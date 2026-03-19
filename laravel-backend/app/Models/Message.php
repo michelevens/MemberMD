@@ -21,7 +21,8 @@ class Message extends Model
     ];
 
     protected $casts = [
-        'attachments' => 'array',
+        'body' => 'encrypted',
+        'attachments' => 'encrypted:array',
         'read_at' => 'datetime',
         'is_system_message' => 'boolean',
     ];

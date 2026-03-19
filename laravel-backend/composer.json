@@ -12,6 +12,7 @@
         "laravel/sanctum": "*",
         "laravel/tinker": "^3.0",
         "resend/resend-laravel": "*",
+        "sentry/sentry-laravel": "*",
         "stripe/stripe-php": "*"
     },
     "require-dev": {
