@@ -54,7 +54,7 @@ Route::post('/coupons/validate', [CouponController::class, 'validate_'])->middle
 Route::get('/calendar/ical/{token}', [CalendarController::class, 'icalFeed']);
 
 // ===== Authenticated Routes =====
-Route::middleware('auth:sanctum')->group(function () {
+Route::middleware(['auth:sanctum', 'phi.log'])->group(function () {
     // Auth
     Route::post('/auth/logout', [AuthController::class, 'logout']);
     Route::get('/auth/me', [AuthController::class, 'me']);

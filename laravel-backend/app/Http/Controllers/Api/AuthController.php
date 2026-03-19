@@ -84,19 +84,31 @@ class AuthController extends Controller
         ]);
 
         // Bootstrap practice with specialty defaults (plans, appointment types, screenings, consents, settings)
+        $bootstrapStatus = 'success';
+        $bootstrapErrors = [];
         $provisioningSummary = [];
+
         try {
             (new PracticeBootstrapService())->bootstrap($practice);
         } catch (\Throwable $e) {
-            // Don't block registration if bootstrap fails — practice can be configured later
-            \Illuminate\Support\Facades\Log::warning('Bootstrap failed for practice ' . $practice->id . ': ' . $e->getMessage());
+            $bootstrapStatus = 'failed';
+            $bootstrapErrors[] = 'Bootstrap: ' . $e->getMessage();
+            \Illuminate\Support\Facades\Log::error('Bootstrap failed for practice ' . $practice->id, [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
         }
 
         // Provision programs, screening templates, consent templates, appointment types, diagnosis favorites
         try {
             $provisioningSummary = (new PracticeProvisioningService())->provisionPractice($practice);
         } catch (\Throwable $e) {
-            \Illuminate\Support\Facades\Log::warning('Provisioning failed for practice ' . $practice->id . ': ' . $e->getMessage());
+            $bootstrapStatus = $bootstrapStatus === 'failed' ? 'failed' : 'partial';
+            $bootstrapErrors[] = 'Provisioning: ' . $e->getMessage();
+            \Illuminate\Support\Facades\Log::error('Provisioning failed for practice ' . $practice->id, [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
         }
 
         // Create the practice admin user
@@ -124,6 +136,8 @@ class AuthController extends Controller
                 'expires_in' => 86400,
                 'user' => $this->userPayload($user),
                 'provisioning' => $provisioningSummary,
+                'bootstrap_status' => $bootstrapStatus,
+                'bootstrap_errors' => $bootstrapErrors,
             ],
         ], 201);
     }
