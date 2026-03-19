@@ -801,6 +801,10 @@ export const invoiceService = {
       return { error: e instanceof Error ? e.message : "Network error" };
     }
   },
+  update: async (id: string, data: Partial<Invoice>): Promise<ApiResponse<Invoice>> => {
+    if (useMockData()) return mockUpdate<Invoice>(data);
+    return apiFetch<Invoice>(`/invoices/${id}`, { method: "PUT", body: JSON.stringify(data) });
+  },
   // Legacy convenience methods
   send: async (id: string): Promise<ApiResponse<Invoice>> => {
     if (useMockData()) return mockUpdate<Invoice>({ id, status: "sent" });

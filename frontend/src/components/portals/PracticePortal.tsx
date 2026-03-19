@@ -2,10 +2,10 @@
 // Main dashboard for DPC practice owners/admins — manage membership practice
 // Tabs: Dashboard, Patient Roster, Membership Plans, Appointments, Messages, Invoices, + Coming Soon tabs
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../contexts/AuthContext";
-import { dashboardService, membershipPlanService, messageService, patientService, appointmentService, encounterService, prescriptionService, invoiceService } from "../../lib/api";
+import { dashboardService, membershipPlanService, messageService, patientService, appointmentService, encounterService, prescriptionService, invoiceService, programService } from "../../lib/api";
 import { HeaderToolbar } from "../shared/HeaderToolbar";
 import { UserSettingsDropdown } from "../shared/UserSettingsDropdown";
 import { PracticeSettings } from "../settings/PracticeSettings";
@@ -58,6 +58,8 @@ import {
   Layers,
   Copy,
   Wifi,
+  XCircle,
+  AlertTriangle,
 } from "lucide-react";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -478,6 +480,77 @@ function StatCard({
   );
 }
 
+// ─── MoreActionsDropdown ──────────────────────────────────────────────────────
+
+function MoreActionsDropdown({ actions }: { actions: { label: string; onClick: () => void; danger?: boolean }[] }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        onClick={() => setOpen(!open)}
+        className="p-1.5 rounded-md hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors"
+      >
+        <MoreHorizontal className="w-4 h-4" />
+      </button>
+      {open && (
+        <div className="absolute right-0 top-8 z-50 bg-white border border-slate-200 rounded-lg shadow-lg py-1 min-w-40">
+          {actions.map((action, i) => (
+            <button
+              key={i}
+              onClick={() => { action.onClick(); setOpen(false); }}
+              className="w-full text-left px-4 py-2 text-sm hover:bg-slate-50 transition-colors"
+              style={action.danger ? { color: "#dc2626" } : { color: "#334e68" }}
+            >
+              {action.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── ConfirmDialog ───────────────────────────────────────────────────────────
+
+function ConfirmDialog({ title, message, onConfirm, onCancel, confirmLabel, danger }: {
+  title: string; message: string; onConfirm: () => void; onCancel: () => void; confirmLabel?: string; danger?: boolean;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: "rgba(0,0,0,0.5)" }}>
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm mx-4 p-6">
+        <div className="flex items-center gap-3 mb-4">
+          <div className="w-10 h-10 rounded-full flex items-center justify-center" style={{ backgroundColor: danger ? "#fef2f2" : "#fffbeb" }}>
+            <AlertTriangle className="w-5 h-5" style={{ color: danger ? "#dc2626" : "#d97706" }} />
+          </div>
+          <h3 className="text-lg font-semibold text-slate-800">{title}</h3>
+        </div>
+        <p className="text-sm text-slate-600 mb-6">{message}</p>
+        <div className="flex justify-end gap-3">
+          <button onClick={onCancel} className="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100 transition-colors">Cancel</button>
+          <button
+            onClick={onConfirm}
+            className="px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors"
+            style={{ backgroundColor: danger ? "#dc2626" : "#27ab83" }}
+          >
+            {confirmLabel || "Confirm"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main Component ─────────────────────────────────────────────────────────
 
 export function PracticePortal() {
@@ -521,10 +594,48 @@ export function PracticePortal() {
   const [addPatientLoading, setAddPatientLoading] = useState(false);
   const [addPatientError, setAddPatientError] = useState<string | null>(null);
 
+  // ─── Toast ──────────────────────────────────────────────────────────
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  useEffect(() => { if (toast) { const t = setTimeout(() => setToast(null), 4000); return () => clearTimeout(t); } }, [toast]);
+
+  // ─── Confirm Dialog ─────────────────────────────────────────────────
+  const [confirmDialog, setConfirmDialog] = useState<{ title: string; message: string; onConfirm: () => void; confirmLabel?: string; danger?: boolean } | null>(null);
+
+  // ─── Book Appointment Modal ─────────────────────────────────────────
+  const [showBookAppointment, setShowBookAppointment] = useState(false);
+  const [bookApptForm, setBookApptForm] = useState({ patientId: "", appointmentTypeId: "", scheduledAt: "", scheduledTime: "09:00", durationMinutes: "30", providerId: "", isTeleHealth: false, programId: "", notes: "" });
+  const [bookApptLoading, setBookApptLoading] = useState(false);
+
+  // ─── New Encounter Modal ────────────────────────────────────────────
+  const [showNewEncounter, setShowNewEncounter] = useState(false);
+  const [encounterForm, setEncounterForm] = useState({ patientId: "", encounterType: "follow_up", programId: "", encounterDate: new Date().toISOString().split("T")[0] });
+  const [encounterLoading, setEncounterLoading] = useState(false);
+  // Encounter editor (inline SOAP)
+  const [editingEncounterId, setEditingEncounterId] = useState<string | null>(null);
+  const [soapForm, setSoapForm] = useState({ subjective: "", objective: "", assessment: "", plan: "", chiefComplaint: "" });
+  const [soapLoading, setSoapLoading] = useState(false);
+
+  // ─── New Prescription Modal ─────────────────────────────────────────
+  const [showNewPrescription, setShowNewPrescription] = useState(false);
+  const [rxForm, setRxForm] = useState({ patientId: "", medicationName: "", dosage: "", frequency: "", route: "oral", quantity: "30", refills: "3", isControlled: false, schedule: "", pharmacyName: "", pharmacyPhone: "", notes: "" });
+  const [rxLoading, setRxLoading] = useState(false);
+
+  // ─── Edit Patient Modal ─────────────────────────────────────────────
+  const [showEditPatient, setShowEditPatient] = useState(false);
+  const [editPatientForm, setEditPatientForm] = useState<{ id: string; firstName: string; lastName: string; email: string; phone: string; dateOfBirth: string; gender: string; addressLine1: string; city: string; state: string; zip: string; preferredLanguage: string }>({ id: "", firstName: "", lastName: "", email: "", phone: "", dateOfBirth: "", gender: "male", addressLine1: "", city: "", state: "", zip: "", preferredLanguage: "English" });
+  const [editPatientLoading, setEditPatientLoading] = useState(false);
+
+  // ─── Inline Invoice Detail ──────────────────────────────────────────
+  const [expandedInvoiceId, setExpandedInvoiceId] = useState<string | null>(null);
+
+  // ─── API Programs for dropdowns ─────────────────────────────────────
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [apiPrograms, setApiPrograms] = useState<any[]>([]);
+
   const loadPracticeData = useCallback(async () => {
     setDataLoading(true);
     try {
-      const [statsRes, plansRes, threadsRes, patientsRes, appointmentsRes, encountersRes, prescriptionsRes, invoicesRes] = await Promise.all([
+      const [statsRes, plansRes, threadsRes, patientsRes, appointmentsRes, encountersRes, prescriptionsRes, invoicesRes, programsRes] = await Promise.all([
         dashboardService.getPracticeStats(),
         membershipPlanService.list(),
         messageService.list(),
@@ -533,6 +644,7 @@ export function PracticePortal() {
         encounterService.list(),
         prescriptionService.list(),
         invoiceService.list(),
+        programService.list(),
       ]);
       if (statsRes.data && typeof statsRes.data === "object" && Object.keys(statsRes.data).length > 0) {
         setApiDashStats(statsRes.data);
@@ -628,6 +740,10 @@ export function PracticePortal() {
           date: inv.issuedAt ? new Date(inv.issuedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : inv.date || "",
         })));
       }
+      // Programs
+      if (programsRes.data && Array.isArray(programsRes.data) && programsRes.data.length > 0) {
+        setApiPrograms(programsRes.data);
+      }
     } catch {
       // Fall back to mock data
     }
@@ -656,6 +772,288 @@ export function PracticePortal() {
       setAddPatientError(msg);
     }
     setAddPatientLoading(false);
+  };
+
+  // ─── Book Appointment Handler ──────────────────────────────────────
+  const handleBookAppointment = async () => {
+    if (!bookApptForm.patientId || !bookApptForm.scheduledAt) {
+      setToast({ message: "Patient and date are required.", type: "error" });
+      return;
+    }
+    setBookApptLoading(true);
+    try {
+      const scheduledAt = `${bookApptForm.scheduledAt}T${bookApptForm.scheduledTime}:00`;
+      const res = await appointmentService.create({
+        patientId: bookApptForm.patientId,
+        appointmentTypeId: bookApptForm.appointmentTypeId || undefined,
+        scheduledAt,
+        durationMinutes: parseInt(bookApptForm.durationMinutes) || 30,
+        providerId: bookApptForm.providerId || undefined,
+        isTeleHealth: bookApptForm.isTeleHealth,
+        notes: bookApptForm.notes || undefined,
+      });
+      if (res.data || !res.error) {
+        setToast({ message: "Appointment booked successfully.", type: "success" });
+        setShowBookAppointment(false);
+        setBookApptForm({ patientId: "", appointmentTypeId: "", scheduledAt: "", scheduledTime: "09:00", durationMinutes: "30", providerId: "", isTeleHealth: false, programId: "", notes: "" });
+        loadPracticeData();
+      } else {
+        setToast({ message: res.error || "Failed to book appointment.", type: "error" });
+      }
+    } catch (err: unknown) {
+      setToast({ message: err instanceof Error ? err.message : "Failed to book appointment.", type: "error" });
+    }
+    setBookApptLoading(false);
+  };
+
+  // ─── New Encounter Handler ─────────────────────────────────────────
+  const handleCreateEncounter = async () => {
+    if (!encounterForm.patientId) {
+      setToast({ message: "Patient is required.", type: "error" });
+      return;
+    }
+    setEncounterLoading(true);
+    try {
+      const res = await encounterService.create({
+        patientId: encounterForm.patientId,
+        encounterDate: encounterForm.encounterDate,
+        status: "in_progress",
+      });
+      if (res.data || !res.error) {
+        setToast({ message: "Encounter created. Fill in the SOAP note below.", type: "success" });
+        setShowNewEncounter(false);
+        const encId = res.data?.id || `new-enc-${Date.now()}`;
+        setEditingEncounterId(encId);
+        setSoapForm({ subjective: "", objective: "", assessment: "", plan: "", chiefComplaint: "" });
+        setEncounterForm({ patientId: "", encounterType: "follow_up", programId: "", encounterDate: new Date().toISOString().split("T")[0] });
+        loadPracticeData();
+      } else {
+        setToast({ message: res.error || "Failed to create encounter.", type: "error" });
+      }
+    } catch (err: unknown) {
+      setToast({ message: err instanceof Error ? err.message : "Failed to create encounter.", type: "error" });
+    }
+    setEncounterLoading(false);
+  };
+
+  // ─── Save SOAP Note Handler ────────────────────────────────────────
+  const handleSaveSoap = async (sign?: boolean) => {
+    if (!editingEncounterId) return;
+    setSoapLoading(true);
+    try {
+      const updateData: Record<string, unknown> = {
+        subjective: soapForm.subjective,
+        objective: soapForm.objective,
+        assessment: soapForm.assessment,
+        plan: soapForm.plan,
+        chiefComplaint: soapForm.chiefComplaint,
+      };
+      if (sign) updateData.status = "signed";
+      const res = await encounterService.update(editingEncounterId, updateData);
+      if (res.data || !res.error) {
+        setToast({ message: sign ? "Encounter signed successfully." : "SOAP note saved.", type: "success" });
+        if (sign) setEditingEncounterId(null);
+        loadPracticeData();
+      } else {
+        setToast({ message: res.error || "Failed to save note.", type: "error" });
+      }
+    } catch (err: unknown) {
+      setToast({ message: err instanceof Error ? err.message : "Failed to save note.", type: "error" });
+    }
+    setSoapLoading(false);
+  };
+
+  // ─── New Prescription Handler ──────────────────────────────────────
+  const handleCreatePrescription = async () => {
+    if (!rxForm.patientId || !rxForm.medicationName || !rxForm.dosage) {
+      setToast({ message: "Patient, medication, and dosage are required.", type: "error" });
+      return;
+    }
+    setRxLoading(true);
+    try {
+      const res = await prescriptionService.create({
+        patientId: rxForm.patientId,
+        medicationName: rxForm.medicationName,
+        dosage: rxForm.dosage,
+        frequency: rxForm.frequency,
+        route: rxForm.route,
+        quantity: parseInt(rxForm.quantity) || 30,
+        refills: parseInt(rxForm.refills) || 0,
+        pharmacy: rxForm.pharmacyName || undefined,
+        notes: rxForm.notes || undefined,
+        startDate: new Date().toISOString().split("T")[0],
+        status: "active",
+      });
+      if (res.data || !res.error) {
+        setToast({ message: "Prescription created successfully.", type: "success" });
+        setShowNewPrescription(false);
+        setRxForm({ patientId: "", medicationName: "", dosage: "", frequency: "", route: "oral", quantity: "30", refills: "3", isControlled: false, schedule: "", pharmacyName: "", pharmacyPhone: "", notes: "" });
+        loadPracticeData();
+      } else {
+        setToast({ message: res.error || "Failed to create prescription.", type: "error" });
+      }
+    } catch (err: unknown) {
+      setToast({ message: err instanceof Error ? err.message : "Failed to create prescription.", type: "error" });
+    }
+    setRxLoading(false);
+  };
+
+  // ─── Edit Patient Handler ─────────────────────────────────────────
+  const handleEditPatient = async () => {
+    if (!editPatientForm.id || !editPatientForm.firstName || !editPatientForm.lastName) {
+      setToast({ message: "First and last name are required.", type: "error" });
+      return;
+    }
+    setEditPatientLoading(true);
+    try {
+      const res = await patientService.update(editPatientForm.id, {
+        firstName: editPatientForm.firstName,
+        lastName: editPatientForm.lastName,
+        email: editPatientForm.email || undefined,
+        phone: editPatientForm.phone || undefined,
+        dateOfBirth: editPatientForm.dateOfBirth || undefined,
+        gender: editPatientForm.gender as "male" | "female" | "other" | "prefer_not_to_say",
+        addressLine1: editPatientForm.addressLine1 || undefined,
+        city: editPatientForm.city || undefined,
+        state: editPatientForm.state || undefined,
+        zip: editPatientForm.zip || undefined,
+      });
+      if (res.data || !res.error) {
+        setToast({ message: "Patient updated successfully.", type: "success" });
+        setShowEditPatient(false);
+        loadPracticeData();
+      } else {
+        setToast({ message: res.error || "Failed to update patient.", type: "error" });
+      }
+    } catch (err: unknown) {
+      setToast({ message: err instanceof Error ? err.message : "Failed to update patient.", type: "error" });
+    }
+    setEditPatientLoading(false);
+  };
+
+  // ─── Open Edit Patient Modal ──────────────────────────────────────
+  const openEditPatient = (patient: MockPatient) => {
+    const nameParts = patient.name.split(" ");
+    const firstName = nameParts[0] || "";
+    const lastName = nameParts.slice(1).join(" ") || "";
+    const addrParts = (patient.address || "").split(", ");
+    setEditPatientForm({
+      id: patient.id,
+      firstName,
+      lastName,
+      email: patient.email || "",
+      phone: patient.phone || "",
+      dateOfBirth: patient.dob || "",
+      gender: (patient.gender || "male").toLowerCase(),
+      addressLine1: addrParts[0] || "",
+      city: addrParts[1] || "",
+      state: addrParts[2] || "",
+      zip: addrParts[3] || "",
+      preferredLanguage: patient.language || "English",
+    });
+    setShowEditPatient(true);
+  };
+
+  // ─── Appointment Actions ──────────────────────────────────────────
+  const handleCheckIn = async (aptId: string) => {
+    try {
+      const res = await appointmentService.checkIn(aptId);
+      if (res.data || !res.error) {
+        setToast({ message: "Patient checked in.", type: "success" });
+        loadPracticeData();
+      } else {
+        setToast({ message: res.error || "Failed to check in.", type: "error" });
+      }
+    } catch (err: unknown) {
+      setToast({ message: err instanceof Error ? err.message : "Check-in failed.", type: "error" });
+    }
+  };
+
+  const handleCancelAppointment = async (aptId: string) => {
+    try {
+      const res = await appointmentService.cancel(aptId, "Cancelled by practice");
+      if (res.data || !res.error) {
+        setToast({ message: "Appointment cancelled.", type: "success" });
+        loadPracticeData();
+      } else {
+        setToast({ message: res.error || "Failed to cancel appointment.", type: "error" });
+      }
+    } catch (err: unknown) {
+      setToast({ message: err instanceof Error ? err.message : "Cancel failed.", type: "error" });
+    }
+  };
+
+  // ─── Encounter Actions ─────────────────────────────────────────────
+  const handleSignEncounter = async (encId: string) => {
+    try {
+      const res = await encounterService.update(encId, { status: "signed" });
+      if (res.data || !res.error) {
+        setToast({ message: "Encounter signed.", type: "success" });
+        loadPracticeData();
+      } else {
+        setToast({ message: res.error || "Failed to sign encounter.", type: "error" });
+      }
+    } catch (err: unknown) {
+      setToast({ message: err instanceof Error ? err.message : "Sign failed.", type: "error" });
+    }
+  };
+
+  // ─── Prescription Actions ──────────────────────────────────────────
+  const handleRefillPrescription = async (rxId: string) => {
+    try {
+      const res = await prescriptionService.refill(rxId);
+      if (res.data || !res.error) {
+        setToast({ message: "Refill processed successfully.", type: "success" });
+        loadPracticeData();
+      } else {
+        setToast({ message: res.error || "Refill failed.", type: "error" });
+      }
+    } catch (err: unknown) {
+      setToast({ message: err instanceof Error ? err.message : "Refill failed.", type: "error" });
+    }
+  };
+
+  const handleDiscontinuePrescription = async (rxId: string) => {
+    try {
+      const res = await prescriptionService.cancel(rxId);
+      if (res.data || !res.error) {
+        setToast({ message: "Prescription discontinued.", type: "success" });
+        loadPracticeData();
+      } else {
+        setToast({ message: res.error || "Failed to discontinue.", type: "error" });
+      }
+    } catch (err: unknown) {
+      setToast({ message: err instanceof Error ? err.message : "Failed to discontinue.", type: "error" });
+    }
+  };
+
+  // ─── Invoice Actions ──────────────────────────────────────────────
+  const handleSendInvoice = async (invId: string) => {
+    try {
+      const res = await invoiceService.send(invId);
+      if (res.data || !res.error) {
+        setToast({ message: "Invoice sent successfully.", type: "success" });
+        loadPracticeData();
+      } else {
+        setToast({ message: res.error || "Failed to send invoice.", type: "error" });
+      }
+    } catch (err: unknown) {
+      setToast({ message: err instanceof Error ? err.message : "Send failed.", type: "error" });
+    }
+  };
+
+  const handleMarkInvoicePaid = async (invId: string) => {
+    try {
+      const res = await invoiceService.update(invId, { status: "paid", paidAt: new Date().toISOString() });
+      if (res.data || !res.error) {
+        setToast({ message: "Invoice marked as paid.", type: "success" });
+        loadPracticeData();
+      } else {
+        setToast({ message: res.error || "Failed to mark as paid.", type: "error" });
+      }
+    } catch (err: unknown) {
+      setToast({ message: err instanceof Error ? err.message : "Failed.", type: "error" });
+    }
   };
 
   // Polling for unread messages
@@ -924,17 +1322,28 @@ export function PracticePortal() {
                           <StatusBadge status={apt.status} />
                         </td>
                         <td className="px-4 py-3">
-                          {apt.isTelehealth && apt.sessionId && (
-                            <button
-                              onClick={() => navigate(`/telehealth/${apt.sessionId}`)}
-                              className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold text-white transition-colors"
-                              style={{ backgroundColor: "#22c55e" }}
-                              onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#16a34a")}
-                              onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "#22c55e")}
-                            >
-                              <Video className="w-3 h-3" /> Join
-                            </button>
-                          )}
+                          <div className="flex items-center gap-1">
+                            {apt.isTelehealth && apt.sessionId && (
+                              <button
+                                onClick={() => navigate(`/telehealth/${apt.sessionId}`)}
+                                className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold text-white transition-colors"
+                                style={{ backgroundColor: "#22c55e" }}
+                                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#16a34a")}
+                                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "#22c55e")}
+                              >
+                                <Video className="w-3 h-3" /> Join
+                              </button>
+                            )}
+                            {apt.status === "confirmed" && !apt.isTelehealth && (
+                              <button
+                                onClick={() => handleCheckIn(apt.id)}
+                                className="px-2 py-1 rounded text-xs font-medium transition-colors"
+                                style={{ color: "#27ab83" }}
+                              >
+                                Check In
+                              </button>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -1057,15 +1466,23 @@ export function PracticePortal() {
                         <button
                           onClick={() => { setSelectedPatient(patient); setPatientDetailTab("demographics"); }}
                           className="p-1.5 rounded-md hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors"
+                          title="View patient"
                         >
                           <Eye className="w-4 h-4" />
                         </button>
-                        <button className="p-1.5 rounded-md hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors">
+                        <button
+                          onClick={() => openEditPatient(patient)}
+                          className="p-1.5 rounded-md hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors"
+                          title="Edit patient"
+                        >
                           <Pencil className="w-4 h-4" />
                         </button>
-                        <button className="p-1.5 rounded-md hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors">
-                          <MoreHorizontal className="w-4 h-4" />
-                        </button>
+                        <MoreActionsDropdown actions={[
+                          { label: "Schedule Appointment", onClick: () => { setBookApptForm(f => ({ ...f, patientId: patient.id })); setShowBookAppointment(true); } },
+                          { label: "Create Encounter", onClick: () => { setEncounterForm(f => ({ ...f, patientId: patient.id })); setShowNewEncounter(true); } },
+                          { label: "Enroll in Program", onClick: () => { setActiveTab("programs"); } },
+                          { label: "Deactivate", onClick: () => { setConfirmDialog({ title: "Deactivate Patient", message: `Are you sure you want to deactivate ${patient.name}?`, confirmLabel: "Deactivate", danger: true, onConfirm: async () => { try { await patientService.update(patient.id, { status: "inactive" }); setToast({ message: "Patient deactivated.", type: "success" }); loadPracticeData(); } catch { setToast({ message: "Failed to deactivate.", type: "error" }); } setConfirmDialog(null); } }); }, danger: true },
+                        ]} />
                       </div>
                     </td>
                   </tr>
@@ -1271,8 +1688,18 @@ export function PracticePortal() {
               <Send className="w-4 h-4" /> Send Message
             </button>
             <button
+              className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium text-white transition-colors"
+              style={{ backgroundColor: "#334e68" }}
+              onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#243b53")}
+              onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "#334e68")}
+              onClick={() => { if (pt) { setEncounterForm(f => ({ ...f, patientId: pt.id })); setShowNewEncounter(true); } }}
+            >
+              <Stethoscope className="w-4 h-4" /> New Encounter
+            </button>
+            <button
               className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium border transition-colors"
               style={{ borderColor: "#334e68", color: "#334e68" }}
+              onClick={() => { if (pt) { setBookApptForm(f => ({ ...f, patientId: pt.id })); setShowBookAppointment(true); } }}
             >
               <Calendar className="w-4 h-4" /> Book Appointment
             </button>
@@ -1610,6 +2037,7 @@ export function PracticePortal() {
                 style={{ backgroundColor: "#27ab83" }}
                 onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#147d64")}
                 onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "#27ab83")}
+                onClick={() => { if (pt) { setRxForm(f => ({ ...f, patientId: pt.id })); setShowNewPrescription(true); } }}
               >
                 <Plus className="w-3.5 h-3.5" /> Add Medication
               </button>
@@ -1648,8 +2076,8 @@ export function PracticePortal() {
                           <div className="flex items-center gap-1">
                             {med.status === "active" && (
                               <>
-                                <button className="px-2 py-1 rounded text-xs font-medium" style={{ color: "#27ab83" }}>Refill</button>
-                                <button className="px-2 py-1 rounded text-xs font-medium text-slate-400">Discontinue</button>
+                                <button className="px-2 py-1 rounded text-xs font-medium" style={{ color: "#27ab83" }} onClick={() => setToast({ message: "Use the Prescriptions tab to manage refills.", type: "success" })}>Refill</button>
+                                <button className="px-2 py-1 rounded text-xs font-medium text-slate-400" onClick={() => setToast({ message: "Use the Prescriptions tab to discontinue.", type: "success" })}>Discontinue</button>
                               </>
                             )}
                           </div>
@@ -1688,7 +2116,10 @@ export function PracticePortal() {
                     </div>
                     <p className="text-sm text-slate-600 mb-1">{apt.type}</p>
                     <p className="text-xs text-slate-400">{apt.provider}</p>
-                    <button className="mt-3 px-3 py-1 rounded text-xs font-medium" style={{ color: "#dc2626" }}>Cancel</button>
+                    <button
+                      className="mt-3 px-3 py-1 rounded text-xs font-medium" style={{ color: "#dc2626" }}
+                      onClick={() => setConfirmDialog({ title: "Cancel Appointment", message: `Cancel this ${apt.type} appointment on ${apt.date}?`, confirmLabel: "Cancel Appointment", danger: true, onConfirm: () => { handleCancelAppointment(apt.id); setConfirmDialog(null); } })}
+                    >Cancel</button>
                   </div>
                 ))}
               </div>
@@ -2725,6 +3156,7 @@ export function PracticePortal() {
             style={{ backgroundColor: "#27ab83" }}
             onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#147d64")}
             onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "#27ab83")}
+            onClick={() => setToast({ message: "Invoice creation coming soon. Use Stripe for now.", type: "success" })}
           >
             <Plus className="w-4 h-4" />
             New Invoice
@@ -2793,15 +3225,25 @@ export function PracticePortal() {
                     <td className="px-4 py-3 text-slate-500 hidden md:table-cell">{inv.date}</td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-1">
-                        <button className="p-1.5 rounded-md hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors">
+                        <button
+                          className="p-1.5 rounded-md hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors"
+                          title="View invoice"
+                          onClick={() => setExpandedInvoiceId(expandedInvoiceId === inv.id ? null : inv.id)}
+                        >
                           <Eye className="w-4 h-4" />
                         </button>
-                        <button className="p-1.5 rounded-md hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors">
+                        <button className="p-1.5 rounded-md hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors" title="Edit invoice">
                           <Pencil className="w-4 h-4" />
                         </button>
-                        <button className="p-1.5 rounded-md hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors">
-                          <MoreHorizontal className="w-4 h-4" />
-                        </button>
+                        <MoreActionsDropdown actions={[
+                          ...(inv.status === "open" || inv.status === "overdue" ? [
+                            { label: "Send Invoice", onClick: () => handleSendInvoice(inv.id) },
+                            { label: "Mark as Paid", onClick: () => handleMarkInvoicePaid(inv.id) },
+                          ] : []),
+                          ...(inv.status !== "paid" ? [
+                            { label: "Void Invoice", onClick: () => setConfirmDialog({ title: "Void Invoice", message: `Void invoice ${inv.id}?`, confirmLabel: "Void", danger: true, onConfirm: async () => { try { await invoiceService.void(inv.id); setToast({ message: "Invoice voided.", type: "success" }); loadPracticeData(); } catch { setToast({ message: "Failed.", type: "error" }); } setConfirmDialog(null); } }), danger: true },
+                          ] : []),
+                        ]} />
                       </div>
                     </td>
                   </tr>
@@ -3094,6 +3536,7 @@ export function PracticePortal() {
             style={{ backgroundColor: "#27ab83" }}
             onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#147d64")}
             onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "#27ab83")}
+            onClick={() => setShowNewEncounter(true)}
           >
             <Plus className="w-4 h-4" />
             New Encounter
@@ -3165,23 +3608,39 @@ export function PracticePortal() {
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-1">
-                          <button className="p-1.5 rounded-md hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors">
+                          <button
+                            className="p-1.5 rounded-md hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors"
+                            title="View encounter"
+                            onClick={() => {
+                              setExpandedEncounters(prev => prev.includes(enc.id) ? prev : [...prev, enc.id]);
+                            }}
+                          >
                             <Eye className="w-4 h-4" />
                           </button>
-                          <button className="p-1.5 rounded-md hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors">
+                          <button
+                            className="p-1.5 rounded-md hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors"
+                            title="Edit encounter"
+                            onClick={() => {
+                              setEditingEncounterId(enc.id);
+                              setSoapForm({ subjective: "", objective: "", assessment: "", plan: "", chiefComplaint: "" });
+                              setActiveTab("encounters");
+                            }}
+                          >
                             <Pencil className="w-4 h-4" />
                           </button>
                           {enc.status === "draft" && (
                             <button
                               className="px-2 py-1 rounded text-xs font-medium transition-colors"
                               style={{ color: "#27ab83" }}
+                              onClick={() => handleSignEncounter(enc.id)}
                             >
                               Sign
                             </button>
                           )}
-                          <button className="p-1.5 rounded-md hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors">
-                            <MoreHorizontal className="w-4 h-4" />
-                          </button>
+                          <MoreActionsDropdown actions={[
+                            ...(enc.status === "signed" ? [{ label: "Amend", onClick: () => { setEditingEncounterId(enc.id); setSoapForm({ subjective: "", objective: "", assessment: "", plan: "", chiefComplaint: "" }); } }] : []),
+                            ...(enc.status === "draft" ? [{ label: "Delete", onClick: () => setConfirmDialog({ title: "Delete Encounter", message: "Delete this draft encounter?", confirmLabel: "Delete", danger: true, onConfirm: async () => { try { await encounterService.update(enc.id, { status: "in_progress" }); setToast({ message: "Encounter deleted.", type: "success" }); loadPracticeData(); } catch { setToast({ message: "Failed.", type: "error" }); } setConfirmDialog(null); } }), danger: true }] : []),
+                          ]} />
                         </div>
                       </td>
                     </tr>
@@ -3191,6 +3650,56 @@ export function PracticePortal() {
             </table>
           </div>
         </div>
+
+        {/* Inline SOAP Editor */}
+        {editingEncounterId && (
+          <div className="glass rounded-xl p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="font-semibold text-slate-800">SOAP Note Editor</h3>
+              <button onClick={() => setEditingEncounterId(null)} className="p-1.5 rounded-md hover:bg-slate-100 text-slate-400">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Chief Complaint</label>
+              <input className="w-full border rounded-lg px-3 py-2 text-sm" value={soapForm.chiefComplaint} onChange={e => setSoapForm(f => ({ ...f, chiefComplaint: e.target.value }))} placeholder="Reason for visit..." />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold uppercase mb-1" style={{ color: "#27ab83" }}>S — Subjective</label>
+              <textarea className="w-full border rounded-lg px-3 py-2 text-sm" rows={3} value={soapForm.subjective} onChange={e => setSoapForm(f => ({ ...f, subjective: e.target.value }))} placeholder="Patient's reported symptoms..." />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold uppercase mb-1" style={{ color: "#334e68" }}>O — Objective</label>
+              <textarea className="w-full border rounded-lg px-3 py-2 text-sm" rows={3} value={soapForm.objective} onChange={e => setSoapForm(f => ({ ...f, objective: e.target.value }))} placeholder="Clinical findings, vitals, exam..." />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold uppercase mb-1" style={{ color: "#d97706" }}>A — Assessment</label>
+              <textarea className="w-full border rounded-lg px-3 py-2 text-sm" rows={3} value={soapForm.assessment} onChange={e => setSoapForm(f => ({ ...f, assessment: e.target.value }))} placeholder="Diagnoses, clinical impression..." />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold uppercase mb-1" style={{ color: "#147d64" }}>P — Plan</label>
+              <textarea className="w-full border rounded-lg px-3 py-2 text-sm" rows={3} value={soapForm.plan} onChange={e => setSoapForm(f => ({ ...f, plan: e.target.value }))} placeholder="Treatment plan, follow-up..." />
+            </div>
+            <div className="flex items-center gap-3 pt-2">
+              <button
+                className="px-4 py-2 rounded-lg text-sm font-medium border transition-colors"
+                style={{ borderColor: "#27ab83", color: "#27ab83" }}
+                onClick={() => handleSaveSoap(false)}
+                disabled={soapLoading}
+              >
+                {soapLoading ? "Saving..." : "Save Draft"}
+              </button>
+              <button
+                className="px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors"
+                style={{ backgroundColor: "#27ab83" }}
+                onClick={() => handleSaveSoap(true)}
+                disabled={soapLoading}
+              >
+                {soapLoading ? "Signing..." : "Sign & Lock"}
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -3265,10 +3774,14 @@ export function PracticePortal() {
                         style={{ backgroundColor: "#27ab83" }}
                         onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#147d64")}
                         onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "#27ab83")}
+                        onClick={() => handleRefillPrescription(req.id)}
                       >
                         Approve
                       </button>
-                      <button className="px-3 py-1.5 rounded-lg text-xs font-medium border border-slate-200 text-slate-500 hover:bg-slate-50 transition-colors">
+                      <button
+                        className="px-3 py-1.5 rounded-lg text-xs font-medium border border-slate-200 text-slate-500 hover:bg-slate-50 transition-colors"
+                        onClick={() => setConfirmDialog({ title: "Deny Refill", message: `Deny refill for ${req.medication} ${req.dosage}?`, confirmLabel: "Deny", danger: true, onConfirm: () => { handleDiscontinuePrescription(req.id); setConfirmDialog(null); } })}
+                      >
                         Deny
                       </button>
                     </div>
@@ -3314,15 +3827,22 @@ export function PracticePortal() {
                       <td className="px-4 py-3 text-slate-500 hidden lg:table-cell">{rx.refillsLeft}</td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-1">
-                          <button className="p-1.5 rounded-md hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors">
+                          <button className="p-1.5 rounded-md hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors" title="View prescription">
                             <Eye className="w-4 h-4" />
                           </button>
-                          <button className="p-1.5 rounded-md hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors">
+                          <button className="p-1.5 rounded-md hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors" title="Edit prescription">
                             <Pencil className="w-4 h-4" />
                           </button>
-                          <button className="p-1.5 rounded-md hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors">
-                            <MoreHorizontal className="w-4 h-4" />
-                          </button>
+                          <MoreActionsDropdown actions={[
+                            ...(rx.status === "active" ? [
+                              { label: "Refill", onClick: () => handleRefillPrescription(rx.id) },
+                              { label: "Discontinue", onClick: () => setConfirmDialog({ title: "Discontinue Prescription", message: `Discontinue ${rx.medication} ${rx.dosage} for ${rx.patient}?`, confirmLabel: "Discontinue", danger: true, onConfirm: () => { handleDiscontinuePrescription(rx.id); setConfirmDialog(null); } }), danger: true },
+                            ] : []),
+                            ...(rx.status === "refill_requested" ? [
+                              { label: "Approve Refill", onClick: () => handleRefillPrescription(rx.id) },
+                              { label: "Deny Refill", onClick: () => setConfirmDialog({ title: "Deny Refill", message: `Deny refill request for ${rx.medication}?`, confirmLabel: "Deny", danger: true, onConfirm: () => { handleDiscontinuePrescription(rx.id); setConfirmDialog(null); } }), danger: true },
+                            ] : []),
+                          ]} />
                         </div>
                       </td>
                     </tr>
@@ -3380,6 +3900,7 @@ export function PracticePortal() {
             style={{ backgroundColor: "#27ab83" }}
             onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#147d64")}
             onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "#27ab83")}
+            onClick={() => setToast({ message: "Screening administration coming soon.", type: "success" })}
           >
             <Plus className="w-4 h-4" />
             Administer Screening
@@ -4128,6 +4649,364 @@ export function PracticePortal() {
           {renderContent()}
         </main>
       </div>
+
+      {/* ─── Toast Notification ──────────────────────────────────────────── */}
+      {toast && (
+        <div
+          className="fixed top-4 right-4 z-50 flex items-center gap-3 px-4 py-3 rounded-xl shadow-lg text-sm font-medium text-white"
+          style={{ backgroundColor: toast.type === "success" ? "#27ab83" : "#dc2626", minWidth: "280px" }}
+        >
+          {toast.type === "success" ? <Check className="w-4 h-4 shrink-0" /> : <XCircle className="w-4 h-4 shrink-0" />}
+          <span className="flex-1">{toast.message}</span>
+          <button onClick={() => setToast(null)} className="p-0.5 rounded shrink-0" style={{ backgroundColor: "rgba(255,255,255,0.2)" }}>
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
+      {/* ─── Confirm Dialog ──────────────────────────────────────────────── */}
+      {confirmDialog && (
+        <ConfirmDialog
+          title={confirmDialog.title}
+          message={confirmDialog.message}
+          confirmLabel={confirmDialog.confirmLabel}
+          danger={confirmDialog.danger}
+          onConfirm={confirmDialog.onConfirm}
+          onCancel={() => setConfirmDialog(null)}
+        />
+      )}
+
+      {/* ─── Book Appointment Modal ──────────────────────────────────────── */}
+      {showBookAppointment && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: "rgba(0,0,0,0.5)" }}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden">
+            <div className="p-6" style={{ background: "linear-gradient(135deg, #1B2B4D, #243b53)" }}>
+              <h3 className="text-xl font-bold text-white">Book Appointment</h3>
+              <p className="text-sm text-slate-300 mt-1">Schedule a new appointment for a patient.</p>
+            </div>
+            <div className="p-6 space-y-4 max-h-96 overflow-y-auto">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Patient *</label>
+                <select className="w-full border rounded-lg px-3 py-2 text-sm" value={bookApptForm.patientId} onChange={e => setBookApptForm(f => ({ ...f, patientId: e.target.value }))}>
+                  <option value="">Select patient...</option>
+                  {(apiPatients || MOCK_PATIENTS).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Date *</label>
+                  <input type="date" className="w-full border rounded-lg px-3 py-2 text-sm" value={bookApptForm.scheduledAt} onChange={e => setBookApptForm(f => ({ ...f, scheduledAt: e.target.value }))} />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Time *</label>
+                  <input type="time" className="w-full border rounded-lg px-3 py-2 text-sm" value={bookApptForm.scheduledTime} onChange={e => setBookApptForm(f => ({ ...f, scheduledTime: e.target.value }))} />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Duration (min)</label>
+                  <select className="w-full border rounded-lg px-3 py-2 text-sm" value={bookApptForm.durationMinutes} onChange={e => setBookApptForm(f => ({ ...f, durationMinutes: e.target.value }))}>
+                    <option value="15">15 min</option>
+                    <option value="20">20 min</option>
+                    <option value="30">30 min</option>
+                    <option value="45">45 min</option>
+                    <option value="60">60 min</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Type</label>
+                  <select className="w-full border rounded-lg px-3 py-2 text-sm" value={bookApptForm.appointmentTypeId} onChange={e => setBookApptForm(f => ({ ...f, appointmentTypeId: e.target.value }))}>
+                    <option value="">General Visit</option>
+                    <option value="follow_up">Follow-Up</option>
+                    <option value="initial">Initial Evaluation</option>
+                    <option value="telehealth">Telehealth</option>
+                    <option value="lab_review">Lab Review</option>
+                    <option value="wellness">Wellness Check</option>
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Program</label>
+                <select className="w-full border rounded-lg px-3 py-2 text-sm" value={bookApptForm.programId} onChange={e => setBookApptForm(f => ({ ...f, programId: e.target.value }))}>
+                  <option value="">No program</option>
+                  {apiPrograms.map((p: { id: string; name: string }) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                  {apiPrograms.length === 0 && <>
+                    <option value="dpc">DPC Membership</option>
+                    <option value="ccm">CCM</option>
+                    <option value="rpm">RPM</option>
+                  </>}
+                </select>
+              </div>
+              <div className="flex items-center gap-3">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" checked={bookApptForm.isTeleHealth} onChange={e => setBookApptForm(f => ({ ...f, isTeleHealth: e.target.checked }))} className="accent-teal-600" />
+                  <span className="text-sm text-slate-700">Telehealth visit</span>
+                </label>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Notes</label>
+                <textarea className="w-full border rounded-lg px-3 py-2 text-sm" rows={2} value={bookApptForm.notes} onChange={e => setBookApptForm(f => ({ ...f, notes: e.target.value }))} placeholder="Optional notes..." />
+              </div>
+            </div>
+            <div className="px-6 pb-6 flex items-center justify-end gap-3">
+              <button className="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100 transition-colors" onClick={() => setShowBookAppointment(false)}>Cancel</button>
+              <button
+                className="px-6 py-2 rounded-lg text-sm font-medium text-white transition-colors"
+                style={{ backgroundColor: "#27ab83" }}
+                onClick={handleBookAppointment}
+                disabled={bookApptLoading}
+              >
+                {bookApptLoading ? "Booking..." : "Book Appointment"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─── New Encounter Modal ─────────────────────────────────────────── */}
+      {showNewEncounter && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: "rgba(0,0,0,0.5)" }}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden">
+            <div className="p-6" style={{ background: "linear-gradient(135deg, #1B2B4D, #243b53)" }}>
+              <h3 className="text-xl font-bold text-white">New Encounter</h3>
+              <p className="text-sm text-slate-300 mt-1">Create a clinical encounter to document a visit.</p>
+            </div>
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Patient *</label>
+                <select className="w-full border rounded-lg px-3 py-2 text-sm" value={encounterForm.patientId} onChange={e => setEncounterForm(f => ({ ...f, patientId: e.target.value }))}>
+                  <option value="">Select patient...</option>
+                  {(apiPatients || MOCK_PATIENTS).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Encounter Type</label>
+                  <select className="w-full border rounded-lg px-3 py-2 text-sm" value={encounterForm.encounterType} onChange={e => setEncounterForm(f => ({ ...f, encounterType: e.target.value }))}>
+                    <option value="initial_eval">Initial Evaluation</option>
+                    <option value="follow_up">Follow-Up</option>
+                    <option value="med_management">Med Management</option>
+                    <option value="therapy">Therapy</option>
+                    <option value="crisis">Crisis</option>
+                    <option value="care_coordination">Care Coordination</option>
+                    <option value="device_review">Device Review</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Date</label>
+                  <input type="date" className="w-full border rounded-lg px-3 py-2 text-sm" value={encounterForm.encounterDate} onChange={e => setEncounterForm(f => ({ ...f, encounterDate: e.target.value }))} />
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Program</label>
+                <select className="w-full border rounded-lg px-3 py-2 text-sm" value={encounterForm.programId} onChange={e => setEncounterForm(f => ({ ...f, programId: e.target.value }))}>
+                  <option value="">No program</option>
+                  {apiPrograms.map((p: { id: string; name: string }) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                  {apiPrograms.length === 0 && <>
+                    <option value="dpc">DPC Membership</option>
+                    <option value="ccm">CCM</option>
+                    <option value="rpm">RPM</option>
+                  </>}
+                </select>
+              </div>
+            </div>
+            <div className="px-6 pb-6 flex items-center justify-end gap-3">
+              <button className="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100 transition-colors" onClick={() => setShowNewEncounter(false)}>Cancel</button>
+              <button
+                className="px-6 py-2 rounded-lg text-sm font-medium text-white transition-colors"
+                style={{ backgroundColor: "#27ab83" }}
+                onClick={handleCreateEncounter}
+                disabled={encounterLoading}
+              >
+                {encounterLoading ? "Creating..." : "Create Encounter"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─── New Prescription Modal ──────────────────────────────────────── */}
+      {showNewPrescription && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: "rgba(0,0,0,0.5)" }}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden">
+            <div className="p-6" style={{ background: "linear-gradient(135deg, #1B2B4D, #243b53)" }}>
+              <h3 className="text-xl font-bold text-white">New Prescription</h3>
+              <p className="text-sm text-slate-300 mt-1">Prescribe a medication for a patient.</p>
+            </div>
+            <div className="p-6 space-y-4 max-h-96 overflow-y-auto">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Patient *</label>
+                <select className="w-full border rounded-lg px-3 py-2 text-sm" value={rxForm.patientId} onChange={e => setRxForm(f => ({ ...f, patientId: e.target.value }))}>
+                  <option value="">Select patient...</option>
+                  {(apiPatients || MOCK_PATIENTS).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Medication Name *</label>
+                <input className="w-full border rounded-lg px-3 py-2 text-sm" value={rxForm.medicationName} onChange={e => setRxForm(f => ({ ...f, medicationName: e.target.value }))} placeholder="e.g. Sertraline" />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Dosage *</label>
+                  <input className="w-full border rounded-lg px-3 py-2 text-sm" value={rxForm.dosage} onChange={e => setRxForm(f => ({ ...f, dosage: e.target.value }))} placeholder="e.g. 100mg" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Frequency</label>
+                  <input className="w-full border rounded-lg px-3 py-2 text-sm" value={rxForm.frequency} onChange={e => setRxForm(f => ({ ...f, frequency: e.target.value }))} placeholder="e.g. Daily" />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Route</label>
+                  <select className="w-full border rounded-lg px-3 py-2 text-sm" value={rxForm.route} onChange={e => setRxForm(f => ({ ...f, route: e.target.value }))}>
+                    <option value="oral">Oral</option>
+                    <option value="topical">Topical</option>
+                    <option value="injectable">Injectable</option>
+                    <option value="sublingual">Sublingual</option>
+                    <option value="inhaled">Inhaled</option>
+                    <option value="transdermal">Transdermal</option>
+                    <option value="rectal">Rectal</option>
+                    <option value="other">Other</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Quantity</label>
+                  <input type="number" className="w-full border rounded-lg px-3 py-2 text-sm" value={rxForm.quantity} onChange={e => setRxForm(f => ({ ...f, quantity: e.target.value }))} />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Refills</label>
+                  <input type="number" className="w-full border rounded-lg px-3 py-2 text-sm" value={rxForm.refills} onChange={e => setRxForm(f => ({ ...f, refills: e.target.value }))} />
+                </div>
+                <div className="flex items-end pb-1">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" checked={rxForm.isControlled} onChange={e => setRxForm(f => ({ ...f, isControlled: e.target.checked }))} className="accent-teal-600" />
+                    <span className="text-sm text-slate-700">Controlled substance</span>
+                  </label>
+                </div>
+              </div>
+              {rxForm.isControlled && (
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Schedule</label>
+                  <select className="w-full border rounded-lg px-3 py-2 text-sm" value={rxForm.schedule} onChange={e => setRxForm(f => ({ ...f, schedule: e.target.value }))}>
+                    <option value="">Select...</option>
+                    <option value="II">Schedule II</option>
+                    <option value="III">Schedule III</option>
+                    <option value="IV">Schedule IV</option>
+                    <option value="V">Schedule V</option>
+                  </select>
+                </div>
+              )}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Pharmacy Name</label>
+                  <input className="w-full border rounded-lg px-3 py-2 text-sm" value={rxForm.pharmacyName} onChange={e => setRxForm(f => ({ ...f, pharmacyName: e.target.value }))} placeholder="CVS Pharmacy" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Pharmacy Phone</label>
+                  <input className="w-full border rounded-lg px-3 py-2 text-sm" value={rxForm.pharmacyPhone} onChange={e => setRxForm(f => ({ ...f, pharmacyPhone: e.target.value }))} placeholder="(555) 123-4567" />
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Notes</label>
+                <textarea className="w-full border rounded-lg px-3 py-2 text-sm" rows={2} value={rxForm.notes} onChange={e => setRxForm(f => ({ ...f, notes: e.target.value }))} placeholder="Optional notes..." />
+              </div>
+            </div>
+            <div className="px-6 pb-6 flex items-center justify-end gap-3">
+              <button className="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100 transition-colors" onClick={() => setShowNewPrescription(false)}>Cancel</button>
+              <button
+                className="px-6 py-2 rounded-lg text-sm font-medium text-white transition-colors"
+                style={{ backgroundColor: "#27ab83" }}
+                onClick={handleCreatePrescription}
+                disabled={rxLoading}
+              >
+                {rxLoading ? "Creating..." : "Create Prescription"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─── Edit Patient Modal ──────────────────────────────────────────── */}
+      {showEditPatient && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: "rgba(0,0,0,0.5)" }}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden">
+            <div className="p-6" style={{ background: "linear-gradient(135deg, #1B2B4D, #243b53)" }}>
+              <h3 className="text-xl font-bold text-white">Edit Patient</h3>
+              <p className="text-sm text-slate-300 mt-1">Update patient information.</p>
+            </div>
+            <div className="p-6 space-y-4 max-h-96 overflow-y-auto">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">First Name *</label>
+                  <input className="w-full border rounded-lg px-3 py-2 text-sm" value={editPatientForm.firstName} onChange={e => setEditPatientForm(f => ({ ...f, firstName: e.target.value }))} />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Last Name *</label>
+                  <input className="w-full border rounded-lg px-3 py-2 text-sm" value={editPatientForm.lastName} onChange={e => setEditPatientForm(f => ({ ...f, lastName: e.target.value }))} />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Date of Birth</label>
+                  <input type="date" className="w-full border rounded-lg px-3 py-2 text-sm" value={editPatientForm.dateOfBirth} onChange={e => setEditPatientForm(f => ({ ...f, dateOfBirth: e.target.value }))} />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Gender</label>
+                  <select className="w-full border rounded-lg px-3 py-2 text-sm" value={editPatientForm.gender} onChange={e => setEditPatientForm(f => ({ ...f, gender: e.target.value }))}>
+                    <option value="male">Male</option>
+                    <option value="female">Female</option>
+                    <option value="other">Other</option>
+                    <option value="prefer_not_to_say">Prefer not to say</option>
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Email</label>
+                <input type="email" className="w-full border rounded-lg px-3 py-2 text-sm" value={editPatientForm.email} onChange={e => setEditPatientForm(f => ({ ...f, email: e.target.value }))} />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Phone</label>
+                <input type="tel" className="w-full border rounded-lg px-3 py-2 text-sm" value={editPatientForm.phone} onChange={e => setEditPatientForm(f => ({ ...f, phone: e.target.value }))} />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Address</label>
+                <input className="w-full border rounded-lg px-3 py-2 text-sm" value={editPatientForm.addressLine1} onChange={e => setEditPatientForm(f => ({ ...f, addressLine1: e.target.value }))} placeholder="Street address" />
+              </div>
+              <div className="grid grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">City</label>
+                  <input className="w-full border rounded-lg px-3 py-2 text-sm" value={editPatientForm.city} onChange={e => setEditPatientForm(f => ({ ...f, city: e.target.value }))} />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">State</label>
+                  <input className="w-full border rounded-lg px-3 py-2 text-sm" value={editPatientForm.state} onChange={e => setEditPatientForm(f => ({ ...f, state: e.target.value }))} />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">ZIP</label>
+                  <input className="w-full border rounded-lg px-3 py-2 text-sm" value={editPatientForm.zip} onChange={e => setEditPatientForm(f => ({ ...f, zip: e.target.value }))} />
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Preferred Language</label>
+                <input className="w-full border rounded-lg px-3 py-2 text-sm" value={editPatientForm.preferredLanguage} onChange={e => setEditPatientForm(f => ({ ...f, preferredLanguage: e.target.value }))} />
+              </div>
+            </div>
+            <div className="px-6 pb-6 flex items-center justify-end gap-3">
+              <button className="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100 transition-colors" onClick={() => setShowEditPatient(false)}>Cancel</button>
+              <button
+                className="px-6 py-2 rounded-lg text-sm font-medium text-white transition-colors"
+                style={{ backgroundColor: "#27ab83" }}
+                onClick={handleEditPatient}
+                disabled={editPatientLoading}
+              >
+                {editPatientLoading ? "Saving..." : "Save Changes"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
