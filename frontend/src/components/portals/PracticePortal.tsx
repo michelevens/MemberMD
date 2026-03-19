@@ -6,6 +6,7 @@ import { useState } from "react";
 import { useAuth } from "../../contexts/AuthContext";
 import { HeaderToolbar } from "../shared/HeaderToolbar";
 import { UserSettingsDropdown } from "../shared/UserSettingsDropdown";
+import { PracticeSettings } from "../settings/PracticeSettings";
 import {
   LayoutDashboard,
   Users,
@@ -290,7 +291,6 @@ const MOCK_THREADS = [
 const COMING_SOON_TABS: TabId[] = [
   "intakes", "waitlist", "encounters", "prescriptions", "screenings",
   "payments", "coupons", "providers", "staff", "notifications",
-  "practice-settings", "branding",
 ];
 
 // ─── Helper Components ──────────────────────────────────────────────────────
@@ -1249,6 +1249,10 @@ export function PracticePortal() {
         return renderMessages();
       case "invoices":
         return renderInvoices();
+      case "practice-settings":
+        return <PracticeSettings />;
+      case "branding":
+        return <PracticeSettings initialTab="branding" />;
       default:
         return renderDashboard();
     }
