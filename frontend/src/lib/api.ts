@@ -230,13 +230,23 @@ const MOCK_DASHBOARD: DashboardStats = {
   retentionRate: 94.2,
 };
 
+// Demo accounts — role determined by email
+const DEMO_ACCOUNTS: Record<string, { role: User["role"]; firstName: string; lastName: string }> = {
+  "super@membermd.io": { role: "superadmin", firstName: "Super", lastName: "Admin" },
+  "admin@pinnacledpc.com": { role: "practice_admin", firstName: "Sarah", lastName: "Mitchell" },
+  "dr.michel@ennhealth.com": { role: "provider", firstName: "Nageley", lastName: "Michel" },
+  "front@pinnacledpc.com": { role: "staff", firstName: "Maria", lastName: "Garcia" },
+  "patient@demo.com": { role: "patient", firstName: "James", lastName: "Wilson" },
+};
+
 // ===== Service Objects =====
 
 export const authService = {
   login: async (credentials: LoginCredentials): Promise<ApiResponse<LoginResponse>> => {
     if (useMockData()) {
-      const user = { ...MOCK_USER, email: credentials.email };
-      const token = `mock_token_practice_admin_${Date.now()}`;
+      const demo = DEMO_ACCOUNTS[credentials.email] || { role: "practice_admin" as const, firstName: "Demo", lastName: "User" };
+      const user: User = { ...MOCK_USER, email: credentials.email, role: demo.role, firstName: demo.firstName, lastName: demo.lastName };
+      const token = `mock_token_${demo.role}_${Date.now()}`;
       sessionStorage.setItem("membermd_user", JSON.stringify(user));
       return { data: { accessToken: token, user } };
     }
