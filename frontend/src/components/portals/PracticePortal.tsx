@@ -5,7 +5,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../contexts/AuthContext";
-import { dashboardService, membershipPlanService, messageService } from "../../lib/api";
+import { dashboardService, membershipPlanService, messageService, patientService, appointmentService, encounterService, prescriptionService, invoiceService } from "../../lib/api";
 import { HeaderToolbar } from "../shared/HeaderToolbar";
 import { UserSettingsDropdown } from "../shared/UserSettingsDropdown";
 import { PracticeSettings } from "../settings/PracticeSettings";
@@ -506,13 +506,29 @@ export function PracticePortal() {
   const [apiThreads, setApiThreads] = useState<any[] | null>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [apiMessages, setApiMessages] = useState<any[] | null>(null);
+  const [apiPatients, setApiPatients] = useState<MockPatient[] | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [apiAppointments, setApiAppointments] = useState<any[] | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [apiEncounters, setApiEncounters] = useState<any[] | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [apiPrescriptions, setApiPrescriptions] = useState<any[] | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [apiInvoices, setApiInvoices] = useState<any[] | null>(null);
+  const [dataLoading, setDataLoading] = useState(false);
 
   const loadPracticeData = useCallback(async () => {
+    setDataLoading(true);
     try {
-      const [statsRes, plansRes, threadsRes] = await Promise.all([
+      const [statsRes, plansRes, threadsRes, patientsRes, appointmentsRes, encountersRes, prescriptionsRes, invoicesRes] = await Promise.all([
         dashboardService.getPracticeStats(),
         membershipPlanService.list(),
         messageService.list(),
+        patientService.list(),
+        appointmentService.list(),
+        encounterService.list(),
+        prescriptionService.list(),
+        invoiceService.list(),
       ]);
       if (statsRes.data && typeof statsRes.data === "object" && Object.keys(statsRes.data).length > 0) {
         setApiDashStats(statsRes.data);
@@ -524,9 +540,94 @@ export function PracticePortal() {
       if (threadsRes.data && Array.isArray(threadsRes.data) && threadsRes.data.length > 0) {
         setApiThreads(threadsRes.data);
       }
+      // Patients
+      if (patientsRes.data && Array.isArray(patientsRes.data) && patientsRes.data.length > 0) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        setApiPatients(patientsRes.data.map((p: any) => ({
+          id: p.id,
+          name: [p.firstName, p.lastName].filter(Boolean).join(" ") || p.name || "",
+          preferredName: p.preferredName || undefined,
+          plan: p.activeMembership?.plan?.name || p.planName || "No Plan",
+          planPrice: p.activeMembership?.plan?.monthlyPrice || p.planPrice || 0,
+          status: p.isActive === false ? "cancelled" : (p.activeMembership?.status === "paused" ? "paused" : "active") as "active" | "paused" | "cancelled",
+          phone: p.phone || "",
+          email: p.email || "",
+          lastVisit: p.lastVisitAt || "N/A",
+          nextApt: p.nextAppointmentAt || "N/A",
+          memberId: p.activeMembership?.memberNumber || p.memberId || "",
+          memberSince: p.createdAt || "",
+          dob: p.dateOfBirth || p.dob || "",
+          gender: p.gender || "",
+          pronouns: p.pronouns || "",
+          language: p.language || "",
+          address: [p.addressLine1, p.addressLine2, p.city, p.state, p.zip].filter(Boolean).join(", ") || p.address || "",
+          visitsUsed: p.activeMembership?.visitsUsed ?? 0,
+          visitsTotal: p.activeMembership?.visitsTotal ?? 0,
+          provider: p.primaryProvider?.name || p.providerName || "",
+        })));
+      }
+      // Appointments
+      if (appointmentsRes.data && Array.isArray(appointmentsRes.data) && appointmentsRes.data.length > 0) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        setApiAppointments(appointmentsRes.data.map((a: any) => ({
+          id: a.id,
+          time: a.scheduledAt ? new Date(a.scheduledAt).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true }) : a.time || "",
+          patient: a.patient ? [a.patient.firstName, a.patient.lastName].filter(Boolean).join(" ") : a.patientName || "",
+          plan: a.patient?.activeMembership?.plan?.name || a.planName || "",
+          program: a.program?.name || a.programName || "DPC Membership",
+          type: a.appointmentType?.name || a.type || a.typeName || "Visit",
+          duration: a.durationMinutes ? `${a.durationMinutes} min` : a.duration || "30 min",
+          provider: a.provider ? `${a.provider.title || ""} ${a.provider.lastName || ""}`.trim() : a.providerName || "",
+          status: a.status || "confirmed",
+          isTelehealth: a.isTelehealth ?? a.is_telehealth ?? false,
+          sessionId: a.telehealthSessionId || a.sessionId || "",
+        })));
+      }
+      // Encounters
+      if (encountersRes.data && Array.isArray(encountersRes.data) && encountersRes.data.length > 0) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        setApiEncounters(encountersRes.data.map((e: any) => ({
+          id: e.id,
+          date: e.encounterDate ? new Date(e.encounterDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : e.date || "",
+          patient: e.patient ? [e.patient.firstName, e.patient.lastName].filter(Boolean).join(" ") : e.patientName || "",
+          provider: e.provider ? `${e.provider.title || ""} ${e.provider.lastName || ""}`.trim() : e.providerName || "",
+          type: e.encounterType || e.type || "Follow-Up",
+          program: e.program?.name || e.programName || "DPC Membership",
+          noteTemplate: e.noteTemplate || e.templateType || "SOAP",
+          duration: e.durationMinutes ? `${e.durationMinutes} min` : e.duration || "30 min",
+          status: e.status || "draft",
+        })));
+      }
+      // Prescriptions
+      if (prescriptionsRes.data && Array.isArray(prescriptionsRes.data) && prescriptionsRes.data.length > 0) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        setApiPrescriptions(prescriptionsRes.data.map((rx: any) => ({
+          id: rx.id,
+          patient: rx.patient ? [rx.patient.firstName, rx.patient.lastName].filter(Boolean).join(" ") : rx.patientName || "",
+          medication: rx.medicationName || rx.medication || "",
+          dosage: rx.dosage || "",
+          frequency: rx.frequency || "",
+          prescriber: rx.prescriber ? `${rx.prescriber.title || ""} ${rx.prescriber.lastName || ""}`.trim() : rx.prescriberName || "",
+          status: rx.status || "active",
+          refillsLeft: rx.refillsRemaining ?? rx.refillsLeft ?? 0,
+        })));
+      }
+      // Invoices
+      if (invoicesRes.data && Array.isArray(invoicesRes.data) && invoicesRes.data.length > 0) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        setApiInvoices(invoicesRes.data.map((inv: any) => ({
+          id: inv.invoiceNumber || inv.id || "",
+          patient: inv.patient ? [inv.patient.firstName, inv.patient.lastName].filter(Boolean).join(" ") : inv.patientName || "",
+          amount: inv.totalAmount ?? inv.amount ?? 0,
+          plan: inv.plan?.name || inv.planName || "",
+          status: inv.status || "open",
+          date: inv.issuedAt ? new Date(inv.issuedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : inv.date || "",
+        })));
+      }
     } catch {
       // Fall back to mock data
     }
+    setDataLoading(false);
   }, []);
 
   useEffect(() => { loadPracticeData(); }, [loadPracticeData]);
@@ -777,7 +878,7 @@ export function PracticePortal() {
                     </tr>
                   </thead>
                   <tbody>
-                    {MOCK_DASHBOARD_APPOINTMENTS.map((apt) => (
+                    {(apiAppointments || MOCK_DASHBOARD_APPOINTMENTS).slice(0, 5).map((apt) => (
                       <tr
                         key={apt.id}
                         className="border-t border-slate-100 hover:bg-slate-50 transition-colors"
@@ -845,7 +946,8 @@ export function PracticePortal() {
   // ─── Patient Roster Tab ─────────────────────────────────────────────────
 
   function renderRoster() {
-    const filtered = MOCK_PATIENTS.filter(
+    const patients = apiPatients || MOCK_PATIENTS;
+    const filtered = patients.filter(
       (p) =>
         p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
         p.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -2107,7 +2209,7 @@ export function PracticePortal() {
   // ─── Telehealth Tab ─────────────────────────────────────────────────────
 
   function renderTelehealth() {
-    const telehealthAppointments = MOCK_APPOINTMENTS.filter((a) => a.isTelehealth);
+    const telehealthAppointments = (apiAppointments || MOCK_APPOINTMENTS).filter((a: typeof MOCK_APPOINTMENTS[0]) => a.isTelehealth);
     const platformLabels: Record<string, string> = {
       zoom: "Zoom",
       doxy: "Doxy.me",
@@ -2518,6 +2620,7 @@ export function PracticePortal() {
   // ─── Invoices Tab ───────────────────────────────────────────────────────
 
   function renderInvoices() {
+    const invoices = apiInvoices || MOCK_INVOICES;
     return (
       <div className="space-y-4">
         <div className="flex items-center justify-between">
@@ -2538,25 +2641,25 @@ export function PracticePortal() {
           <div className="glass rounded-lg p-4">
             <p className="text-xs text-slate-500 mb-1">Total Invoiced</p>
             <p className="text-xl font-bold text-slate-800">
-              ${MOCK_INVOICES.reduce((s, i) => s + i.amount, 0).toLocaleString("en-US", { minimumFractionDigits: 2 })}
+              ${invoices.reduce((s, i) => s + i.amount, 0).toLocaleString("en-US", { minimumFractionDigits: 2 })}
             </p>
           </div>
           <div className="glass rounded-lg p-4">
             <p className="text-xs text-slate-500 mb-1">Paid</p>
             <p className="text-xl font-bold" style={{ color: "#2f8132" }}>
-              ${MOCK_INVOICES.filter((i) => i.status === "paid").reduce((s, i) => s + i.amount, 0).toLocaleString("en-US", { minimumFractionDigits: 2 })}
+              ${invoices.filter((i) => i.status === "paid").reduce((s, i) => s + i.amount, 0).toLocaleString("en-US", { minimumFractionDigits: 2 })}
             </p>
           </div>
           <div className="glass rounded-lg p-4">
             <p className="text-xs text-slate-500 mb-1">Open</p>
             <p className="text-xl font-bold" style={{ color: "#334e68" }}>
-              ${MOCK_INVOICES.filter((i) => i.status === "open").reduce((s, i) => s + i.amount, 0).toLocaleString("en-US", { minimumFractionDigits: 2 })}
+              ${invoices.filter((i) => i.status === "open").reduce((s, i) => s + i.amount, 0).toLocaleString("en-US", { minimumFractionDigits: 2 })}
             </p>
           </div>
           <div className="glass rounded-lg p-4">
             <p className="text-xs text-slate-500 mb-1">Overdue</p>
             <p className="text-xl font-bold" style={{ color: "#dc2626" }}>
-              ${MOCK_INVOICES.filter((i) => i.status === "overdue").reduce((s, i) => s + i.amount, 0).toLocaleString("en-US", { minimumFractionDigits: 2 })}
+              ${invoices.filter((i) => i.status === "overdue").reduce((s, i) => s + i.amount, 0).toLocaleString("en-US", { minimumFractionDigits: 2 })}
             </p>
           </div>
         </div>
@@ -2576,7 +2679,7 @@ export function PracticePortal() {
                 </tr>
               </thead>
               <tbody>
-                {MOCK_INVOICES.map((inv) => (
+                {invoices.map((inv) => (
                   <tr
                     key={inv.id}
                     className="border-t border-slate-100 hover:bg-slate-50 transition-colors"
@@ -2936,7 +3039,7 @@ export function PracticePortal() {
                 </tr>
               </thead>
               <tbody>
-                {mockPracticeEncounters.map((enc) => {
+                {(apiEncounters || mockPracticeEncounters).map((enc) => {
                   const tc = encounterTypeConfig[enc.type] || encounterTypeConfig["Follow-Up"];
                   const esc = encounterStatusConfig[enc.status];
                   const pbc = programBadgeConfig[enc.program] || { bg: "#e0e8f0", text: "#334e68" };
@@ -3032,20 +3135,20 @@ export function PracticePortal() {
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
           <div className="glass rounded-lg p-4">
             <p className="text-xs text-slate-500 mb-1">Active</p>
-            <p className="text-2xl font-bold" style={{ color: "#2f8132" }}>45</p>
+            <p className="text-2xl font-bold" style={{ color: "#2f8132" }}>{apiPrescriptions ? apiPrescriptions.filter(rx => rx.status === "active").length : 45}</p>
           </div>
           <div className="glass rounded-lg p-4">
             <p className="text-xs text-slate-500 mb-1">Refill Requests</p>
-            <p className="text-2xl font-bold" style={{ color: "#d97706" }}>3</p>
+            <p className="text-2xl font-bold" style={{ color: "#d97706" }}>{apiPrescriptions ? apiPrescriptions.filter(rx => rx.status === "refill_requested").length : 3}</p>
           </div>
           <div className="glass rounded-lg p-4">
             <p className="text-xs text-slate-500 mb-1">Discontinued</p>
-            <p className="text-2xl font-bold text-slate-500">12</p>
+            <p className="text-2xl font-bold text-slate-500">{apiPrescriptions ? apiPrescriptions.filter(rx => rx.status === "discontinued").length : 12}</p>
           </div>
         </div>
 
         {/* Pending Refill Requests */}
-        {mockRefillRequests.length > 0 && (
+        {(!apiPrescriptions && mockRefillRequests.length > 0) && (
           <div>
             <h3 className="text-sm font-semibold text-slate-800 mb-3">Pending Refill Requests</h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -3098,7 +3201,7 @@ export function PracticePortal() {
                 </tr>
               </thead>
               <tbody>
-                {mockPrescriptions.map((rx) => {
+                {(apiPrescriptions || mockPrescriptions).map((rx) => {
                   const rsc = rxStatusConfig[rx.status];
                   return (
                     <tr key={rx.id} className="border-t border-slate-100 hover:bg-slate-50 transition-colors">
@@ -3917,6 +4020,13 @@ export function PracticePortal() {
             </div>
           </div>
         </header>
+
+        {/* Loading indicator */}
+        {dataLoading && (
+          <div className="h-0.5 w-full overflow-hidden" style={{ backgroundColor: "#e6f7f2" }}>
+            <div className="h-full animate-pulse" style={{ backgroundColor: "#27ab83", width: "40%", animationDuration: "1s" }} />
+          </div>
+        )}
 
         {/* Page Content */}
         <main className="p-4 sm:p-6 lg:p-8">

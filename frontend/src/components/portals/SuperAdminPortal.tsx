@@ -951,17 +951,21 @@ export function SuperAdminPortal() {
   const [selectedTicket, setSelectedTicket] = useState<string | null>(null);
   const [apiSpecialties, setApiSpecialties] = useState<MockSpecialty[] | null>(null);
   const [apiScreenings, setApiScreenings] = useState<MockScreeningInstrument[] | null>(null);
-
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [apiConsents, setApiConsents] = useState<any[] | null>(null);
+  const [adminLoading, setAdminLoading] = useState(false);
 
   // ─── Fetch real data from API ─────────────────────────────────────────────
 
   const loadData = useCallback(async () => {
+    setAdminLoading(true);
     try {
-      const [practicesRes, statsRes, specialtiesRes, screeningsRes] = await Promise.all([
+      const [practicesRes, statsRes, specialtiesRes, screeningsRes, consentsRes] = await Promise.all([
         practiceService.list(),
         dashboardService.getStats(),
         adminService.getSpecialties(),
         adminService.getScreenings(),
+        adminService.getConsents(),
       ]);
       if (practicesRes.data && Array.isArray(practicesRes.data)) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1013,9 +1017,25 @@ export function SuperAdminPortal() {
           answerOptions: s.answerOptions || s.answer_options || [],
         })));
       }
+      // Consents
+      if (consentsRes.data && Array.isArray(consentsRes.data) && consentsRes.data.length > 0) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        setApiConsents(consentsRes.data.map((c: any) => ({
+          id: c.id || "",
+          name: c.name || c.title || "",
+          type: c.type || c.consentType || "General",
+          required: c.required ?? c.isRequired ?? false,
+          specialty: c.specialty || "All",
+          version: c.version || "1.0",
+          active: c.active ?? c.isActive ?? true,
+          practiceCount: c.practiceCount ?? c.practice_count ?? 0,
+          previewText: c.previewText || c.description || c.body || "",
+        })));
+      }
     } catch {
       // Fall back to mock data
     }
+    setAdminLoading(false);
   }, []);
 
   useEffect(() => { loadData(); }, [loadData]);
@@ -2574,11 +2594,12 @@ export function SuperAdminPortal() {
   // ─── Consent Templates Tab ──────────────────────────────────────────────────
 
   function renderConsentTemplates() {
+    const consentsData = apiConsents || MOCK_CONSENTS;
     const filtered = consentFilter === "All"
-      ? MOCK_CONSENTS
+      ? consentsData
       : consentFilter === "Required"
-        ? MOCK_CONSENTS.filter((c) => c.required)
-        : MOCK_CONSENTS.filter((c) => !c.required);
+        ? consentsData.filter((c: { required: boolean }) => c.required)
+        : consentsData.filter((c: { required: boolean }) => !c.required);
 
     const typeColors: Record<string, { bg: string; color: string }> = {
       hipaa: { bg: "#fef2f2", color: "#dc2626" },
@@ -2707,7 +2728,7 @@ export function SuperAdminPortal() {
 
           {/* Expanded consent preview */}
           {expandedConsent && (() => {
-            const consent = MOCK_CONSENTS.find((c) => c.id === expandedConsent);
+            const consent = (apiConsents || MOCK_CONSENTS).find((c: { id: string }) => c.id === expandedConsent);
             if (!consent) return null;
             return (
               <div className="px-6 py-4 border-t border-slate-200" style={{ backgroundColor: "#f8fafc" }}>
@@ -3944,6 +3965,13 @@ export function SuperAdminPortal() {
             </div>
           </div>
         </header>
+
+        {/* Loading indicator */}
+        {adminLoading && (
+          <div className="h-0.5 w-full overflow-hidden" style={{ backgroundColor: "#e6f7f2" }}>
+            <div className="h-full animate-pulse" style={{ backgroundColor: "#27ab83", width: "40%", animationDuration: "1s" }} />
+          </div>
+        )}
 
         {/* Page Content */}
         <main className="flex-1 px-4 sm:px-6 lg:px-8 py-6">
