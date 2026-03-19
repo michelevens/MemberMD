@@ -5,14 +5,13 @@
 
 import { useState } from "react";
 import { useAuth } from "../../contexts/AuthContext";
-import { UserSettingsDropdown } from "../shared/UserSettingsDropdown";
+import { HeaderToolbar } from "../shared/HeaderToolbar";
 import {
   Home,
   Calendar,
   MessageSquare,
   Heart,
   User,
-  Bell,
   LogOut,
   ChevronRight,
   Send,
@@ -30,7 +29,6 @@ import {
   CreditCard,
   Shield,
   Star,
-  X,
   ChevronDown,
   AlertCircle,
   Activity,
@@ -454,7 +452,7 @@ function formatDate(dateStr: string) {
 export function PatientPortal() {
   const { user, logout } = useAuth();
   const [activeTab, setActiveTab] = useState<TabId>("home");
-  const [showNotifications, setShowNotifications] = useState(false);
+
   const [activeThread, setActiveThread] = useState<string | null>(null);
   const [messageInput, setMessageInput] = useState("");
   const [expandedVisit, setExpandedVisit] = useState<string | null>(null);
@@ -536,49 +534,7 @@ export function PatientPortal() {
 
         {/* Right actions */}
         <div className="flex items-center gap-2">
-          {/* Notifications */}
-          <div className="relative">
-            <button
-              onClick={() => setShowNotifications(!showNotifications)}
-              className="relative p-2 rounded-full transition-colors hover:bg-slate-100"
-            >
-              <Bell className="w-5 h-5" style={{ color: COLORS.slate500 }} />
-              {unreadCount > 0 && (
-                <span
-                  className="absolute top-1 right-1 w-4 h-4 rounded-full text-white text-xs flex items-center justify-center font-bold"
-                  style={{ backgroundColor: COLORS.red500, fontSize: "10px" }}
-                >
-                  {unreadCount}
-                </span>
-              )}
-            </button>
-            {showNotifications && (
-              <div
-                className="absolute right-0 top-12 w-72 rounded-xl shadow-xl border p-3 z-50"
-                style={{ backgroundColor: COLORS.white, borderColor: COLORS.slate200 }}
-              >
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-sm font-semibold" style={{ color: COLORS.navy800 }}>Notifications</span>
-                  <button onClick={() => setShowNotifications(false)}>
-                    <X className="w-4 h-4" style={{ color: COLORS.slate400 }} />
-                  </button>
-                </div>
-                <div className="space-y-2">
-                  <div className="p-2 rounded-lg" style={{ backgroundColor: COLORS.slate50 }}>
-                    <p className="text-xs font-medium" style={{ color: COLORS.navy800 }}>New lab results available</p>
-                    <p className="text-xs" style={{ color: COLORS.slate400 }}>2 hours ago</p>
-                  </div>
-                  <div className="p-2 rounded-lg" style={{ backgroundColor: COLORS.slate50 }}>
-                    <p className="text-xs font-medium" style={{ color: COLORS.navy800 }}>Appointment reminder: Mar 22</p>
-                    <p className="text-xs" style={{ color: COLORS.slate400 }}>1 day ago</p>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* User avatar + dropdown */}
-          <UserSettingsDropdown variant="patient" />
+          <HeaderToolbar variant="patient" onNavigate={(tab) => setActiveTab(tab as TabId)} />
         </div>
       </div>
     </header>

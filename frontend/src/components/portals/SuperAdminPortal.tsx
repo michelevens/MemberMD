@@ -3,6 +3,8 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { practiceService, dashboardService } from "../../lib/api";
+import { HeaderToolbar } from "../shared/HeaderToolbar";
+import { PlatformSettings } from "../settings/PlatformSettings";
 import { UserSettingsDropdown } from "../shared/UserSettingsDropdown";
 import {
   LayoutDashboard,
@@ -3069,7 +3071,7 @@ export function SuperAdminPortal() {
       case "support":
         return <ComingSoon title="Support" />;
       case "settings":
-        return <ComingSoon title="Platform Settings" />;
+        return <PlatformSettings />;
       default:
         return renderDashboard();
     }
@@ -3133,7 +3135,7 @@ export function SuperAdminPortal() {
                   All Systems Operational
                 </span>
               </div>
-              <UserSettingsDropdown variant="superadmin" />
+              <HeaderToolbar variant="superadmin" onNavigate={(tab) => setActiveTab(tab as TabId)} />
             </div>
           </div>
         </header>
