@@ -4,6 +4,7 @@
 
 import { useState } from "react";
 import { useAuth } from "../../contexts/AuthContext";
+import { UserSettingsDropdown } from "../shared/UserSettingsDropdown";
 import {
   LayoutDashboard,
   Users,
@@ -23,7 +24,6 @@ import {
   Bell,
   Settings,
   Palette,
-  LogOut,
   Menu,
   X,
   DollarSign,
@@ -381,14 +381,6 @@ export function PracticePortal() {
     ? `${auth.user.firstName}'s Practice`
     : "My Practice";
 
-  const userName = auth.user
-    ? `${auth.user.firstName} ${auth.user.lastName}`
-    : "Practice Admin";
-
-  const userInitials = auth.user
-    ? `${auth.user.firstName[0]}${auth.user.lastName[0]}`
-    : "PA";
-
   // Total members
   const totalMembers = MOCK_PLANS.reduce((s, p) => s + p.memberCount, 0);
 
@@ -480,36 +472,7 @@ export function PracticePortal() {
 
         {/* User section */}
         <div className="p-4 border-t" style={{ borderColor: "rgba(255,255,255,0.08)" }}>
-          <div className="flex items-center gap-3 mb-3">
-            <div
-              className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-semibold text-white shrink-0"
-              style={{ backgroundColor: "#334e68" }}
-            >
-              {userInitials}
-            </div>
-            <div className="min-w-0">
-              <p className="text-sm font-medium text-white truncate">{userName}</p>
-              <p className="text-xs truncate" style={{ color: "rgba(255,255,255,0.45)" }}>
-                {auth.user?.email || "admin@practice.com"}
-              </p>
-            </div>
-          </div>
-          <button
-            onClick={() => auth.logout()}
-            className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors"
-            style={{ color: "rgba(255,255,255,0.55)", backgroundColor: "rgba(255,255,255,0.05)" }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.backgroundColor = "rgba(239,68,68,0.15)";
-              e.currentTarget.style.color = "#fca5a5";
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.backgroundColor = "rgba(255,255,255,0.05)";
-              e.currentTarget.style.color = "rgba(255,255,255,0.55)";
-            }}
-          >
-            <LogOut className="w-4 h-4" />
-            Log Out
-          </button>
+          <UserSettingsDropdown variant="practice" />
         </div>
       </aside>
     );
@@ -1343,12 +1306,7 @@ export function PracticePortal() {
                   style={{ backgroundColor: "#ef4444" }}
                 />
               </button>
-              <button
-                className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-semibold text-white"
-                style={{ backgroundColor: "#334e68" }}
-              >
-                {userInitials}
-              </button>
+              <UserSettingsDropdown variant="practice" />
             </div>
           </div>
         </header>

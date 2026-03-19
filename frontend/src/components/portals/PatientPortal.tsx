@@ -5,6 +5,7 @@
 
 import { useState } from "react";
 import { useAuth } from "../../contexts/AuthContext";
+import { UserSettingsDropdown } from "../shared/UserSettingsDropdown";
 import {
   Home,
   Calendar,
@@ -13,7 +14,6 @@ import {
   User,
   Bell,
   LogOut,
-  Settings,
   ChevronRight,
   Send,
   Paperclip,
@@ -454,7 +454,6 @@ function formatDate(dateStr: string) {
 export function PatientPortal() {
   const { user, logout } = useAuth();
   const [activeTab, setActiveTab] = useState<TabId>("home");
-  const [showUserMenu, setShowUserMenu] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const [activeThread, setActiveThread] = useState<string | null>(null);
   const [messageInput, setMessageInput] = useState("");
@@ -468,7 +467,6 @@ export function PatientPortal() {
 
   const firstName = user?.firstName || PATIENT.firstName;
   const lastName = user?.lastName || PATIENT.lastName;
-  const initials = `${firstName[0]}${lastName[0]}`;
 
   const desktopNavItems: { id: TabId; label: string }[] = [
     { id: "home", label: "Home" },
@@ -541,7 +539,7 @@ export function PatientPortal() {
           {/* Notifications */}
           <div className="relative">
             <button
-              onClick={() => { setShowNotifications(!showNotifications); setShowUserMenu(false); }}
+              onClick={() => setShowNotifications(!showNotifications)}
               className="relative p-2 rounded-full transition-colors hover:bg-slate-100"
             >
               <Bell className="w-5 h-5" style={{ color: COLORS.slate500 }} />
@@ -580,44 +578,7 @@ export function PatientPortal() {
           </div>
 
           {/* User avatar + dropdown */}
-          <div className="relative">
-            <button
-              onClick={() => { setShowUserMenu(!showUserMenu); setShowNotifications(false); }}
-              className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold text-white transition-transform hover:scale-105"
-              style={{ background: `linear-gradient(135deg, ${COLORS.navy700}, ${COLORS.teal500})` }}
-            >
-              {initials}
-            </button>
-            {showUserMenu && (
-              <div
-                className="absolute right-0 top-12 w-48 rounded-xl shadow-xl border py-1 z-50"
-                style={{ backgroundColor: COLORS.white, borderColor: COLORS.slate200 }}
-              >
-                <button
-                  onClick={() => { setActiveTab("account"); setShowUserMenu(false); }}
-                  className="w-full text-left px-4 py-2 text-sm hover:bg-slate-50 flex items-center gap-2"
-                  style={{ color: COLORS.slate600 }}
-                >
-                  <User className="w-4 h-4" /> Profile
-                </button>
-                <button
-                  onClick={() => { setActiveTab("account"); setShowUserMenu(false); }}
-                  className="w-full text-left px-4 py-2 text-sm hover:bg-slate-50 flex items-center gap-2"
-                  style={{ color: COLORS.slate600 }}
-                >
-                  <Settings className="w-4 h-4" /> Settings
-                </button>
-                <hr style={{ borderColor: COLORS.slate200 }} />
-                <button
-                  onClick={logout}
-                  className="w-full text-left px-4 py-2 text-sm hover:bg-red-50 flex items-center gap-2"
-                  style={{ color: COLORS.red500 }}
-                >
-                  <LogOut className="w-4 h-4" /> Logout
-                </button>
-              </div>
-            )}
-          </div>
+          <UserSettingsDropdown variant="patient" />
         </div>
       </div>
     </header>

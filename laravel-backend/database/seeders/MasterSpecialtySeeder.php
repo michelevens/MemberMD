@@ -4,11 +4,13 @@ namespace Database\Seeders;
 
 use App\Models\MasterSpecialty;
 use Illuminate\Database\Seeder;
+use Illuminate\Support\Facades\Log;
 
 class MasterSpecialtySeeder extends Seeder
 {
     public function run(): void
     {
+        $seeded = 0;
         $specialties = [
             // ─── Psychiatry ───
             [
@@ -1008,22 +1010,31 @@ class MasterSpecialtySeeder extends Seeder
         ];
 
         foreach ($specialties as $spec) {
-            MasterSpecialty::updateOrCreate(
-                ['code' => $spec['code']],
-                [
-                    'name' => $spec['name'],
-                    'description' => $spec['description'] ?? null,
-                    'default_screening_tools' => $spec['default_screening_tools'],
-                    'default_appointment_types' => $spec['default_appointment_types'],
-                    'default_diagnosis_favorites' => $spec['default_diagnosis_favorites'],
-                    'default_medication_categories' => $spec['default_medication_categories'],
-                    'default_lab_panels' => $spec['default_lab_panels'],
-                    'default_plan_templates' => $spec['default_plan_templates'],
-                    'default_intake_sections' => $spec['default_intake_sections'],
-                    'default_addons' => $spec['default_addons'],
-                    'is_active' => true,
-                ]
-            );
+            try {
+                MasterSpecialty::updateOrCreate(
+                    ['code' => $spec['code']],
+                    [
+                        'name' => $spec['name'],
+                        'description' => $spec['description'] ?? null,
+                        'default_screening_tools' => $spec['default_screening_tools'],
+                        'default_appointment_types' => $spec['default_appointment_types'],
+                        'default_diagnosis_favorites' => $spec['default_diagnosis_favorites'],
+                        'default_medication_categories' => $spec['default_medication_categories'],
+                        'default_lab_panels' => $spec['default_lab_panels'],
+                        'default_plan_templates' => $spec['default_plan_templates'],
+                        'default_intake_sections' => $spec['default_intake_sections'],
+                        'default_addons' => $spec['default_addons'],
+                        'is_active' => true,
+                    ]
+                );
+
+                $seeded++;
+            } catch (\Throwable $e) {
+                $this->command->error("Failed to seed specialty [{$spec['code']}]: " . $e->getMessage());
+                Log::error('MasterSpecialtySeeder failed', ['code' => $spec['code'], 'error' => $e->getMessage()]);
+            }
         }
+
+        $this->command->info("Seeded {$seeded} master specialties.");
     }
 }

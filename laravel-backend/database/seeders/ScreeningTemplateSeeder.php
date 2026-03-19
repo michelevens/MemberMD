@@ -4,11 +4,13 @@ namespace Database\Seeders;
 
 use App\Models\ScreeningTemplate;
 use Illuminate\Database\Seeder;
+use Illuminate\Support\Facades\Log;
 
 class ScreeningTemplateSeeder extends Seeder
 {
     public function run(): void
     {
+        $seeded = 0;
         $templates = [
             // ─── PHQ-9 (Depression) ───
             [
@@ -587,17 +589,37 @@ class ScreeningTemplateSeeder extends Seeder
         ];
 
         foreach ($templates as $template) {
-            ScreeningTemplate::updateOrCreate(
-                ['code' => $template['code'], 'tenant_id' => null],
-                [
+            try {
+                // PostgreSQL: NULL != NULL in WHERE, so use whereNull instead of updateOrCreate
+                $existing = ScreeningTemplate::where('code', $template['code'])
+                    ->whereNull('tenant_id')
+                    ->first();
+
+                $data = [
                     'name' => $template['name'],
                     'description' => $template['description'],
                     'specialty' => $template['specialty'],
                     'questions' => $template['questions'],
                     'scoring_ranges' => $template['scoring_ranges'],
                     'is_active' => true,
-                ]
-            );
+                ];
+
+                if ($existing) {
+                    $existing->update($data);
+                } else {
+                    ScreeningTemplate::create(array_merge($data, [
+                        'code' => $template['code'],
+                        'tenant_id' => null,
+                    ]));
+                }
+
+                $seeded++;
+            } catch (\Throwable $e) {
+                $this->command->error("Failed to seed screening template [{$template['code']}]: " . $e->getMessage());
+                Log::error('ScreeningTemplateSeeder failed', ['code' => $template['code'], 'error' => $e->getMessage()]);
+            }
         }
+
+        $this->command->info("Seeded {$seeded} screening templates.");
     }
 }

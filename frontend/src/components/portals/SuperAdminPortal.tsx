@@ -2,8 +2,8 @@
 // Platform admin dashboard for managing all practices (tenants) on MemberMD
 
 import { useState, useEffect, useCallback } from "react";
-import { useAuth } from "../../contexts/AuthContext";
 import { practiceService, dashboardService } from "../../lib/api";
+import { UserSettingsDropdown } from "../shared/UserSettingsDropdown";
 import {
   LayoutDashboard,
   Building2,
@@ -15,7 +15,6 @@ import {
   ChevronUp,
   Eye,
   MoreHorizontal,
-  LogOut,
   Menu,
   X,
   Shield,
@@ -947,7 +946,6 @@ function ComingSoon({ title }: { title: string }) {
 // ─── Main Component ──────────────────────────────────────────────────────────
 
 export function SuperAdminPortal() {
-  const auth = useAuth();
   const [activeTab, setActiveTab] = useState<TabId>("dashboard");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [practiceSearch, setPracticeSearch] = useState("");
@@ -963,9 +961,6 @@ export function SuperAdminPortal() {
   const [noteSpecialtyFilter, setNoteSpecialtyFilter] = useState<string>("All");
   const [selectedSpecialtyDetail, setSelectedSpecialtyDetail] = useState<MockSpecialty | null>(null);
 
-  const userName = auth.user
-    ? `${auth.user.firstName} ${auth.user.lastName}`
-    : "Platform Admin";
 
   // ─── Fetch real data from API ─────────────────────────────────────────────
 
@@ -1098,31 +1093,8 @@ export function SuperAdminPortal() {
         </nav>
 
         {/* User section */}
-        <div className="border-t border-white/10 px-4 py-4">
-          <div className="flex items-center gap-3 mb-3">
-            <div
-              className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold text-white shrink-0"
-              style={{
-                background: "linear-gradient(135deg, #27ab83, #147d64)",
-              }}
-            >
-              {auth.user?.firstName?.charAt(0) || "A"}
-              {auth.user?.lastName?.charAt(0) || "D"}
-            </div>
-            <div className="min-w-0">
-              <p className="text-sm font-medium text-white truncate">
-                {userName}
-              </p>
-              <p className="text-xs text-slate-400">Super Admin</p>
-            </div>
-          </div>
-          <button
-            onClick={() => auth.logout()}
-            className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium text-slate-300 hover:text-white hover:bg-white/5 transition-colors"
-          >
-            <LogOut className="w-4 h-4" />
-            <span>Logout</span>
-          </button>
+        <div className="border-t border-white/10 px-4 py-3">
+          <UserSettingsDropdown variant="superadmin" />
         </div>
       </aside>
     );
@@ -3161,14 +3133,7 @@ export function SuperAdminPortal() {
                   All Systems Operational
                 </span>
               </div>
-              <div
-                className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-white"
-                style={{
-                  background: "linear-gradient(135deg, #27ab83, #147d64)",
-                }}
-              >
-                {auth.user?.firstName?.charAt(0) || "A"}
-              </div>
+              <UserSettingsDropdown variant="superadmin" />
             </div>
           </div>
         </header>

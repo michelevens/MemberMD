@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\MasterDataController;
 use App\Http\Controllers\Api\PracticeController;
 use Illuminate\Support\Facades\Route;
 
@@ -29,4 +30,11 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Practice: own practice
     Route::get('/practice/me', [PracticeController::class, 'myPractice']);
+
+    // Master Data (SuperAdmin)
+    Route::get('/admin/master-data/specialties', [MasterDataController::class, 'specialties']);
+    Route::get('/admin/master-data/specialties/{id}', [MasterDataController::class, 'specialty']);
+    Route::get('/admin/master-data/screenings', [MasterDataController::class, 'screenings']);
+    Route::get('/admin/master-data/consents', [MasterDataController::class, 'consents']);
+    Route::get('/admin/master-data/stats', [MasterDataController::class, 'stats']);
 });

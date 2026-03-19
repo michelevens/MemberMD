@@ -4,11 +4,13 @@ namespace Database\Seeders;
 
 use App\Models\ConsentTemplate;
 use Illuminate\Database\Seeder;
+use Illuminate\Support\Facades\Log;
 
 class ConsentTemplateSeeder extends Seeder
 {
     public function run(): void
     {
+        $seeded = 0;
         $templates = [
             // ─── HIPAA Notice of Privacy Practices ───
             [
@@ -408,17 +410,37 @@ COMMS,
         ];
 
         foreach ($templates as $template) {
-            ConsentTemplate::updateOrCreate(
-                ['type' => $template['type'], 'tenant_id' => null],
-                [
+            try {
+                // PostgreSQL: NULL != NULL in WHERE, so use whereNull instead of updateOrCreate
+                $existing = ConsentTemplate::where('type', $template['type'])
+                    ->whereNull('tenant_id')
+                    ->first();
+
+                $data = [
                     'name' => $template['name'],
                     'specialty' => $template['specialty'],
                     'is_required' => $template['is_required'],
                     'version' => $template['version'],
                     'content' => $template['content'],
                     'is_active' => true,
-                ]
-            );
+                ];
+
+                if ($existing) {
+                    $existing->update($data);
+                } else {
+                    ConsentTemplate::create(array_merge($data, [
+                        'type' => $template['type'],
+                        'tenant_id' => null,
+                    ]));
+                }
+
+                $seeded++;
+            } catch (\Throwable $e) {
+                $this->command->error("Failed to seed consent template [{$template['type']}]: " . $e->getMessage());
+                Log::error('ConsentTemplateSeeder failed', ['type' => $template['type'], 'error' => $e->getMessage()]);
+            }
         }
+
+        $this->command->info("Seeded {$seeded} consent templates.");
     }
 }
