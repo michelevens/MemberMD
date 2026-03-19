@@ -11,6 +11,8 @@ import {
   DollarSign,
   Clock,
   ChevronRight,
+  ChevronDown,
+  ChevronUp,
   Eye,
   MoreHorizontal,
   LogOut,
@@ -55,6 +57,9 @@ import {
   XCircle,
   UserCheck,
   Star,
+  ClipboardCheck,
+  PenLine,
+  AlertTriangle,
 } from "lucide-react";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -168,6 +173,43 @@ interface MockAuditLog {
   action: string;
   resource: string;
   ipAddress: string;
+}
+
+interface MockScreeningInstrument {
+  id: string;
+  name: string;
+  code: string;
+  fullName: string;
+  category: string;
+  questionCount: number;
+  scoreMin: number;
+  scoreMax: number;
+  severities: { label: string; min: number; max: number; color: string; bg: string }[];
+  specialties: string[];
+  active: boolean;
+  questions: string[];
+  answerOptions: string[];
+}
+
+interface MockConsentTemplate {
+  id: string;
+  name: string;
+  type: string;
+  required: boolean;
+  specialty: string;
+  version: string;
+  active: boolean;
+  practiceCount: number;
+  previewText: string;
+}
+
+interface MockNoteTemplate {
+  id: string;
+  name: string;
+  specialty: string;
+  noteType: string;
+  status: "active" | "draft";
+  sections: { key: string; label: string; fields: string[] }[];
 }
 
 // ─── Navigation Config ───────────────────────────────────────────────────────
@@ -294,6 +336,425 @@ const MOCK_PENDING_PRACTICES: MockPendingPractice[] = [
     website: "metrocardiology.com", npi: "3456789012", taxId: "76-3456789", tenantCode: "MC19D5",
   },
 ];
+
+// ─── Screening Instruments Mock Data ────────────────────────────────────────
+
+const MOCK_SCREENINGS: MockScreeningInstrument[] = [
+  {
+    id: "s1",
+    name: "PHQ-9",
+    code: "phq9",
+    fullName: "Patient Health Questionnaire-9",
+    category: "Depression",
+    questionCount: 9,
+    scoreMin: 0,
+    scoreMax: 27,
+    severities: [
+      { label: "Minimal", min: 0, max: 4, color: "#2f8132", bg: "#ecf9ec" },
+      { label: "Mild", min: 5, max: 9, color: "#d97706", bg: "#fffbeb" },
+      { label: "Moderate", min: 10, max: 14, color: "#ea580c", bg: "#fff7ed" },
+      { label: "Moderately Severe", min: 15, max: 19, color: "#dc2626", bg: "#fef2f2" },
+      { label: "Severe", min: 20, max: 27, color: "#7f1d1d", bg: "#fce4e4" },
+    ],
+    specialties: ["Psychiatry", "Primary Care", "Family Medicine", "Internal Medicine", "OB/GYN", "Concierge Medicine", "Pain Management", "Addiction Medicine", "Neurology"],
+    active: true,
+    questions: [
+      "Little interest or pleasure in doing things",
+      "Feeling down, depressed, or hopeless",
+      "Trouble falling or staying asleep, or sleeping too much",
+      "Feeling tired or having little energy",
+      "Poor appetite or overeating",
+      "Feeling bad about yourself — or that you are a failure or have let yourself or your family down",
+      "Trouble concentrating on things",
+      "Moving or speaking so slowly that other people could have noticed, or being fidgety/restless",
+      "Thoughts that you would be better off dead, or of hurting yourself",
+    ],
+    answerOptions: ["Not at all (0)", "Several days (1)", "More than half the days (2)", "Nearly every day (3)"],
+  },
+  {
+    id: "s2",
+    name: "GAD-7",
+    code: "gad7",
+    fullName: "Generalized Anxiety Disorder-7",
+    category: "Anxiety",
+    questionCount: 7,
+    scoreMin: 0,
+    scoreMax: 21,
+    severities: [
+      { label: "Minimal", min: 0, max: 4, color: "#2f8132", bg: "#ecf9ec" },
+      { label: "Mild", min: 5, max: 9, color: "#d97706", bg: "#fffbeb" },
+      { label: "Moderate", min: 10, max: 14, color: "#ea580c", bg: "#fff7ed" },
+      { label: "Severe", min: 15, max: 21, color: "#dc2626", bg: "#fef2f2" },
+    ],
+    specialties: ["Psychiatry", "Primary Care", "Family Medicine", "Concierge Medicine", "Addiction Medicine"],
+    active: true,
+    questions: [
+      "Feeling nervous, anxious, or on edge",
+      "Not being able to stop or control worrying",
+      "Worrying too much about different things",
+      "Trouble relaxing",
+      "Being so restless that it is hard to sit still",
+      "Becoming easily annoyed or irritable",
+      "Feeling afraid, as if something awful might happen",
+    ],
+    answerOptions: ["Not at all (0)", "Several days (1)", "More than half the days (2)", "Nearly every day (3)"],
+  },
+  {
+    id: "s3",
+    name: "ASRS v1.1",
+    code: "asrs",
+    fullName: "Adult ADHD Self-Report Scale",
+    category: "ADHD",
+    questionCount: 6,
+    scoreMin: 0,
+    scoreMax: 24,
+    severities: [
+      { label: "Unlikely", min: 0, max: 13, color: "#2f8132", bg: "#ecf9ec" },
+      { label: "Possible", min: 14, max: 17, color: "#d97706", bg: "#fffbeb" },
+      { label: "Likely", min: 18, max: 24, color: "#dc2626", bg: "#fef2f2" },
+    ],
+    specialties: ["Psychiatry"],
+    active: true,
+    questions: [
+      "How often do you have trouble wrapping up the final details of a project, once the challenging parts have been done?",
+      "How often do you have difficulty getting things in order when you have to do a task that requires organization?",
+      "How often do you have problems remembering appointments or obligations?",
+      "When you have a task that requires a lot of thought, how often do you avoid or delay getting started?",
+      "How often do you fidget or squirm with your hands or feet when you have to sit down for a long time?",
+      "How often do you feel overly active and compelled to do things, like you were driven by a motor?",
+    ],
+    answerOptions: ["Never (0)", "Rarely (1)", "Sometimes (2)", "Often (3)", "Very Often (4)"],
+  },
+  {
+    id: "s4",
+    name: "AUDIT-C",
+    code: "auditc",
+    fullName: "Alcohol Use Disorders Identification Test",
+    category: "Alcohol Use",
+    questionCount: 3,
+    scoreMin: 0,
+    scoreMax: 12,
+    severities: [
+      { label: "Low Risk", min: 0, max: 2, color: "#2f8132", bg: "#ecf9ec" },
+      { label: "Moderate Risk", min: 3, max: 7, color: "#d97706", bg: "#fffbeb" },
+      { label: "High Risk", min: 8, max: 12, color: "#dc2626", bg: "#fef2f2" },
+    ],
+    specialties: ["Psychiatry", "Addiction Medicine"],
+    active: true,
+    questions: [
+      "How often do you have a drink containing alcohol?",
+      "How many drinks containing alcohol do you have on a typical day when you are drinking?",
+      "How often do you have 6 or more drinks on one occasion?",
+    ],
+    answerOptions: ["Never (0)", "Monthly or less (1)", "2-4 times a month (2)", "2-3 times a week (3)", "4+ times a week (4)"],
+  },
+  {
+    id: "s5",
+    name: "PCL-5",
+    code: "pcl5",
+    fullName: "PTSD Checklist (abbreviated)",
+    category: "PTSD / Trauma",
+    questionCount: 5,
+    scoreMin: 0,
+    scoreMax: 20,
+    severities: [
+      { label: "Minimal", min: 0, max: 5, color: "#2f8132", bg: "#ecf9ec" },
+      { label: "Mild", min: 6, max: 10, color: "#d97706", bg: "#fffbeb" },
+      { label: "Moderate", min: 11, max: 15, color: "#ea580c", bg: "#fff7ed" },
+      { label: "Severe", min: 16, max: 20, color: "#dc2626", bg: "#fef2f2" },
+    ],
+    specialties: ["Psychiatry"],
+    active: true,
+    questions: [
+      "Repeated, disturbing, and unwanted memories of the stressful experience?",
+      "Feeling very upset when something reminded you of the stressful experience?",
+      "Avoiding memories, thoughts, or feelings related to the stressful experience?",
+      "Having strong negative feelings such as fear, horror, anger, guilt, or shame?",
+      "Being super alert or watchful or on guard?",
+    ],
+    answerOptions: ["Not at all (0)", "A little bit (1)", "Moderately (2)", "Quite a bit (3)", "Extremely (4)"],
+  },
+  {
+    id: "s6",
+    name: "MDQ",
+    code: "mdq",
+    fullName: "Mood Disorder Questionnaire",
+    category: "Bipolar",
+    questionCount: 13,
+    scoreMin: 0,
+    scoreMax: 13,
+    severities: [
+      { label: "Negative Screen", min: 0, max: 6, color: "#2f8132", bg: "#ecf9ec" },
+      { label: "Positive Screen", min: 7, max: 13, color: "#dc2626", bg: "#fef2f2" },
+    ],
+    specialties: ["Psychiatry"],
+    active: true,
+    questions: [
+      "You felt so good or hyper that other people thought you were not your normal self?",
+      "You were so irritable that you shouted at people or started fights or arguments?",
+      "You felt much more self-confident than usual?",
+      "You got much less sleep than usual and found you didn't really miss it?",
+      "You were much more talkative or spoke faster than usual?",
+      "Thoughts raced through your head or you couldn't slow your mind down?",
+      "You were so easily distracted by things around you that you had trouble concentrating?",
+      "You had much more energy than usual?",
+      "You were much more active or did many more things than usual?",
+      "You were much more social or outgoing than usual?",
+      "You were much more interested in sex than usual?",
+      "You did things that were unusual for you or that other people might have thought were excessive?",
+      "Spending money got you or your family into trouble?",
+    ],
+    answerOptions: ["No (0)", "Yes (1)"],
+  },
+  {
+    id: "s7",
+    name: "C-SSRS",
+    code: "cssrs",
+    fullName: "Columbia Suicide Severity Rating Scale",
+    category: "Suicide Risk",
+    questionCount: 6,
+    scoreMin: 0,
+    scoreMax: 6,
+    severities: [
+      { label: "None", min: 0, max: 0, color: "#2f8132", bg: "#ecf9ec" },
+      { label: "Low", min: 1, max: 2, color: "#d97706", bg: "#fffbeb" },
+      { label: "Moderate", min: 3, max: 4, color: "#ea580c", bg: "#fff7ed" },
+      { label: "High", min: 5, max: 6, color: "#dc2626", bg: "#fef2f2" },
+    ],
+    specialties: ["Psychiatry"],
+    active: true,
+    questions: [
+      "Have you wished you were dead or wished you could go to sleep and not wake up?",
+      "Have you actually had any thoughts of killing yourself?",
+      "Have you been thinking about how you might do this?",
+      "Have you had these thoughts and had some intention of acting on them?",
+      "Have you started to work out or worked out the details of how to kill yourself?",
+      "Have you ever done anything, started to do anything, or prepared to do anything to end your life?",
+    ],
+    answerOptions: ["No (0)", "Yes (1)"],
+  },
+];
+
+// ─── Consent Templates Mock Data ────────────────────────────────────────────
+
+const MOCK_CONSENTS: MockConsentTemplate[] = [
+  {
+    id: "c1",
+    name: "HIPAA Notice of Privacy Practices",
+    type: "hipaa",
+    required: true,
+    specialty: "All",
+    version: "2.1",
+    active: true,
+    practiceCount: 42,
+    previewText: "THIS NOTICE DESCRIBES HOW MEDICAL INFORMATION ABOUT YOU MAY BE USED AND DISCLOSED AND HOW YOU CAN GET ACCESS TO THIS INFORMATION. PLEASE REVIEW IT CAREFULLY.\n\nWe are required by law to maintain the privacy of your protected health information (PHI), to notify you of our legal duties and privacy practices with respect to your PHI, and to notify affected individuals following a breach of unsecured PHI. This Notice of Privacy Practices describes how we may use and disclose your PHI in accordance with all applicable law. It also describes your rights regarding how you may gain access to and control your PHI.\n\nWe reserve the right to change the terms of this Notice at any time, and to make the new Notice provisions effective for all PHI that we maintain. We will post a copy of the current Notice in our office in a visible location at all times.",
+  },
+  {
+    id: "c2",
+    name: "Consent to Treatment",
+    type: "treatment",
+    required: true,
+    specialty: "All",
+    version: "1.3",
+    active: true,
+    practiceCount: 42,
+    previewText: "I consent to receive evaluation and treatment from the provider and authorized staff at this practice. I understand that the practice of medicine is not an exact science and I acknowledge that no guarantees have been made to me as to the results of any treatment or examination.\n\nI understand that I have the right to be informed of my diagnosis, proposed treatment plan, alternative treatments, and the risks and benefits associated with each option. I also understand I have the right to refuse treatment at any time.\n\nI voluntarily consent to treatment and authorize the provider to perform assessments, diagnostic tests, and therapeutic interventions deemed necessary in the clinical judgment of the treating provider.",
+  },
+  {
+    id: "c3",
+    name: "Telehealth Informed Consent",
+    type: "telehealth",
+    required: true,
+    specialty: "All",
+    version: "1.5",
+    active: true,
+    practiceCount: 42,
+    previewText: "Telehealth involves the use of electronic communications to enable providers to deliver healthcare services at a distance. This includes interactive audio, video, and data communications.\n\nI understand that telehealth-based services and care may not be as complete as face-to-face services. I understand there are potential risks to this technology, including interruptions, unauthorized access, and technical difficulties. I understand that I or my provider can discontinue the telehealth visit if it is felt that the service is not adequate.\n\nI understand that my healthcare information may be shared with other individuals for scheduling and billing purposes. I have the right to withhold or withdraw my consent at any time without affecting my right to future care or treatment.",
+  },
+  {
+    id: "c4",
+    name: "Controlled Substance Agreement",
+    type: "controlled_substance",
+    required: false,
+    specialty: "Psychiatry",
+    version: "1.2",
+    active: true,
+    practiceCount: 11,
+    previewText: "I agree to the following conditions for receiving controlled substance prescriptions from my provider:\n\n1. I will use the medication only as prescribed and will not change the dose without consulting my provider.\n2. I will not obtain controlled substances from any other provider without informing this practice.\n3. I understand that refills will require regular follow-up appointments.\n4. I agree to random drug screening if requested.\n5. I will store my medications in a secure location and will not share them with others.\n6. I understand that lost or stolen medications will not be replaced.\n7. I understand that violation of this agreement may result in tapering and discontinuation of controlled substance prescriptions.",
+  },
+  {
+    id: "c5",
+    name: "Financial Agreement",
+    type: "financial",
+    required: true,
+    specialty: "All",
+    version: "1.4",
+    active: true,
+    practiceCount: 42,
+    previewText: "I understand that membership fees are billed on a recurring basis according to my selected plan. I authorize the practice to charge my designated payment method for all applicable fees.\n\nI understand that membership fees cover the services described in my membership plan and that additional services not included in my plan may incur separate charges. I agree to pay any outstanding balances within 30 days of billing.\n\nI understand that I may cancel my membership at any time with 30 days written notice. Refunds will be issued on a prorated basis for any prepaid, unused membership period.",
+  },
+  {
+    id: "c6",
+    name: "Communications Consent",
+    type: "communications",
+    required: true,
+    specialty: "All",
+    version: "1.1",
+    active: true,
+    practiceCount: 42,
+    previewText: "I consent to receive communications via email, text message, and phone from this practice regarding my healthcare, appointments, test results, and general health information.\n\nI understand that email and text communications may not be encrypted and there is a risk that information could be intercepted. I accept this risk and agree to receive communications through these channels.\n\nI understand I can opt out of non-essential communications at any time by contacting the practice. I understand that essential communications regarding my care, appointments, and billing may still be sent regardless of my preferences.",
+  },
+];
+
+// ─── Note Templates Mock Data ───────────────────────────────────────────────
+
+const MOCK_NOTE_TEMPLATES: MockNoteTemplate[] = [
+  {
+    id: "n1",
+    name: "Psychiatric Evaluation",
+    specialty: "Psychiatry",
+    noteType: "Initial Eval",
+    status: "active",
+    sections: [
+      { key: "S", label: "Subjective", fields: ["Chief complaint", "History of present illness", "Past psychiatric history", "Substance use", "Social history", "Family psychiatric history"] },
+      { key: "O", label: "Objective", fields: ["Mental status exam", "Appearance", "Behavior", "Speech", "Mood", "Affect", "Thought process", "Thought content", "Cognition", "Insight", "Judgment"] },
+      { key: "A", label: "Assessment", fields: ["DSM-5 diagnoses", "Risk assessment", "Functional assessment"] },
+      { key: "P", label: "Plan", fields: ["Medications", "Therapy recommendations", "Labs", "Follow-up", "Safety plan"] },
+    ],
+  },
+  {
+    id: "n2",
+    name: "Medication Management",
+    specialty: "Psychiatry",
+    noteType: "Follow-Up",
+    status: "active",
+    sections: [
+      { key: "S", label: "Subjective", fields: ["Interval history", "Medication response", "Side effects", "Adherence", "Sleep", "Appetite"] },
+      { key: "O", label: "Objective", fields: ["MSE (abbreviated)", "Vital signs"] },
+      { key: "A", label: "Assessment", fields: ["Treatment response", "Medication adjustments needed"] },
+      { key: "P", label: "Plan", fields: ["Medication changes", "Refills", "Labs", "Next follow-up"] },
+    ],
+  },
+  {
+    id: "n3",
+    name: "Therapy Progress Note",
+    specialty: "Psychiatry",
+    noteType: "Therapy",
+    status: "active",
+    sections: [
+      { key: "S", label: "Subjective", fields: ["Session focus", "Patient report", "Mood/affect"] },
+      { key: "O", label: "Objective", fields: ["Behavioral observations", "Therapeutic interventions used (CBT, DBT, etc.)"] },
+      { key: "A", label: "Assessment", fields: ["Progress toward goals", "Treatment response"] },
+      { key: "P", label: "Plan", fields: ["Homework", "Next session focus", "Referrals"] },
+    ],
+  },
+  {
+    id: "n4",
+    name: "Primary Care Visit",
+    specialty: "Primary Care",
+    noteType: "Follow-Up",
+    status: "active",
+    sections: [
+      { key: "S", label: "Subjective", fields: ["Chief complaint", "HPI", "ROS"] },
+      { key: "O", label: "Objective", fields: ["Vitals", "Physical exam", "Labs reviewed"] },
+      { key: "A", label: "Assessment", fields: ["Diagnoses", "Clinical impression"] },
+      { key: "P", label: "Plan", fields: ["Medications", "Referrals", "Labs ordered", "Follow-up", "Patient education"] },
+    ],
+  },
+  {
+    id: "n5",
+    name: "Wellness Exam",
+    specialty: "Primary Care",
+    noteType: "Initial Eval",
+    status: "active",
+    sections: [
+      { key: "S", label: "Subjective", fields: ["Health history update", "Preventive care review", "Social determinants"] },
+      { key: "O", label: "Objective", fields: ["Comprehensive physical", "Vitals", "BMI", "Screening results"] },
+      { key: "A", label: "Assessment", fields: ["Risk factors", "Preventive care gaps"] },
+      { key: "P", label: "Plan", fields: ["Immunizations due", "Screenings ordered", "Lifestyle counseling", "Follow-up"] },
+    ],
+  },
+  {
+    id: "n6",
+    name: "Pediatric Well-Child",
+    specialty: "Pediatrics",
+    noteType: "Initial Eval",
+    status: "active",
+    sections: [
+      { key: "S", label: "Subjective", fields: ["Developmental milestones", "Parental concerns", "Feeding/sleep", "School performance"] },
+      { key: "O", label: "Objective", fields: ["Growth chart (height, weight, head circumference)", "Physical exam", "Developmental screening"] },
+      { key: "A", label: "Assessment", fields: ["Growth assessment", "Developmental stage", "Immunization status"] },
+      { key: "P", label: "Plan", fields: ["Immunizations given", "Anticipatory guidance", "Next well-child visit"] },
+    ],
+  },
+];
+
+// ─── Specialty Detail Mock Data ─────────────────────────────────────────────
+
+interface SpecialtyDetail {
+  practices: string[];
+  screeningTools: string[];
+  planTemplates: { name: string; price: number }[];
+  appointmentTypes: string[];
+  consentTemplates: string[];
+  diagnosisFavorites: { code: string; description: string }[];
+  medicationCategories: string[];
+  labPanels: string[];
+}
+
+const SPECIALTY_DETAILS: Record<string, SpecialtyDetail> = {
+  Psychiatry: {
+    practices: ["Tranquil Mind Psychiatry", "ClearMind Behavioral Health", "Serenity Psychiatric Group", "BrightPath Mental Health", "Resilience Psychiatry", "Mindful Care Associates", "Harmony Behavioral", "Pacific Psych Group", "Summit Behavioral Health", "Lakeview Mental Health", "Eastside Psychiatry"],
+    screeningTools: ["PHQ-9", "GAD-7", "ASRS v1.1", "AUDIT-C", "PCL-5", "MDQ", "C-SSRS", "CAGE-AID", "DAST-10"],
+    planTemplates: [{ name: "Mental Wellness", price: 179 }, { name: "Psychiatric Complete", price: 249 }, { name: "Intensive Care", price: 349 }],
+    appointmentTypes: ["Psychiatric Evaluation (60 min)", "Medication Management (30 min)", "Therapy Session (50 min)", "Crisis Intervention", "Telehealth Follow-Up (25 min)", "Group Therapy (90 min)"],
+    consentTemplates: ["HIPAA Notice", "Consent to Treatment", "Telehealth Consent", "Controlled Substance Agreement", "Financial Agreement", "Communications Consent"],
+    diagnosisFavorites: [
+      { code: "F32.1", description: "Major depressive disorder, single episode, moderate" },
+      { code: "F33.1", description: "Major depressive disorder, recurrent, moderate" },
+      { code: "F41.1", description: "Generalized anxiety disorder" },
+      { code: "F43.10", description: "Post-traumatic stress disorder, unspecified" },
+      { code: "F31.9", description: "Bipolar disorder, unspecified" },
+      { code: "F90.0", description: "ADHD, predominantly inattentive type" },
+      { code: "F10.20", description: "Alcohol dependence, uncomplicated" },
+      { code: "F42.2", description: "Mixed obsessional thoughts and acts" },
+    ],
+    medicationCategories: ["SSRIs", "SNRIs", "Atypical Antidepressants", "Benzodiazepines", "Mood Stabilizers", "Antipsychotics", "Stimulants", "Non-Stimulant ADHD", "Sleep Aids"],
+    labPanels: ["CBC", "CMP", "Thyroid Panel (TSH, Free T4)", "Lithium Level", "Valproic Acid Level", "Lipid Panel", "HbA1c", "UDS (Urine Drug Screen)"],
+  },
+  "Primary Care": {
+    practices: ["Evergreen Family Health", "Pinnacle Internal Medicine", "Coastal Primary Care", "Summit Medical Group", "Valley Health Partners"],
+    screeningTools: ["PHQ-9", "GAD-7", "AUDIT-C"],
+    planTemplates: [{ name: "Basic", price: 79 }, { name: "Standard", price: 149 }, { name: "Premium", price: 249 }],
+    appointmentTypes: ["Annual Physical (45 min)", "Follow-Up Visit (20 min)", "Sick Visit (20 min)", "Telehealth Visit (15 min)", "Procedure Visit (30 min)", "Pre-Op Clearance (30 min)"],
+    consentTemplates: ["HIPAA Notice", "Consent to Treatment", "Telehealth Consent", "Financial Agreement", "Communications Consent"],
+    diagnosisFavorites: [
+      { code: "I10", description: "Essential (primary) hypertension" },
+      { code: "E11.9", description: "Type 2 diabetes mellitus without complications" },
+      { code: "E78.5", description: "Hyperlipidemia, unspecified" },
+      { code: "J06.9", description: "Acute upper respiratory infection, unspecified" },
+      { code: "M54.5", description: "Low back pain" },
+      { code: "J20.9", description: "Acute bronchitis, unspecified" },
+      { code: "E03.9", description: "Hypothyroidism, unspecified" },
+    ],
+    medicationCategories: ["Antihypertensives", "Statins", "Metformin", "PPIs", "Antibiotics", "NSAIDs", "Thyroid Hormones", "ACE Inhibitors"],
+    labPanels: ["CBC", "CMP", "Lipid Panel", "HbA1c", "Thyroid Panel", "Urinalysis", "Vitamin D", "Iron Studies"],
+  },
+  "Family Medicine": {
+    practices: ["Evergreen Family Health", "Bright Horizons Family Practice", "Community Family Care"],
+    screeningTools: ["PHQ-9", "GAD-7"],
+    planTemplates: [{ name: "Family Essentials", price: 89 }, { name: "Family Premium", price: 149 }],
+    appointmentTypes: ["Well Visit (30 min)", "Sick Visit (20 min)", "Follow-Up (15 min)", "Telehealth (15 min)"],
+    consentTemplates: ["HIPAA Notice", "Consent to Treatment", "Telehealth Consent", "Financial Agreement", "Communications Consent"],
+    diagnosisFavorites: [
+      { code: "I10", description: "Essential hypertension" },
+      { code: "J06.9", description: "Acute upper respiratory infection" },
+      { code: "E11.9", description: "Type 2 diabetes" },
+    ],
+    medicationCategories: ["Antihypertensives", "Antibiotics", "NSAIDs", "Statins"],
+    labPanels: ["CBC", "CMP", "Lipid Panel", "HbA1c"],
+  },
+};
 
 // Mock plan data by specialty
 function getMockPlans(specialty: string) {
@@ -495,6 +956,12 @@ export function SuperAdminPortal() {
   const [selectedPractice, setSelectedPractice] = useState<MockPractice | null>(null);
   const [pendingPractices, setPendingPractices] = useState<MockPendingPractice[]>(MOCK_PENDING_PRACTICES);
   const [approvalMessage, setApprovalMessage] = useState<string | null>(null);
+  const [expandedScreening, setExpandedScreening] = useState<string | null>(null);
+  const [expandedConsent, setExpandedConsent] = useState<string | null>(null);
+  const [screeningCategoryFilter, setScreeningCategoryFilter] = useState<string>("All");
+  const [consentFilter, setConsentFilter] = useState<string>("All");
+  const [noteSpecialtyFilter, setNoteSpecialtyFilter] = useState<string>("All");
+  const [selectedSpecialtyDetail, setSelectedSpecialtyDetail] = useState<MockSpecialty | null>(null);
 
   const userName = auth.user
     ? `${auth.user.firstName} ${auth.user.lastName}`
@@ -603,6 +1070,7 @@ export function SuperAdminPortal() {
                         setActiveTab(item.id);
                         setSidebarOpen(false);
                         setSelectedPractice(null);
+                        setSelectedSpecialtyDetail(null);
                       }}
                       className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 ${
                         isActive
@@ -1179,9 +1647,10 @@ export function SuperAdminPortal() {
                 (spec) => {
                   const Icon = spec.icon;
                   return (
-                    <div
+                    <button
                       key={spec.id}
-                      className="glass hover-lift rounded-xl p-5 transition-all group"
+                      onClick={() => setSelectedSpecialtyDetail(spec)}
+                      className="glass hover-lift rounded-xl p-5 transition-all group text-left w-full cursor-pointer"
                     >
                       <div className="flex items-start justify-between mb-3">
                         <div
@@ -1227,16 +1696,17 @@ export function SuperAdminPortal() {
                           <span>{spec.screeningTools} tools</span>
                         </div>
                       </div>
-                      <button
-                        className="mt-3 w-full py-1.5 rounded-lg text-xs font-medium opacity-0 group-hover:opacity-100 transition-opacity"
+                      <div
+                        className="mt-3 w-full py-1.5 rounded-lg text-xs font-medium text-center opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1.5"
                         style={{
                           backgroundColor: "#e6f7f2",
                           color: "#147d64",
                         }}
                       >
-                        Edit Specialty
-                      </button>
-                    </div>
+                        View Bootstrap Pack
+                        <ChevronRight className="w-3.5 h-3.5" />
+                      </div>
+                    </button>
                   );
                 }
               )}
@@ -1945,12 +2415,660 @@ export function SuperAdminPortal() {
     );
   }
 
+  // ─── Screening Library Tab ────────────────────────────────────────────────
+
+  function renderScreeningLibrary() {
+    const categories = ["All", "Depression", "Anxiety", "ADHD", "Alcohol Use", "PTSD / Trauma", "Bipolar", "Suicide Risk"];
+    const filtered = screeningCategoryFilter === "All"
+      ? MOCK_SCREENINGS
+      : MOCK_SCREENINGS.filter((s) => s.category === screeningCategoryFilter);
+
+    return (
+      <div className="animate-page-in space-y-6">
+        {/* Header */}
+        <div>
+          <div className="flex items-center gap-3 mb-1">
+            <ClipboardCheck className="w-6 h-6" style={{ color: "#147d64" }} />
+            <h2 className="text-xl font-bold" style={{ color: "#102a43" }}>Screening Library</h2>
+          </div>
+          <p className="text-sm text-slate-500">Validated clinical instruments auto-provisioned to practices by specialty</p>
+        </div>
+
+        {/* Filters */}
+        <div className="flex flex-wrap items-center gap-2">
+          {categories.map((cat) => (
+            <button
+              key={cat}
+              onClick={() => setScreeningCategoryFilter(cat)}
+              className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
+              style={
+                screeningCategoryFilter === cat
+                  ? { backgroundColor: "#147d64", color: "#fff" }
+                  : { backgroundColor: "#f1f5f9", color: "#475569" }
+              }
+            >
+              {cat}
+            </button>
+          ))}
+          <span className="ml-auto text-sm text-slate-500">{filtered.length} instrument{filtered.length !== 1 ? "s" : ""}</span>
+        </div>
+
+        {/* Grid */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {filtered.map((instrument) => {
+            const isExpanded = expandedScreening === instrument.id;
+            return (
+              <div key={instrument.id} className="glass rounded-xl overflow-hidden transition-all">
+                {/* Card Header */}
+                <div className="p-5">
+                  <div className="flex items-start justify-between mb-3">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h3 className="text-base font-bold" style={{ color: "#102a43" }}>{instrument.name}</h3>
+                        <span
+                          className="text-xs font-mono font-medium px-2 py-0.5 rounded"
+                          style={{ backgroundColor: "#e0f2fe", color: "#0369a1" }}
+                        >
+                          {instrument.code}
+                        </span>
+                      </div>
+                      <p className="text-sm text-slate-500 mt-0.5">{instrument.fullName}</p>
+                    </div>
+                    <button
+                      onClick={() => {/* toggle active - placeholder */}}
+                      className="px-2.5 py-1 rounded-full text-xs font-semibold shrink-0 ml-2"
+                      style={
+                        instrument.active
+                          ? { backgroundColor: "#ecf9ec", color: "#2f8132" }
+                          : { backgroundColor: "#f1f5f9", color: "#94a3b8" }
+                      }
+                    >
+                      {instrument.active ? "Active" : "Inactive"}
+                    </button>
+                  </div>
+
+                  {/* Category + Stats */}
+                  <div className="flex items-center gap-4 mb-3 text-xs text-slate-500">
+                    <span className="inline-flex items-center gap-1.5">
+                      <ClipboardList className="w-3.5 h-3.5" />
+                      {instrument.category}
+                    </span>
+                    <span>{instrument.questionCount} questions</span>
+                    <span>Score: {instrument.scoreMin}-{instrument.scoreMax}</span>
+                  </div>
+
+                  {/* Severity Badges */}
+                  <div className="flex flex-wrap gap-1.5 mb-3">
+                    {instrument.severities.map((sev) => (
+                      <span
+                        key={sev.label}
+                        className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium"
+                        style={{ backgroundColor: sev.bg, color: sev.color }}
+                      >
+                        {sev.label} ({sev.min}-{sev.max})
+                      </span>
+                    ))}
+                  </div>
+
+                  {/* Specialty badges */}
+                  <div className="flex flex-wrap gap-1.5 mb-3">
+                    {instrument.specialties.map((spec) => (
+                      <span
+                        key={spec}
+                        className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium"
+                        style={{ backgroundColor: "#f1f5f9", color: "#334e68" }}
+                      >
+                        {spec}
+                      </span>
+                    ))}
+                  </div>
+
+                  {/* Expand toggle */}
+                  <button
+                    onClick={() => setExpandedScreening(isExpanded ? null : instrument.id)}
+                    className="flex items-center gap-1.5 text-xs font-semibold transition-colors"
+                    style={{ color: "#147d64" }}
+                  >
+                    {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                    {isExpanded ? "Hide Questions" : "Show Questions"}
+                  </button>
+                </div>
+
+                {/* Expanded questions */}
+                {isExpanded && (
+                  <div className="px-5 pb-5 pt-0">
+                    <div className="rounded-lg p-4" style={{ backgroundColor: "#f8fafc", border: "1px solid #e2e8f0" }}>
+                      <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-3">
+                        Questions ({instrument.questionCount})
+                      </p>
+                      <ol className="space-y-2">
+                        {instrument.questions.map((q, idx) => (
+                          <li key={idx} className="flex gap-3 text-sm">
+                            <span className="font-mono font-bold shrink-0" style={{ color: "#334e68", minWidth: "1.5rem" }}>{idx + 1}.</span>
+                            <span style={{ color: "#102a43" }}>{q}</span>
+                          </li>
+                        ))}
+                      </ol>
+                      <div className="mt-4 pt-3 border-t border-slate-200">
+                        <p className="text-xs font-semibold text-slate-500 mb-1.5">Answer Options:</p>
+                        <div className="flex flex-wrap gap-2">
+                          {instrument.answerOptions.map((opt) => (
+                            <span
+                              key={opt}
+                              className="px-2 py-0.5 rounded text-xs font-medium"
+                              style={{ backgroundColor: "#e6f7f2", color: "#147d64" }}
+                            >
+                              {opt}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
+  // ─── Consent Templates Tab ──────────────────────────────────────────────────
+
+  function renderConsentTemplates() {
+    const filtered = consentFilter === "All"
+      ? MOCK_CONSENTS
+      : consentFilter === "Required"
+        ? MOCK_CONSENTS.filter((c) => c.required)
+        : MOCK_CONSENTS.filter((c) => !c.required);
+
+    const typeColors: Record<string, { bg: string; color: string }> = {
+      hipaa: { bg: "#fef2f2", color: "#dc2626" },
+      treatment: { bg: "#e0f2fe", color: "#0369a1" },
+      telehealth: { bg: "#e6f7f2", color: "#147d64" },
+      controlled_substance: { bg: "#f3e8ff", color: "#7c3aed" },
+      financial: { bg: "#fffbeb", color: "#d97706" },
+      communications: { bg: "#f1f5f9", color: "#475569" },
+    };
+
+    return (
+      <div className="animate-page-in space-y-6">
+        {/* Header */}
+        <div>
+          <div className="flex items-center gap-3 mb-1">
+            <FileCheck className="w-6 h-6" style={{ color: "#147d64" }} />
+            <h2 className="text-xl font-bold" style={{ color: "#102a43" }}>Consent Templates</h2>
+          </div>
+          <p className="text-sm text-slate-500">Legal consent forms auto-assigned to practices during registration</p>
+        </div>
+
+        {/* Filters */}
+        <div className="flex items-center gap-2">
+          {["All", "Required", "Optional"].map((f) => (
+            <button
+              key={f}
+              onClick={() => setConsentFilter(f)}
+              className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
+              style={
+                consentFilter === f
+                  ? { backgroundColor: "#147d64", color: "#fff" }
+                  : { backgroundColor: "#f1f5f9", color: "#475569" }
+              }
+            >
+              {f}
+            </button>
+          ))}
+          <span className="ml-auto text-sm text-slate-500">{filtered.length} template{filtered.length !== 1 ? "s" : ""}</span>
+        </div>
+
+        {/* Table */}
+        <div className="glass rounded-xl overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr style={{ backgroundColor: "#f8fafc" }}>
+                  <th className="text-left px-6 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Name</th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Type</th>
+                  <th className="text-center px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Required</th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Specialty</th>
+                  <th className="text-center px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Version</th>
+                  <th className="text-center px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Status</th>
+                  <th className="text-right px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Provisioned</th>
+                  <th className="text-center px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Preview</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {filtered.map((consent) => {
+                  const isExpanded = expandedConsent === consent.id;
+                  const tc = typeColors[consent.type] || { bg: "#f1f5f9", color: "#475569" };
+                  return (
+                    <tr key={consent.id} className="group">
+                      <td className="px-6 py-3.5">
+                        <p className="text-sm font-medium" style={{ color: "#102a43" }}>{consent.name}</p>
+                      </td>
+                      <td className="px-4 py-3.5">
+                        <span
+                          className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold"
+                          style={{ backgroundColor: tc.bg, color: tc.color }}
+                        >
+                          {consent.type.replace(/_/g, " ")}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3.5 text-center">
+                        {consent.required ? (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold" style={{ backgroundColor: "#ecf9ec", color: "#2f8132" }}>Yes</span>
+                        ) : (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold" style={{ backgroundColor: "#f1f5f9", color: "#94a3b8" }}>No</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3.5">
+                        <span
+                          className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium"
+                          style={
+                            consent.specialty === "All"
+                              ? { backgroundColor: "#e6f7f2", color: "#147d64" }
+                              : { backgroundColor: "#f3e8ff", color: "#7c3aed" }
+                          }
+                        >
+                          {consent.specialty}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3.5 text-center">
+                        <span className="text-sm font-mono text-slate-500">v{consent.version}</span>
+                      </td>
+                      <td className="px-4 py-3.5 text-center">
+                        <span
+                          className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold"
+                          style={
+                            consent.active
+                              ? { backgroundColor: "#ecf9ec", color: "#2f8132" }
+                              : { backgroundColor: "#f1f5f9", color: "#94a3b8" }
+                          }
+                        >
+                          {consent.active ? "Active" : "Inactive"}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3.5 text-right">
+                        <span className="text-sm font-medium" style={{ color: "#334e68" }}>{consent.practiceCount} practices</span>
+                      </td>
+                      <td className="px-4 py-3.5 text-center">
+                        <button
+                          onClick={() => setExpandedConsent(isExpanded ? null : consent.id)}
+                          className="p-1.5 rounded-lg hover:bg-slate-100 transition-colors"
+                          title={isExpanded ? "Collapse" : "Preview"}
+                        >
+                          {isExpanded ? <ChevronUp className="w-4 h-4" style={{ color: "#147d64" }} /> : <Eye className="w-4 h-4 text-slate-500" />}
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Expanded consent preview */}
+          {expandedConsent && (() => {
+            const consent = MOCK_CONSENTS.find((c) => c.id === expandedConsent);
+            if (!consent) return null;
+            return (
+              <div className="px-6 py-4 border-t border-slate-200" style={{ backgroundColor: "#f8fafc" }}>
+                <div className="flex items-center justify-between mb-3">
+                  <h4 className="text-sm font-semibold" style={{ color: "#102a43" }}>Preview: {consent.name}</h4>
+                  <button
+                    onClick={() => setExpandedConsent(null)}
+                    className="p-1 rounded hover:bg-slate-200 transition-colors"
+                  >
+                    <X className="w-4 h-4 text-slate-400" />
+                  </button>
+                </div>
+                <div
+                  className="rounded-lg p-4 text-sm leading-relaxed overflow-y-auto"
+                  style={{ backgroundColor: "#fff", border: "1px solid #e2e8f0", color: "#334e68", maxHeight: "300px", whiteSpace: "pre-line" }}
+                >
+                  {consent.previewText}
+                </div>
+              </div>
+            );
+          })()}
+        </div>
+      </div>
+    );
+  }
+
+  // ─── Note Templates Tab ─────────────────────────────────────────────────────
+
+  function renderNoteTemplates() {
+    const specialties = ["All", ...new Set(MOCK_NOTE_TEMPLATES.map((t) => t.specialty))];
+    const filtered = noteSpecialtyFilter === "All"
+      ? MOCK_NOTE_TEMPLATES
+      : MOCK_NOTE_TEMPLATES.filter((t) => t.specialty === noteSpecialtyFilter);
+
+    const sectionKeyColors: Record<string, { bg: string; color: string; border: string }> = {
+      S: { bg: "#e0f2fe", color: "#0369a1", border: "#38bdf8" },
+      O: { bg: "#e6f7f2", color: "#147d64", border: "#27ab83" },
+      A: { bg: "#fffbeb", color: "#92400e", border: "#d97706" },
+      P: { bg: "#f3e8ff", color: "#7c3aed", border: "#a78bfa" },
+    };
+
+    const noteTypeColors: Record<string, { bg: string; color: string }> = {
+      "Initial Eval": { bg: "#e0f2fe", color: "#0369a1" },
+      "Follow-Up": { bg: "#e6f7f2", color: "#147d64" },
+      "Therapy": { bg: "#f3e8ff", color: "#7c3aed" },
+      "Med Management": { bg: "#fffbeb", color: "#d97706" },
+      "Crisis": { bg: "#fef2f2", color: "#dc2626" },
+    };
+
+    return (
+      <div className="animate-page-in space-y-6">
+        {/* Header */}
+        <div>
+          <div className="flex items-center gap-3 mb-1">
+            <PenLine className="w-6 h-6" style={{ color: "#147d64" }} />
+            <h2 className="text-xl font-bold" style={{ color: "#102a43" }}>Note Templates</h2>
+          </div>
+          <p className="text-sm text-slate-500">SOAP note templates provisioned by specialty</p>
+        </div>
+
+        {/* Filters */}
+        <div className="flex items-center gap-2">
+          {specialties.map((spec) => (
+            <button
+              key={spec}
+              onClick={() => setNoteSpecialtyFilter(spec)}
+              className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
+              style={
+                noteSpecialtyFilter === spec
+                  ? { backgroundColor: "#147d64", color: "#fff" }
+                  : { backgroundColor: "#f1f5f9", color: "#475569" }
+              }
+            >
+              {spec}
+            </button>
+          ))}
+          <span className="ml-auto text-sm text-slate-500">{filtered.length} template{filtered.length !== 1 ? "s" : ""}</span>
+        </div>
+
+        {/* Grid */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {filtered.map((template) => {
+            const ntc = noteTypeColors[template.noteType] || { bg: "#f1f5f9", color: "#475569" };
+            return (
+              <div key={template.id} className="glass rounded-xl p-5 transition-all">
+                {/* Header */}
+                <div className="flex items-start justify-between mb-4">
+                  <div>
+                    <h3 className="text-base font-bold" style={{ color: "#102a43" }}>{template.name}</h3>
+                    <div className="flex items-center gap-2 mt-1.5">
+                      <span
+                        className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold"
+                        style={{ backgroundColor: "#f1f5f9", color: "#334e68" }}
+                      >
+                        {template.specialty}
+                      </span>
+                      <span
+                        className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold"
+                        style={{ backgroundColor: ntc.bg, color: ntc.color }}
+                      >
+                        {template.noteType}
+                      </span>
+                    </div>
+                  </div>
+                  <span
+                    className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold"
+                    style={
+                      template.status === "active"
+                        ? { backgroundColor: "#ecf9ec", color: "#2f8132" }
+                        : { backgroundColor: "#fffbeb", color: "#d97706" }
+                    }
+                  >
+                    {template.status === "active" ? "Active" : "Draft"}
+                  </span>
+                </div>
+
+                {/* SOAP Sections */}
+                <div className="space-y-3">
+                  {template.sections.map((section) => {
+                    const sc = sectionKeyColors[section.key] || { bg: "#f1f5f9", color: "#475569", border: "#e2e8f0" };
+                    return (
+                      <div
+                        key={section.key}
+                        className="rounded-lg p-3"
+                        style={{ backgroundColor: sc.bg, borderLeft: `3px solid ${sc.border}` }}
+                      >
+                        <div className="flex items-center gap-2 mb-1.5">
+                          <span className="text-xs font-bold" style={{ color: sc.color }}>
+                            {section.key}
+                          </span>
+                          <span className="text-xs font-semibold" style={{ color: sc.color }}>
+                            {section.label}
+                          </span>
+                        </div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {section.fields.map((field) => (
+                            <span
+                              key={field}
+                              className="inline-flex items-center px-2 py-0.5 rounded text-xs"
+                              style={{ backgroundColor: "rgba(255,255,255,0.7)", color: "#475569" }}
+                            >
+                              {field}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
+  // ─── Specialty Detail Panel ─────────────────────────────────────────────────
+
+  function renderSpecialtyDetail() {
+    if (!selectedSpecialtyDetail) return null;
+    const spec = selectedSpecialtyDetail;
+    const Icon = spec.icon;
+    const detail = SPECIALTY_DETAILS[spec.name] || SPECIALTY_DETAILS["Primary Care"];
+
+    if (!detail) {
+      return (
+        <div className="animate-page-in space-y-6">
+          <div className="flex items-center gap-3 mb-4">
+            <button
+              onClick={() => setSelectedSpecialtyDetail(null)}
+              className="p-2 rounded-lg hover:bg-slate-100 transition-colors"
+            >
+              <ArrowLeft className="w-5 h-5" style={{ color: "#334e68" }} />
+            </button>
+            <h2 className="text-xl font-bold" style={{ color: "#102a43" }}>{spec.name}</h2>
+          </div>
+          <div className="glass rounded-xl p-12 text-center">
+            <p className="text-sm text-slate-500">Detail data for this specialty is not yet available.</p>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div className="animate-page-in space-y-6">
+        {/* Header */}
+        <div className="glass rounded-xl p-5">
+          <div className="flex items-center gap-4">
+            <button
+              onClick={() => setSelectedSpecialtyDetail(null)}
+              className="p-2 rounded-lg hover:bg-slate-100 transition-colors shrink-0"
+            >
+              <ArrowLeft className="w-5 h-5" style={{ color: "#334e68" }} />
+            </button>
+            <div
+              className="w-12 h-12 rounded-xl flex items-center justify-center shrink-0"
+              style={{ background: "linear-gradient(135deg, rgba(39,171,131,0.15), rgba(20,125,100,0.1))" }}
+            >
+              <Icon className="w-6 h-6" style={{ color: "#147d64" }} />
+            </div>
+            <div>
+              <div className="flex items-center gap-3">
+                <h2 className="text-xl font-bold" style={{ color: "#102a43" }}>{spec.name}</h2>
+                <span className="text-xs font-mono font-medium px-2 py-0.5 rounded" style={{ backgroundColor: "#f1f5f9", color: "#475569" }}>
+                  {spec.code}
+                </span>
+              </div>
+              <p className="text-sm text-slate-500 mt-0.5">
+                {spec.category} &middot; {spec.practiceCount} practices &middot; {spec.screeningTools} screening tools
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Bootstrap Pack Grid */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {/* Practices */}
+          <div className="glass rounded-xl p-5">
+            <div className="flex items-center gap-2 mb-3">
+              <Building2 className="w-4 h-4" style={{ color: "#334e68" }} />
+              <h3 className="text-sm font-semibold" style={{ color: "#102a43" }}>Practices ({detail.practices.length})</h3>
+            </div>
+            <div className="space-y-1.5">
+              {detail.practices.map((name) => (
+                <div key={name} className="flex items-center gap-2 py-1.5 px-3 rounded-lg" style={{ backgroundColor: "#f8fafc" }}>
+                  <div className="w-6 h-6 rounded flex items-center justify-center text-xs font-bold text-white shrink-0" style={{ background: "linear-gradient(135deg, #334e68, #243b53)" }}>
+                    {name.charAt(0)}
+                  </div>
+                  <span className="text-sm" style={{ color: "#102a43" }}>{name}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Screening Tools */}
+          <div className="glass rounded-xl p-5">
+            <div className="flex items-center gap-2 mb-3">
+              <ClipboardCheck className="w-4 h-4" style={{ color: "#147d64" }} />
+              <h3 className="text-sm font-semibold" style={{ color: "#102a43" }}>Default Screening Tools ({detail.screeningTools.length})</h3>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {detail.screeningTools.map((tool) => (
+                <span key={tool} className="inline-flex items-center px-3 py-1.5 rounded-lg text-xs font-semibold" style={{ backgroundColor: "#e6f7f2", color: "#147d64" }}>
+                  {tool}
+                </span>
+              ))}
+            </div>
+          </div>
+
+          {/* Plan Templates */}
+          <div className="glass rounded-xl p-5">
+            <div className="flex items-center gap-2 mb-3">
+              <CreditCard className="w-4 h-4" style={{ color: "#0369a1" }} />
+              <h3 className="text-sm font-semibold" style={{ color: "#102a43" }}>Default Plan Templates ({detail.planTemplates.length})</h3>
+            </div>
+            <div className="space-y-2">
+              {detail.planTemplates.map((plan) => (
+                <div key={plan.name} className="flex items-center justify-between py-2 px-3 rounded-lg" style={{ backgroundColor: "#f8fafc" }}>
+                  <span className="text-sm font-medium" style={{ color: "#102a43" }}>{plan.name}</span>
+                  <span className="text-sm font-bold" style={{ color: "#147d64" }}>${plan.price}/mo</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Appointment Types */}
+          <div className="glass rounded-xl p-5">
+            <div className="flex items-center gap-2 mb-3">
+              <Calendar className="w-4 h-4" style={{ color: "#d97706" }} />
+              <h3 className="text-sm font-semibold" style={{ color: "#102a43" }}>Default Appointment Types ({detail.appointmentTypes.length})</h3>
+            </div>
+            <div className="space-y-1.5">
+              {detail.appointmentTypes.map((apt) => (
+                <div key={apt} className="flex items-center gap-2 py-1.5 px-3 rounded-lg" style={{ backgroundColor: "#f8fafc" }}>
+                  <Clock className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                  <span className="text-sm" style={{ color: "#102a43" }}>{apt}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Consent Templates */}
+          <div className="glass rounded-xl p-5">
+            <div className="flex items-center gap-2 mb-3">
+              <FileCheck className="w-4 h-4" style={{ color: "#dc2626" }} />
+              <h3 className="text-sm font-semibold" style={{ color: "#102a43" }}>Default Consent Templates ({detail.consentTemplates.length})</h3>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {detail.consentTemplates.map((ct) => (
+                <span key={ct} className="inline-flex items-center px-3 py-1.5 rounded-lg text-xs font-semibold" style={{ backgroundColor: "#fef2f2", color: "#dc2626" }}>
+                  {ct}
+                </span>
+              ))}
+            </div>
+          </div>
+
+          {/* Diagnosis Favorites */}
+          <div className="glass rounded-xl p-5">
+            <div className="flex items-center gap-2 mb-3">
+              <AlertTriangle className="w-4 h-4" style={{ color: "#7c3aed" }} />
+              <h3 className="text-sm font-semibold" style={{ color: "#102a43" }}>Diagnosis Favorites (ICD-10)</h3>
+            </div>
+            <div className="space-y-1.5">
+              {detail.diagnosisFavorites.map((dx) => (
+                <div key={dx.code} className="flex items-start gap-2 py-1.5 px-3 rounded-lg" style={{ backgroundColor: "#f8fafc" }}>
+                  <span className="text-xs font-mono font-bold shrink-0 mt-0.5" style={{ color: "#7c3aed" }}>{dx.code}</span>
+                  <span className="text-sm text-slate-600">{dx.description}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Medication Categories */}
+          <div className="glass rounded-xl p-5">
+            <div className="flex items-center gap-2 mb-3">
+              <Pill className="w-4 h-4" style={{ color: "#ea580c" }} />
+              <h3 className="text-sm font-semibold" style={{ color: "#102a43" }}>Default Medication Categories ({detail.medicationCategories.length})</h3>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {detail.medicationCategories.map((med) => (
+                <span key={med} className="inline-flex items-center px-3 py-1.5 rounded-lg text-xs font-semibold" style={{ backgroundColor: "#fff7ed", color: "#ea580c" }}>
+                  {med}
+                </span>
+              ))}
+            </div>
+          </div>
+
+          {/* Lab Panels */}
+          <div className="glass rounded-xl p-5">
+            <div className="flex items-center gap-2 mb-3">
+              <Microscope className="w-4 h-4" style={{ color: "#0369a1" }} />
+              <h3 className="text-sm font-semibold" style={{ color: "#102a43" }}>Default Lab Panels ({detail.labPanels.length})</h3>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {detail.labPanels.map((lab) => (
+                <span key={lab} className="inline-flex items-center px-3 py-1.5 rounded-lg text-xs font-semibold" style={{ backgroundColor: "#e0f2fe", color: "#0369a1" }}>
+                  {lab}
+                </span>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   // ─── Tab Router ──────────────────────────────────────────────────────────
 
   function renderContent() {
     // If a practice is selected, show its detail page regardless of tab
     if (selectedPractice) {
       return renderPracticeDetail();
+    }
+
+    // If a specialty detail is selected, show its detail page
+    if (selectedSpecialtyDetail && activeTab === "specialties") {
+      return renderSpecialtyDetail();
     }
 
     switch (activeTab) {
@@ -1967,11 +3085,11 @@ export function SuperAdminPortal() {
       case "pending-approvals":
         return renderPendingApprovals();
       case "screening-library":
-        return <ComingSoon title="Screening Library" />;
+        return renderScreeningLibrary();
       case "consent-templates":
-        return <ComingSoon title="Consent Templates" />;
+        return renderConsentTemplates();
       case "note-templates":
-        return <ComingSoon title="Note Templates" />;
+        return renderNoteTemplates();
       case "analytics":
         return <ComingSoon title="Analytics" />;
       case "billing":
