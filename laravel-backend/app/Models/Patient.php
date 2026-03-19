@@ -34,12 +34,12 @@ class Patient extends Model
 
     protected $casts = [
         'date_of_birth' => 'date',
-        'emergency_contacts' => 'array',
-        'primary_diagnoses' => 'array',
-        'allergies' => 'array',
-        'medications' => 'array',
-        'insurance_primary' => 'array',
-        'insurance_secondary' => 'array',
+        'emergency_contacts' => 'encrypted:array',
+        'primary_diagnoses' => 'encrypted:array',
+        'allergies' => 'encrypted:array',
+        'medications' => 'encrypted:array',
+        'insurance_primary' => 'encrypted:array',
+        'insurance_secondary' => 'encrypted:array',
         'ssn_encrypted' => 'encrypted',
         'medicaid_number_encrypted' => 'encrypted',
         'medicare_number_encrypted' => 'encrypted',

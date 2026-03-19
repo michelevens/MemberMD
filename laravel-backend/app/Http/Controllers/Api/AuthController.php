@@ -50,7 +50,7 @@ class AuthController extends Controller
             'data' => [
                 'access_token' => $token,
                 'token_type' => 'Bearer',
-                'expires_in' => 86400,
+                'expires_in' => (int) (config('sanctum.expiration', 60) * 60),
                 'user' => $this->userPayload($user),
             ],
         ]);
@@ -67,7 +67,7 @@ class AuthController extends Controller
             'first_name' => 'required|string|max:100',
             'last_name' => 'required|string|max:100',
             'email' => 'required|email|unique:users,email',
-            'password' => 'required|string|min:8|confirmed',
+            'password' => ['required', 'string', 'min:12', 'confirmed', 'regex:/[A-Z]/', 'regex:/[a-z]/', 'regex:/[0-9]/', 'regex:/[^A-Za-z0-9]/'],
             'phone' => 'nullable|string|max:30',
         ]);
 
@@ -133,7 +133,7 @@ class AuthController extends Controller
             'data' => [
                 'access_token' => $token,
                 'token_type' => 'Bearer',
-                'expires_in' => 86400,
+                'expires_in' => (int) (config('sanctum.expiration', 60) * 60),
                 'user' => $this->userPayload($user),
                 'provisioning' => $provisioningSummary,
                 'bootstrap_status' => $bootstrapStatus,
