@@ -1,8 +1,9 @@
 // ===== SuperAdmin Portal =====
 // Platform admin dashboard for managing all practices (tenants) on MemberMD
 
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useAuth } from "../../contexts/AuthContext";
+import { practiceService, dashboardService } from "../../lib/api";
 import {
   LayoutDashboard,
   Building2,
@@ -298,28 +299,67 @@ export function SuperAdminPortal() {
   const [activeTab, setActiveTab] = useState<TabId>("dashboard");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [practiceSearch, setPracticeSearch] = useState("");
+  const [apiPractices, setApiPractices] = useState<MockPractice[] | null>(null);
+  const [apiStats, setApiStats] = useState<Record<string, number> | null>(null);
 
   const userName = auth.user
     ? `${auth.user.firstName} ${auth.user.lastName}`
     : "Platform Admin";
 
+  // ─── Fetch real data from API ─────────────────────────────────────────────
+
+  const loadData = useCallback(async () => {
+    try {
+      const [practicesRes, statsRes] = await Promise.all([
+        practiceService.list(),
+        dashboardService.getStats(),
+      ]);
+      if (practicesRes.data && Array.isArray(practicesRes.data)) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        setApiPractices(practicesRes.data.map((p: any) => ({
+          id: p.id || "",
+          name: p.name || "",
+          specialty: p.specialty || "",
+          model: p.practiceModel || p.practice_model || "",
+          city: (p.city || "") + (p.state ? ", " + p.state : ""),
+          state: p.state || "",
+          providers: p.providerCount || p.providers_count || 0,
+          members: p.memberCount || p.member_count || p.patients_count || 0,
+          mrr: 0,
+          status: (p.status || (p.isActive || p.is_active ? "active" : "suspended")) as "active" | "trial" | "suspended",
+          joinedAt: p.createdAt || p.created_at || "",
+        })));
+      }
+      if (statsRes.data) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        setApiStats(statsRes.data as any);
+      }
+    } catch {
+      // Fall back to mock data
+    }
+  }, []);
+
+  useEffect(() => { loadData(); }, [loadData]);
+
+  const practices = apiPractices || MOCK_PRACTICES;
+
   // ─── Computed stats ──────────────────────────────────────────────────────
 
-  const totalPractices = MOCK_PRACTICES.length;
-  const totalMembers = MOCK_PRACTICES.reduce((sum, p) => sum + p.members, 0);
-  const platformMRR = MOCK_PRACTICES.reduce((sum, p) => sum + p.mrr, 0);
-  const activeTrials = MOCK_PRACTICES.filter((p) => p.status === "trial").length;
+  const totalPractices = apiStats?.total_practices ?? apiStats?.totalPractices ?? practices.length;
+  const totalMembers = apiStats?.total_patients ?? apiStats?.totalPatients ?? practices.reduce((sum, p) => sum + p.members, 0);
+  const platformMRR = practices.reduce((sum, p) => sum + p.mrr, 0);
+  const activeTrials = practices.filter((p) => p.status === "trial").length;
 
   // ─── Filtered practices ──────────────────────────────────────────────────
 
   const filteredPractices = practiceSearch
-    ? MOCK_PRACTICES.filter(
+    ? practices.filter(
         (p) =>
           p.name.toLowerCase().includes(practiceSearch.toLowerCase()) ||
           p.specialty.toLowerCase().includes(practiceSearch.toLowerCase()) ||
           p.city.toLowerCase().includes(practiceSearch.toLowerCase())
       )
-    : MOCK_PRACTICES;
+    : practices;
 
   // ─── Sidebar ─────────────────────────────────────────────────────────────
 
@@ -467,7 +507,7 @@ export function SuperAdminPortal() {
       },
     ];
 
-    const recentPractices = MOCK_PRACTICES.slice(0, 6);
+    const recentPractices = practices.slice(0, 6);
 
     return (
       <div className="animate-page-in space-y-6">
@@ -767,7 +807,7 @@ export function SuperAdminPortal() {
               All Practices
             </h2>
             <p className="text-sm text-slate-500 mt-0.5">
-              {MOCK_PRACTICES.length} practices on the platform
+              {practices.length} practices on the platform
             </p>
           </div>
           <div className="flex items-center gap-3">

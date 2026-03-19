@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\PracticeController;
 use Illuminate\Support\Facades\Route;
 
 // ===== MemberMD API Routes =====
@@ -20,4 +21,12 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/auth/logout', [AuthController::class, 'logout']);
     Route::get('/auth/me', [AuthController::class, 'me']);
     Route::put('/auth/profile', [AuthController::class, 'updateProfile']);
+
+    // SuperAdmin: Platform management
+    Route::get('/admin/practices', [PracticeController::class, 'index']);
+    Route::get('/admin/practices/{id}', [PracticeController::class, 'show']);
+    Route::get('/admin/stats', [PracticeController::class, 'platformStats']);
+
+    // Practice: own practice
+    Route::get('/practice/me', [PracticeController::class, 'myPractice']);
 });

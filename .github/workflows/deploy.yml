@@ -36,7 +36,7 @@ jobs:
         env:
           VITE_API_URL: ${{ secrets.VITE_API_URL }}
           VITE_APP_NAME: MemberMD
-          VITE_DEMO_MODE: "true"
+          VITE_DEMO_MODE: "false"
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3

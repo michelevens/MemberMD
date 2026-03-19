@@ -284,9 +284,21 @@ export const authService = {
 };
 
 export const practiceService = {
+  // SuperAdmin: list all practices
+  list: async (params?: { search?: string }): Promise<ApiResponse<Practice[]>> => {
+    if (useMockData()) return { data: [] };
+    const qs = params?.search ? `?search=${encodeURIComponent(params.search)}` : "";
+    return apiFetch<Practice[]>(`/admin/practices${qs}`);
+  },
+  // SuperAdmin: get single practice
+  getById: async (id: string): Promise<ApiResponse<Practice>> => {
+    if (useMockData()) return { data: MOCK_PRACTICE };
+    return apiFetch<Practice>(`/admin/practices/${id}`);
+  },
+  // Own practice
   get: async (): Promise<ApiResponse<Practice>> => {
     if (useMockData()) return { data: MOCK_PRACTICE };
-    return apiFetch<Practice>("/practice");
+    return apiFetch<Practice>("/practice/me");
   },
   update: async (data: Partial<Practice>): Promise<ApiResponse<Practice>> => {
     if (useMockData()) return mockUpdate<Practice>(data);
@@ -714,7 +726,7 @@ export const intakeService = {
 export const dashboardService = {
   getStats: async (): Promise<ApiResponse<DashboardStats>> => {
     if (useMockData()) return { data: MOCK_DASHBOARD };
-    return apiFetch<DashboardStats>("/dashboard/stats");
+    return apiFetch<DashboardStats>("/admin/stats");
   },
 };
 
