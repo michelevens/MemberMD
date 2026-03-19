@@ -3,6 +3,7 @@
 // Tabs: Dashboard, Patient Roster, Membership Plans, Appointments, Messages, Invoices, + Coming Soon tabs
 
 import { useState, useEffect, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../contexts/AuthContext";
 import { dashboardService, membershipPlanService, messageService } from "../../lib/api";
 import { HeaderToolbar } from "../shared/HeaderToolbar";
@@ -55,6 +56,8 @@ import {
   ChevronUp,
   Mail,
   Layers,
+  Copy,
+  Wifi,
 } from "lucide-react";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -66,6 +69,7 @@ type TabId =
   | "intakes"
   | "waitlist"
   | "appointments"
+  | "telehealth"
   | "encounters"
   | "prescriptions"
   | "screenings"
@@ -114,6 +118,7 @@ const NAV_SECTIONS: NavSection[] = [
     title: "Clinical",
     items: [
       { id: "appointments", label: "Appointments", icon: Calendar },
+      { id: "telehealth", label: "Telehealth", icon: Video },
       { id: "encounters", label: "Encounters", icon: Stethoscope },
       { id: "prescriptions", label: "Prescriptions", icon: Pill },
       { id: "screenings", label: "Screenings", icon: Activity },
@@ -211,6 +216,18 @@ const MOCK_PLANS = [
   },
 ];
 
+interface MockProgramEnrollment {
+  programName: string;
+  planName?: string;
+  status: "active" | "paused" | "completed";
+  fundingSource: string;
+  monthlyAmount?: string;
+  usageLabel?: string;
+  usageUsed?: number;
+  usageTotal?: number;
+  nextAppointment?: string;
+}
+
 interface MockPatient {
   id: string;
   name: string;
@@ -242,6 +259,7 @@ interface MockPatient {
   visitsUsed?: number;
   visitsTotal?: number;
   provider?: string;
+  programEnrollments?: MockProgramEnrollment[];
 }
 
 const MOCK_PATIENTS: MockPatient[] = [
@@ -269,10 +287,29 @@ const MOCK_PATIENTS: MockPatient[] = [
       { name: "Melatonin", dosage: "5mg", frequency: "Bedtime", prescriber: "Dr. Michel", status: "active", startDate: "Feb 15, 2026" },
     ],
     visitsUsed: 1, visitsTotal: 2, provider: "Dr. Nageley Michel",
+    programEnrollments: [
+      { programName: "DPC Membership", planName: "Complete", status: "active", fundingSource: "$199/mo", monthlyAmount: "$199", usageLabel: "visits", usageUsed: 2, usageTotal: 4, nextAppointment: "Mar 25, 2:00 PM — CCM Care Coordination" },
+      { programName: "CCM", status: "active", fundingSource: "Medicare", usageLabel: "min", usageUsed: 12, usageTotal: 20 },
+      { programName: "RPM", status: "active", fundingSource: "Medicare", usageLabel: "readings", usageUsed: 22, usageTotal: 30 },
+    ],
   },
-  { id: "pt2", name: "Sarah Mitchell", plan: "Complete", planPrice: 199, status: "active", phone: "(555) 234-5678", email: "sarah.m@email.com", lastVisit: "Mar 15, 2026", nextApt: "Mar 22, 2026", memberId: "MBR-SM2026", memberSince: "Feb 1, 2026", visitsUsed: 2, visitsTotal: 4, provider: "Dr. Nageley Michel" },
-  { id: "pt3", name: "James Rivera", plan: "Premium", planPrice: 299, status: "active", phone: "(555) 345-6789", email: "james.r@email.com", lastVisit: "Mar 14, 2026", nextApt: "Mar 20, 2026", memberId: "MBR-JR2026", memberSince: "Jan 10, 2026", visitsUsed: 3, visitsTotal: 999, provider: "Dr. Nageley Michel" },
-  { id: "pt4", name: "Emily Chen", plan: "Essential", planPrice: 99, status: "active", phone: "(555) 456-7890", email: "emily.c@email.com", lastVisit: "Mar 10, 2026", nextApt: "Mar 25, 2026", memberId: "MBR-EC2026", memberSince: "Mar 1, 2026", visitsUsed: 1, visitsTotal: 2, provider: "Dr. Nageley Michel" },
+  { id: "pt2", name: "Sarah Mitchell", plan: "Complete", planPrice: 199, status: "active", phone: "(555) 234-5678", email: "sarah.m@email.com", lastVisit: "Mar 15, 2026", nextApt: "Mar 22, 2026", memberId: "MBR-SM2026", memberSince: "Feb 1, 2026", visitsUsed: 2, visitsTotal: 4, provider: "Dr. Nageley Michel",
+    programEnrollments: [
+      { programName: "DPC Membership", planName: "Complete", status: "active", fundingSource: "$199/mo", usageLabel: "visits", usageUsed: 2, usageTotal: 4 },
+    ],
+  },
+  { id: "pt3", name: "James Rivera", plan: "Premium", planPrice: 299, status: "active", phone: "(555) 345-6789", email: "james.r@email.com", lastVisit: "Mar 14, 2026", nextApt: "Mar 20, 2026", memberId: "MBR-JR2026", memberSince: "Jan 10, 2026", visitsUsed: 3, visitsTotal: 999, provider: "Dr. Nageley Michel",
+    programEnrollments: [
+      { programName: "DPC Membership", planName: "Premium", status: "active", fundingSource: "$299/mo", usageLabel: "visits", usageUsed: 3, usageTotal: 999 },
+      { programName: "RPM", status: "active", fundingSource: "Medicare", usageLabel: "readings", usageUsed: 18, usageTotal: 30 },
+    ],
+  },
+  { id: "pt4", name: "Emily Chen", plan: "Essential", planPrice: 99, status: "active", phone: "(555) 456-7890", email: "emily.c@email.com", lastVisit: "Mar 10, 2026", nextApt: "Mar 25, 2026", memberId: "MBR-EC2026", memberSince: "Mar 1, 2026", visitsUsed: 1, visitsTotal: 2, provider: "Dr. Nageley Michel",
+    programEnrollments: [
+      { programName: "DPC Membership", planName: "Essential", status: "active", fundingSource: "$99/mo", usageLabel: "visits", usageUsed: 1, usageTotal: 2 },
+      { programName: "CCM", status: "active", fundingSource: "Medicare", usageLabel: "min", usageUsed: 8, usageTotal: 20 },
+    ],
+  },
   { id: "pt5", name: "Michael Thompson", plan: "Complete", planPrice: 199, status: "paused", phone: "(555) 567-8901", email: "michael.t@email.com", lastVisit: "Feb 28, 2026", nextApt: "—", memberId: "MBR-MT2026", memberSince: "Dec 15, 2025", visitsUsed: 0, visitsTotal: 4, provider: "Dr. Nageley Michel" },
   { id: "pt6", name: "Lisa Patel", plan: "Essential", planPrice: 99, status: "active", phone: "(555) 678-9012", email: "lisa.p@email.com", lastVisit: "Mar 12, 2026", nextApt: "Mar 26, 2026", memberId: "MBR-LP2026", memberSince: "Feb 20, 2026", visitsUsed: 1, visitsTotal: 2, provider: "NP Johnson" },
   { id: "pt7", name: "Robert Kim", plan: "Premium", planPrice: 299, status: "active", phone: "(555) 789-0123", email: "robert.k@email.com", lastVisit: "Mar 16, 2026", nextApt: "Mar 19, 2026", memberId: "MBR-RK2026", memberSince: "Nov 1, 2025", visitsUsed: 5, visitsTotal: 999, provider: "Dr. Nageley Michel" },
@@ -285,14 +322,14 @@ const MOCK_PATIENTS: MockPatient[] = [
 ];
 
 const MOCK_APPOINTMENTS = [
-  { id: "a1", time: "8:00 AM", patient: "James Rivera", plan: "Premium", type: "Follow-up", duration: "30 min", provider: "Dr. Michel", status: "confirmed" as const },
-  { id: "a2", time: "8:30 AM", patient: "Sarah Mitchell", plan: "Complete", type: "Telehealth", duration: "20 min", provider: "Dr. Michel", status: "confirmed" as const },
-  { id: "a3", time: "9:15 AM", patient: "Emily Chen", plan: "Essential", type: "Office Visit", duration: "30 min", provider: "Dr. Michel", status: "pending" as const },
-  { id: "a4", time: "10:00 AM", patient: "Robert Kim", plan: "Premium", type: "Annual Wellness", duration: "60 min", provider: "Dr. Michel", status: "confirmed" as const },
-  { id: "a5", time: "11:00 AM", patient: "Lisa Patel", plan: "Essential", type: "Lab Review", duration: "15 min", provider: "NP Johnson", status: "confirmed" as const },
-  { id: "a6", time: "1:00 PM", patient: "Rachel Adams", plan: "Complete", type: "Mental Health", duration: "45 min", provider: "Dr. Michel", status: "pending" as const },
-  { id: "a7", time: "2:00 PM", patient: "Carlos Mendez", plan: "Premium", type: "Office Visit", duration: "30 min", provider: "NP Johnson", status: "confirmed" as const },
-  { id: "a8", time: "3:30 PM", patient: "Thomas Lee", plan: "Complete", type: "Telehealth", duration: "20 min", provider: "Dr. Michel", status: "confirmed" as const },
+  { id: "a1", time: "8:00 AM", patient: "James Wilson", plan: "Complete", program: "DPC Membership", type: "Follow-Up", duration: "30 min", provider: "Dr. Michel", status: "confirmed" as const, isTelehealth: false, sessionId: "" },
+  { id: "a2", time: "8:30 AM", patient: "Sarah Mitchell", plan: "Complete", program: "DPC Membership", type: "Telehealth", duration: "20 min", provider: "Dr. Michel", status: "confirmed" as const, isTelehealth: true, sessionId: "th-session-001" },
+  { id: "a3", time: "9:15 AM", patient: "Maria Garcia", plan: "Essential", program: "CCM", type: "Care Coordination", duration: "30 min", provider: "Dr. Michel", status: "pending" as const, isTelehealth: false, sessionId: "" },
+  { id: "a4", time: "10:00 AM", patient: "Robert Chen", plan: "Premium", program: "RPM", type: "Telehealth", duration: "30 min", provider: "Dr. Michel", status: "confirmed" as const, isTelehealth: true, sessionId: "th-session-002" },
+  { id: "a5", time: "11:00 AM", patient: "Lisa Patel", plan: "Essential", program: "DPC Membership", type: "Lab Review", duration: "15 min", provider: "NP Johnson", status: "confirmed" as const, isTelehealth: false, sessionId: "" },
+  { id: "a6", time: "1:00 PM", patient: "Rachel Adams", plan: "Complete", program: "Employer Wellness", type: "Wellness Check", duration: "45 min", provider: "Dr. Michel", status: "pending" as const, isTelehealth: false, sessionId: "" },
+  { id: "a7", time: "2:00 PM", patient: "James Wilson", plan: "Complete", program: "CCM", type: "Care Coordination", duration: "20 min", provider: "NP Johnson", status: "confirmed" as const, isTelehealth: false, sessionId: "" },
+  { id: "a8", time: "3:30 PM", patient: "Thomas Lee", plan: "Complete", program: "DPC Membership", type: "Telehealth", duration: "20 min", provider: "Dr. Michel", status: "confirmed" as const, isTelehealth: true, sessionId: "th-session-003" },
 ];
 
 const MOCK_DASHBOARD_APPOINTMENTS = MOCK_APPOINTMENTS.slice(0, 5);
@@ -445,6 +482,7 @@ function StatCard({
 
 export function PracticePortal() {
   const auth = useAuth();
+  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<TabId>("dashboard");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [selectedThread, setSelectedThread] = useState(MOCK_THREADS[0].id);
@@ -455,6 +493,9 @@ export function PracticePortal() {
   const [expandedEncounters, setExpandedEncounters] = useState<string[]>([]);
   const [notificationFilter, setNotificationFilter] = useState<"all" | "members" | "appointments" | "billing" | "system">("all");
   const [showBookingWidget, setShowBookingWidget] = useState(false);
+  const [telehealthMode, setTelehealthMode] = useState<"builtin" | "external">("builtin");
+  const [externalPlatform, setExternalPlatform] = useState<"zoom" | "doxy" | "teams" | "google_meet" | "custom">("zoom");
+  const [externalUrl, setExternalUrl] = useState("");
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [apiDashStats, setApiDashStats] = useState<Record<string, any> | null>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -505,11 +546,6 @@ export function PracticePortal() {
   const practiceName = auth.user
     ? `${auth.user.firstName}'s Practice`
     : "My Practice";
-
-  // Total members
-  const totalMembers = apiPlans
-    ? apiPlans.reduce((s, p) => s + (p.memberCount ?? p.member_count ?? 0), 0)
-    : MOCK_PLANS.reduce((s, p) => s + p.memberCount, 0);
 
   // ─── Sidebar ────────────────────────────────────────────────────────────
 
@@ -608,74 +644,117 @@ export function PracticePortal() {
 
   // ─── Dashboard Tab ──────────────────────────────────────────────────────
 
+  // Program performance mock data
+  const MOCK_PROGRAM_STATS = [
+    { name: "DPC Membership", enrolled: 120, mrr: 23800, utilization: 78, color: "#147d64", bgColor: "#e6f7f2", icon: Heart },
+    { name: "CCM", enrolled: 50, mrr: 2100, utilization: 65, color: "#334e68", bgColor: "#e0e8f0", icon: ClipboardList },
+    { name: "RPM", enrolled: 30, mrr: 1700, utilization: 72, color: "#7c3aed", bgColor: "#f3e8ff", icon: Activity },
+    { name: "Employer Wellness", enrolled: 500, mrr: 10000, utilization: 42, color: "#d97706", bgColor: "#fffbeb", icon: UsersRound },
+  ];
+
   function renderDashboard() {
+    const totalMRR = 39328;
+
     return (
       <div className="space-y-6">
-        {/* Stats Row */}
+        {/* Revenue by Source */}
+        <div>
+          <h3 className="text-lg font-semibold text-slate-800 mb-4">Revenue by Source</h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <StatCard
+              icon={Heart}
+              label="Membership"
+              value={apiDashStats?.mrr ? `$${Number(apiDashStats.mrr).toLocaleString()}/mo` : "$23,800/mo"}
+              trend="120 DPC members"
+              trendColor="#147d64"
+            />
+            <StatCard
+              icon={FileText}
+              label="Insurance Claims"
+              value="$5,528/mo"
+              trend="CCM + RPM"
+              trendColor="#334e68"
+            />
+            <StatCard
+              icon={UsersRound}
+              label="Employer Contracts"
+              value="$10,000/mo"
+              trend="2 contracts"
+              trendColor="#d97706"
+            />
+            <StatCard
+              icon={DollarSign}
+              label="Total MRR"
+              value={`$${totalMRR.toLocaleString()}`}
+              trend="+12% MoM"
+            />
+          </div>
+        </div>
+
+        {/* Quick Stats Row */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <StatCard
-            icon={Users}
-            label="Active Members"
-            value={apiDashStats?.activeMembers?.toString() ?? apiDashStats?.active_members?.toString() ?? apiDashStats?.totalPatients?.toString() ?? "85"}
-            trend={apiDashStats ? "" : "+7 this month"}
+            icon={Layers}
+            label="Active Programs"
+            value={apiDashStats?.activePrograms?.toString() ?? "4"}
+            trend="All performing"
           />
           <StatCard
-            icon={DollarSign}
-            label="Monthly Revenue"
-            value={apiDashStats?.mrr ? `$${Number(apiDashStats.mrr).toLocaleString()}` : apiDashStats?.monthlyRevenue ? `$${Number(apiDashStats.monthlyRevenue).toLocaleString()}` : "$14,285"}
-            trend={apiDashStats ? "" : "+12% MoM"}
+            icon={Users}
+            label="Total Enrolled"
+            value={apiDashStats?.activeMembers?.toString() ?? apiDashStats?.active_members?.toString() ?? "700"}
+            trend="+15 this month"
           />
           <StatCard
             icon={Calendar}
             label="Appointments Today"
             value={apiDashStats?.appointmentsToday?.toString() ?? apiDashStats?.appointments_today?.toString() ?? "8"}
-            trend={apiDashStats ? "" : "3 confirmed"}
+            trend="3 telehealth"
             trendColor="#334e68"
           />
           <StatCard
             icon={ClipboardList}
             label="Pending Intakes"
             value={apiDashStats?.pendingIntakes?.toString() ?? apiDashStats?.pending_intakes?.toString() ?? "4"}
-            trend={apiDashStats ? "" : "2 new today"}
+            trend="2 new today"
             trendColor="#d97706"
           />
         </div>
 
-        {/* Plan Distribution */}
+        {/* Program Performance Cards */}
         <div>
-          <h3 className="text-lg font-semibold text-slate-800 mb-4">Plan Distribution</h3>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {(apiPlans || MOCK_PLANS).map((plan) => {
-              const memberCount = plan.memberCount ?? plan.member_count ?? 0;
-              const pct = totalMembers > 0 ? Math.round((memberCount / totalMembers) * 100) : 0;
-              const planColors: Record<string, { accent: string; bg: string }> = {
-                Essential: { accent: "#334e68", bg: "#e0e8f0" },
-                Complete: { accent: "#147d64", bg: "#e6f7f2" },
-                Premium: { accent: "#d97706", bg: "#fffbeb" },
-              };
-              const colors = planColors[plan.name] || planColors.Essential;
-              return (
-                <div key={plan.id} className="glass rounded-xl p-5 hover-lift">
-                  <div className="flex items-center justify-between mb-2">
-                    <h4 className="font-semibold text-slate-800">{plan.name}</h4>
-                    <span className="text-lg font-bold" style={{ color: colors.accent }}>
-                      ${plan.monthlyPrice ?? plan.monthly_price ?? 0}
-                      <span className="text-xs font-normal text-slate-400">/mo</span>
-                    </span>
+          <h3 className="text-lg font-semibold text-slate-800 mb-4">Program Performance</h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {MOCK_PROGRAM_STATS.map((prog) => (
+              <div key={prog.name} className="glass rounded-xl p-5 hover-lift">
+                <div className="flex items-center gap-3 mb-3">
+                  <div
+                    className="w-10 h-10 rounded-lg flex items-center justify-center"
+                    style={{ backgroundColor: prog.bgColor }}
+                  >
+                    <prog.icon className="w-5 h-5" style={{ color: prog.color }} />
                   </div>
-                  <p className="text-sm text-slate-500 mb-3">
-                    {memberCount} members
-                  </p>
-                  <div className="w-full h-2 rounded-full" style={{ backgroundColor: colors.bg }}>
+                  <div className="min-w-0">
+                    <h4 className="font-semibold text-slate-800 text-sm truncate">{prog.name}</h4>
+                    <p className="text-xs text-slate-400">{prog.enrolled} enrolled</p>
+                  </div>
+                </div>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-lg font-bold text-slate-800">${prog.mrr.toLocaleString()}</span>
+                  <span className="text-xs font-medium text-slate-400">/mo</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="flex-1 h-2 rounded-full" style={{ backgroundColor: prog.bgColor }}>
                     <div
                       className="h-2 rounded-full transition-all duration-500"
-                      style={{ width: `${pct}%`, backgroundColor: colors.accent }}
+                      style={{ width: `${prog.utilization}%`, backgroundColor: prog.color }}
                     />
                   </div>
-                  <p className="text-xs text-slate-400 mt-1">{pct}% of members</p>
+                  <span className="text-xs font-medium text-slate-500">{prog.utilization}%</span>
                 </div>
-              );
-            })}
+                <p className="text-xs text-slate-400 mt-1">Utilization</p>
+              </div>
+            ))}
           </div>
         </div>
 
@@ -691,9 +770,10 @@ export function PracticePortal() {
                     <tr style={{ backgroundColor: "rgba(16,42,67,0.03)" }}>
                       <th className="text-left px-4 py-3 font-medium text-slate-500">Time</th>
                       <th className="text-left px-4 py-3 font-medium text-slate-500">Patient</th>
+                      <th className="text-left px-4 py-3 font-medium text-slate-500">Program</th>
                       <th className="text-left px-4 py-3 font-medium text-slate-500">Type</th>
-                      <th className="text-left px-4 py-3 font-medium text-slate-500">Provider</th>
                       <th className="text-left px-4 py-3 font-medium text-slate-500">Status</th>
+                      <th className="text-left px-4 py-3 font-medium text-slate-500"></th>
                     </tr>
                   </thead>
                   <tbody>
@@ -704,10 +784,30 @@ export function PracticePortal() {
                       >
                         <td className="px-4 py-3 font-medium text-slate-700">{apt.time}</td>
                         <td className="px-4 py-3 text-slate-700">{apt.patient}</td>
-                        <td className="px-4 py-3 text-slate-500">{apt.type}</td>
-                        <td className="px-4 py-3 text-slate-500">{apt.provider}</td>
+                        <td className="px-4 py-3">
+                          <span className="text-xs font-medium text-slate-500">{apt.program}</span>
+                        </td>
+                        <td className="px-4 py-3 text-slate-500">
+                          <span className="flex items-center gap-1">
+                            {apt.isTelehealth && <Video className="w-3 h-3" style={{ color: "#27ab83" }} />}
+                            {apt.type}
+                          </span>
+                        </td>
                         <td className="px-4 py-3">
                           <StatusBadge status={apt.status} />
+                        </td>
+                        <td className="px-4 py-3">
+                          {apt.isTelehealth && apt.sessionId && (
+                            <button
+                              onClick={() => navigate(`/telehealth/${apt.sessionId}`)}
+                              className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold text-white transition-colors"
+                              style={{ backgroundColor: "#22c55e" }}
+                              onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#16a34a")}
+                              onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "#22c55e")}
+                            >
+                              <Video className="w-3 h-3" /> Join
+                            </button>
+                          )}
                         </td>
                       </tr>
                     ))}
@@ -1089,6 +1189,68 @@ export function PracticePortal() {
             <p className="text-sm font-bold text-slate-800">{pt.lastVisit}</p>
           </div>
         </div>
+
+        {/* ── Program Enrollments ──────────────────────────────────────── */}
+        {pt.programEnrollments && pt.programEnrollments.length > 0 && (
+          <div className="glass rounded-xl p-5">
+            <h3 className="font-semibold text-slate-800 mb-3">Program Enrollments</h3>
+            <div className="space-y-3">
+              {pt.programEnrollments.map((enrollment, idx) => {
+                const progColors: Record<string, { color: string; bg: string }> = {
+                  "DPC Membership": { color: "#147d64", bg: "#e6f7f2" },
+                  "CCM": { color: "#334e68", bg: "#e0e8f0" },
+                  "RPM": { color: "#7c3aed", bg: "#f3e8ff" },
+                  "Employer Wellness": { color: "#d97706", bg: "#fffbeb" },
+                };
+                const pc = progColors[enrollment.programName] || { color: "#334e68", bg: "#e0e8f0" };
+                return (
+                  <div key={idx} className="flex flex-col sm:flex-row sm:items-center gap-3 p-3 rounded-lg" style={{ backgroundColor: "rgba(16,42,67,0.02)" }}>
+                    <div className="flex items-center gap-3 flex-1 min-w-0">
+                      <div className="w-2 h-8 rounded-full shrink-0" style={{ backgroundColor: pc.color }} />
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-medium text-sm text-slate-800">{enrollment.programName}</span>
+                          {enrollment.planName && (
+                            <span className="px-2 py-0.5 rounded text-xs font-medium" style={{ backgroundColor: pc.bg, color: pc.color }}>
+                              {enrollment.planName}
+                            </span>
+                          )}
+                          <StatusBadge status={enrollment.status} />
+                        </div>
+                        <p className="text-xs text-slate-400 mt-0.5">{enrollment.fundingSource}</p>
+                      </div>
+                    </div>
+                    {enrollment.usageUsed !== undefined && enrollment.usageTotal !== undefined && (
+                      <div className="flex items-center gap-3 shrink-0">
+                        <div className="text-right">
+                          <p className="text-sm font-semibold text-slate-700">
+                            {enrollment.usageUsed} of {enrollment.usageTotal >= 999 ? "\u221E" : enrollment.usageTotal} {enrollment.usageLabel}
+                          </p>
+                          <div className="w-24 h-1.5 rounded-full mt-1" style={{ backgroundColor: "#e2e8f0" }}>
+                            <div
+                              className="h-1.5 rounded-full"
+                              style={{
+                                width: `${enrollment.usageTotal >= 999 ? 30 : Math.min((enrollment.usageUsed / enrollment.usageTotal) * 100, 100)}%`,
+                                backgroundColor: pc.color,
+                              }}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+            {pt.programEnrollments[0]?.nextAppointment && (
+              <div className="mt-3 pt-3 border-t border-slate-100">
+                <p className="text-xs text-slate-400">
+                  Next Appointment: <span className="font-medium text-slate-600">{pt.programEnrollments[0].nextAppointment}</span>
+                </p>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* ── Detail Tab Bar ──────────────────────────────────────────── */}
         <div className="border-b border-slate-200 overflow-x-auto">
@@ -1797,10 +1959,12 @@ export function PracticePortal() {
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
-          {MOCK_PLANS.map((plan) => {
+          {(apiPlans || MOCK_PLANS).map((plan) => {
             const Icon = planIcons[plan.name] || Heart;
             const gradient = planGradients[plan.name] || planGradients.Essential;
-            const revenue = plan.memberCount * plan.monthlyPrice;
+            const memberCount = plan.memberCount ?? plan.member_count ?? 0;
+            const monthlyPrice = plan.monthlyPrice ?? plan.monthly_price ?? 0;
+            const revenue = memberCount * monthlyPrice;
 
             return (
               <div key={plan.id} className="glass rounded-2xl overflow-hidden hover-lift flex flex-col">
@@ -1825,11 +1989,11 @@ export function PracticePortal() {
                     )}
                     <h3 className="text-xl font-bold">{plan.name}</h3>
                     <div className="mt-2">
-                      <span className="text-3xl font-bold">${plan.monthlyPrice}</span>
+                      <span className="text-3xl font-bold">${monthlyPrice}</span>
                       <span className="text-sm opacity-80">/month</span>
                     </div>
                     <p className="text-sm opacity-70 mt-1">
-                      ${plan.annualPrice}/year (save {Math.round((1 - plan.annualPrice / (plan.monthlyPrice * 12)) * 100)}%)
+                      ${plan.annualPrice ?? plan.annual_price ?? 0}/year (save {Math.round((1 - (plan.annualPrice ?? plan.annual_price ?? 0) / (monthlyPrice * 12)) * 100)}%)
                     </p>
                   </div>
                 </div>
@@ -1837,7 +2001,7 @@ export function PracticePortal() {
                 {/* Entitlements */}
                 <div className="p-5 flex-1">
                   <ul className="space-y-2.5">
-                    {plan.entitlements.map((item, i) => (
+                    {(plan.entitlements as string[]).map((item: string, i: number) => (
                       <li key={i} className="flex items-start gap-2 text-sm text-slate-600">
                         <Check
                           className="w-4 h-4 shrink-0 mt-0.5"
@@ -1858,7 +2022,7 @@ export function PracticePortal() {
                     <div>
                       <p className="text-xs text-slate-500">Members</p>
                       <p className="text-lg font-bold" style={{ color: gradient.accent }}>
-                        {plan.memberCount}
+                        {memberCount}
                       </p>
                     </div>
                     <div className="text-right">
@@ -1936,6 +2100,240 @@ export function PracticePortal() {
             onBooked={() => setShowBookingWidget(false)}
           />
         )}
+      </div>
+    );
+  }
+
+  // ─── Telehealth Tab ─────────────────────────────────────────────────────
+
+  function renderTelehealth() {
+    const telehealthAppointments = MOCK_APPOINTMENTS.filter((a) => a.isTelehealth);
+    const platformLabels: Record<string, string> = {
+      zoom: "Zoom",
+      doxy: "Doxy.me",
+      teams: "Microsoft Teams",
+      google_meet: "Google Meet",
+      custom: "Custom URL",
+    };
+    const platformPlaceholders: Record<string, string> = {
+      zoom: "https://zoom.us/j/1234567890 or Personal Meeting ID",
+      doxy: "https://doxy.me/your-room-name",
+      teams: "https://teams.microsoft.com/l/meetup-join/...",
+      google_meet: "https://meet.google.com/abc-defg-hij",
+      custom: "https://your-video-platform.com/room/...",
+    };
+
+    const handleQuickLaunch = () => {
+      const sessionId = `adhoc-${Date.now()}`;
+      if (telehealthMode === "builtin") {
+        navigate(`/telehealth/${sessionId}`);
+      } else {
+        const url = externalUrl || "#";
+        window.open(url, "_blank", "noopener,noreferrer");
+      }
+    };
+
+    const handleCopyLink = (sessionId: string) => {
+      const link = `${window.location.origin}/#/telehealth/${sessionId}`;
+      navigator.clipboard.writeText(link).catch(() => { /* fallback */ });
+    };
+
+    return (
+      <div className="space-y-6">
+        {/* Header */}
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+          <h2 className="text-xl font-bold text-slate-800">Telehealth</h2>
+          <button
+            onClick={handleQuickLaunch}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors shrink-0"
+            style={{ backgroundColor: "#22c55e" }}
+            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#16a34a")}
+            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "#22c55e")}
+          >
+            <Video className="w-4 h-4" />
+            Start Ad-Hoc Video Call
+          </button>
+        </div>
+
+        {/* Telehealth Settings */}
+        <div className="glass rounded-xl p-6">
+          <h3 className="font-semibold text-slate-800 mb-4 flex items-center gap-2">
+            <Settings className="w-4 h-4" style={{ color: "#27ab83" }} />
+            Video Platform Settings
+          </h3>
+
+          {/* Mode Toggle */}
+          <div className="flex items-center gap-4 mb-4">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="radio"
+                name="telehealth-mode"
+                checked={telehealthMode === "builtin"}
+                onChange={() => setTelehealthMode("builtin")}
+                className="accent-teal-600"
+              />
+              <span className="text-sm font-medium text-slate-700">Use MemberMD Built-in Video</span>
+              <span className="px-2 py-0.5 rounded text-xs font-medium" style={{ backgroundColor: "#e6f7f2", color: "#147d64" }}>
+                Daily.co
+              </span>
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="radio"
+                name="telehealth-mode"
+                checked={telehealthMode === "external"}
+                onChange={() => setTelehealthMode("external")}
+                className="accent-teal-600"
+              />
+              <span className="text-sm font-medium text-slate-700">Use External Platform</span>
+            </label>
+          </div>
+
+          {telehealthMode === "builtin" ? (
+            <div className="p-3 rounded-lg flex items-start gap-3" style={{ backgroundColor: "#e6f7f2" }}>
+              <Shield className="w-4 h-4 shrink-0 mt-0.5" style={{ color: "#147d64" }} />
+              <div>
+                <p className="text-sm font-medium" style={{ color: "#147d64" }}>HIPAA-Compliant Built-in Video</p>
+                <p className="text-xs mt-0.5" style={{ color: "#334e68" }}>
+                  End-to-end encrypted video calls with BAA coverage included. Patients join via a secure link — no downloads required.
+                </p>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <div>
+                <label className="text-sm font-medium text-slate-700 mb-1 block">Platform</label>
+                <select
+                  value={externalPlatform}
+                  onChange={(e) => setExternalPlatform(e.target.value as typeof externalPlatform)}
+                  className="w-full sm:w-64 px-3 py-2 rounded-lg border border-slate-200 text-sm bg-white focus:outline-none"
+                >
+                  {Object.entries(platformLabels).map(([key, label]) => (
+                    <option key={key} value={key}>{label}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-sm font-medium text-slate-700 mb-1 block">
+                  {externalPlatform === "zoom" ? "Meeting URL or Personal Meeting ID" :
+                   externalPlatform === "doxy" ? "Doxy.me Room URL" :
+                   "Meeting URL"}
+                </label>
+                <input
+                  type="text"
+                  value={externalUrl}
+                  onChange={(e) => setExternalUrl(e.target.value)}
+                  placeholder={platformPlaceholders[externalPlatform]}
+                  className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 bg-white"
+                  onFocus={(e) => (e.currentTarget.style.borderColor = "#27ab83")}
+                  onBlur={(e) => (e.currentTarget.style.borderColor = "")}
+                />
+              </div>
+              <div className="p-3 rounded-lg flex items-start gap-3" style={{ backgroundColor: "#fffbeb" }}>
+                <Shield className="w-4 h-4 shrink-0 mt-0.5" style={{ color: "#d97706" }} />
+                <p className="text-xs" style={{ color: "#92400e" }}>
+                  Built-in video is HIPAA-compliant with BAA. External platforms require your own BAA with the provider.
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Today's Telehealth Sessions */}
+        <div>
+          <h3 className="text-lg font-semibold text-slate-800 mb-4">Today&apos;s Telehealth Sessions</h3>
+          <div className="space-y-3">
+            {telehealthAppointments.length === 0 ? (
+              <div className="glass rounded-xl p-8 text-center">
+                <Video className="w-10 h-10 mx-auto mb-2 text-slate-300" />
+                <p className="text-sm text-slate-400">No telehealth sessions scheduled for today.</p>
+              </div>
+            ) : (
+              telehealthAppointments.map((apt) => {
+                const statusConfig: Record<string, { bg: string; text: string; dot: string; label: string }> = {
+                  confirmed: { bg: "#ecf9ec", text: "#2f8132", dot: "#3f9142", label: "Ready" },
+                  pending: { bg: "#fffbeb", text: "#d97706", dot: "#f59e0b", label: "Pending" },
+                };
+                const sc = statusConfig[apt.status] || statusConfig.confirmed;
+                return (
+                  <div key={apt.id} className="glass rounded-xl p-4 flex flex-col sm:flex-row sm:items-center gap-4">
+                    {/* Time */}
+                    <div className="shrink-0 text-center sm:text-left" style={{ minWidth: "70px" }}>
+                      <p className="text-lg font-bold text-slate-800">{apt.time}</p>
+                      <p className="text-xs text-slate-400">{apt.duration}</p>
+                    </div>
+
+                    {/* Patient + Program */}
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium text-slate-800">{apt.patient}</p>
+                      <div className="flex items-center gap-2 mt-1 flex-wrap">
+                        <span className="text-xs text-slate-500">{apt.program}</span>
+                        <span className="text-slate-300">|</span>
+                        <span className="text-xs text-slate-400">{apt.type}</span>
+                      </div>
+                    </div>
+
+                    {/* Status */}
+                    <div className="shrink-0">
+                      <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium" style={{ backgroundColor: sc.bg, color: sc.text }}>
+                        <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: sc.dot }} />
+                        {sc.label}
+                      </span>
+                    </div>
+
+                    {/* Actions */}
+                    <div className="flex items-center gap-2 shrink-0">
+                      {telehealthMode === "builtin" && apt.sessionId && (
+                        <button
+                          onClick={() => handleCopyLink(apt.sessionId)}
+                          className="flex items-center gap-1 px-3 py-2 rounded-lg text-xs font-medium border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors"
+                        >
+                          <Copy className="w-3.5 h-3.5" /> Copy Link
+                        </button>
+                      )}
+                      <button
+                        onClick={() => {
+                          if (telehealthMode === "builtin" && apt.sessionId) {
+                            navigate(`/telehealth/${apt.sessionId}`);
+                          } else if (externalUrl) {
+                            window.open(externalUrl, "_blank", "noopener,noreferrer");
+                          }
+                        }}
+                        className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-white transition-colors"
+                        style={{ backgroundColor: "#22c55e" }}
+                        onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#16a34a")}
+                        onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "#22c55e")}
+                      >
+                        <Video className="w-4 h-4" /> Start Video Call
+                      </button>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+
+        {/* Connection Status */}
+        <div className="glass rounded-xl p-4 flex items-center gap-3">
+          <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ backgroundColor: "#e6f7f2" }}>
+            <Wifi className="w-4 h-4" style={{ color: "#147d64" }} />
+          </div>
+          <div className="flex-1">
+            <p className="text-sm font-medium text-slate-700">
+              {telehealthMode === "builtin" ? "Daily.co Integration" : `${platformLabels[externalPlatform]} Integration`}
+            </p>
+            <p className="text-xs text-slate-400">
+              {telehealthMode === "builtin"
+                ? "HIPAA-compliant video with BAA. All sessions are encrypted end-to-end."
+                : "External platform configured. Ensure you have a signed BAA."}
+            </p>
+          </div>
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium" style={{ backgroundColor: "#ecf9ec", color: "#2f8132" }}>
+            <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: "#3f9142" }} />
+            Connected
+          </span>
+        </div>
       </div>
     );
   }
@@ -2450,14 +2848,14 @@ export function PracticePortal() {
 
   function renderEncounters() {
     const mockPracticeEncounters = [
-      { id: "e1", date: "Mar 18, 2026", patient: "James Wilson", provider: "Dr. Michel", type: "Follow-Up", duration: "30 min", status: "signed" as const },
-      { id: "e2", date: "Mar 18, 2026", patient: "Sarah Mitchell", provider: "Dr. Michel", type: "Med Mgmt", duration: "20 min", status: "draft" as const },
-      { id: "e3", date: "Mar 17, 2026", patient: "Robert Kim", provider: "Dr. Michel", type: "Initial", duration: "60 min", status: "signed" as const },
-      { id: "e4", date: "Mar 17, 2026", patient: "Emily Chen", provider: "NP Johnson", type: "Follow-Up", duration: "30 min", status: "signed" as const },
-      { id: "e5", date: "Mar 16, 2026", patient: "Carlos Mendez", provider: "Dr. Michel", type: "Therapy", duration: "45 min", status: "amended" as const },
-      { id: "e6", date: "Mar 15, 2026", patient: "Lisa Patel", provider: "NP Johnson", type: "Med Mgmt", duration: "20 min", status: "signed" as const },
-      { id: "e7", date: "Mar 14, 2026", patient: "Rachel Adams", provider: "Dr. Michel", type: "Follow-Up", duration: "30 min", status: "signed" as const },
-      { id: "e8", date: "Mar 13, 2026", patient: "Thomas Lee", provider: "Dr. Michel", type: "Initial", duration: "60 min", status: "draft" as const },
+      { id: "e1", date: "Mar 18, 2026", patient: "James Wilson", provider: "Dr. Michel", type: "Follow-Up", program: "DPC Membership", noteTemplate: "SOAP", duration: "30 min", status: "signed" as const },
+      { id: "e2", date: "Mar 18, 2026", patient: "Sarah Mitchell", provider: "Dr. Michel", type: "Med Mgmt", program: "DPC Membership", noteTemplate: "SOAP", duration: "20 min", status: "draft" as const },
+      { id: "e3", date: "Mar 17, 2026", patient: "Maria Garcia", provider: "Dr. Michel", type: "Care Coord", program: "CCM", noteTemplate: "CCM", duration: "20 min", status: "signed" as const },
+      { id: "e4", date: "Mar 17, 2026", patient: "Emily Chen", provider: "NP Johnson", type: "Follow-Up", program: "CCM", noteTemplate: "CCM", duration: "30 min", status: "signed" as const },
+      { id: "e5", date: "Mar 16, 2026", patient: "Robert Chen", provider: "Dr. Michel", type: "Device Review", program: "RPM", noteTemplate: "RPM", duration: "15 min", status: "amended" as const },
+      { id: "e6", date: "Mar 15, 2026", patient: "Lisa Patel", provider: "NP Johnson", type: "Med Mgmt", program: "DPC Membership", noteTemplate: "SOAP", duration: "20 min", status: "signed" as const },
+      { id: "e7", date: "Mar 14, 2026", patient: "Rachel Adams", provider: "Dr. Michel", type: "Wellness Check", program: "Employer Wellness", noteTemplate: "SOAP", duration: "30 min", status: "signed" as const },
+      { id: "e8", date: "Mar 13, 2026", patient: "Thomas Lee", provider: "Dr. Michel", type: "Initial", program: "DPC Membership", noteTemplate: "SOAP", duration: "60 min", status: "draft" as const },
     ];
 
     const encounterTypeConfig: Record<string, { bg: string; text: string }> = {
@@ -2465,6 +2863,22 @@ export function PracticePortal() {
       "Follow-Up": { bg: "#e0e8f0", text: "#334e68" },
       "Med Mgmt": { bg: "#fffbeb", text: "#d97706" },
       Therapy: { bg: "#f3e8ff", text: "#7c3aed" },
+      "Care Coord": { bg: "#e0e8f0", text: "#334e68" },
+      "Device Review": { bg: "#f3e8ff", text: "#7c3aed" },
+      "Wellness Check": { bg: "#fffbeb", text: "#d97706" },
+    };
+
+    const programBadgeConfig: Record<string, { bg: string; text: string }> = {
+      "DPC Membership": { bg: "#e6f7f2", text: "#147d64" },
+      "CCM": { bg: "#e0e8f0", text: "#334e68" },
+      "RPM": { bg: "#f3e8ff", text: "#7c3aed" },
+      "Employer Wellness": { bg: "#fffbeb", text: "#d97706" },
+    };
+
+    const noteTemplateLabels: Record<string, string> = {
+      SOAP: "Standard SOAP",
+      CCM: "CCM Minutes",
+      RPM: "Device Review",
     };
 
     const encounterStatusConfig: Record<string, { bg: string; text: string; dot: string }> = {
@@ -2490,7 +2904,7 @@ export function PracticePortal() {
 
         {/* Filters */}
         <div className="flex flex-wrap items-center gap-2">
-          {["Initial", "Follow-Up", "Med Mgmt", "Therapy"].map((type) => {
+          {["Initial", "Follow-Up", "Med Mgmt", "Care Coord", "Device Review"].map((type) => {
             const tc = encounterTypeConfig[type];
             return (
               <button
@@ -2512,8 +2926,10 @@ export function PracticePortal() {
                 <tr style={{ backgroundColor: "rgba(16,42,67,0.03)" }}>
                   <th className="text-left px-4 py-3 font-medium text-slate-500">Date</th>
                   <th className="text-left px-4 py-3 font-medium text-slate-500">Patient</th>
+                  <th className="text-left px-4 py-3 font-medium text-slate-500 hidden lg:table-cell">Program</th>
                   <th className="text-left px-4 py-3 font-medium text-slate-500 hidden md:table-cell">Provider</th>
                   <th className="text-left px-4 py-3 font-medium text-slate-500">Type</th>
+                  <th className="text-left px-4 py-3 font-medium text-slate-500 hidden lg:table-cell">Note Template</th>
                   <th className="text-left px-4 py-3 font-medium text-slate-500 hidden md:table-cell">Duration</th>
                   <th className="text-left px-4 py-3 font-medium text-slate-500">Status</th>
                   <th className="text-left px-4 py-3 font-medium text-slate-500">Actions</th>
@@ -2523,15 +2939,24 @@ export function PracticePortal() {
                 {mockPracticeEncounters.map((enc) => {
                   const tc = encounterTypeConfig[enc.type] || encounterTypeConfig["Follow-Up"];
                   const esc = encounterStatusConfig[enc.status];
+                  const pbc = programBadgeConfig[enc.program] || { bg: "#e0e8f0", text: "#334e68" };
                   return (
                     <tr key={enc.id} className="border-t border-slate-100 hover:bg-slate-50 transition-colors">
                       <td className="px-4 py-3 font-medium text-slate-700">{enc.date}</td>
                       <td className="px-4 py-3 text-slate-700">{enc.patient}</td>
+                      <td className="px-4 py-3 hidden lg:table-cell">
+                        <span className="px-2 py-0.5 rounded text-xs font-medium" style={{ backgroundColor: pbc.bg, color: pbc.text }}>
+                          {enc.program}
+                        </span>
+                      </td>
                       <td className="px-4 py-3 text-slate-500 hidden md:table-cell">{enc.provider}</td>
                       <td className="px-4 py-3">
                         <span className="px-2 py-0.5 rounded text-xs font-medium" style={{ backgroundColor: tc.bg, color: tc.text }}>
                           {enc.type}
                         </span>
+                      </td>
+                      <td className="px-4 py-3 hidden lg:table-cell">
+                        <span className="text-xs text-slate-500">{noteTemplateLabels[enc.noteTemplate] || enc.noteTemplate}</span>
                       </td>
                       <td className="px-4 py-3 text-slate-500 hidden md:table-cell">{enc.duration}</td>
                       <td className="px-4 py-3">
@@ -3408,6 +3833,8 @@ export function PracticePortal() {
         return renderPlans();
       case "appointments":
         return renderAppointments();
+      case "telehealth":
+        return renderTelehealth();
       case "encounters":
         return renderEncounters();
       case "prescriptions":
