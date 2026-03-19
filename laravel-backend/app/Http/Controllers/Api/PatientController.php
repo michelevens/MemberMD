@@ -3,6 +3,8 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\StorePatientRequest;
+use App\Http\Requests\UpdatePatientRequest;
 use App\Models\Patient;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -11,8 +13,9 @@ class PatientController extends Controller
 {
     public function index(Request $request): JsonResponse
     {
+        $this->authorize('viewAny', Patient::class);
+
         $user = $request->user();
-        abort_if($user->isPatient(), 403, 'Patients cannot list other patients.');
 
         $query = Patient::where('tenant_id', $user->tenant_id)
             ->with(['activeMembership.plan']);
@@ -49,49 +52,18 @@ class PatientController extends Controller
             ->with(['activeMembership.plan', 'memberships.plan', 'entitlements'])
             ->findOrFail($id);
 
-        // Patients can only view their own record
-        if ($user->isPatient()) {
-            abort_if(!$user->patient || $user->patient->id !== $patient->id, 403);
-        }
+        $this->authorize('view', $patient);
 
         return response()->json(['data' => $patient]);
     }
 
-    public function store(Request $request): JsonResponse
+    public function store(StorePatientRequest $request): JsonResponse
     {
-        $user = $request->user();
-        abort_if(!in_array($user->role, ['practice_admin', 'staff']), 403);
+        $this->authorize('create', Patient::class);
 
-        $validated = $request->validate([
-            'first_name' => 'required|string|max:100',
-            'last_name' => 'required|string|max:100',
-            'email' => 'required|email|max:255',
-            'phone' => 'nullable|string|max:20',
-            'date_of_birth' => 'nullable|date',
-            'gender' => 'nullable|string|max:20',
-            'pronouns' => 'nullable|string|max:50',
-            'preferred_name' => 'nullable|string|max:100',
-            'address' => 'nullable|string|max:255',
-            'city' => 'nullable|string|max:100',
-            'state' => 'nullable|string|max:2',
-            'zip' => 'nullable|string|max:10',
-            'preferred_language' => 'nullable|string|max:50',
-            'marital_status' => 'nullable|string|max:30',
-            'employment_status' => 'nullable|string|max:30',
-            'emergency_contacts' => 'nullable|array',
-            'primary_diagnoses' => 'nullable|array',
-            'allergies' => 'nullable|array',
-            'medications' => 'nullable|array',
-            'primary_care_physician' => 'nullable|string|max:255',
-            'pcp_phone' => 'nullable|string|max:20',
-            'referring_provider' => 'nullable|string|max:255',
-            'insurance_primary' => 'nullable|array',
-            'insurance_secondary' => 'nullable|array',
-            'pharmacy_name' => 'nullable|string|max:255',
-            'pharmacy_address' => 'nullable|string|max:255',
-            'pharmacy_phone' => 'nullable|string|max:20',
-            'referral_source' => 'nullable|string|max:100',
-        ]);
+        $user = $request->user();
+
+        $validated = $request->validated();
 
         $validated['tenant_id'] = $user->tenant_id;
         $validated['is_active'] = true;
@@ -101,49 +73,14 @@ class PatientController extends Controller
         return response()->json(['data' => $patient], 201);
     }
 
-    public function update(Request $request, string $id): JsonResponse
+    public function update(UpdatePatientRequest $request, string $id): JsonResponse
     {
         $user = $request->user();
         $patient = Patient::where('tenant_id', $user->tenant_id)->findOrFail($id);
 
-        // Only practice_admin, staff, or the patient themselves
-        if ($user->isPatient()) {
-            abort_if(!$user->patient || $user->patient->id !== $patient->id, 403);
-        } else {
-            abort_if(!in_array($user->role, ['practice_admin', 'staff']), 403);
-        }
+        $this->authorize('update', $patient);
 
-        $validated = $request->validate([
-            'first_name' => 'sometimes|string|max:100',
-            'last_name' => 'sometimes|string|max:100',
-            'email' => 'sometimes|email|max:255',
-            'phone' => 'nullable|string|max:20',
-            'date_of_birth' => 'nullable|date',
-            'gender' => 'nullable|string|max:20',
-            'pronouns' => 'nullable|string|max:50',
-            'preferred_name' => 'nullable|string|max:100',
-            'address' => 'nullable|string|max:255',
-            'city' => 'nullable|string|max:100',
-            'state' => 'nullable|string|max:2',
-            'zip' => 'nullable|string|max:10',
-            'preferred_language' => 'nullable|string|max:50',
-            'marital_status' => 'nullable|string|max:30',
-            'employment_status' => 'nullable|string|max:30',
-            'emergency_contacts' => 'nullable|array',
-            'primary_diagnoses' => 'nullable|array',
-            'allergies' => 'nullable|array',
-            'medications' => 'nullable|array',
-            'primary_care_physician' => 'nullable|string|max:255',
-            'pcp_phone' => 'nullable|string|max:20',
-            'referring_provider' => 'nullable|string|max:255',
-            'insurance_primary' => 'nullable|array',
-            'insurance_secondary' => 'nullable|array',
-            'pharmacy_name' => 'nullable|string|max:255',
-            'pharmacy_address' => 'nullable|string|max:255',
-            'pharmacy_phone' => 'nullable|string|max:20',
-            'referral_source' => 'nullable|string|max:100',
-            'photo_url' => 'nullable|string|max:500',
-        ]);
+        $validated = $request->validated();
 
         $patient->update($validated);
 
@@ -153,9 +90,9 @@ class PatientController extends Controller
     public function destroy(Request $request, string $id): JsonResponse
     {
         $user = $request->user();
-        abort_if(!in_array($user->role, ['practice_admin']), 403);
-
         $patient = Patient::where('tenant_id', $user->tenant_id)->findOrFail($id);
+
+        $this->authorize('delete', $patient);
         $patient->update(['is_active' => false]);
 
         return response()->json(['data' => ['message' => 'Patient deactivated.']]);
@@ -166,9 +103,7 @@ class PatientController extends Controller
         $user = $request->user();
         $patient = Patient::where('tenant_id', $user->tenant_id)->findOrFail($id);
 
-        if ($user->isPatient()) {
-            abort_if(!$user->patient || $user->patient->id !== $patient->id, 403);
-        }
+        $this->authorize('view', $patient);
 
         $memberships = $patient->memberships()
             ->with(['plan', 'entitlements'])
@@ -183,9 +118,7 @@ class PatientController extends Controller
         $user = $request->user();
         $patient = Patient::where('tenant_id', $user->tenant_id)->findOrFail($id);
 
-        if ($user->isPatient()) {
-            abort_if(!$user->patient || $user->patient->id !== $patient->id, 403);
-        }
+        $this->authorize('view', $patient);
 
         $appointments = $patient->appointments()
             ->with(['provider.user', 'appointmentType'])
@@ -200,9 +133,7 @@ class PatientController extends Controller
         $user = $request->user();
         $patient = Patient::where('tenant_id', $user->tenant_id)->findOrFail($id);
 
-        if ($user->isPatient()) {
-            abort_if(!$user->patient || $user->patient->id !== $patient->id, 403);
-        }
+        $this->authorize('view', $patient);
 
         $encounters = $patient->encounters()
             ->with(['provider.user'])
@@ -217,9 +148,7 @@ class PatientController extends Controller
         $user = $request->user();
         $patient = Patient::where('tenant_id', $user->tenant_id)->findOrFail($id);
 
-        if ($user->isPatient()) {
-            abort_if(!$user->patient || $user->patient->id !== $patient->id, 403);
-        }
+        $this->authorize('view', $patient);
 
         $prescriptions = $patient->prescriptions()
             ->with(['provider.user'])
@@ -234,9 +163,7 @@ class PatientController extends Controller
         $user = $request->user();
         $patient = Patient::where('tenant_id', $user->tenant_id)->findOrFail($id);
 
-        if ($user->isPatient()) {
-            abort_if(!$user->patient || $user->patient->id !== $patient->id, 403);
-        }
+        $this->authorize('view', $patient);
 
         $responses = $patient->screeningResponses()
             ->with(['template'])
@@ -251,9 +178,7 @@ class PatientController extends Controller
         $user = $request->user();
         $patient = Patient::where('tenant_id', $user->tenant_id)->findOrFail($id);
 
-        if ($user->isPatient()) {
-            abort_if(!$user->patient || $user->patient->id !== $patient->id, 403);
-        }
+        $this->authorize('view', $patient);
 
         $documents = $patient->documents()
             ->orderBy('created_at', 'desc')

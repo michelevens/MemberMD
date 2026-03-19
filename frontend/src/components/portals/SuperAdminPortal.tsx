@@ -1,7 +1,7 @@
 // ===== SuperAdmin Portal =====
 // Platform admin dashboard for managing all practices (tenants) on MemberMD
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { practiceService, adminService, auditService } from "../../lib/api";
 import { ProgramTemplatesTab } from "./ProgramTemplatesTab";
 import { HeaderToolbar } from "../shared/HeaderToolbar";
@@ -1082,25 +1082,32 @@ export function SuperAdminPortal() {
 
   useEffect(() => { loadData(); }, [loadData]);
 
-  const practices = apiPractices || MOCK_PRACTICES;
+  const practices = useMemo(() => apiPractices || MOCK_PRACTICES, [apiPractices]);
 
   // ─── Computed stats ──────────────────────────────────────────────────────
 
   const totalPractices = apiStats?.total_practices ?? apiStats?.totalPractices ?? practices.length;
   const totalMembers = apiStats?.total_patients ?? apiStats?.totalPatients ?? practices.reduce((sum, p) => sum + p.members, 0);
-  const platformMRR = practices.reduce((sum, p) => sum + p.mrr, 0);
-  const activeTrials = practices.filter((p) => p.status === "trial" || p.status === "pending").length + pendingPractices.length;
+  const platformMRR = useMemo(() => practices.reduce((sum, p) => sum + p.mrr, 0), [practices]);
+  const activeTrials = useMemo(
+    () => practices.filter((p) => p.status === "trial" || p.status === "pending").length + pendingPractices.length,
+    [practices, pendingPractices]
+  );
 
   // ─── Filtered practices ──────────────────────────────────────────────────
 
-  const filteredPractices = practiceSearch
-    ? practices.filter(
-        (p) =>
-          p.name.toLowerCase().includes(practiceSearch.toLowerCase()) ||
-          p.specialty.toLowerCase().includes(practiceSearch.toLowerCase()) ||
-          p.city.toLowerCase().includes(practiceSearch.toLowerCase())
-      )
-    : practices;
+  const filteredPractices = useMemo(
+    () =>
+      practiceSearch
+        ? practices.filter(
+            (p) =>
+              p.name.toLowerCase().includes(practiceSearch.toLowerCase()) ||
+              p.specialty.toLowerCase().includes(practiceSearch.toLowerCase()) ||
+              p.city.toLowerCase().includes(practiceSearch.toLowerCase())
+          )
+        : practices,
+    [practices, practiceSearch]
+  );
 
   // ─── Sidebar ─────────────────────────────────────────────────────────────
 

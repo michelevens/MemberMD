@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\StoreInvoiceRequest;
 use App\Models\Invoice;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -51,20 +52,12 @@ class InvoiceController extends Controller
         return response()->json(['data' => $invoice]);
     }
 
-    public function store(Request $request): JsonResponse
+    public function store(StoreInvoiceRequest $request): JsonResponse
     {
         $user = $request->user();
         abort_if(!$user->isPracticeAdmin(), 403);
 
-        $validated = $request->validate([
-            'patient_id' => 'required|uuid|exists:patients,id',
-            'membership_id' => 'nullable|uuid|exists:patient_memberships,id',
-            'amount' => 'required|numeric|min:0.01',
-            'tax' => 'nullable|numeric|min:0',
-            'description' => 'nullable|string|max:500',
-            'line_items' => 'nullable|array',
-            'due_date' => 'nullable|date',
-        ]);
+        $validated = $request->validated();
 
         $validated['tenant_id'] = $user->tenant_id;
         $validated['status'] = 'pending';

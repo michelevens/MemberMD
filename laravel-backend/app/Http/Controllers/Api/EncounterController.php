@@ -3,6 +3,8 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\StoreEncounterRequest;
+use App\Http\Requests\UpdateEncounterRequest;
 use App\Models\Encounter;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -11,6 +13,8 @@ class EncounterController extends Controller
 {
     public function index(Request $request): JsonResponse
     {
+        $this->authorize('viewAny', Encounter::class);
+
         $user = $request->user();
         $query = Encounter::where('tenant_id', $user->tenant_id)
             ->with(['patient', 'provider.user']);
@@ -56,37 +60,18 @@ class EncounterController extends Controller
             ->with(['patient', 'provider.user', 'appointment', 'prescriptions', 'screeningResponses.template'])
             ->findOrFail($id);
 
-        if ($user->isPatient()) {
-            abort_if($encounter->patient->user_id !== $user->id, 403);
-        }
+        $this->authorize('view', $encounter);
 
         return response()->json(['data' => $encounter]);
     }
 
-    public function store(Request $request): JsonResponse
+    public function store(StoreEncounterRequest $request): JsonResponse
     {
-        $user = $request->user();
-        abort_if(!in_array($user->role, ['practice_admin', 'provider']), 403);
+        $this->authorize('create', Encounter::class);
 
-        $validated = $request->validate([
-            'patient_id' => 'required|uuid|exists:patients,id',
-            'provider_id' => 'required|uuid|exists:providers,id',
-            'appointment_id' => 'nullable|uuid|exists:appointments,id',
-            'encounter_date' => 'required|date',
-            'encounter_type' => 'required|string|in:office_visit,telehealth,phone,urgent,follow_up,annual_wellness,procedure',
-            'chief_complaint' => 'nullable|string|max:500',
-            'subjective' => 'nullable|string',
-            'objective' => 'nullable|string',
-            'assessment' => 'nullable|string',
-            'plan' => 'nullable|string',
-            'diagnoses' => 'nullable|array',
-            'vitals' => 'nullable|array',
-            'prescriptions_written' => 'nullable|array',
-            'labs_ordered' => 'nullable|array',
-            'follow_up_instructions' => 'nullable|string|max:1000',
-            'follow_up_weeks' => 'nullable|integer|min:1|max:52',
-            'screening_scores' => 'nullable|array',
-        ]);
+        $user = $request->user();
+
+        $validated = $request->validated();
 
         $validated['tenant_id'] = $user->tenant_id;
         $validated['status'] = 'draft';
@@ -103,12 +88,12 @@ class EncounterController extends Controller
         ], 201);
     }
 
-    public function update(Request $request, string $id): JsonResponse
+    public function update(UpdateEncounterRequest $request, string $id): JsonResponse
     {
         $user = $request->user();
-        abort_if(!in_array($user->role, ['practice_admin', 'provider']), 403);
-
         $encounter = Encounter::where('tenant_id', $user->tenant_id)->findOrFail($id);
+
+        $this->authorize('update', $encounter);
 
         // Cannot edit signed encounters (unless amending)
         if ($encounter->signed_at && !$request->has('amendment_reason')) {
@@ -117,21 +102,7 @@ class EncounterController extends Controller
             ], 422);
         }
 
-        $validated = $request->validate([
-            'chief_complaint' => 'nullable|string|max:500',
-            'subjective' => 'nullable|string',
-            'objective' => 'nullable|string',
-            'assessment' => 'nullable|string',
-            'plan' => 'nullable|string',
-            'diagnoses' => 'nullable|array',
-            'vitals' => 'nullable|array',
-            'prescriptions_written' => 'nullable|array',
-            'labs_ordered' => 'nullable|array',
-            'follow_up_instructions' => 'nullable|string|max:1000',
-            'follow_up_weeks' => 'nullable|integer|min:1|max:52',
-            'screening_scores' => 'nullable|array',
-            'amendment_reason' => 'nullable|string|max:500',
-        ]);
+        $validated = $request->validated();
 
         // If amending a signed encounter
         if ($encounter->signed_at && isset($validated['amendment_reason'])) {
@@ -148,9 +119,9 @@ class EncounterController extends Controller
     public function sign(Request $request, string $id): JsonResponse
     {
         $user = $request->user();
-        abort_if(!in_array($user->role, ['practice_admin', 'provider']), 403);
-
         $encounter = Encounter::where('tenant_id', $user->tenant_id)->findOrFail($id);
+
+        $this->authorize('sign', $encounter);
 
         if ($encounter->signed_at) {
             return response()->json(['message' => 'Encounter is already signed.'], 422);

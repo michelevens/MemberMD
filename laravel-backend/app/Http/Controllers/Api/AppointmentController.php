@@ -3,6 +3,8 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\StoreAppointmentRequest;
+use App\Http\Requests\UpdateAppointmentRequest;
 use App\Models\Appointment;
 use App\Models\AppointmentWaitlist;
 use App\Models\ProviderAvailability;
@@ -18,6 +20,8 @@ class AppointmentController extends Controller
 {
     public function index(Request $request): JsonResponse
     {
+        $this->authorize('viewAny', Appointment::class);
+
         $user = $request->user();
         $query = Appointment::where('tenant_id', $user->tenant_id)
             ->with(['patient', 'provider.user', 'appointmentType']);
@@ -65,27 +69,18 @@ class AppointmentController extends Controller
             ->with(['patient', 'provider.user', 'appointmentType', 'encounter'])
             ->findOrFail($id);
 
-        if ($user->isPatient()) {
-            abort_if($appointment->patient->user_id !== $user->id, 403);
-        }
+        $this->authorize('view', $appointment);
 
         return response()->json(['data' => $appointment]);
     }
 
-    public function store(Request $request): JsonResponse
+    public function store(StoreAppointmentRequest $request): JsonResponse
     {
-        $user = $request->user();
-        abort_if($user->isPatient() && !$user->patient, 403);
+        $this->authorize('create', Appointment::class);
 
-        $validated = $request->validate([
-            'patient_id' => 'required|uuid|exists:patients,id',
-            'provider_id' => 'required|uuid|exists:providers,id',
-            'appointment_type_id' => 'nullable|uuid|exists:appointment_types,id',
-            'scheduled_at' => 'required|date|after:now',
-            'duration_minutes' => 'required|integer|min:5|max:480',
-            'is_telehealth' => 'sometimes|boolean',
-            'notes' => 'nullable|string|max:1000',
-        ]);
+        $user = $request->user();
+
+        $validated = $request->validated();
 
         // Validate provider availability (check day of week)
         $scheduledAt = \Carbon\Carbon::parse($validated['scheduled_at']);
@@ -165,24 +160,14 @@ class AppointmentController extends Controller
         ], 201);
     }
 
-    public function update(Request $request, string $id): JsonResponse
+    public function update(UpdateAppointmentRequest $request, string $id): JsonResponse
     {
         $user = $request->user();
-        abort_if($user->isPatient(), 403);
-
         $appointment = Appointment::where('tenant_id', $user->tenant_id)->findOrFail($id);
 
-        $validated = $request->validate([
-            'scheduled_at' => 'sometimes|date',
-            'duration_minutes' => 'sometimes|integer|min:5|max:480',
-            'status' => 'sometimes|string|in:scheduled,confirmed,checked_in,in_progress,completed,no_show,cancelled',
-            'provider_id' => 'sometimes|uuid|exists:providers,id',
-            'appointment_type_id' => 'sometimes|uuid|exists:appointment_types,id',
-            'is_telehealth' => 'sometimes|boolean',
-            'video_room_url' => 'nullable|string|max:500',
-            'notes' => 'nullable|string|max:1000',
-            'cancel_reason' => 'nullable|string|max:500',
-        ]);
+        $this->authorize('update', $appointment);
+
+        $validated = $request->validated();
 
         if (isset($validated['status']) && $validated['status'] === 'cancelled') {
             $validated['cancelled_at'] = now();
@@ -200,10 +185,7 @@ class AppointmentController extends Controller
         $user = $request->user();
         $appointment = Appointment::where('tenant_id', $user->tenant_id)->findOrFail($id);
 
-        // Patients can cancel their own appointments
-        if ($user->isPatient()) {
-            abort_if($appointment->patient->user_id !== $user->id, 403);
-        }
+        $this->authorize('delete', $appointment);
 
         $appointment->update([
             'status' => 'cancelled',
@@ -216,6 +198,8 @@ class AppointmentController extends Controller
 
     public function today(Request $request): JsonResponse
     {
+        $this->authorize('viewAny', Appointment::class);
+
         $user = $request->user();
 
         $query = Appointment::where('tenant_id', $user->tenant_id)
@@ -278,6 +262,8 @@ class AppointmentController extends Controller
     {
         $user = $request->user();
         $appointment = Appointment::where('tenant_id', $user->tenant_id)->findOrFail($id);
+
+        $this->authorize('update', $appointment);
 
         $validated = $request->validate([
             'scheduled_at' => 'required|date|after:now',

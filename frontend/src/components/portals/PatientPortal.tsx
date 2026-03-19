@@ -3,7 +3,7 @@
 // Premium health app feel (One Medical / Forward inspired)
 // Mobile-first: top header + bottom nav (no sidebar)
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../contexts/AuthContext";
 import { HeaderToolbar } from "../shared/HeaderToolbar";
@@ -666,12 +666,12 @@ export function PatientPortal() {
   }, []);
 
   // ─── Resolved data (API with mock fallback) ──────────────────────────────
-  const patient = apiPatient || PATIENT;
-  const upcomingAppointments = apiUpcoming || UPCOMING_APPOINTMENTS;
-  const pastAppointments = apiPast || PAST_APPOINTMENTS;
-  const messageThreads = apiThreads || MESSAGE_THREADS;
-  const medications = apiMedications || MEDICATIONS;
-  const documents = apiDocuments || DOCUMENTS;
+  const patient = useMemo(() => apiPatient || PATIENT, [apiPatient]);
+  const upcomingAppointments = useMemo(() => apiUpcoming || UPCOMING_APPOINTMENTS, [apiUpcoming]);
+  const pastAppointments = useMemo(() => apiPast || PAST_APPOINTMENTS, [apiPast]);
+  const messageThreads = useMemo(() => apiThreads || MESSAGE_THREADS, [apiThreads]);
+  const medications = useMemo(() => apiMedications || MEDICATIONS, [apiMedications]);
+  const documents = useMemo(() => apiDocuments || DOCUMENTS, [apiDocuments]);
 
   // Family member handlers — will be wired when Family UI section is built
   void setFamilyMembers; void setShowAddFamily; void setConfirmRemoveId; void familyForm; void _setFamilyForm;
@@ -695,7 +695,7 @@ export function PatientPortal() {
     { id: "account", label: "Account", icon: User },
   ];
 
-  const unreadCount = messageThreads.filter((t) => t.unread).length;
+  const unreadCount = useMemo(() => messageThreads.filter((t) => t.unread).length, [messageThreads]);
 
   // ─── Header ──────────────────────────────────────────────────────────────
 

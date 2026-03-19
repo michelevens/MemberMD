@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\StorePrescriptionRequest;
 use App\Models\Practice;
 use App\Models\Prescription;
 use Illuminate\Http\JsonResponse;
@@ -14,6 +15,8 @@ class PrescriptionController extends Controller
 {
     public function index(Request $request): JsonResponse
     {
+        $this->authorize('viewAny', Prescription::class);
+
         $user = $request->user();
         $query = Prescription::where('tenant_id', $user->tenant_id)
             ->with(['patient', 'provider.user']);
@@ -47,34 +50,18 @@ class PrescriptionController extends Controller
             ->with(['patient', 'provider.user', 'encounter'])
             ->findOrFail($id);
 
-        if ($user->isPatient()) {
-            abort_if($prescription->patient->user_id !== $user->id, 403);
-        }
+        $this->authorize('view', $prescription);
 
         return response()->json(['data' => $prescription]);
     }
 
-    public function store(Request $request): JsonResponse
+    public function store(StorePrescriptionRequest $request): JsonResponse
     {
-        $user = $request->user();
-        abort_if(!in_array($user->role, ['practice_admin', 'provider']), 403);
+        $this->authorize('create', Prescription::class);
 
-        $validated = $request->validate([
-            'patient_id' => 'required|uuid|exists:patients,id',
-            'provider_id' => 'required|uuid|exists:providers,id',
-            'encounter_id' => 'nullable|uuid|exists:encounters,id',
-            'medication_name' => 'required|string|max:255',
-            'dosage' => 'required|string|max:100',
-            'frequency' => 'required|string|max:100',
-            'route' => 'nullable|string|max:50',
-            'quantity' => 'nullable|integer|min:1',
-            'refills' => 'nullable|integer|min:0',
-            'is_controlled' => 'sometimes|boolean',
-            'schedule' => 'nullable|string|max:20',
-            'pharmacy_name' => 'nullable|string|max:255',
-            'pharmacy_phone' => 'nullable|string|max:20',
-            'notes' => 'nullable|string|max:1000',
-        ]);
+        $user = $request->user();
+
+        $validated = $request->validated();
 
         $validated['tenant_id'] = $user->tenant_id;
         $validated['status'] = 'active';
@@ -90,9 +77,9 @@ class PrescriptionController extends Controller
     public function update(Request $request, string $id): JsonResponse
     {
         $user = $request->user();
-        abort_if(!in_array($user->role, ['practice_admin', 'provider']), 403);
-
         $prescription = Prescription::where('tenant_id', $user->tenant_id)->findOrFail($id);
+
+        $this->authorize('update', $prescription);
 
         $validated = $request->validate([
             'dosage' => 'sometimes|string|max:100',
@@ -123,10 +110,7 @@ class PrescriptionController extends Controller
         $user = $request->user();
         $prescription = Prescription::where('tenant_id', $user->tenant_id)->findOrFail($id);
 
-        // Patients can request refills for their own prescriptions
-        if ($user->isPatient()) {
-            abort_if($prescription->patient->user_id !== $user->id, 403);
-        }
+        $this->authorize('requestRefill', $prescription);
 
         if ($prescription->status !== 'active') {
             return response()->json(['message' => 'Can only refill active prescriptions.'], 422);
@@ -146,9 +130,9 @@ class PrescriptionController extends Controller
     public function processRefill(Request $request, string $id): JsonResponse
     {
         $user = $request->user();
-        abort_if(!in_array($user->role, ['practice_admin', 'provider']), 403);
-
         $prescription = Prescription::where('tenant_id', $user->tenant_id)->findOrFail($id);
+
+        $this->authorize('processRefill', $prescription);
 
         $validated = $request->validate([
             'action' => 'required|string|in:approve,deny',
@@ -182,6 +166,8 @@ class PrescriptionController extends Controller
             ->with(['patient', 'provider.user'])
             ->findOrFail($id);
 
+        $this->authorize('generatePdf', $prescription);
+
         $practice = Practice::find($user->tenant_id);
 
         $pdf = Pdf::loadView('pdf.prescription', [
@@ -205,11 +191,11 @@ class PrescriptionController extends Controller
     public function efax(Request $request, string $id): JsonResponse
     {
         $user = $request->user();
-        abort_if(!in_array($user->role, ['practice_admin', 'provider']), 403);
-
         $prescription = Prescription::where('tenant_id', $user->tenant_id)
             ->with(['patient', 'provider.user'])
             ->findOrFail($id);
+
+        $this->authorize('efax', $prescription);
 
         $validated = $request->validate([
             'pharmacy_fax' => 'required|string|max:20',

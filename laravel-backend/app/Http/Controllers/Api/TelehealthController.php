@@ -28,6 +28,19 @@ class TelehealthController extends Controller
         $appointment = Appointment::where('tenant_id', $user->tenant_id)
             ->findOrFail($validated['appointment_id']);
 
+        // Validate recording consent before enabling recording
+        if (!empty($validated['recording_enabled'])) {
+            $hasConsent = \App\Models\ConsentSignature::where('patient_id', $appointment->patient_id)
+                ->whereHas('template', fn($q) => $q->where('type', 'telehealth_recording'))
+                ->exists();
+
+            if (!$hasConsent) {
+                return response()->json([
+                    'message' => 'Patient must sign a telehealth recording consent before recording can be enabled.',
+                ], 422);
+            }
+        }
+
         // Check if session already exists
         $existing = TelehealthSession::where('appointment_id', $appointment->id)->first();
         if ($existing) {

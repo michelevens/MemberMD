@@ -12,6 +12,8 @@ class MessageController extends Controller
 {
     public function index(Request $request): JsonResponse
     {
+        $this->authorize('viewAny', Message::class);
+
         $user = $request->user();
 
         // Get latest message per thread where user is sender or recipient
@@ -61,6 +63,8 @@ class MessageController extends Controller
 
     public function store(Request $request): JsonResponse
     {
+        $this->authorize('create', Message::class);
+
         $user = $request->user();
 
         $validated = $request->validate([

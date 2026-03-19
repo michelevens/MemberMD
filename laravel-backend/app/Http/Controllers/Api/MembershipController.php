@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\StoreMembershipRequest;
 use App\Models\PatientMembership;
 use App\Models\PatientEntitlement;
 use App\Models\MembershipPlan;
@@ -49,16 +50,12 @@ class MembershipController extends Controller
         return response()->json(['data' => $membership]);
     }
 
-    public function store(Request $request): JsonResponse
+    public function store(StoreMembershipRequest $request): JsonResponse
     {
         $user = $request->user();
         abort_if(!in_array($user->role, ['practice_admin', 'staff']), 403);
 
-        $validated = $request->validate([
-            'patient_id' => 'required|uuid|exists:patients,id',
-            'plan_id' => 'required|uuid|exists:membership_plans,id',
-            'billing_frequency' => 'required|string|in:monthly,annual',
-        ]);
+        $validated = $request->validated();
 
         // Verify plan belongs to tenant and is active
         $plan = MembershipPlan::where('tenant_id', $user->tenant_id)

@@ -2,7 +2,7 @@
 // Main dashboard for DPC practice owners/admins — manage membership practice
 // Tabs: Dashboard, Patient Roster, Membership Plans, Appointments, Messages, Invoices, + Coming Soon tabs
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../contexts/AuthContext";
 import { dashboardService, membershipPlanService, messageService, patientService, appointmentService, encounterService, prescriptionService, invoiceService, programService } from "../../lib/api";
@@ -960,7 +960,7 @@ export function PracticePortal() {
   };
 
   // ─── Appointment Actions ──────────────────────────────────────────
-  const handleCheckIn = async (aptId: string) => {
+  const handleCheckIn = useCallback(async (aptId: string) => {
     try {
       const res = await appointmentService.checkIn(aptId);
       if (res.data || !res.error) {
@@ -972,9 +972,9 @@ export function PracticePortal() {
     } catch (err: unknown) {
       setToast({ message: err instanceof Error ? err.message : "Check-in failed.", type: "error" });
     }
-  };
+  }, [loadPracticeData]);
 
-  const handleCancelAppointment = async (aptId: string) => {
+  const handleCancelAppointment = useCallback(async (aptId: string) => {
     try {
       const res = await appointmentService.cancel(aptId, "Cancelled by practice");
       if (res.data || !res.error) {
@@ -986,10 +986,10 @@ export function PracticePortal() {
     } catch (err: unknown) {
       setToast({ message: err instanceof Error ? err.message : "Cancel failed.", type: "error" });
     }
-  };
+  }, [loadPracticeData]);
 
   // ─── Encounter Actions ─────────────────────────────────────────────
-  const handleSignEncounter = async (encId: string) => {
+  const handleSignEncounter = useCallback(async (encId: string) => {
     try {
       const res = await encounterService.update(encId, { status: "signed" });
       if (res.data || !res.error) {
@@ -1001,10 +1001,10 @@ export function PracticePortal() {
     } catch (err: unknown) {
       setToast({ message: err instanceof Error ? err.message : "Sign failed.", type: "error" });
     }
-  };
+  }, [loadPracticeData]);
 
   // ─── Prescription Actions ──────────────────────────────────────────
-  const handleRefillPrescription = async (rxId: string) => {
+  const handleRefillPrescription = useCallback(async (rxId: string) => {
     try {
       const res = await prescriptionService.refill(rxId);
       if (res.data || !res.error) {
@@ -1016,9 +1016,9 @@ export function PracticePortal() {
     } catch (err: unknown) {
       setToast({ message: err instanceof Error ? err.message : "Refill failed.", type: "error" });
     }
-  };
+  }, [loadPracticeData]);
 
-  const handleDiscontinuePrescription = async (rxId: string) => {
+  const handleDiscontinuePrescription = useCallback(async (rxId: string) => {
     try {
       const res = await prescriptionService.cancel(rxId);
       if (res.data || !res.error) {
@@ -1030,7 +1030,7 @@ export function PracticePortal() {
     } catch (err: unknown) {
       setToast({ message: err instanceof Error ? err.message : "Failed to discontinue.", type: "error" });
     }
-  };
+  }, [loadPracticeData]);
 
   // ─── eFax Prescription ──────────────────────────────────────────────
   const handleOpenEfax = (rx: { id: string; medication: string; dosage: string; patient: string; pharmacyPhone?: string }) => {
@@ -1060,12 +1060,12 @@ export function PracticePortal() {
     setEfaxLoading(false);
   };
 
-  const handleDownloadRxPdf = (rxId: string) => {
+  const handleDownloadRxPdf = useCallback((rxId: string) => {
     prescriptionService.downloadPdf(rxId);
-  };
+  }, []);
 
   // ─── Invoice Actions ──────────────────────────────────────────────
-  const handleSendInvoice = async (invId: string) => {
+  const handleSendInvoice = useCallback(async (invId: string) => {
     try {
       const res = await invoiceService.send(invId);
       if (res.data || !res.error) {
@@ -1077,9 +1077,9 @@ export function PracticePortal() {
     } catch (err: unknown) {
       setToast({ message: err instanceof Error ? err.message : "Send failed.", type: "error" });
     }
-  };
+  }, [loadPracticeData]);
 
-  const handleMarkInvoicePaid = async (invId: string) => {
+  const handleMarkInvoicePaid = useCallback(async (invId: string) => {
     try {
       const res = await invoiceService.update(invId, { status: "paid", paidAt: new Date().toISOString() });
       if (res.data || !res.error) {
@@ -1091,7 +1091,7 @@ export function PracticePortal() {
     } catch (err: unknown) {
       setToast({ message: err instanceof Error ? err.message : "Failed.", type: "error" });
     }
-  };
+  }, [loadPracticeData]);
 
   // Polling for unread messages
   useEffect(() => {
@@ -1108,6 +1108,47 @@ export function PracticePortal() {
   const practiceName = auth.user
     ? `${auth.user.firstName}'s Practice`
     : "My Practice";
+
+  // ─── Memoized Data ──────────────────────────────────────────────────────
+
+  const patients = useMemo(() => apiPatients || MOCK_PATIENTS, [apiPatients]);
+
+  const filteredPatients = useMemo(
+    () =>
+      patients.filter(
+        (p) =>
+          p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          p.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          p.plan.toLowerCase().includes(searchQuery.toLowerCase())
+      ),
+    [patients, searchQuery]
+  );
+
+  const appointments = useMemo(() => apiAppointments || MOCK_APPOINTMENTS, [apiAppointments]);
+
+  const telehealthAppointments = useMemo(
+    () => appointments.filter((a: typeof MOCK_APPOINTMENTS[0]) => a.isTelehealth),
+    [appointments]
+  );
+
+  const invoices = useMemo(() => apiInvoices || MOCK_INVOICES, [apiInvoices]);
+
+  const invoiceSummary = useMemo(() => ({
+    total: invoices.reduce((s: number, i: { amount: number }) => s + i.amount, 0),
+    paid: invoices.filter((i: { status: string }) => i.status === "paid").reduce((s: number, i: { amount: number }) => s + i.amount, 0),
+    open: invoices.filter((i: { status: string }) => i.status === "open").reduce((s: number, i: { amount: number }) => s + i.amount, 0),
+    overdue: invoices.filter((i: { status: string }) => i.status === "overdue").reduce((s: number, i: { amount: number }) => s + i.amount, 0),
+  }), [invoices]);
+
+  const prescriptionCounts = useMemo(() => {
+    if (!apiPrescriptions) return { active: 45, sent: 0, refillRequested: 3, discontinued: 12 };
+    return {
+      active: apiPrescriptions.filter((rx: { status: string }) => rx.status === "active").length,
+      sent: apiPrescriptions.filter((rx: { status: string }) => rx.status === "sent").length,
+      refillRequested: apiPrescriptions.filter((rx: { status: string }) => rx.status === "refill_requested").length,
+      discontinued: apiPrescriptions.filter((rx: { status: string }) => rx.status === "discontinued").length,
+    };
+  }, [apiPrescriptions]);
 
   // ─── Sidebar ────────────────────────────────────────────────────────────
 
@@ -1418,13 +1459,7 @@ export function PracticePortal() {
   // ─── Patient Roster Tab ─────────────────────────────────────────────────
 
   function renderRoster() {
-    const patients = apiPatients || MOCK_PATIENTS;
-    const filtered = patients.filter(
-      (p) =>
-        p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        p.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        p.plan.toLowerCase().includes(searchQuery.toLowerCase())
-    );
+    const filtered = filteredPatients;
 
     return (
       <div className="space-y-4">
@@ -2772,7 +2807,6 @@ export function PracticePortal() {
   // ─── Telehealth Tab ─────────────────────────────────────────────────────
 
   function renderTelehealth() {
-    const telehealthAppointments = (apiAppointments || MOCK_APPOINTMENTS).filter((a: typeof MOCK_APPOINTMENTS[0]) => a.isTelehealth);
     const platformLabels: Record<string, string> = {
       zoom: "Zoom",
       doxy: "Doxy.me",
@@ -3183,7 +3217,6 @@ export function PracticePortal() {
   // ─── Invoices Tab ───────────────────────────────────────────────────────
 
   function renderInvoices() {
-    const invoices = apiInvoices || MOCK_INVOICES;
     return (
       <div className="space-y-4">
         <div className="flex items-center justify-between">
@@ -3205,25 +3238,25 @@ export function PracticePortal() {
           <div className="glass rounded-lg p-4">
             <p className="text-xs text-slate-500 mb-1">Total Invoiced</p>
             <p className="text-xl font-bold text-slate-800">
-              ${invoices.reduce((s, i) => s + i.amount, 0).toLocaleString("en-US", { minimumFractionDigits: 2 })}
+              ${invoiceSummary.total.toLocaleString("en-US", { minimumFractionDigits: 2 })}
             </p>
           </div>
           <div className="glass rounded-lg p-4">
             <p className="text-xs text-slate-500 mb-1">Paid</p>
             <p className="text-xl font-bold" style={{ color: "#2f8132" }}>
-              ${invoices.filter((i) => i.status === "paid").reduce((s, i) => s + i.amount, 0).toLocaleString("en-US", { minimumFractionDigits: 2 })}
+              ${invoiceSummary.paid.toLocaleString("en-US", { minimumFractionDigits: 2 })}
             </p>
           </div>
           <div className="glass rounded-lg p-4">
             <p className="text-xs text-slate-500 mb-1">Open</p>
             <p className="text-xl font-bold" style={{ color: "#334e68" }}>
-              ${invoices.filter((i) => i.status === "open").reduce((s, i) => s + i.amount, 0).toLocaleString("en-US", { minimumFractionDigits: 2 })}
+              ${invoiceSummary.open.toLocaleString("en-US", { minimumFractionDigits: 2 })}
             </p>
           </div>
           <div className="glass rounded-lg p-4">
             <p className="text-xs text-slate-500 mb-1">Overdue</p>
             <p className="text-xl font-bold" style={{ color: "#dc2626" }}>
-              ${invoices.filter((i) => i.status === "overdue").reduce((s, i) => s + i.amount, 0).toLocaleString("en-US", { minimumFractionDigits: 2 })}
+              ${invoiceSummary.overdue.toLocaleString("en-US", { minimumFractionDigits: 2 })}
             </p>
           </div>
         </div>
@@ -3777,19 +3810,19 @@ export function PracticePortal() {
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <div className="glass rounded-lg p-4">
             <p className="text-xs text-slate-500 mb-1">Active</p>
-            <p className="text-2xl font-bold" style={{ color: "#2f8132" }}>{apiPrescriptions ? apiPrescriptions.filter(rx => rx.status === "active").length : 45}</p>
+            <p className="text-2xl font-bold" style={{ color: "#2f8132" }}>{prescriptionCounts.active}</p>
           </div>
           <div className="glass rounded-lg p-4">
             <p className="text-xs text-slate-500 mb-1">eFaxed</p>
-            <p className="text-2xl font-bold" style={{ color: "#1d4ed8" }}>{apiPrescriptions ? apiPrescriptions.filter(rx => rx.status === "sent").length : 0}</p>
+            <p className="text-2xl font-bold" style={{ color: "#1d4ed8" }}>{prescriptionCounts.sent}</p>
           </div>
           <div className="glass rounded-lg p-4">
             <p className="text-xs text-slate-500 mb-1">Refill Requests</p>
-            <p className="text-2xl font-bold" style={{ color: "#d97706" }}>{apiPrescriptions ? apiPrescriptions.filter(rx => rx.status === "refill_requested").length : 3}</p>
+            <p className="text-2xl font-bold" style={{ color: "#d97706" }}>{prescriptionCounts.refillRequested}</p>
           </div>
           <div className="glass rounded-lg p-4">
             <p className="text-xs text-slate-500 mb-1">Discontinued</p>
-            <p className="text-2xl font-bold text-slate-500">{apiPrescriptions ? apiPrescriptions.filter(rx => rx.status === "discontinued").length : 12}</p>
+            <p className="text-2xl font-bold text-slate-500">{prescriptionCounts.discontinued}</p>
           </div>
         </div>
 
