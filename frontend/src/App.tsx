@@ -53,6 +53,11 @@ const PatientPortal = namedLazy(
   "PatientPortal"
 );
 
+const PracticeRegistration = namedLazy(
+  () => import("./components/auth/PracticeRegistration"),
+  "PracticeRegistration"
+);
+
 // ─── Loading Fallback ─────────────────────────────────────────────────────────
 
 function LoadingFallback() {
@@ -80,7 +85,7 @@ function AuthGate() {
     return (
       <Routes>
         <Route path="/login" element={<LoginScreen />} />
-        <Route path="/register" element={<div className="min-h-screen flex items-center justify-center"><p className="text-slate-500">Registration — Coming Soon</p></div>} />
+        <Route path="/register" element={<Suspense fallback={<LoadingFallback />}><PracticeRegistration /></Suspense>} />
         <Route path="/intake/:tenantCode" element={<div className="min-h-screen flex items-center justify-center"><p className="text-slate-500">Patient Intake — Coming Soon</p></div>} />
         <Route path="*" element={<Navigate to="/login" replace />} />
       </Routes>
