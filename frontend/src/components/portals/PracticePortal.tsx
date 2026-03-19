@@ -1993,7 +1993,7 @@ export function PracticePortal() {
                       <span className="text-sm opacity-80">/month</span>
                     </div>
                     <p className="text-sm opacity-70 mt-1">
-                      ${plan.annualPrice ?? plan.annual_price ?? 0}/year (save {Math.round((1 - (plan.annualPrice ?? plan.annual_price ?? 0) / (monthlyPrice * 12)) * 100)}%)
+                      ${plan.annualPrice ?? plan.annual_price ?? 0}/year{monthlyPrice > 0 ? ` (save ${Math.round((1 - (plan.annualPrice ?? plan.annual_price ?? 0) / (monthlyPrice * 12)) * 100)}%)` : ""}
                     </p>
                   </div>
                 </div>
@@ -2001,7 +2001,7 @@ export function PracticePortal() {
                 {/* Entitlements */}
                 <div className="p-5 flex-1">
                   <ul className="space-y-2.5">
-                    {(plan.entitlements as string[]).map((item: string, i: number) => (
+                    {(Array.isArray(plan.entitlements) ? plan.entitlements : Object.entries(plan.entitlements || {}).map(([k, v]) => `${k.replace(/_/g, " ")}: ${v}`)).map((item: string, i: number) => (
                       <li key={i} className="flex items-start gap-2 text-sm text-slate-600">
                         <Check
                           className="w-4 h-4 shrink-0 mt-0.5"
