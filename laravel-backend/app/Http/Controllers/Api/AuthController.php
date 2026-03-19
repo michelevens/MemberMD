@@ -70,6 +70,7 @@ class AuthController extends Controller
         // Create the practice admin user
         $user = User::create([
             'tenant_id' => $practice->id,
+            'name' => $validated['first_name'] . ' ' . $validated['last_name'],
             'first_name' => $validated['first_name'],
             'last_name' => $validated['last_name'],
             'email' => $validated['email'],
