@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Models\Practice;
+use App\Services\PracticeBootstrapService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
@@ -62,6 +63,9 @@ class AuthController extends Controller
             'owner_email' => $validated['email'],
             'is_active' => true,
         ]);
+
+        // Bootstrap practice with specialty defaults (plans, appointment types, screenings, consents, settings)
+        (new PracticeBootstrapService())->bootstrap($practice);
 
         // Create the practice admin user
         $user = User::create([
