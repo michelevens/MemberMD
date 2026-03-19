@@ -620,6 +620,12 @@ export function PracticePortal() {
   const [rxForm, setRxForm] = useState({ patientId: "", medicationName: "", dosage: "", frequency: "", route: "oral", quantity: "30", refills: "3", isControlled: false, schedule: "", pharmacyName: "", pharmacyPhone: "", notes: "" });
   const [rxLoading, setRxLoading] = useState(false);
 
+  // ─── eFax Modal ───────────────────────────────────────────────────────
+  const [showEfaxModal, setShowEfaxModal] = useState(false);
+  const [efaxTarget, setEfaxTarget] = useState<{ id: string; medication: string; dosage: string; patient: string; pharmacyPhone: string }>({ id: "", medication: "", dosage: "", patient: "", pharmacyPhone: "" });
+  const [efaxFaxNumber, setEfaxFaxNumber] = useState("");
+  const [efaxLoading, setEfaxLoading] = useState(false);
+
   // ─── Edit Patient Modal ─────────────────────────────────────────────
   const [showEditPatient, setShowEditPatient] = useState(false);
   const [editPatientForm, setEditPatientForm] = useState<{ id: string; firstName: string; lastName: string; email: string; phone: string; dateOfBirth: string; gender: string; addressLine1: string; city: string; state: string; zip: string; preferredLanguage: string }>({ id: "", firstName: "", lastName: "", email: "", phone: "", dateOfBirth: "", gender: "male", addressLine1: "", city: "", state: "", zip: "", preferredLanguage: "English" });
@@ -1025,6 +1031,38 @@ export function PracticePortal() {
     } catch (err: unknown) {
       setToast({ message: err instanceof Error ? err.message : "Failed to discontinue.", type: "error" });
     }
+  };
+
+  // ─── eFax Prescription ──────────────────────────────────────────────
+  const handleOpenEfax = (rx: { id: string; medication: string; dosage: string; patient: string; pharmacyPhone?: string }) => {
+    setEfaxTarget({ id: rx.id, medication: rx.medication, dosage: rx.dosage, patient: rx.patient, pharmacyPhone: rx.pharmacyPhone || "" });
+    setEfaxFaxNumber(rx.pharmacyPhone || "");
+    setShowEfaxModal(true);
+  };
+
+  const handleSendEfax = async () => {
+    if (!efaxFaxNumber.trim()) {
+      setToast({ message: "Pharmacy fax number is required.", type: "error" });
+      return;
+    }
+    setEfaxLoading(true);
+    try {
+      const res = await prescriptionService.efax(efaxTarget.id, efaxFaxNumber.trim());
+      if (res.data || !res.error) {
+        setToast({ message: "Prescription eFaxed successfully.", type: "success" });
+        setShowEfaxModal(false);
+        loadPracticeData();
+      } else {
+        setToast({ message: res.error || "Failed to send eFax.", type: "error" });
+      }
+    } catch (err: unknown) {
+      setToast({ message: err instanceof Error ? err.message : "eFax failed.", type: "error" });
+    }
+    setEfaxLoading(false);
+  };
+
+  const handleDownloadRxPdf = (rxId: string) => {
+    prescriptionService.downloadPdf(rxId);
   };
 
   // ─── Invoice Actions ──────────────────────────────────────────────
@@ -3725,6 +3763,7 @@ export function PracticePortal() {
 
     const rxStatusConfig: Record<string, { bg: string; text: string; dot: string }> = {
       active: { bg: "#ecf9ec", text: "#2f8132", dot: "#3f9142" },
+      sent: { bg: "#eff6ff", text: "#1d4ed8", dot: "#3b82f6" },
       discontinued: { bg: "#f1f5f9", text: "#64748b", dot: "#94a3b8" },
       refill_requested: { bg: "#fffbeb", text: "#d97706", dot: "#f59e0b" },
     };
@@ -3736,10 +3775,14 @@ export function PracticePortal() {
         </div>
 
         {/* Stats */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <div className="glass rounded-lg p-4">
             <p className="text-xs text-slate-500 mb-1">Active</p>
             <p className="text-2xl font-bold" style={{ color: "#2f8132" }}>{apiPrescriptions ? apiPrescriptions.filter(rx => rx.status === "active").length : 45}</p>
+          </div>
+          <div className="glass rounded-lg p-4">
+            <p className="text-xs text-slate-500 mb-1">eFaxed</p>
+            <p className="text-2xl font-bold" style={{ color: "#1d4ed8" }}>{apiPrescriptions ? apiPrescriptions.filter(rx => rx.status === "sent").length : 0}</p>
           </div>
           <div className="glass rounded-lg p-4">
             <p className="text-xs text-slate-500 mb-1">Refill Requests</p>
@@ -3834,6 +3877,8 @@ export function PracticePortal() {
                             <Pencil className="w-4 h-4" />
                           </button>
                           <MoreActionsDropdown actions={[
+                            { label: "Download PDF", onClick: () => handleDownloadRxPdf(rx.id) },
+                            { label: "eFax to Pharmacy", onClick: () => handleOpenEfax(rx) },
                             ...(rx.status === "active" ? [
                               { label: "Refill", onClick: () => handleRefillPrescription(rx.id) },
                               { label: "Discontinue", onClick: () => setConfirmDialog({ title: "Discontinue Prescription", message: `Discontinue ${rx.medication} ${rx.dosage} for ${rx.patient}?`, confirmLabel: "Discontinue", danger: true, onConfirm: () => { handleDiscontinuePrescription(rx.id); setConfirmDialog(null); } }), danger: true },
@@ -4922,6 +4967,47 @@ export function PracticePortal() {
                 disabled={rxLoading}
               >
                 {rxLoading ? "Creating..." : "Create Prescription"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─── eFax Prescription Modal ────────────────────────────────────── */}
+      {showEfaxModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: "rgba(0,0,0,0.5)" }}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
+            <div className="p-6" style={{ background: "linear-gradient(135deg, #1B2B4D, #243b53)" }}>
+              <h3 className="text-xl font-bold text-white">eFax Prescription to Pharmacy</h3>
+              <p className="text-sm text-slate-300 mt-1">Send this prescription via secure eFax.</p>
+            </div>
+            <div className="p-6 space-y-4">
+              <div className="rounded-lg p-4" style={{ backgroundColor: "#f8fafc", border: "1px solid #e2e8f0" }}>
+                <div className="text-sm text-slate-500">Medication</div>
+                <div className="font-semibold text-slate-800">{efaxTarget.medication} {efaxTarget.dosage}</div>
+                <div className="text-sm text-slate-500 mt-2">Patient</div>
+                <div className="font-medium text-slate-700">{efaxTarget.patient}</div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Pharmacy Fax Number *</label>
+                <input
+                  className="w-full border rounded-lg px-3 py-2 text-sm"
+                  value={efaxFaxNumber}
+                  onChange={e => setEfaxFaxNumber(e.target.value)}
+                  placeholder="(407) 555-9877"
+                />
+                <p className="text-xs text-slate-400 mt-1">Enter the pharmacy fax number including area code.</p>
+              </div>
+            </div>
+            <div className="px-6 pb-6 flex items-center justify-end gap-3">
+              <button className="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100 transition-colors" onClick={() => setShowEfaxModal(false)}>Cancel</button>
+              <button
+                className="px-6 py-2 rounded-lg text-sm font-medium text-white transition-colors"
+                style={{ backgroundColor: "#1d4ed8" }}
+                onClick={handleSendEfax}
+                disabled={efaxLoading}
+              >
+                {efaxLoading ? "Sending..." : "Send eFax"}
               </button>
             </div>
           </div>

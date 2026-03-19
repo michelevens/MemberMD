@@ -467,7 +467,8 @@ export type PrescriptionStatus =
   | "active"
   | "completed"
   | "canceled"
-  | "on_hold";
+  | "on_hold"
+  | "sent";
 
 export interface Prescription {
   id: string;
@@ -485,6 +486,8 @@ export interface Prescription {
   startDate: string;
   endDate: string | null;
   pharmacy: string | null;
+  pharmacyPhone: string | null;
+  pharmacyFax: string | null;
   status: PrescriptionStatus;
   notes: string | null;
   patient?: Patient;

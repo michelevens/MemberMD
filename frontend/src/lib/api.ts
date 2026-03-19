@@ -701,6 +701,13 @@ export const prescriptionService = {
     if (useMockData()) return mockUpdate<Prescription>({ id, status: "canceled" });
     return apiFetch<Prescription>(`/prescriptions/${id}`, { method: "PUT", body: JSON.stringify({ status: "canceled" }) });
   },
+  downloadPdf: (id: string) => {
+    window.open(`${API_BASE_URL}/prescriptions/${id}/pdf`, "_blank");
+  },
+  efax: async (id: string, pharmacyFax: string): Promise<ApiResponse<Prescription>> => {
+    if (useMockData()) return mockUpdate<Prescription>({ id, status: "sent" as "active" });
+    return apiFetch<Prescription>(`/prescriptions/${id}/efax`, { method: "POST", body: JSON.stringify({ pharmacyFax }) });
+  },
 };
 
 // ─── Screenings ─────────────────────────────────────────────────────────────

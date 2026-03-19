@@ -3,9 +3,12 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\Practice;
 use App\Models\Prescription;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Http;
+use Barryvdh\DomPDF\Facade\Pdf;
 
 class PrescriptionController extends Controller
 {
@@ -100,7 +103,7 @@ class PrescriptionController extends Controller
             'pharmacy_name' => 'nullable|string|max:255',
             'pharmacy_phone' => 'nullable|string|max:20',
             'notes' => 'nullable|string|max:1000',
-            'status' => 'sometimes|string|in:active,discontinued,completed',
+            'status' => 'sometimes|string|in:active,discontinued,completed,sent',
             'discontinue_reason' => 'nullable|string|max:500',
         ]);
 
@@ -167,5 +170,103 @@ class PrescriptionController extends Controller
         return response()->json([
             'data' => $prescription->fresh()->load(['patient', 'provider.user'])
         ]);
+    }
+
+    /**
+     * Generate Rx PDF for download.
+     */
+    public function generatePdf(Request $request, string $id): \Illuminate\Http\Response
+    {
+        $user = $request->user();
+        $prescription = Prescription::where('tenant_id', $user->tenant_id)
+            ->with(['patient', 'provider.user'])
+            ->findOrFail($id);
+
+        $practice = Practice::find($user->tenant_id);
+
+        $pdf = Pdf::loadView('pdf.prescription', [
+            'prescription' => $prescription,
+            'patient' => $prescription->patient,
+            'provider' => $prescription->provider,
+            'practice' => $practice,
+        ]);
+
+        $pdf->setPaper('letter');
+
+        $filename = "rx_{$prescription->patient->last_name}_{$prescription->medication_name}.pdf";
+        $filename = preg_replace('/[^a-zA-Z0-9_\-.]/', '_', $filename);
+
+        return $pdf->download($filename);
+    }
+
+    /**
+     * eFax prescription to pharmacy via SRFax.
+     */
+    public function efax(Request $request, string $id): JsonResponse
+    {
+        $user = $request->user();
+        abort_if(!in_array($user->role, ['practice_admin', 'provider']), 403);
+
+        $prescription = Prescription::where('tenant_id', $user->tenant_id)
+            ->with(['patient', 'provider.user'])
+            ->findOrFail($id);
+
+        $validated = $request->validate([
+            'pharmacy_fax' => 'required|string|max:20',
+        ]);
+
+        $practice = Practice::find($user->tenant_id);
+
+        // Generate PDF
+        $pdf = Pdf::loadView('pdf.prescription', [
+            'prescription' => $prescription,
+            'patient' => $prescription->patient,
+            'provider' => $prescription->provider,
+            'practice' => $practice,
+        ]);
+
+        $pdfContent = $pdf->output();
+        $base64Pdf = base64_encode($pdfContent);
+
+        // Send via SRFax API
+        try {
+            $response = Http::post('https://www.srfax.com/SRF_SecWebSvc.php', [
+                'action' => 'Queue_Fax',
+                'access_id' => config('services.srfax.access_id'),
+                'access_pwd' => config('services.srfax.access_pwd'),
+                'sCallerID' => config('services.srfax.caller_id'),
+                'sSenderEmail' => config('services.srfax.sender_email'),
+                'sFaxType' => 'SINGLE',
+                'sToFaxNumber' => $validated['pharmacy_fax'],
+                'sFileName_1' => "rx_{$prescription->id}.pdf",
+                'sFileContent_1' => $base64Pdf,
+                'sCoverPage' => 'N',
+            ]);
+
+            $result = $response->json();
+
+            if (($result['Status'] ?? '') === 'Success') {
+                $prescription->update([
+                    'status' => 'sent',
+                    'notes' => ($prescription->notes ? $prescription->notes . "\n" : '') .
+                        "eFaxed to {$validated['pharmacy_fax']} on " . now()->format('Y-m-d H:i:s') .
+                        " | Fax ID: " . ($result['Result'] ?? 'N/A'),
+                ]);
+
+                return response()->json([
+                    'data' => $prescription->fresh()->load(['patient', 'provider.user']),
+                    'message' => 'Prescription faxed successfully.',
+                    'fax_id' => $result['Result'] ?? null,
+                ]);
+            }
+
+            return response()->json([
+                'message' => 'Fax failed: ' . ($result['Result'] ?? 'Unknown error'),
+            ], 422);
+        } catch (\Throwable $e) {
+            return response()->json([
+                'message' => 'eFax service error: ' . $e->getMessage(),
+            ], 500);
+        }
     }
 }

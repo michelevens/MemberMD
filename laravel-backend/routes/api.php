@@ -97,6 +97,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::apiResource('encounters', EncounterController::class)->except(['destroy']);
 
     // ===== Prescriptions =====
+    Route::get('/prescriptions/{id}/pdf', [PrescriptionController::class, 'generatePdf']);
+    Route::post('/prescriptions/{id}/efax', [PrescriptionController::class, 'efax']);
     Route::post('/prescriptions/{id}/refill', [PrescriptionController::class, 'requestRefill']);
     Route::put('/prescriptions/{id}/refill', [PrescriptionController::class, 'processRefill']);
     Route::apiResource('prescriptions', PrescriptionController::class)->except(['destroy']);

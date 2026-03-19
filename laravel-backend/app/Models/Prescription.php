@@ -20,6 +20,7 @@ class Prescription extends Model
         'is_controlled', 'schedule',
         'pharmacy_name', 'pharmacy_phone',
         'status', 'prescribed_at', 'discontinued_at', 'discontinue_reason',
+        'dispense_as_written', 'dea_number', 'pharmacy_fax',
         'notes',
     ];
 
@@ -27,6 +28,7 @@ class Prescription extends Model
         'quantity' => 'integer',
         'refills' => 'integer',
         'is_controlled' => 'boolean',
+        'dispense_as_written' => 'boolean',
         'prescribed_at' => 'datetime',
         'discontinued_at' => 'datetime',
     ];

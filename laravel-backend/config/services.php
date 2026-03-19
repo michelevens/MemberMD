@@ -40,4 +40,11 @@ return [
         'domain' => env('DAILY_DOMAIN', 'membermd'),
     ],
 
+    'srfax' => [
+        'access_id' => env('SRFAX_ACCESS_ID'),
+        'access_pwd' => env('SRFAX_ACCESS_PWD'),
+        'caller_id' => env('SRFAX_CALLER_ID', '0000000000'),
+        'sender_email' => env('SRFAX_SENDER_EMAIL', 'noreply@membermd.io'),
+    ],
+
 ];
