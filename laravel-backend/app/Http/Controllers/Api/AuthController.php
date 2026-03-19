@@ -67,7 +67,12 @@ class AuthController extends Controller
         ]);
 
         // Bootstrap practice with specialty defaults (plans, appointment types, screenings, consents, settings)
-        (new PracticeBootstrapService())->bootstrap($practice);
+        try {
+            (new PracticeBootstrapService())->bootstrap($practice);
+        } catch (\Throwable $e) {
+            // Don't block registration if bootstrap fails — practice can be configured later
+            \Illuminate\Support\Facades\Log::warning('Bootstrap failed for practice ' . $practice->id . ': ' . $e->getMessage());
+        }
 
         // Create the practice admin user
         $user = User::create([
