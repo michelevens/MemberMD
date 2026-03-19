@@ -58,6 +58,16 @@ const PracticeRegistration = namedLazy(
   "PracticeRegistration"
 );
 
+const PlanWidget = namedLazy(
+  () => import("./components/widgets/PlanWidget"),
+  "PlanWidget"
+);
+
+const EnrollmentWidget = namedLazy(
+  () => import("./components/widgets/EnrollmentWidget"),
+  "EnrollmentWidget"
+);
+
 // ─── Loading Fallback ─────────────────────────────────────────────────────────
 
 function LoadingFallback() {
@@ -86,6 +96,8 @@ function AuthGate() {
       <Routes>
         <Route path="/login" element={<LoginScreen />} />
         <Route path="/register" element={<Suspense fallback={<LoadingFallback />}><PracticeRegistration /></Suspense>} />
+        <Route path="/plans/:tenantCode" element={<Suspense fallback={<LoadingFallback />}><PlanWidget /></Suspense>} />
+        <Route path="/enroll/:tenantCode" element={<Suspense fallback={<LoadingFallback />}><EnrollmentWidget /></Suspense>} />
         <Route path="/intake/:tenantCode" element={<div className="min-h-screen flex items-center justify-center"><p className="text-slate-500">Patient Intake — Coming Soon</p></div>} />
         <Route path="*" element={<Navigate to="/login" replace />} />
       </Routes>

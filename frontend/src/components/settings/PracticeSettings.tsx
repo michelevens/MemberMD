@@ -21,6 +21,11 @@ import {
   Pencil,
   UserMinus,
   ExternalLink,
+  Code,
+  Link,
+  QrCode,
+  Key,
+  Globe,
 } from "lucide-react";
 
 // ─── Colors ──────────────────────────────────────────────────────────────────
@@ -1091,7 +1096,36 @@ export function PracticeSettings({ initialTab }: { initialTab?: string }) {
   }
 
   // ─── Tab: Integrations ───────────────────────────────────────────────────
+
+  function CopyButton({ text }: { text: string }) {
+    const [copied, setCopied] = useState(false);
+    return (
+      <button
+        onClick={() => {
+          navigator.clipboard.writeText(text).then(() => {
+            setCopied(true);
+            setTimeout(() => setCopied(false), 2000);
+          });
+        }}
+        className="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium transition-colors"
+        style={{ color: copied ? C.green600 : C.teal600, backgroundColor: copied ? "#dcfce7" : C.slate50 }}
+      >
+        {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+        {copied ? "Copied" : "Copy"}
+      </button>
+    );
+  }
+
   function renderIntegrations() {
+    // Use a sample tenant code — in production this comes from auth context / practice data
+    const tenantCode = "ABC123";
+    const appUrl = "https://app.membermd.io";
+
+    const planEmbedCode = `<iframe src="${appUrl}/#/plans/${tenantCode}" width="100%" height="600" style="border:none" title="Membership Plans"></iframe>`;
+    const planDirectLink = `${appUrl}/#/plans/${tenantCode}`;
+    const enrollEmbedCode = `<iframe src="${appUrl}/#/enroll/${tenantCode}" width="100%" height="800" style="border:none" title="Patient Enrollment"></iframe>`;
+    const enrollDirectLink = `${appUrl}/#/enroll/${tenantCode}`;
+
     const integrations = [
       {
         name: "Stripe",
@@ -1156,39 +1190,262 @@ export function PracticeSettings({ initialTab }: { initialTab?: string }) {
     ];
 
     return (
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {integrations.map((intg) => (
-          <div
-            key={intg.name}
-            className="rounded-xl border p-5"
-            style={{ borderColor: C.slate200, backgroundColor: C.white }}
-          >
-            <div className="flex items-start justify-between mb-3">
-              <div>
-                <h4 className="text-sm font-semibold" style={{ color: C.navy900 }}>{intg.name}</h4>
-                <p className="text-xs mt-0.5" style={{ color: C.slate400 }}>{intg.category}</p>
-              </div>
-              <Badge text={intg.status} color={intg.statusColor} bg={intg.statusBg} />
-            </div>
-            <p className="text-sm mb-4" style={{ color: C.slate500 }}>{intg.description}</p>
-            {intg.action && (
-              <button
-                disabled={intg.disabled}
-                onClick={() => !intg.disabled && showToast(`${intg.name} connection initiated`)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors"
-                style={{
-                  borderColor: intg.disabled ? C.slate200 : C.teal500,
-                  color: intg.disabled ? C.slate400 : C.teal600,
-                  backgroundColor: intg.disabled ? C.slate50 : C.white,
-                  cursor: intg.disabled ? "not-allowed" : "pointer",
-                }}
-              >
-                <ExternalLink className="w-3.5 h-3.5" />
-                {intg.action}
-              </button>
-            )}
+      <div className="space-y-6">
+        {/* ── Embeddable Widgets ─────────────────────────────────────────────── */}
+        <div className="rounded-xl border p-6" style={{ borderColor: C.slate200, backgroundColor: C.white }}>
+          <div className="flex items-center gap-2 mb-4">
+            <Code className="w-5 h-5" style={{ color: C.teal500 }} />
+            <h3 className="text-base font-semibold" style={{ color: C.navy900 }}>Embeddable Widgets</h3>
           </div>
-        ))}
+          <p className="text-sm mb-6" style={{ color: C.slate500 }}>
+            Add these widgets to your practice website so patients can view plans and enroll directly.
+          </p>
+
+          {/* Plan Display Widget */}
+          <div className="rounded-xl border p-5 mb-4" style={{ borderColor: C.slate200, backgroundColor: C.slate50 }}>
+            <div className="flex items-center gap-2 mb-3">
+              <Globe className="w-4 h-4" style={{ color: C.teal500 }} />
+              <h4 className="text-sm font-semibold" style={{ color: C.navy900 }}>Plan Display Widget</h4>
+            </div>
+            <p className="text-xs mb-4" style={{ color: C.slate500 }}>
+              Shows your membership plans with pricing. Patients click "Enroll" to start enrollment.
+            </p>
+
+            {/* Mini Preview */}
+            <div className="rounded-lg border p-3 mb-4" style={{ borderColor: C.slate200, backgroundColor: C.white }}>
+              <div className="flex items-center justify-center gap-3">
+                {["Standard", "Professional", "Enterprise"].map((name, i) => (
+                  <div
+                    key={name}
+                    className="flex-1 rounded-lg border p-2 text-center"
+                    style={{
+                      borderColor: i === 1 ? C.teal500 : C.slate200,
+                      maxWidth: "120px",
+                    }}
+                  >
+                    <p className="text-xs font-semibold" style={{ color: C.navy900 }}>{name}</p>
+                    <p className="text-xs mt-0.5" style={{ color: C.slate400 }}>
+                      ${i === 0 ? "99" : i === 1 ? "179" : "299"}/mo
+                    </p>
+                    <div
+                      className="mt-1.5 py-0.5 rounded text-xs"
+                      style={{ backgroundColor: C.teal500, color: C.white, fontSize: "9px" }}
+                    >
+                      Enroll
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Embed Code */}
+            <div className="mb-3">
+              <div className="flex items-center justify-between mb-1">
+                <p className="text-xs font-medium" style={{ color: C.navy800 }}>Embed Code</p>
+                <CopyButton text={planEmbedCode} />
+              </div>
+              <div
+                className="rounded-lg p-2.5 text-xs font-mono overflow-x-auto"
+                style={{ backgroundColor: C.navy900, color: "#93c5fd" }}
+              >
+                {planEmbedCode}
+              </div>
+            </div>
+
+            {/* Direct Link */}
+            <div className="mb-3">
+              <div className="flex items-center justify-between mb-1">
+                <p className="text-xs font-medium" style={{ color: C.navy800 }}>Direct Link</p>
+                <CopyButton text={planDirectLink} />
+              </div>
+              <div className="flex items-center gap-2">
+                <Link className="w-3.5 h-3.5 flex-shrink-0" style={{ color: C.teal500 }} />
+                <a
+                  href={planDirectLink}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-xs hover:underline truncate"
+                  style={{ color: C.teal600 }}
+                >
+                  {planDirectLink}
+                </a>
+              </div>
+            </div>
+
+            {/* QR Code */}
+            <button
+              onClick={() => showToast("QR Code generation coming soon")}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors"
+              style={{ borderColor: C.slate200, color: C.slate600, backgroundColor: C.white }}
+            >
+              <QrCode className="w-3.5 h-3.5" />
+              Generate QR Code
+            </button>
+          </div>
+
+          {/* Enrollment Widget */}
+          <div className="rounded-xl border p-5 mb-4" style={{ borderColor: C.slate200, backgroundColor: C.slate50 }}>
+            <div className="flex items-center gap-2 mb-3">
+              <Globe className="w-4 h-4" style={{ color: C.teal500 }} />
+              <h4 className="text-sm font-semibold" style={{ color: C.navy900 }}>Enrollment Widget</h4>
+            </div>
+            <p className="text-xs mb-4" style={{ color: C.slate500 }}>
+              Multi-step enrollment form where patients can sign up for a plan directly from your website.
+            </p>
+
+            {/* Embed Code */}
+            <div className="mb-3">
+              <div className="flex items-center justify-between mb-1">
+                <p className="text-xs font-medium" style={{ color: C.navy800 }}>Embed Code</p>
+                <CopyButton text={enrollEmbedCode} />
+              </div>
+              <div
+                className="rounded-lg p-2.5 text-xs font-mono overflow-x-auto"
+                style={{ backgroundColor: C.navy900, color: "#93c5fd" }}
+              >
+                {enrollEmbedCode}
+              </div>
+            </div>
+
+            {/* Direct Link */}
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <p className="text-xs font-medium" style={{ color: C.navy800 }}>Direct Link</p>
+                <CopyButton text={enrollDirectLink} />
+              </div>
+              <div className="flex items-center gap-2">
+                <Link className="w-3.5 h-3.5 flex-shrink-0" style={{ color: C.teal500 }} />
+                <a
+                  href={enrollDirectLink}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-xs hover:underline truncate"
+                  style={{ color: C.teal600 }}
+                >
+                  {enrollDirectLink}
+                </a>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* ── API Access ────────────────────────────────────────────────────── */}
+        <div className="rounded-xl border p-6" style={{ borderColor: C.slate200, backgroundColor: C.white }}>
+          <div className="flex items-center gap-2 mb-4">
+            <Key className="w-5 h-5" style={{ color: C.teal500 }} />
+            <h3 className="text-base font-semibold" style={{ color: C.navy900 }}>API Access</h3>
+          </div>
+
+          {/* API Key */}
+          <div className="rounded-xl border p-4 mb-4" style={{ borderColor: C.slate200, backgroundColor: C.slate50 }}>
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-sm font-medium" style={{ color: C.navy800 }}>API Key</p>
+              <button
+                onClick={() => showToast("API key generation coming soon")}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors"
+                style={{ borderColor: C.teal500, color: C.teal600, backgroundColor: C.white }}
+              >
+                <Key className="w-3.5 h-3.5" />
+                Generate API Key
+              </button>
+            </div>
+            <div
+              className="rounded-lg px-3 py-2 text-sm font-mono"
+              style={{ backgroundColor: C.white, border: `1px solid ${C.slate200}`, color: C.slate400 }}
+            >
+              ••••••••••••••••••••••••••••••••
+            </div>
+          </div>
+
+          {/* Endpoints */}
+          <div className="mb-4">
+            <p className="text-sm font-medium mb-3" style={{ color: C.navy800 }}>Available Endpoints</p>
+            <div className="space-y-2">
+              {[
+                { method: "GET", path: `/api/external/plans/${tenantCode}`, desc: "List membership plans" },
+                { method: "POST", path: `/api/external/enroll/${tenantCode}`, desc: "Enroll a patient" },
+                { method: "GET", path: `/api/external/availability/${tenantCode}`, desc: "Check availability" },
+              ].map((ep) => (
+                <div
+                  key={ep.path}
+                  className="flex items-center gap-3 rounded-lg px-3 py-2"
+                  style={{ backgroundColor: C.slate50, border: `1px solid ${C.slate200}` }}
+                >
+                  <span
+                    className="px-2 py-0.5 rounded text-xs font-bold"
+                    style={{
+                      backgroundColor: ep.method === "GET" ? "#dbeafe" : "#dcfce7",
+                      color: ep.method === "GET" ? "#1d4ed8" : "#166534",
+                    }}
+                  >
+                    {ep.method}
+                  </span>
+                  <code className="text-xs font-mono flex-1 truncate" style={{ color: C.navy900 }}>
+                    {ep.path}
+                  </code>
+                  <span className="text-xs hidden md:inline" style={{ color: C.slate400 }}>{ep.desc}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Rate Limits */}
+          <div className="flex items-center justify-between">
+            <p className="text-xs" style={{ color: C.slate500 }}>Rate limit: 60 requests/minute</p>
+            <button
+              disabled
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors"
+              style={{
+                borderColor: C.slate200,
+                color: C.slate400,
+                backgroundColor: C.slate50,
+                cursor: "not-allowed",
+              }}
+            >
+              <ExternalLink className="w-3.5 h-3.5" />
+              View Full API Docs
+            </button>
+          </div>
+        </div>
+
+        {/* ── Third-Party Integrations ──────────────────────────────────────── */}
+        <div>
+          <h3 className="text-base font-semibold mb-4" style={{ color: C.navy900 }}>Third-Party Integrations</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {integrations.map((intg) => (
+              <div
+                key={intg.name}
+                className="rounded-xl border p-5"
+                style={{ borderColor: C.slate200, backgroundColor: C.white }}
+              >
+                <div className="flex items-start justify-between mb-3">
+                  <div>
+                    <h4 className="text-sm font-semibold" style={{ color: C.navy900 }}>{intg.name}</h4>
+                    <p className="text-xs mt-0.5" style={{ color: C.slate400 }}>{intg.category}</p>
+                  </div>
+                  <Badge text={intg.status} color={intg.statusColor} bg={intg.statusBg} />
+                </div>
+                <p className="text-sm mb-4" style={{ color: C.slate500 }}>{intg.description}</p>
+                {intg.action && (
+                  <button
+                    disabled={intg.disabled}
+                    onClick={() => !intg.disabled && showToast(`${intg.name} connection initiated`)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors"
+                    style={{
+                      borderColor: intg.disabled ? C.slate200 : C.teal500,
+                      color: intg.disabled ? C.slate400 : C.teal600,
+                      backgroundColor: intg.disabled ? C.slate50 : C.white,
+                      cursor: intg.disabled ? "not-allowed" : "pointer",
+                    }}
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                    {intg.action}
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
       </div>
     );
   }

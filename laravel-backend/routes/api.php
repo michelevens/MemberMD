@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\ExternalController;
 use App\Http\Controllers\Api\MasterDataController;
 use App\Http\Controllers\Api\PracticeController;
 use Illuminate\Support\Facades\Route;
@@ -14,6 +15,13 @@ Route::get('/health', fn () => response()->json(['status' => 'ok', 'app' => 'Mem
 Route::prefix('auth')->group(function () {
     Route::post('/login', [AuthController::class, 'login'])->middleware('throttle:10,1');
     Route::post('/register', [AuthController::class, 'register'])->middleware('throttle:5,1');
+});
+
+// ===== External/Public Endpoints (no auth) =====
+Route::prefix('external')->middleware('throttle:60,1')->group(function () {
+    Route::get('/plans/{tenantCode}', [ExternalController::class, 'plans']);
+    Route::post('/enroll/{tenantCode}', [ExternalController::class, 'enroll'])->middleware('throttle:5,1');
+    Route::get('/availability/{tenantCode}', [ExternalController::class, 'availability']);
 });
 
 // ===== Authenticated Routes =====
