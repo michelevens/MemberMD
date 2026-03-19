@@ -1,116 +1,97 @@
 <?php
 
 use Illuminate\Database\Migrations\Migration;
-use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Database\Schema\Blueprint;
 
 return new class extends Migration
 {
+    /**
+     * Create index only if it does not already exist (safe for re-runs).
+     */
+    private function addIndexIfNotExists(string $table, array $columns, ?string $name = null): void
+    {
+        $name = $name ?? $table . '_' . implode('_', $columns) . '_index';
+        $exists = DB::selectOne(
+            "SELECT 1 FROM pg_indexes WHERE tablename = ? AND indexname = ?",
+            [$table, $name]
+        );
+        if (!$exists) {
+            Schema::table($table, function (Blueprint $t) use ($columns) {
+                $t->index($columns);
+            });
+        }
+    }
+
     public function up(): void
     {
-        // Invoices — billing queries by status
-        Schema::table('invoices', function (Blueprint $table) {
-            $table->index(['tenant_id', 'status']);
-            $table->index(['tenant_id', 'patient_id']);
-        });
+        // Invoices
+        $this->addIndexIfNotExists('invoices', ['tenant_id', 'status']);
+        $this->addIndexIfNotExists('invoices', ['tenant_id', 'patient_id']);
 
-        // Patient memberships — lifecycle and MRR queries
-        Schema::table('patient_memberships', function (Blueprint $table) {
-            $table->index(['tenant_id', 'status']);
-            $table->index(['status', 'started_at']);
-        });
+        // Patient memberships
+        $this->addIndexIfNotExists('patient_memberships', ['tenant_id', 'status']);
+        $this->addIndexIfNotExists('patient_memberships', ['status', 'started_at']);
 
-        // Encounters — clinical history lookups
-        Schema::table('encounters', function (Blueprint $table) {
-            $table->index(['tenant_id', 'patient_id']);
-            $table->index(['encounter_date', 'patient_id']);
-        });
+        // Encounters
+        $this->addIndexIfNotExists('encounters', ['tenant_id', 'patient_id']);
+        $this->addIndexIfNotExists('encounters', ['encounter_date', 'patient_id']);
 
-        // Prescriptions — patient prescription history
-        Schema::table('prescriptions', function (Blueprint $table) {
-            $table->index(['tenant_id', 'patient_id']);
-            $table->index(['tenant_id', 'status']);
-        });
+        // Prescriptions
+        $this->addIndexIfNotExists('prescriptions', ['tenant_id', 'patient_id']);
+        $this->addIndexIfNotExists('prescriptions', ['tenant_id', 'status']);
 
-        // PHI access logs — audit queries
-        Schema::table('phi_access_logs', function (Blueprint $table) {
-            $table->index(['user_id', 'created_at']);
-            $table->index(['tenant_id', 'created_at']);
-        });
+        // PHI access logs
+        $this->addIndexIfNotExists('phi_access_logs', ['user_id', 'created_at']);
+        $this->addIndexIfNotExists('phi_access_logs', ['tenant_id', 'created_at']);
 
-        // Security events — security audit queries
-        Schema::table('security_events', function (Blueprint $table) {
-            $table->index(['tenant_id', 'event_type']);
-            $table->index(['user_id', 'created_at']);
-        });
+        // Security events
+        $this->addIndexIfNotExists('security_events', ['tenant_id', 'event_type']);
+        $this->addIndexIfNotExists('security_events', ['user_id', 'created_at']);
 
-        // Documents — document lookups
-        Schema::table('documents', function (Blueprint $table) {
-            $table->index(['tenant_id', 'patient_id']);
-        });
+        // Documents
+        $this->addIndexIfNotExists('documents', ['tenant_id', 'patient_id']);
 
-        // Messages — thread and unread queries
-        Schema::table('messages', function (Blueprint $table) {
-            $table->index(['tenant_id', 'recipient_id', 'is_read']);
-        });
+        // Messages
+        $this->addIndexIfNotExists('messages', ['tenant_id', 'recipient_id', 'is_read']);
 
-        // Payments — payment history
-        Schema::table('payments', function (Blueprint $table) {
-            $table->index(['tenant_id', 'patient_id']);
-        });
+        // Payments
+        $this->addIndexIfNotExists('payments', ['tenant_id', 'patient_id']);
 
-        // Provider schedule overrides — availability checks
-        Schema::table('provider_schedule_overrides', function (Blueprint $table) {
-            $table->index(['provider_id', 'override_date']);
-        });
+        // Provider schedule overrides
+        $this->addIndexIfNotExists('provider_schedule_overrides', ['provider_id', 'override_date']);
     }
 
     public function down(): void
     {
-        Schema::table('invoices', function (Blueprint $table) {
-            $table->dropIndex(['tenant_id', 'status']);
-            $table->dropIndex(['tenant_id', 'patient_id']);
-        });
+        $indexes = [
+            ['invoices', ['tenant_id', 'status']],
+            ['invoices', ['tenant_id', 'patient_id']],
+            ['patient_memberships', ['tenant_id', 'status']],
+            ['patient_memberships', ['status', 'started_at']],
+            ['encounters', ['tenant_id', 'patient_id']],
+            ['encounters', ['encounter_date', 'patient_id']],
+            ['prescriptions', ['tenant_id', 'patient_id']],
+            ['prescriptions', ['tenant_id', 'status']],
+            ['phi_access_logs', ['user_id', 'created_at']],
+            ['phi_access_logs', ['tenant_id', 'created_at']],
+            ['security_events', ['tenant_id', 'event_type']],
+            ['security_events', ['user_id', 'created_at']],
+            ['documents', ['tenant_id', 'patient_id']],
+            ['messages', ['tenant_id', 'recipient_id', 'is_read']],
+            ['payments', ['tenant_id', 'patient_id']],
+            ['provider_schedule_overrides', ['provider_id', 'override_date']],
+        ];
 
-        Schema::table('patient_memberships', function (Blueprint $table) {
-            $table->dropIndex(['tenant_id', 'status']);
-            $table->dropIndex(['status', 'started_at']);
-        });
-
-        Schema::table('encounters', function (Blueprint $table) {
-            $table->dropIndex(['tenant_id', 'patient_id']);
-            $table->dropIndex(['encounter_date', 'patient_id']);
-        });
-
-        Schema::table('prescriptions', function (Blueprint $table) {
-            $table->dropIndex(['tenant_id', 'patient_id']);
-            $table->dropIndex(['tenant_id', 'status']);
-        });
-
-        Schema::table('phi_access_logs', function (Blueprint $table) {
-            $table->dropIndex(['user_id', 'created_at']);
-            $table->dropIndex(['tenant_id', 'created_at']);
-        });
-
-        Schema::table('security_events', function (Blueprint $table) {
-            $table->dropIndex(['tenant_id', 'event_type']);
-            $table->dropIndex(['user_id', 'created_at']);
-        });
-
-        Schema::table('documents', function (Blueprint $table) {
-            $table->dropIndex(['tenant_id', 'patient_id']);
-        });
-
-        Schema::table('messages', function (Blueprint $table) {
-            $table->dropIndex(['tenant_id', 'recipient_id', 'is_read']);
-        });
-
-        Schema::table('payments', function (Blueprint $table) {
-            $table->dropIndex(['tenant_id', 'patient_id']);
-        });
-
-        Schema::table('provider_schedule_overrides', function (Blueprint $table) {
-            $table->dropIndex(['provider_id', 'override_date']);
-        });
+        foreach ($indexes as [$table, $columns]) {
+            try {
+                Schema::table($table, function (Blueprint $t) use ($columns) {
+                    $t->dropIndex($columns);
+                });
+            } catch (\Throwable) {
+                // Index may not exist
+            }
+        }
     }
 };

@@ -21,9 +21,11 @@ return new class extends Migration
         ];
 
         foreach ($tables as $table) {
-            Schema::table($table, function (Blueprint $t) {
-                $t->softDeletes();
-            });
+            if (!Schema::hasColumn($table, 'deleted_at')) {
+                Schema::table($table, function (Blueprint $t) {
+                    $t->softDeletes();
+                });
+            }
         }
     }
 
