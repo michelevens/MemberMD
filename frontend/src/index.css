@@ -1,0 +1,175 @@
+@import "tailwindcss";
+
+/* ─── MemberMD Design System ─── */
+/* Best of: InsureFlow (trust colors) + Solarera (glass/shadows) + ClinicLink (animations) */
+
+@theme {
+  /* Shield Navy (Primary — Trust & Authority) */
+  --color-navy-50: #e0e8f0;
+  --color-navy-100: #b3c5d5;
+  --color-navy-200: #8aa5bc;
+  --color-navy-300: #627d98;
+  --color-navy-400: #486581;
+  --color-navy-500: #334e68;
+  --color-navy-600: #243b53;
+  --color-navy-700: #1a2f45;
+  --color-navy-800: #102a43;
+  --color-navy-900: #0a1f33;
+
+  /* Confidence Teal (Secondary — Health & Wellness) */
+  --color-teal-50: #e6f7f2;
+  --color-teal-100: #b3e8d8;
+  --color-teal-200: #80d9be;
+  --color-teal-300: #4dcaa4;
+  --color-teal-400: #27ab83;
+  --color-teal-500: #199473;
+  --color-teal-600: #147d64;
+  --color-teal-700: #0f6654;
+  --color-teal-800: #0a4f45;
+  --color-teal-900: #053836;
+
+  /* Healthcare Green (Success) */
+  --color-green-50: #ecf9ec;
+  --color-green-500: #3f9142;
+  --color-green-600: #2f8132;
+  --color-green-700: #207122;
+
+  /* Amber (Warning) */
+  --color-amber-50: #fffbeb;
+  --color-amber-500: #f59e0b;
+  --color-amber-600: #d97706;
+
+  /* Warm Red (Danger) */
+  --color-red-50: #fef2f2;
+  --color-red-500: #ef4444;
+  --color-red-600: #dc2626;
+
+  /* Neutrals (Slate) */
+  --color-slate-50: #f8fafc;
+  --color-slate-100: #f1f5f9;
+  --color-slate-200: #e2e8f0;
+  --color-slate-300: #cbd5e1;
+  --color-slate-400: #94a3b8;
+  --color-slate-500: #64748b;
+  --color-slate-600: #475569;
+  --color-slate-700: #334155;
+  --color-slate-800: #1e293b;
+  --color-slate-900: #0f172a;
+
+  /* Spacing & Sizing */
+  --radius-sm: 0.375rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+  --radius-xl: 1rem;
+  --radius-2xl: 1.5rem;
+
+  /* Shadows */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.08), 0 2px 4px -2px rgba(0, 0, 0, 0.05);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.08), 0 4px 6px -4px rgba(0, 0, 0, 0.05);
+  --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.08), 0 8px 10px -6px rgba(0, 0, 0, 0.05);
+  --shadow-glass: 0 4px 16px rgba(16, 42, 67, 0.12);
+  --shadow-navy: 0 4px 14px -2px rgba(16, 42, 67, 0.2);
+  --shadow-navy-lg: 0 8px 32px rgba(16, 42, 67, 0.25);
+  --shadow-teal: 0 4px 14px -2px rgba(20, 125, 100, 0.2);
+  --shadow-lift: 0 12px 28px rgba(0, 0, 0, 0.12);
+
+  /* Typography */
+  --font-sans: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono: 'SF Mono', 'Fira Code', 'Roboto Mono', monospace;
+}
+
+/* ─── Base ─── */
+html { scroll-behavior: smooth; }
+body {
+  font-family: var(--font-sans);
+  color: var(--color-slate-800);
+  background: var(--color-slate-50);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  margin: 0;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+/* ─── Glass Morphism (from Solarera) ─── */
+.glass {
+  background: rgba(255, 255, 255, 0.8);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  box-shadow: var(--shadow-glass);
+}
+
+.glass-navy {
+  background: linear-gradient(135deg, rgba(16, 42, 67, 0.08), rgba(20, 125, 100, 0.05));
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(16, 42, 67, 0.12);
+}
+
+.glass-dark {
+  background: rgba(15, 23, 42, 0.85);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* ─── Hover Lift Effect (from Solarera) ─── */
+.hover-lift {
+  transition: transform 300ms ease, box-shadow 300ms ease;
+}
+.hover-lift:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-lift);
+}
+
+/* ─── Page Transition (from ClinicLink) ─── */
+@keyframes page-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-page-in {
+  animation: page-in 0.25s ease-out;
+}
+
+/* ─── Floating Animation ─── */
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-8px); }
+}
+.animate-float {
+  animation: float 3s ease-in-out infinite;
+}
+
+/* ─── Gradient Text ─── */
+.gradient-text {
+  background: linear-gradient(135deg, var(--color-navy-500), var(--color-teal-500));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* ─── Scrollbar ─── */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: var(--color-slate-100); border-radius: 4px; }
+::-webkit-scrollbar-thumb { background: var(--color-slate-300); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--color-slate-400); }
+
+/* ─── Focus Ring ─── */
+*:focus-visible {
+  outline: 2px solid var(--color-teal-400);
+  outline-offset: 2px;
+  border-radius: var(--radius-md);
+}
+
+/* ─── Inter Font ─── */
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+}
