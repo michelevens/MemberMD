@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use App\Traits\BelongsToTenant;
 use App\Traits\Auditable;
 
@@ -43,4 +44,10 @@ class Provider extends Model
     public function encounters(): HasMany { return $this->hasMany(Encounter::class); }
     public function prescriptions(): HasMany { return $this->hasMany(Prescription::class); }
     public function scheduleOverrides(): HasMany { return $this->hasMany(ProviderScheduleOverride::class); }
+    public function programs(): BelongsToMany
+    {
+        return $this->belongsToMany(Program::class, 'program_providers')
+            ->withPivot('panel_capacity', 'role', 'is_active')
+            ->withTimestamps();
+    }
 }

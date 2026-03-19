@@ -15,7 +15,7 @@ class Invoice extends Model
     use HasFactory, HasUuids, BelongsToTenant, Auditable;
 
     protected $fillable = [
-        'tenant_id', 'patient_id', 'membership_id',
+        'tenant_id', 'patient_id', 'membership_id', 'program_id',
         'stripe_invoice_id',
         'amount', 'tax', 'status',
         'description', 'line_items',
@@ -32,5 +32,6 @@ class Invoice extends Model
 
     public function patient(): BelongsTo { return $this->belongsTo(Patient::class); }
     public function membership(): BelongsTo { return $this->belongsTo(PatientMembership::class, 'membership_id'); }
+    public function program(): BelongsTo { return $this->belongsTo(Program::class); }
     public function payments(): HasMany { return $this->hasMany(Payment::class); }
 }

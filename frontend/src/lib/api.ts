@@ -22,6 +22,9 @@ import type {
   CouponCode,
   NotificationPreference,
   DashboardStats,
+  Program,
+  ProgramEnrollment,
+  ProgramProvider,
   ApiResponse,
   AvailableSlot,
   CalendarLinks,
@@ -1131,6 +1134,23 @@ export const dashboardService = {
   },
 };
 
+// ─── Family Members ──────────────────────────────────────────────────────────
+
+export const familyService = {
+  list: async (): Promise<ApiResponse<{ id: string; firstName: string; lastName: string; relationship: string; dateOfBirth: string; email?: string; phone?: string; status: string }[]>> => {
+    if (useMockData()) return { data: [] };
+    return apiFetch("/family/members");
+  },
+  add: async (data: { firstName: string; lastName: string; dateOfBirth: string; relationship: string; email?: string; phone?: string }): Promise<ApiResponse<{ id: string; firstName: string; lastName: string; relationship: string; dateOfBirth: string; status: string }>> => {
+    if (useMockData()) return { data: { id: `fm_${Date.now()}`, firstName: data.firstName, lastName: data.lastName, relationship: data.relationship, dateOfBirth: data.dateOfBirth, status: "active" } };
+    return apiFetch("/family/members", { method: "POST", body: JSON.stringify(data) });
+  },
+  remove: async (id: string): Promise<ApiResponse<void>> => {
+    if (useMockData()) return mockDelete();
+    return apiFetch(`/family/members/${id}`, { method: "DELETE" });
+  },
+};
+
 // ─── Dunning ────────────────────────────────────────────────────────────────
 
 export const dunningService = {
@@ -1138,5 +1158,73 @@ export const dunningService = {
     if (useMockData()) return { data: [] };
     const query = params ? "?" + new URLSearchParams(params).toString() : "";
     return apiFetch<DunningEvent[]>(`/dunning-events${query}`);
+  },
+};
+
+// ─── Programs (Universal Program Management) ────────────────────────────────
+
+export const programService = {
+  // Practice-level
+  list: async (): Promise<ApiResponse<Program[]>> => {
+    if (useMockData()) return { data: [] };
+    return apiFetch<Program[]>("/programs");
+  },
+  get: async (id: string): Promise<ApiResponse<Program>> => {
+    if (useMockData()) return { data: {} as Program };
+    return apiFetch<Program>(`/programs/${id}`);
+  },
+  create: async (data: Partial<Program>): Promise<ApiResponse<Program>> => {
+    if (useMockData()) return mockCreate<Program>(data);
+    return apiFetch<Program>("/programs", { method: "POST", body: JSON.stringify(data) });
+  },
+  update: async (id: string, data: Partial<Program>): Promise<ApiResponse<Program>> => {
+    if (useMockData()) return mockUpdate<Program>(data);
+    return apiFetch<Program>(`/programs/${id}`, { method: "PUT", body: JSON.stringify(data) });
+  },
+  delete: async (id: string): Promise<ApiResponse<void>> => {
+    if (useMockData()) return mockDelete();
+    return apiFetch<void>(`/programs/${id}`, { method: "DELETE" });
+  },
+  enrollPatient: async (programId: string, data: { patientId: string; planId?: string; fundingSource?: string; sponsorName?: string }): Promise<ApiResponse<ProgramEnrollment>> => {
+    if (useMockData()) return mockCreate<ProgramEnrollment>(data as Partial<ProgramEnrollment>);
+    return apiFetch<ProgramEnrollment>(`/programs/${programId}/enroll`, { method: "POST", body: JSON.stringify(data) });
+  },
+  unenrollPatient: async (programId: string, enrollmentId: string, data?: { reason?: string }): Promise<ApiResponse<void>> => {
+    if (useMockData()) return mockDelete();
+    return apiFetch<void>(`/programs/${programId}/unenroll/${enrollmentId}`, { method: "POST", body: JSON.stringify(data || {}) });
+  },
+  addProvider: async (programId: string, data: { providerId: string; role?: string; panelCapacity?: number }): Promise<ApiResponse<ProgramProvider>> => {
+    if (useMockData()) return mockCreate<ProgramProvider>(data);
+    return apiFetch<ProgramProvider>(`/programs/${programId}/providers`, { method: "POST", body: JSON.stringify(data) });
+  },
+  removeProvider: async (programId: string, providerId: string): Promise<ApiResponse<void>> => {
+    if (useMockData()) return mockDelete();
+    return apiFetch<void>(`/programs/${programId}/providers/${providerId}`, { method: "DELETE" });
+  },
+  stats: async (programId: string): Promise<ApiResponse<Record<string, unknown>>> => {
+    if (useMockData()) return { data: {} };
+    return apiFetch<Record<string, unknown>>(`/programs/${programId}/stats`);
+  },
+
+  // SuperAdmin master templates
+  listTemplates: async (): Promise<ApiResponse<Program[]>> => {
+    if (useMockData()) return { data: [] };
+    return apiFetch<Program[]>("/admin/master-data/programs");
+  },
+  getTemplate: async (id: string): Promise<ApiResponse<Program>> => {
+    if (useMockData()) return { data: {} as Program };
+    return apiFetch<Program>(`/admin/master-data/programs/${id}`);
+  },
+  createTemplate: async (data: Partial<Program>): Promise<ApiResponse<Program>> => {
+    if (useMockData()) return mockCreate<Program>(data);
+    return apiFetch<Program>("/admin/master-data/programs", { method: "POST", body: JSON.stringify(data) });
+  },
+  updateTemplate: async (id: string, data: Partial<Program>): Promise<ApiResponse<Program>> => {
+    if (useMockData()) return mockUpdate<Program>(data);
+    return apiFetch<Program>(`/admin/master-data/programs/${id}`, { method: "PUT", body: JSON.stringify(data) });
+  },
+  provisionTemplate: async (id: string, practiceId: string): Promise<ApiResponse<Program>> => {
+    if (useMockData()) return mockCreate<Program>({ id, isTemplate: false });
+    return apiFetch<Program>(`/admin/master-data/programs/${id}/provision`, { method: "POST", body: JSON.stringify({ practiceId }) });
   },
 };

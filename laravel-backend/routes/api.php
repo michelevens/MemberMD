@@ -22,6 +22,8 @@ use App\Http\Controllers\Api\DashboardController;
 use App\Http\Controllers\Api\TelehealthController;
 use App\Http\Controllers\Api\CalendarController;
 use App\Http\Controllers\Api\AuditController;
+use App\Http\Controllers\Api\ProgramController;
+use App\Http\Controllers\Api\Admin\MasterProgramController;
 use Illuminate\Support\Facades\Route;
 
 // ===== MemberMD API Routes =====
@@ -165,6 +167,29 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/calendar/ical/generate-token', [CalendarController::class, 'generateToken']);
     Route::get('/calendar/{appointmentId}/links', [CalendarController::class, 'calendarLinks']);
     Route::get('/calendar/google/redirect', [CalendarController::class, 'googleRedirect']);
+
+    // ===== Programs =====
+    Route::prefix('programs')->group(function () {
+        Route::get('/', [ProgramController::class, 'index']);
+        Route::post('/', [ProgramController::class, 'store']);
+        Route::get('/{program}', [ProgramController::class, 'show']);
+        Route::put('/{program}', [ProgramController::class, 'update']);
+        Route::delete('/{program}', [ProgramController::class, 'destroy']);
+        Route::post('/{program}/enroll', [ProgramController::class, 'enrollPatient']);
+        Route::post('/{program}/unenroll/{enrollment}', [ProgramController::class, 'unenrollPatient']);
+        Route::post('/{program}/providers', [ProgramController::class, 'addProvider']);
+        Route::delete('/{program}/providers/{provider}', [ProgramController::class, 'removeProvider']);
+        Route::get('/{program}/stats', [ProgramController::class, 'stats']);
+    });
+
+    // ===== SuperAdmin Program Templates =====
+    Route::prefix('admin/master-data/programs')->group(function () {
+        Route::get('/', [MasterProgramController::class, 'index']);
+        Route::post('/', [MasterProgramController::class, 'store']);
+        Route::get('/{program}', [MasterProgramController::class, 'show']);
+        Route::put('/{program}', [MasterProgramController::class, 'update']);
+        Route::post('/{program}/provision', [MasterProgramController::class, 'provision']);
+    });
 
     // ===== Audit & Compliance =====
     Route::prefix('audit')->group(function () {

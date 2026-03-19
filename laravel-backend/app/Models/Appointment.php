@@ -16,7 +16,7 @@ class Appointment extends Model
     use HasFactory, HasUuids, BelongsToTenant, Auditable;
 
     protected $fillable = [
-        'tenant_id', 'patient_id', 'provider_id', 'appointment_type_id',
+        'tenant_id', 'patient_id', 'provider_id', 'appointment_type_id', 'program_id',
         'scheduled_at', 'duration_minutes', 'status',
         'is_telehealth', 'video_room_url',
         'cancel_reason', 'cancelled_at', 'no_show_fee',
@@ -42,6 +42,7 @@ class Appointment extends Model
     public function patient(): BelongsTo { return $this->belongsTo(Patient::class); }
     public function provider(): BelongsTo { return $this->belongsTo(Provider::class); }
     public function appointmentType(): BelongsTo { return $this->belongsTo(AppointmentType::class); }
+    public function program(): BelongsTo { return $this->belongsTo(Program::class); }
     public function encounter(): HasOne { return $this->hasOne(Encounter::class); }
 
     // Recurrence relations

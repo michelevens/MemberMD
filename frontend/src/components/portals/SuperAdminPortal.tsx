@@ -2,7 +2,8 @@
 // Platform admin dashboard for managing all practices (tenants) on MemberMD
 
 import { useState, useEffect, useCallback } from "react";
-import { practiceService, dashboardService } from "../../lib/api";
+import { practiceService, dashboardService, adminService } from "../../lib/api";
+import { ProgramTemplatesTab } from "./ProgramTemplatesTab";
 import { HeaderToolbar } from "../shared/HeaderToolbar";
 import { PlatformSettings } from "../settings/PlatformSettings";
 import { UserSettingsDropdown } from "../shared/UserSettingsDropdown";
@@ -65,6 +66,7 @@ import {
   Send,
   RefreshCw,
   ExternalLink,
+  Layers,
 } from "lucide-react";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -78,6 +80,7 @@ type TabId =
   | "screening-library"
   | "consent-templates"
   | "note-templates"
+  | "programs"
   | "analytics"
   | "billing"
   | "support"
@@ -241,6 +244,7 @@ const NAV_SECTIONS: NavSection[] = [
       { id: "screening-library", label: "Screening Library", icon: BookOpen },
       { id: "consent-templates", label: "Consent Templates", icon: FileCheck },
       { id: "note-templates", label: "Note Templates", icon: StickyNote },
+      { id: "programs", label: "Programs", icon: Layers },
     ],
   },
   {
@@ -945,15 +949,19 @@ export function SuperAdminPortal() {
   const [selectedSpecialtyDetail, setSelectedSpecialtyDetail] = useState<MockSpecialty | null>(null);
   const [supportFilter, setSupportFilter] = useState<string>("All");
   const [selectedTicket, setSelectedTicket] = useState<string | null>(null);
+  const [apiSpecialties, setApiSpecialties] = useState<MockSpecialty[] | null>(null);
+  const [apiScreenings, setApiScreenings] = useState<MockScreeningInstrument[] | null>(null);
 
 
   // ─── Fetch real data from API ─────────────────────────────────────────────
 
   const loadData = useCallback(async () => {
     try {
-      const [practicesRes, statsRes] = await Promise.all([
+      const [practicesRes, statsRes, specialtiesRes, screeningsRes] = await Promise.all([
         practiceService.list(),
         dashboardService.getStats(),
+        adminService.getSpecialties(),
+        adminService.getScreenings(),
       ]);
       if (practicesRes.data && Array.isArray(practicesRes.data)) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -974,6 +982,36 @@ export function SuperAdminPortal() {
       if (statsRes.data) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         setApiStats(statsRes.data as any);
+      }
+      if (specialtiesRes.data && Array.isArray(specialtiesRes.data) && specialtiesRes.data.length > 0) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        setApiSpecialties(specialtiesRes.data.map((s: any) => ({
+          id: s.id || "",
+          name: s.name || "",
+          code: s.code || s.abbreviation || "",
+          icon: Heart,
+          practiceCount: s.practiceCount ?? s.practice_count ?? 0,
+          screeningTools: s.screeningTools ?? s.screening_tools ?? 0,
+          category: s.category || "Specialty",
+        })));
+      }
+      if (screeningsRes.data && Array.isArray(screeningsRes.data) && screeningsRes.data.length > 0) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        setApiScreenings(screeningsRes.data.map((s: any) => ({
+          id: s.id || "",
+          name: s.name || s.title || "",
+          code: s.code || s.abbreviation || "",
+          fullName: s.fullName || s.full_name || s.description || s.name || "",
+          category: s.category || "General",
+          questionCount: s.questionCount ?? s.question_count ?? (s.questions?.length || 0),
+          scoreMin: s.scoreMin ?? s.score_min ?? 0,
+          scoreMax: s.scoreMax ?? s.score_max ?? 0,
+          severities: s.severities || [],
+          specialties: s.specialties || [],
+          active: s.active ?? s.isActive ?? true,
+          questions: s.questions || [],
+          answerOptions: s.answerOptions || s.answer_options || [],
+        })));
       }
     } catch {
       // Fall back to mock data
@@ -1578,7 +1616,8 @@ export function SuperAdminPortal() {
   // ─── Specialties Tab ─────────────────────────────────────────────────────
 
   function renderSpecialties() {
-    const categories = [...new Set(MOCK_SPECIALTIES.map((s) => s.category))];
+    const specialtiesData = apiSpecialties || MOCK_SPECIALTIES;
+    const categories = [...new Set(specialtiesData.map((s) => s.category))];
 
     return (
       <div className="animate-page-in space-y-6">
@@ -1587,7 +1626,7 @@ export function SuperAdminPortal() {
             Specialties
           </h2>
           <p className="text-sm text-slate-500 mt-0.5">
-            {MOCK_SPECIALTIES.length} specialties configured across the platform
+            {specialtiesData.length} specialties configured across the platform
           </p>
         </div>
 
@@ -1600,7 +1639,7 @@ export function SuperAdminPortal() {
               {category}
             </h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-              {MOCK_SPECIALTIES.filter((s) => s.category === category).map(
+              {specialtiesData.filter((s) => s.category === category).map(
                 (spec) => {
                   const Icon = spec.icon;
                   return (
@@ -2375,10 +2414,11 @@ export function SuperAdminPortal() {
   // ─── Screening Library Tab ────────────────────────────────────────────────
 
   function renderScreeningLibrary() {
-    const categories = ["All", "Depression", "Anxiety", "ADHD", "Alcohol Use", "PTSD / Trauma", "Bipolar", "Suicide Risk"];
+    const screeningsData = apiScreenings || MOCK_SCREENINGS;
+    const categories = ["All", ...new Set(screeningsData.map((s) => s.category))];
     const filtered = screeningCategoryFilter === "All"
-      ? MOCK_SCREENINGS
-      : MOCK_SCREENINGS.filter((s) => s.category === screeningCategoryFilter);
+      ? screeningsData
+      : screeningsData.filter((s) => s.category === screeningCategoryFilter);
 
     return (
       <div className="animate-page-in space-y-6">
@@ -3827,6 +3867,8 @@ export function SuperAdminPortal() {
         return renderConsentTemplates();
       case "note-templates":
         return renderNoteTemplates();
+      case "programs":
+        return <ProgramTemplatesTab />;
       case "analytics":
         return renderAnalytics();
       case "billing":

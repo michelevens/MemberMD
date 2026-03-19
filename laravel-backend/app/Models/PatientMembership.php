@@ -15,7 +15,7 @@ class PatientMembership extends Model
     use HasFactory, HasUuids, BelongsToTenant, Auditable;
 
     protected $fillable = [
-        'tenant_id', 'patient_id', 'plan_id',
+        'tenant_id', 'patient_id', 'plan_id', 'program_id',
         'status', 'billing_frequency',
         'stripe_subscription_id', 'stripe_customer_id',
         'started_at', 'paused_at', 'cancelled_at', 'expires_at',
@@ -34,6 +34,7 @@ class PatientMembership extends Model
 
     public function patient(): BelongsTo { return $this->belongsTo(Patient::class); }
     public function plan(): BelongsTo { return $this->belongsTo(MembershipPlan::class, 'plan_id'); }
+    public function program(): BelongsTo { return $this->belongsTo(Program::class); }
     public function entitlements(): HasMany { return $this->hasMany(PatientEntitlement::class, 'membership_id'); }
     public function dunningEvents(): HasMany { return $this->hasMany(DunningEvent::class, 'membership_id'); }
     public function invoices(): HasMany { return $this->hasMany(Invoice::class, 'membership_id'); }

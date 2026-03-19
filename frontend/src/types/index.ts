@@ -752,3 +752,117 @@ export interface DashboardStats {
   newPatientsThisMonth: number;
   retentionRate: number;
 }
+
+// ─── Programs (Universal Program Management) ─────────────────────────────────
+export type ProgramType = 'membership' | 'sponsor_based' | 'insurance_billed' | 'grant_funded' | 'hybrid';
+export type ProgramStatus = 'draft' | 'active' | 'paused' | 'archived';
+export type ProgramDurationType = 'ongoing' | 'fixed_term';
+export type FundingSourceType = 'stripe_subscription' | 'employer_invoice' | 'insurance_claim' | 'grant' | 'sliding_scale' | 'free';
+export type EnrollmentStatus = 'pending' | 'active' | 'paused' | 'completed' | 'graduated' | 'discharged' | 'cancelled';
+
+export interface Program {
+  id: string;
+  tenantId: string | null;
+  name: string;
+  code: string | null;
+  type: ProgramType;
+  description: string | null;
+  icon: string | null;
+  status: ProgramStatus;
+  durationType: ProgramDurationType;
+  durationMonths: number | null;
+  autoRenew: boolean;
+  maxEnrollment: number | null;
+  currentEnrollment: number;
+  specialties: string[] | null;
+  settings: Record<string, any> | null;
+  branding: Record<string, any> | null;
+  sortOrder: number;
+  isTemplate: boolean;
+  isActive: boolean;
+  plans?: ProgramPlan[];
+  eligibilityRules?: ProgramEligibilityRule[];
+  enrollments?: ProgramEnrollment[];
+  providers?: ProgramProvider[];
+  fundingSources?: ProgramFundingSource[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ProgramPlan {
+  id: string;
+  programId: string;
+  tenantId: string | null;
+  name: string;
+  description: string | null;
+  badgeText: string | null;
+  monthlyPrice: number;
+  annualPrice: number;
+  entitlements: Record<string, any>;
+  featuresList: string[] | null;
+  familyEligible: boolean;
+  familyMemberPrice: number | null;
+  minCommitmentMonths: number;
+  sortOrder: number;
+  isActive: boolean;
+}
+
+export interface ProgramEligibilityRule {
+  id: string;
+  programId: string;
+  ruleType: string;
+  operator: string;
+  value: any;
+  description: string | null;
+  isRequired: boolean;
+}
+
+export interface ProgramEnrollment {
+  id: string;
+  tenantId: string;
+  programId: string;
+  patientId: string;
+  planId: string | null;
+  membershipId: string | null;
+  status: EnrollmentStatus;
+  fundingSource: FundingSourceType;
+  sponsorName: string | null;
+  sponsorId: string | null;
+  insuranceAuthNumber: string | null;
+  enrolledAt: string | null;
+  startedAt: string | null;
+  pausedAt: string | null;
+  completedAt: string | null;
+  expiresAt: string | null;
+  dischargeReason: string | null;
+  goals: Record<string, any> | null;
+  outcomes: Record<string, any> | null;
+  notes: string | null;
+  assignedProviderId: string | null;
+  program?: Program;
+  patient?: Patient;
+  plan?: ProgramPlan;
+}
+
+export interface ProgramProvider {
+  id: string;
+  programId: string;
+  providerId: string;
+  panelCapacity: number | null;
+  role: string;
+  isActive: boolean;
+}
+
+export interface ProgramFundingSource {
+  id: string;
+  programId: string;
+  sourceType: FundingSourceType;
+  name: string;
+  description: string | null;
+  config: Record<string, any> | null;
+  defaultAmount: number | null;
+  billingFrequency: string | null;
+  cptCode: string | null;
+  isPrimary: boolean;
+  isActive: boolean;
+}

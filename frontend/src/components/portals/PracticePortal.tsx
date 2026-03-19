@@ -2,14 +2,16 @@
 // Main dashboard for DPC practice owners/admins — manage membership practice
 // Tabs: Dashboard, Patient Roster, Membership Plans, Appointments, Messages, Invoices, + Coming Soon tabs
 
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useAuth } from "../../contexts/AuthContext";
+import { dashboardService, membershipPlanService, messageService } from "../../lib/api";
 import { HeaderToolbar } from "../shared/HeaderToolbar";
 import { UserSettingsDropdown } from "../shared/UserSettingsDropdown";
 import { PracticeSettings } from "../settings/PracticeSettings";
 import { CalendarView } from "../shared/CalendarView";
 import { AppointmentBookingWidget } from "../widgets/AppointmentBookingWidget";
 import { AuditDashboard } from "../shared/AuditDashboard";
+import { ProgramsSection } from "./ProgramsSection";
 import {
   LayoutDashboard,
   Users,
@@ -52,12 +54,14 @@ import {
   ChevronDown,
   ChevronUp,
   Mail,
+  Layers,
 } from "lucide-react";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 type TabId =
   | "dashboard"
+  | "programs"
   | "roster"
   | "intakes"
   | "waitlist"
@@ -93,7 +97,10 @@ interface NavSection {
 const NAV_SECTIONS: NavSection[] = [
   {
     title: "Overview",
-    items: [{ id: "dashboard", label: "Dashboard", icon: LayoutDashboard }],
+    items: [
+      { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
+      { id: "programs", label: "Programs", icon: Layers },
+    ],
   },
   {
     title: "Members",
@@ -448,13 +455,61 @@ export function PracticePortal() {
   const [expandedEncounters, setExpandedEncounters] = useState<string[]>([]);
   const [notificationFilter, setNotificationFilter] = useState<"all" | "members" | "appointments" | "billing" | "system">("all");
   const [showBookingWidget, setShowBookingWidget] = useState(false);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [apiDashStats, setApiDashStats] = useState<Record<string, any> | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [apiPlans, setApiPlans] = useState<any[] | null>(null);
+  const [unreadCount, setUnreadCount] = useState(3);
+  const [isRealApi, setIsRealApi] = useState(false);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [apiThreads, setApiThreads] = useState<any[] | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [apiMessages, setApiMessages] = useState<any[] | null>(null);
+
+  const loadPracticeData = useCallback(async () => {
+    try {
+      const [statsRes, plansRes, threadsRes] = await Promise.all([
+        dashboardService.getPracticeStats(),
+        membershipPlanService.list(),
+        messageService.list(),
+      ]);
+      if (statsRes.data && typeof statsRes.data === "object" && Object.keys(statsRes.data).length > 0) {
+        setApiDashStats(statsRes.data);
+        setIsRealApi(true);
+      }
+      if (plansRes.data && Array.isArray(plansRes.data) && plansRes.data.length > 0) {
+        setApiPlans(plansRes.data);
+      }
+      if (threadsRes.data && Array.isArray(threadsRes.data) && threadsRes.data.length > 0) {
+        setApiThreads(threadsRes.data);
+      }
+    } catch {
+      // Fall back to mock data
+    }
+  }, []);
+
+  useEffect(() => { loadPracticeData(); }, [loadPracticeData]);
+
+  // Polling for unread messages
+  useEffect(() => {
+    if (!isRealApi) return;
+    const interval = setInterval(async () => {
+      try {
+        const res = await messageService.getUnreadCount();
+        if (res.data) setUnreadCount(res.data.count);
+      } catch { /* ignore */ }
+    }, 10000);
+    return () => clearInterval(interval);
+  }, [isRealApi]);
 
   const practiceName = auth.user
     ? `${auth.user.firstName}'s Practice`
     : "My Practice";
 
   // Total members
-  const totalMembers = MOCK_PLANS.reduce((s, p) => s + p.memberCount, 0);
+  const totalMembers = apiPlans
+    ? apiPlans.reduce((s, p) => s + (p.memberCount ?? p.member_count ?? 0), 0)
+    : MOCK_PLANS.reduce((s, p) => s + p.memberCount, 0);
 
   // ─── Sidebar ────────────────────────────────────────────────────────────
 
@@ -527,12 +582,12 @@ export function PracticePortal() {
                     >
                       <item.icon className="w-4 h-4 shrink-0" style={isActive ? { color: "#27ab83" } : {}} />
                       {item.label}
-                      {item.id === "messages" && (
+                      {item.id === "messages" && unreadCount > 0 && (
                         <span
                           className="ml-auto text-xs rounded-full px-1.5 py-0.5 font-semibold"
                           style={{ backgroundColor: "#ef4444", color: "#ffffff" }}
                         >
-                          3
+                          {unreadCount}
                         </span>
                       )}
                     </button>
@@ -558,18 +613,41 @@ export function PracticePortal() {
       <div className="space-y-6">
         {/* Stats Row */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <StatCard icon={Users} label="Active Members" value="85" trend="+7 this month" />
-          <StatCard icon={DollarSign} label="Monthly Revenue" value="$14,285" trend="+12% MoM" />
-          <StatCard icon={Calendar} label="Appointments Today" value="8" trend="3 confirmed" trendColor="#334e68" />
-          <StatCard icon={ClipboardList} label="Pending Intakes" value="4" trend="2 new today" trendColor="#d97706" />
+          <StatCard
+            icon={Users}
+            label="Active Members"
+            value={apiDashStats?.activeMembers?.toString() ?? apiDashStats?.active_members?.toString() ?? apiDashStats?.totalPatients?.toString() ?? "85"}
+            trend={apiDashStats ? "" : "+7 this month"}
+          />
+          <StatCard
+            icon={DollarSign}
+            label="Monthly Revenue"
+            value={apiDashStats?.mrr ? `$${Number(apiDashStats.mrr).toLocaleString()}` : apiDashStats?.monthlyRevenue ? `$${Number(apiDashStats.monthlyRevenue).toLocaleString()}` : "$14,285"}
+            trend={apiDashStats ? "" : "+12% MoM"}
+          />
+          <StatCard
+            icon={Calendar}
+            label="Appointments Today"
+            value={apiDashStats?.appointmentsToday?.toString() ?? apiDashStats?.appointments_today?.toString() ?? "8"}
+            trend={apiDashStats ? "" : "3 confirmed"}
+            trendColor="#334e68"
+          />
+          <StatCard
+            icon={ClipboardList}
+            label="Pending Intakes"
+            value={apiDashStats?.pendingIntakes?.toString() ?? apiDashStats?.pending_intakes?.toString() ?? "4"}
+            trend={apiDashStats ? "" : "2 new today"}
+            trendColor="#d97706"
+          />
         </div>
 
         {/* Plan Distribution */}
         <div>
           <h3 className="text-lg font-semibold text-slate-800 mb-4">Plan Distribution</h3>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {MOCK_PLANS.map((plan) => {
-              const pct = Math.round((plan.memberCount / totalMembers) * 100);
+            {(apiPlans || MOCK_PLANS).map((plan) => {
+              const memberCount = plan.memberCount ?? plan.member_count ?? 0;
+              const pct = totalMembers > 0 ? Math.round((memberCount / totalMembers) * 100) : 0;
               const planColors: Record<string, { accent: string; bg: string }> = {
                 Essential: { accent: "#334e68", bg: "#e0e8f0" },
                 Complete: { accent: "#147d64", bg: "#e6f7f2" },
@@ -581,12 +659,12 @@ export function PracticePortal() {
                   <div className="flex items-center justify-between mb-2">
                     <h4 className="font-semibold text-slate-800">{plan.name}</h4>
                     <span className="text-lg font-bold" style={{ color: colors.accent }}>
-                      ${plan.monthlyPrice}
+                      ${plan.monthlyPrice ?? plan.monthly_price ?? 0}
                       <span className="text-xs font-normal text-slate-400">/mo</span>
                     </span>
                   </div>
                   <p className="text-sm text-slate-500 mb-3">
-                    {plan.memberCount} members
+                    {memberCount} members
                   </p>
                   <div className="w-full h-2 rounded-full" style={{ backgroundColor: colors.bg }}>
                     <div
@@ -1864,8 +1942,44 @@ export function PracticePortal() {
 
   // ─── Messages Tab ───────────────────────────────────────────────────────
 
+  // Fetch thread messages from API when thread is selected
+  const handleSelectThread = async (threadId: string) => {
+    setSelectedThread(threadId);
+    if (apiThreads) {
+      try {
+        const res = await messageService.getThread(threadId);
+        if (res.data && Array.isArray(res.data) && res.data.length > 0) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          setApiMessages(res.data.map((m: any) => ({
+            id: m.id,
+            sender: m.senderName ?? m.sender_name ?? "",
+            text: m.body ?? m.text ?? m.content ?? "",
+            time: m.createdAt ?? m.created_at ?? m.timestamp ?? "",
+            isPatient: m.senderRole === "patient" || m.is_patient === true,
+          })));
+        } else {
+          setApiMessages(null);
+        }
+      } catch {
+        setApiMessages(null);
+      }
+    }
+  };
+
+  const handleSendMessage = async () => {
+    if (!messageInput.trim()) return;
+    if (apiThreads) {
+      try {
+        await messageService.send({ threadId: selectedThread, body: messageInput, text: messageInput } as Partial<import("../../types").Message>);
+      } catch { /* fallback: just clear input */ }
+    }
+    setMessageInput("");
+  };
+
   function renderMessages() {
-    const activeThread = MOCK_THREADS.find((t) => t.id === selectedThread) || MOCK_THREADS[0];
+    const threads = apiThreads || MOCK_THREADS;
+    const activeThread = threads.find((t: typeof MOCK_THREADS[0]) => t.id === selectedThread) || threads[0];
+    const displayMessages = apiMessages || activeThread?.messages || [];
 
     return (
       <div className="space-y-4">
@@ -1884,10 +1998,10 @@ export function PracticePortal() {
               </div>
             </div>
             <div className="flex-1 overflow-y-auto">
-              {MOCK_THREADS.map((thread) => (
+              {threads.map((thread: typeof MOCK_THREADS[0]) => (
                 <button
                   key={thread.id}
-                  onClick={() => setSelectedThread(thread.id)}
+                  onClick={() => handleSelectThread(thread.id)}
                   className={`w-full text-left p-4 border-b border-slate-100 transition-colors ${
                     selectedThread === thread.id ? "bg-slate-50" : "hover:bg-slate-50"
                   }`}
@@ -1930,7 +2044,7 @@ export function PracticePortal() {
                   className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-semibold text-white"
                   style={{ backgroundColor: "#334e68" }}
                 >
-                  {activeThread.patient.split(" ").map((n) => n[0]).join("")}
+                  {activeThread.patient.split(" ").map((n: string) => n[0]).join("")}
                 </div>
                 <div>
                   <p className="font-medium text-sm text-slate-800">{activeThread.patient}</p>
@@ -1949,7 +2063,7 @@ export function PracticePortal() {
 
             {/* Messages */}
             <div className="flex-1 overflow-y-auto p-4 space-y-4">
-              {activeThread.messages.map((msg) => (
+              {displayMessages.map((msg: { id: string; text: string; time: string; isPatient: boolean }) => (
                 <div
                   key={msg.id}
                   className={`flex ${msg.isPatient ? "justify-start" : "justify-end"}`}
@@ -1987,6 +2101,7 @@ export function PracticePortal() {
                   onBlur={(e) => (e.currentTarget.style.borderColor = "")}
                 />
                 <button
+                  onClick={handleSendMessage}
                   className="p-2.5 rounded-xl text-white transition-colors"
                   style={{ backgroundColor: "#27ab83" }}
                   onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#147d64")}
@@ -3281,6 +3396,8 @@ export function PracticePortal() {
     switch (activeTab) {
       case "dashboard":
         return renderDashboard();
+      case "programs":
+        return <ProgramsSection />;
       case "roster":
         return renderRoster();
       case "intakes":

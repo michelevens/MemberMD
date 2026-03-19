@@ -3,11 +3,12 @@
 // Premium health app feel (One Medical / Forward inspired)
 // Mobile-first: top header + bottom nav (no sidebar)
 
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../contexts/AuthContext";
 import { HeaderToolbar } from "../shared/HeaderToolbar";
 import { AppointmentBookingWidget } from "../widgets/AppointmentBookingWidget";
+import { familyService } from "../../lib/api";
 import {
   Home,
   Calendar,
@@ -466,6 +467,45 @@ export function PatientPortal() {
     messages: true,
     marketing: false,
   });
+
+  // ─── Family Members ──────────────────────────────────────────────────────
+  interface FamilyMember {
+    id: string;
+    firstName: string;
+    lastName: string;
+    relationship: string;
+    dateOfBirth: string;
+    email?: string;
+    phone?: string;
+    status: string;
+  }
+
+  const MOCK_FAMILY_MEMBERS: FamilyMember[] = [
+    { id: "fm1", firstName: "Sarah", lastName: "Wilson", relationship: "Spouse", dateOfBirth: "1990-03-22", status: "active" },
+    { id: "fm2", firstName: "Emma", lastName: "Wilson", relationship: "Child", dateOfBirth: "2015-08-10", status: "active" },
+  ];
+
+  const planSupportsFamily = PATIENT.planName === "Complete Plan" || PATIENT.planName === "Premium Plan";
+  const [_familyMembers, setFamilyMembers] = useState<FamilyMember[]>(planSupportsFamily ? MOCK_FAMILY_MEMBERS : []);
+  const [_showAddFamily, setShowAddFamily] = useState(false);
+  const [familyForm, _setFamilyForm] = useState({ firstName: "", lastName: "", dateOfBirth: "", relationship: "Spouse", email: "", phone: "" });
+  const [_confirmRemoveId, setConfirmRemoveId] = useState<string | null>(null);
+
+  const loadFamilyMembers = useCallback(async () => {
+    try {
+      const res = await familyService.list();
+      if (res.data && Array.isArray(res.data) && res.data.length > 0) {
+        setFamilyMembers(res.data);
+      }
+    } catch {
+      // keep mock data
+    }
+  }, []);
+
+  useEffect(() => { loadFamilyMembers(); }, [loadFamilyMembers]);
+
+  // Family member handlers — will be wired when Family UI section is built
+  void setFamilyMembers; void setShowAddFamily; void setConfirmRemoveId; void familyForm; void _setFamilyForm;
 
   const firstName = user?.firstName || PATIENT.firstName;
   const lastName = user?.lastName || PATIENT.lastName;

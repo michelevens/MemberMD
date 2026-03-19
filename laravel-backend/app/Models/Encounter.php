@@ -15,7 +15,7 @@ class Encounter extends Model
     use HasFactory, HasUuids, BelongsToTenant, Auditable;
 
     protected $fillable = [
-        'tenant_id', 'patient_id', 'provider_id', 'appointment_id',
+        'tenant_id', 'patient_id', 'provider_id', 'appointment_id', 'program_id',
         'encounter_date', 'encounter_type',
         'chief_complaint', 'subjective', 'objective', 'assessment', 'plan',
         'diagnoses', 'vitals', 'prescriptions_written', 'labs_ordered',
@@ -40,6 +40,7 @@ class Encounter extends Model
     public function patient(): BelongsTo { return $this->belongsTo(Patient::class); }
     public function provider(): BelongsTo { return $this->belongsTo(Provider::class); }
     public function appointment(): BelongsTo { return $this->belongsTo(Appointment::class); }
+    public function program(): BelongsTo { return $this->belongsTo(Program::class); }
     public function prescriptions(): HasMany { return $this->hasMany(Prescription::class); }
     public function screeningResponses(): HasMany { return $this->hasMany(ScreeningResponse::class); }
     public function signer(): BelongsTo { return $this->belongsTo(User::class, 'signed_by'); }

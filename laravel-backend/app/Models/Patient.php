@@ -65,6 +65,7 @@ class Patient extends Model
     public function consentSignatures(): HasMany { return $this->hasMany(ConsentSignature::class); }
     public function documents(): HasMany { return $this->hasMany(Document::class); }
     public function familyMembers(): HasMany { return $this->hasMany(PatientFamilyMember::class, 'primary_patient_id'); }
+    public function programEnrollments(): HasMany { return $this->hasMany(ProgramEnrollment::class); }
 
     public function getFullNameAttribute(): string
     {
