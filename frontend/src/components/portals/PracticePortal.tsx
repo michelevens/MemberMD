@@ -7,6 +7,9 @@ import { useAuth } from "../../contexts/AuthContext";
 import { HeaderToolbar } from "../shared/HeaderToolbar";
 import { UserSettingsDropdown } from "../shared/UserSettingsDropdown";
 import { PracticeSettings } from "../settings/PracticeSettings";
+import { CalendarView } from "../shared/CalendarView";
+import { AppointmentBookingWidget } from "../widgets/AppointmentBookingWidget";
+import { AuditDashboard } from "../shared/AuditDashboard";
 import {
   LayoutDashboard,
   Users,
@@ -30,8 +33,6 @@ import {
   X,
   DollarSign,
   TrendingUp,
-  ChevronRight,
-  ChevronLeft,
   Search,
   Plus,
   MoreHorizontal,
@@ -72,6 +73,7 @@ type TabId =
   | "staff"
   | "messages"
   | "notifications"
+  | "compliance"
   | "practice-settings"
   | "branding";
 
@@ -131,6 +133,12 @@ const NAV_SECTIONS: NavSection[] = [
     items: [
       { id: "messages", label: "Messages", icon: MessageSquare },
       { id: "notifications", label: "Notifications", icon: Bell },
+    ],
+  },
+  {
+    title: "Compliance",
+    items: [
+      { id: "compliance", label: "HIPAA & Audit", icon: Shield },
     ],
   },
   {
@@ -439,6 +447,7 @@ export function PracticePortal() {
   const [patientDetailTab, setPatientDetailTab] = useState("demographics");
   const [expandedEncounters, setExpandedEncounters] = useState<string[]>([]);
   const [notificationFilter, setNotificationFilter] = useState<"all" | "members" | "appointments" | "billing" | "system">("all");
+  const [showBookingWidget, setShowBookingWidget] = useState(false);
 
   const practiceName = auth.user
     ? `${auth.user.firstName}'s Practice`
@@ -1836,118 +1845,19 @@ export function PracticePortal() {
   // ─── Appointments Tab ───────────────────────────────────────────────────
 
   function renderAppointments() {
-    const today = new Date();
-    const dateStr = today.toLocaleDateString("en-US", {
-      weekday: "long",
-      year: "numeric",
-      month: "long",
-      day: "numeric",
-    });
-
     return (
       <div className="space-y-4">
-        {/* Day Header */}
-        <div className="flex items-center justify-between">
-          <h2 className="text-xl font-bold text-slate-800">Appointments</h2>
-          <div className="flex items-center gap-2">
-            <button className="p-2 rounded-lg border border-slate-200 hover:bg-slate-50 transition-colors">
-              <ChevronLeft className="w-4 h-4 text-slate-500" />
-            </button>
-            <div className="px-4 py-2 rounded-lg glass text-sm font-medium text-slate-700">
-              {dateStr}
-            </div>
-            <button className="p-2 rounded-lg border border-slate-200 hover:bg-slate-50 transition-colors">
-              <ChevronRight className="w-4 h-4 text-slate-500" />
-            </button>
-          </div>
-        </div>
+        <CalendarView
+          onAppointmentClick={(_id) => { /* TODO: open appointment detail */ }}
+          onBookNew={() => setShowBookingWidget(true)}
+        />
 
-        <div className="glass rounded-xl overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr style={{ backgroundColor: "rgba(16,42,67,0.03)" }}>
-                  <th className="text-left px-4 py-3 font-medium text-slate-500">Time</th>
-                  <th className="text-left px-4 py-3 font-medium text-slate-500">Patient</th>
-                  <th className="text-left px-4 py-3 font-medium text-slate-500 hidden sm:table-cell">Plan</th>
-                  <th className="text-left px-4 py-3 font-medium text-slate-500">Type</th>
-                  <th className="text-left px-4 py-3 font-medium text-slate-500 hidden md:table-cell">Duration</th>
-                  <th className="text-left px-4 py-3 font-medium text-slate-500 hidden md:table-cell">Provider</th>
-                  <th className="text-left px-4 py-3 font-medium text-slate-500">Status</th>
-                  <th className="text-left px-4 py-3 font-medium text-slate-500">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {MOCK_APPOINTMENTS.map((apt) => (
-                  <tr
-                    key={apt.id}
-                    className="border-t border-slate-100 hover:bg-slate-50 transition-colors"
-                  >
-                    <td className="px-4 py-3 font-medium text-slate-700">{apt.time}</td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-2">
-                        <span className="text-slate-700">{apt.patient}</span>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3 hidden sm:table-cell">
-                      <PlanBadge plan={apt.plan} />
-                    </td>
-                    <td className="px-4 py-3 text-slate-600">
-                      <div className="flex items-center gap-1.5">
-                        {apt.type === "Telehealth" && <Video className="w-3.5 h-3.5" style={{ color: "#27ab83" }} />}
-                        {apt.type}
-                      </div>
-                    </td>
-                    <td className="px-4 py-3 text-slate-500 hidden md:table-cell">{apt.duration}</td>
-                    <td className="px-4 py-3 text-slate-500 hidden md:table-cell">{apt.provider}</td>
-                    <td className="px-4 py-3">
-                      <StatusBadge status={apt.status} />
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-1">
-                        <button className="p-1.5 rounded-md hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors">
-                          <Eye className="w-4 h-4" />
-                        </button>
-                        <button className="p-1.5 rounded-md hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors">
-                          <Pencil className="w-4 h-4" />
-                        </button>
-                        <button className="p-1.5 rounded-md hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors">
-                          <MoreHorizontal className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        {/* Summary */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <div className="glass rounded-lg p-4 text-center">
-            <p className="text-2xl font-bold text-slate-800">{MOCK_APPOINTMENTS.length}</p>
-            <p className="text-xs text-slate-500 mt-1">Total</p>
-          </div>
-          <div className="glass rounded-lg p-4 text-center">
-            <p className="text-2xl font-bold" style={{ color: "#2f8132" }}>
-              {MOCK_APPOINTMENTS.filter((a) => a.status === "confirmed").length}
-            </p>
-            <p className="text-xs text-slate-500 mt-1">Confirmed</p>
-          </div>
-          <div className="glass rounded-lg p-4 text-center">
-            <p className="text-2xl font-bold" style={{ color: "#d97706" }}>
-              {MOCK_APPOINTMENTS.filter((a) => a.status === "pending").length}
-            </p>
-            <p className="text-xs text-slate-500 mt-1">Pending</p>
-          </div>
-          <div className="glass rounded-lg p-4 text-center">
-            <p className="text-2xl font-bold" style={{ color: "#27ab83" }}>
-              {MOCK_APPOINTMENTS.filter((a) => a.type === "Telehealth").length}
-            </p>
-            <p className="text-xs text-slate-500 mt-1">Telehealth</p>
-          </div>
-        </div>
+        {showBookingWidget && (
+          <AppointmentBookingWidget
+            onClose={() => setShowBookingWidget(false)}
+            onBooked={() => setShowBookingWidget(false)}
+          />
+        )}
       </div>
     );
   }
@@ -3401,6 +3311,8 @@ export function PracticePortal() {
         return renderMessages();
       case "notifications":
         return renderNotifications();
+      case "compliance":
+        return <AuditDashboard />;
       case "practice-settings":
         return <PracticeSettings />;
       case "branding":

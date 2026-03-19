@@ -35,4 +35,9 @@ return [
         ],
     ],
 
+    'daily' => [
+        'api_key' => env('DAILY_API_KEY', ''),
+        'domain' => env('DAILY_DOMAIN', 'membermd'),
+    ],
+
 ];

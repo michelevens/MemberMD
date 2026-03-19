@@ -19,6 +19,9 @@ use App\Http\Controllers\Api\ProviderController;
 use App\Http\Controllers\Api\CouponController;
 use App\Http\Controllers\Api\NotificationController;
 use App\Http\Controllers\Api\DashboardController;
+use App\Http\Controllers\Api\TelehealthController;
+use App\Http\Controllers\Api\CalendarController;
+use App\Http\Controllers\Api\AuditController;
 use Illuminate\Support\Facades\Route;
 
 // ===== MemberMD API Routes =====
@@ -41,6 +44,9 @@ Route::prefix('external')->middleware('throttle:60,1')->group(function () {
 
 // ===== Coupon Validation (public-ish, no auth required) =====
 Route::post('/coupons/validate', [CouponController::class, 'validate_'])->middleware('throttle:30,1');
+
+// ===== Public iCal Feed (no auth) =====
+Route::get('/calendar/ical/{token}', [CalendarController::class, 'icalFeed']);
 
 // ===== Authenticated Routes =====
 Route::middleware('auth:sanctum')->group(function () {
@@ -136,4 +142,37 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/notifications/read-all', [NotificationController::class, 'markAllAsRead']);
     Route::put('/notifications/{id}/read', [NotificationController::class, 'markAsRead']);
     Route::get('/notifications', [NotificationController::class, 'index']);
+
+    // ===== Appointment Enhancements =====
+    Route::get('/appointments/available-slots', [AppointmentController::class, 'availableSlots']);
+    Route::get('/appointments/{id}/calendar-links', [AppointmentController::class, 'calendarLinks']);
+    Route::put('/appointments/{id}/reschedule', [AppointmentController::class, 'reschedule']);
+    Route::get('/appointments/waitlist', [AppointmentController::class, 'waitlistIndex']);
+    Route::post('/appointments/waitlist', [AppointmentController::class, 'waitlistStore']);
+    Route::delete('/appointments/waitlist/{id}', [AppointmentController::class, 'waitlistDestroy']);
+
+    // ===== Telehealth =====
+    Route::prefix('telehealth')->group(function () {
+        Route::post('/', [TelehealthController::class, 'store']);
+        Route::get('/appointment/{appointmentId}/token', [TelehealthController::class, 'token']);
+        Route::get('/{id}', [TelehealthController::class, 'show']);
+        Route::post('/{id}/join', [TelehealthController::class, 'join']);
+        Route::post('/{id}/end', [TelehealthController::class, 'end']);
+        Route::post('/{id}/consent', [TelehealthController::class, 'consent']);
+    });
+
+    // ===== Calendar =====
+    Route::get('/calendar/ical/generate-token', [CalendarController::class, 'generateToken']);
+    Route::get('/calendar/{appointmentId}/links', [CalendarController::class, 'calendarLinks']);
+    Route::get('/calendar/google/redirect', [CalendarController::class, 'googleRedirect']);
+
+    // ===== Audit & Compliance =====
+    Route::prefix('audit')->group(function () {
+        Route::get('/logs', [AuditController::class, 'logs']);
+        Route::get('/phi-access', [AuditController::class, 'phiAccess']);
+        Route::get('/security-events', [AuditController::class, 'securityEvents']);
+        Route::get('/compliance-dashboard', [AuditController::class, 'complianceDashboard']);
+        Route::get('/export', [AuditController::class, 'export']);
+        Route::get('/hipaa-checklist', [AuditController::class, 'hipaaChecklist']);
+    });
 });

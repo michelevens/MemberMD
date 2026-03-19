@@ -23,6 +23,13 @@ import type {
   NotificationPreference,
   DashboardStats,
   ApiResponse,
+  AvailableSlot,
+  CalendarLinks,
+  TelehealthSession,
+  PhiAccessLog,
+  SecurityEvent,
+  ComplianceDashboardData,
+  HipaaChecklistItem,
 } from "../types";
 
 // ===== API Configuration =====
@@ -608,6 +615,28 @@ export const appointmentService = {
     if (useMockData()) return mockUpdate<AppointmentType>(data);
     return apiFetch<AppointmentType>(`/appointment-types/${id}`, { method: "PUT", body: JSON.stringify(data) });
   },
+  availableSlots: async (providerId: string, date: string, duration: number): Promise<ApiResponse<AvailableSlot[]>> => {
+    if (useMockData()) {
+      return { data: [
+        { start: "09:00", end: "09:30" }, { start: "09:30", end: "10:00" },
+        { start: "10:00", end: "10:30" }, { start: "10:30", end: "11:00" },
+        { start: "11:00", end: "11:30" }, { start: "11:30", end: "12:00" },
+        { start: "13:00", end: "13:30" }, { start: "13:30", end: "14:00" },
+        { start: "14:00", end: "14:30" }, { start: "14:30", end: "15:00" },
+        { start: "15:00", end: "15:30" }, { start: "15:30", end: "16:00" },
+        { start: "16:00", end: "16:30" },
+      ] };
+    }
+    return apiFetch<AvailableSlot[]>(`/appointments/available-slots?provider_id=${providerId}&date=${date}&duration=${duration}`);
+  },
+  calendarLinks: async (id: string): Promise<ApiResponse<CalendarLinks>> => {
+    if (useMockData()) return { data: { google: "#", yahoo: "#", outlook: "#", ical: "#" } };
+    return apiFetch<CalendarLinks>(`/appointments/${id}/calendar-links`);
+  },
+  reschedule: async (id: string, data: { scheduled_at: string }): Promise<ApiResponse<Appointment>> => {
+    if (useMockData()) return mockUpdate<Appointment>({ id });
+    return apiFetch<Appointment>(`/appointments/${id}/reschedule`, { method: "PUT", body: JSON.stringify(data) });
+  },
 };
 
 // ─── Encounters ─────────────────────────────────────────────────────────────
@@ -893,6 +922,85 @@ export const auditService = {
     if (useMockData()) return { data: [] };
     const query = params ? "?" + new URLSearchParams(params).toString() : "";
     return apiFetch<AuditLog[]>(`/audit-logs${query}`);
+  },
+  getPhiAccess: async (params?: Record<string, string>): Promise<ApiResponse<PhiAccessLog[]>> => {
+    if (useMockData()) return { data: [] };
+    const query = params ? "?" + new URLSearchParams(params).toString() : "";
+    return apiFetch<PhiAccessLog[]>(`/audit/phi-access${query}`);
+  },
+  getSecurityEvents: async (params?: Record<string, string>): Promise<ApiResponse<SecurityEvent[]>> => {
+    if (useMockData()) return { data: [] };
+    const query = params ? "?" + new URLSearchParams(params).toString() : "";
+    return apiFetch<SecurityEvent[]>(`/audit/security-events${query}`);
+  },
+  getComplianceDashboard: async (): Promise<ApiResponse<ComplianceDashboardData>> => {
+    if (useMockData()) return { data: {} as ComplianceDashboardData };
+    return apiFetch<ComplianceDashboardData>("/audit/compliance-dashboard");
+  },
+  getHipaaChecklist: async (): Promise<ApiResponse<HipaaChecklistItem[]>> => {
+    if (useMockData()) return { data: [] };
+    return apiFetch<HipaaChecklistItem[]>("/audit/hipaa-checklist");
+  },
+  exportLogs: async (params?: Record<string, string>): Promise<ApiResponse<Blob>> => {
+    if (useMockData()) return { data: new Blob(["mock csv data"], { type: "text/csv" }) };
+    const token = getAuthToken();
+    const query = params ? "?" + new URLSearchParams(params).toString() : "";
+    const headers: Record<string, string> = { Accept: "text/csv" };
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+    try {
+      const res = await fetch(`${API_BASE_URL}/audit/export${query}`, { headers, credentials: "include" });
+      if (!res.ok) return { error: `Export failed (${res.status})` };
+      const blob = await res.blob();
+      return { data: blob };
+    } catch (e) {
+      return { error: e instanceof Error ? e.message : "Network error" };
+    }
+  },
+};
+
+// ─── Telehealth ──────────────────────────────────────────────────────────────
+
+export const telehealthService = {
+  getSession: async (id: string): Promise<ApiResponse<TelehealthSession>> => {
+    if (useMockData()) return { data: {} as TelehealthSession };
+    return apiFetch<TelehealthSession>(`/telehealth/sessions/${id}`);
+  },
+  joinSession: async (sessionId: string): Promise<ApiResponse<{ token: string; roomUrl: string }>> => {
+    if (useMockData()) return { data: { token: "mock_meeting_token", roomUrl: "https://membermd.daily.co/mock-room" } };
+    return apiFetch<{ token: string; roomUrl: string }>(`/telehealth/sessions/${sessionId}/join`, { method: "POST" });
+  },
+  endSession: async (sessionId: string): Promise<ApiResponse<TelehealthSession>> => {
+    if (useMockData()) return mockUpdate<TelehealthSession>({ id: sessionId, status: "completed" });
+    return apiFetch<TelehealthSession>(`/telehealth/sessions/${sessionId}/end`, { method: "POST" });
+  },
+  giveConsent: async (sessionId: string): Promise<ApiResponse<TelehealthSession>> => {
+    if (useMockData()) return mockUpdate<TelehealthSession>({ id: sessionId, recordingConsentGiven: true });
+    return apiFetch<TelehealthSession>(`/telehealth/sessions/${sessionId}/consent`, { method: "POST" });
+  },
+  getToken: async (appointmentId: string): Promise<ApiResponse<{ token: string; roomUrl: string }>> => {
+    if (useMockData()) return { data: { token: "mock_meeting_token", roomUrl: "https://membermd.daily.co/mock-room" } };
+    return apiFetch<{ token: string; roomUrl: string }>(`/telehealth/token/${appointmentId}`);
+  },
+};
+
+// ─── Calendar ────────────────────────────────────────────────────────────────
+
+export const calendarService = {
+  getLinks: async (appointmentId: string): Promise<ApiResponse<CalendarLinks>> => {
+    if (useMockData()) return { data: { google: "#", yahoo: "#", outlook: "#", ical: "#" } };
+    return apiFetch<CalendarLinks>(`/appointments/${appointmentId}/calendar-links`);
+  },
+  generateIcalToken: async (): Promise<ApiResponse<{ token: string; feedUrl: string }>> => {
+    if (useMockData()) return { data: { token: "mock_ical_token", feedUrl: "#" } };
+    return apiFetch<{ token: string; feedUrl: string }>("/calendar/ical/generate-token");
+  },
+  googleRedirect: async (): Promise<ApiResponse<{ url: string }>> => {
+    if (useMockData()) return { data: { url: "#" } };
+    return apiFetch<{ url: string }>("/calendar/google/redirect");
+  },
+  googleSync: async (appointmentId: string): Promise<ApiResponse<void>> => {
+    if (useMockData()) return { data: undefined };
+    return apiFetch<void>(`/calendar/google/sync/${appointmentId}`, { method: "POST" });
   },
 };
 

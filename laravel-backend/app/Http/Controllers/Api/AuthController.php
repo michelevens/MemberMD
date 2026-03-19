@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Models\Practice;
+use App\Models\SecurityEvent;
 use App\Services\PracticeBootstrapService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -23,6 +24,15 @@ class AuthController extends Controller
         $user = User::where('email', $request->email)->first();
 
         if (!$user || !Hash::check($request->password, $user->password)) {
+            // Log failed login attempt
+            $this->logSecurityEvent(
+                'login_failed',
+                $request,
+                $user?->tenant_id,
+                $user?->id,
+                ['email' => $request->email]
+            );
+
             throw ValidationException::withMessages([
                 'email' => ['The provided credentials are incorrect.'],
             ]);
@@ -31,6 +41,9 @@ class AuthController extends Controller
         $user->update(['last_login_at' => now()]);
 
         $token = $user->createToken('auth-token')->plainTextToken;
+
+        // Log successful login
+        $this->logSecurityEvent('login_success', $request, $user->tenant_id, $user->id);
 
         return response()->json([
             'data' => [
@@ -104,7 +117,11 @@ class AuthController extends Controller
 
     public function logout(Request $request): JsonResponse
     {
-        $request->user()->currentAccessToken()->delete();
+        $user = $request->user();
+
+        $this->logSecurityEvent('logout', $request, $user->tenant_id, $user->id);
+
+        $user->currentAccessToken()->delete();
 
         return response()->json(['message' => 'Logged out']);
     }
@@ -155,5 +172,24 @@ class AuthController extends Controller
                 'tenant_code' => $practice->tenant_code,
             ] : null,
         ];
+    }
+
+    /**
+     * Log a security event (login success/failure, logout, etc.).
+     */
+    private function logSecurityEvent(string $eventType, Request $request, ?string $tenantId = null, ?string $userId = null, array $metadata = []): void
+    {
+        try {
+            SecurityEvent::create([
+                'tenant_id' => $tenantId,
+                'user_id' => $userId,
+                'event_type' => $eventType,
+                'ip_address' => $request->ip(),
+                'user_agent' => $request->userAgent(),
+                'metadata' => !empty($metadata) ? $metadata : null,
+            ]);
+        } catch (\Throwable $e) {
+            \Log::warning('Security event logging failed: ' . $e->getMessage());
+        }
     }
 }

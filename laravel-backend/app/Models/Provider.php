@@ -22,6 +22,7 @@ class Provider extends Model
         'panel_capacity', 'panel_status',
         'accepts_new_patients', 'telehealth_enabled',
         'consultation_fee',
+        'ical_feed_token',
     ];
 
     protected $casts = [
@@ -41,4 +42,5 @@ class Provider extends Model
     public function appointments(): HasMany { return $this->hasMany(Appointment::class); }
     public function encounters(): HasMany { return $this->hasMany(Encounter::class); }
     public function prescriptions(): HasMany { return $this->hasMany(Prescription::class); }
+    public function scheduleOverrides(): HasMany { return $this->hasMany(ProviderScheduleOverride::class); }
 }

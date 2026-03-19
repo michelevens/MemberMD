@@ -4,8 +4,10 @@
 // Mobile-first: top header + bottom nav (no sidebar)
 
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../contexts/AuthContext";
 import { HeaderToolbar } from "../shared/HeaderToolbar";
+import { AppointmentBookingWidget } from "../widgets/AppointmentBookingWidget";
 import {
   Home,
   Calendar,
@@ -451,7 +453,9 @@ function formatDate(dateStr: string) {
 
 export function PatientPortal() {
   const { user, logout } = useAuth();
+  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<TabId>("home");
+  const [showBookingWidget, setShowBookingWidget] = useState(false);
 
   const [activeThread, setActiveThread] = useState<string | null>(null);
   const [messageInput, setMessageInput] = useState("");
@@ -797,6 +801,7 @@ export function PatientPortal() {
               </div>
               {apt.isVideo ? (
                 <button
+                  onClick={() => navigate(`/telehealth/session-${apt.id}`)}
                   className="shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold text-white flex items-center gap-1"
                   style={{ backgroundColor: COLORS.teal500 }}
                 >
@@ -814,7 +819,7 @@ export function PatientPortal() {
           ))}
         </div>
         <button
-          onClick={() => setActiveTab("appointments")}
+          onClick={() => setShowBookingWidget(true)}
           className="w-full mt-3 py-2 text-sm font-medium rounded-lg transition-colors hover:bg-slate-50"
           style={{ color: COLORS.teal500 }}
         >
@@ -888,6 +893,7 @@ export function PatientPortal() {
           Appointments
         </h1>
         <button
+          onClick={() => setShowBookingWidget(true)}
           className="px-4 py-2 rounded-xl text-sm font-semibold text-white shadow-lg transition-all hover:-translate-y-0.5"
           style={{ backgroundColor: COLORS.teal500 }}
         >
@@ -944,6 +950,7 @@ export function PatientPortal() {
               <div className="flex items-center gap-2 mt-3 pt-3 border-t" style={{ borderColor: COLORS.slate200 }}>
                 {apt.isVideo && (
                   <button
+                    onClick={() => navigate(`/telehealth/session-${apt.id}`)}
                     className="flex-1 py-2 rounded-lg text-sm font-semibold text-white flex items-center justify-center gap-1"
                     style={{ backgroundColor: COLORS.teal500 }}
                   >
@@ -1655,6 +1662,12 @@ export function PatientPortal() {
         {renderContent()}
       </main>
       {renderMobileNav()}
+      {showBookingWidget && (
+        <AppointmentBookingWidget
+          onClose={() => setShowBookingWidget(false)}
+          onBooked={() => setShowBookingWidget(false)}
+        />
+      )}
     </div>
   );
 }

@@ -68,6 +68,11 @@ const EnrollmentWidget = namedLazy(
   "EnrollmentWidget"
 );
 
+const TelehealthRoom = namedLazy(
+  () => import("./components/telehealth/TelehealthRoom"),
+  "TelehealthRoom"
+);
+
 // ─── Loading Fallback ─────────────────────────────────────────────────────────
 
 function LoadingFallback() {
@@ -113,6 +118,7 @@ function AuthGate() {
         <Route path="/superadmin/*" element={<SuperAdminPortal />} />
         <Route path="/practice/*" element={<PracticePortal />} />
         <Route path="/patient/*" element={<PatientPortal />} />
+        <Route path="/telehealth/:sessionId" element={<TelehealthRoom />} />
         <Route path="*" element={<Navigate to={portalPath} replace />} />
       </Routes>
     </Suspense>

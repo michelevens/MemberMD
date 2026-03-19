@@ -261,6 +261,117 @@ export interface PatientEntitlement {
   updatedAt: string;
 }
 
+// ─── Recurring Appointments & Telehealth ─────────────────────────────────────
+
+export interface RecurrenceRule {
+  frequency: 'weekly' | 'biweekly' | 'monthly';
+  interval: number;
+  endDate: string;
+  parentId?: string;
+}
+
+export interface CalendarLinks {
+  google: string;
+  yahoo: string;
+  outlook: string;
+  ical: string;
+}
+
+export interface TelehealthSession {
+  id: string;
+  appointmentId: string;
+  roomName: string;
+  roomUrl: string;
+  status: 'created' | 'waiting' | 'in_progress' | 'completed' | 'expired';
+  startedAt: string | null;
+  endedAt: string | null;
+  durationSeconds: number | null;
+  providerJoinedAt: string | null;
+  patientJoinedAt: string | null;
+  recordingEnabled: boolean;
+  recordingConsentGiven: boolean;
+  externalVideoUrl: string | null;
+  isExternal: boolean;
+  meetingToken?: string;
+}
+
+export interface AppointmentWaitlistEntry {
+  id: string;
+  practiceId: string;
+  patientId: string;
+  providerId: string;
+  appointmentTypeId: string | null;
+  preferredDateFrom: string;
+  preferredDateTo: string;
+  preferredTimeFrom: string | null;
+  preferredTimeTo: string | null;
+  status: 'waiting' | 'offered' | 'booked' | 'expired';
+  notes: string | null;
+  patient?: Patient;
+  provider?: Provider;
+  createdAt: string;
+}
+
+export interface AvailableSlot {
+  start: string;
+  end: string;
+}
+
+export interface ProviderScheduleOverride {
+  id: string;
+  providerId: string;
+  overrideDate: string;
+  isAvailable: boolean;
+  startTime: string | null;
+  endTime: string | null;
+  reason: string | null;
+}
+
+// ─── PHI & Compliance ────────────────────────────────────────────────────────
+
+export interface PhiAccessLog {
+  id: string;
+  userId: string | null;
+  patientId: string;
+  resourceType: string;
+  resourceId: string | null;
+  accessType: 'view' | 'list' | 'export' | 'print';
+  ipAddress: string;
+  createdAt: string;
+  user?: { firstName: string; lastName: string; email: string };
+  patient?: { firstName: string; lastName: string };
+}
+
+export interface SecurityEvent {
+  id: string;
+  userId: string | null;
+  eventType: string;
+  ipAddress: string;
+  metadata: Record<string, unknown> | null;
+  createdAt: string;
+  user?: { firstName: string; lastName: string; email: string };
+}
+
+export interface HipaaChecklistItem {
+  id: string;
+  category: 'administrative' | 'physical' | 'technical';
+  name: string;
+  description: string;
+  status: 'compliant' | 'partial' | 'non_compliant';
+  details: string | null;
+}
+
+export interface ComplianceDashboardData {
+  phiAccesses24h: number;
+  phiAccesses7d: number;
+  phiAccesses30d: number;
+  uniquePhiAccessors: number;
+  consentCompletionRate: number;
+  mfaAdoptionRate: number;
+  anomalies: Array<{ type: string; description: string; userId: string; timestamp: string }>;
+  hipaaChecklist: HipaaChecklistItem[];
+}
+
 // ─── Appointments ─────────────────────────────────────────────────────────────
 
 export type AppointmentStatus =
@@ -303,6 +414,14 @@ export interface Appointment {
   canceledAt: string | null;
   cancelReason: string | null;
   checkedInAt: string | null;
+  recurrenceRule?: RecurrenceRule | null;
+  parentAppointmentId?: string | null;
+  patientTimezone?: string | null;
+  confirmedAt?: string | null;
+  startedAt?: string | null;
+  completedAt?: string | null;
+  calendarLinks?: CalendarLinks;
+  telehealthSession?: TelehealthSession | null;
   patient?: Patient;
   provider?: Provider;
   appointmentType?: AppointmentType;

@@ -22,6 +22,8 @@ class Practice extends Model
         'subscription_plan', 'subscription_status',
         'settings', 'branding',
         'panel_capacity', 'is_active',
+        'timezone', 'ip_whitelist', 'password_policy',
+        'session_timeout_minutes', 'enforce_mfa',
     ];
 
     protected $casts = [
@@ -31,6 +33,10 @@ class Practice extends Model
         'is_active' => 'boolean',
         'npi' => 'encrypted',
         'tax_id' => 'encrypted',
+        'ip_whitelist' => 'array',
+        'password_policy' => 'array',
+        'enforce_mfa' => 'boolean',
+        'session_timeout_minutes' => 'integer',
     ];
 
     protected $hidden = ['npi', 'tax_id'];
