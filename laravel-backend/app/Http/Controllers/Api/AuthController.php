@@ -56,8 +56,10 @@ class AuthController extends Controller
         ]);
 
         // Create the practice (tenant)
+        $slug = \Illuminate\Support\Str::slug($validated['practice_name']);
         $practice = Practice::create([
             'name' => $validated['practice_name'],
+            'slug' => $slug,
             'specialty' => $validated['specialty'],
             'practice_model' => $validated['practice_model'],
             'owner_email' => $validated['email'],
