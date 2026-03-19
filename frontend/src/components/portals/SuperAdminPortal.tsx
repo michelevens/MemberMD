@@ -61,6 +61,10 @@ import {
   ClipboardCheck,
   PenLine,
   AlertTriangle,
+  MessageSquare,
+  Send,
+  RefreshCw,
+  ExternalLink,
 } from "lucide-react";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -922,29 +926,6 @@ function TierBadge({ tier }: { tier: "starter" | "professional" | "enterprise" }
   );
 }
 
-// ─── Coming Soon Placeholder ─────────────────────────────────────────────────
-
-function ComingSoon({ title }: { title: string }) {
-  return (
-    <div className="flex items-center justify-center min-h-96">
-      <div className="glass rounded-2xl p-12 text-center max-w-md">
-        <div
-          className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4"
-          style={{ backgroundColor: "#e0e8f0" }}
-        >
-          <Microscope className="w-8 h-8" style={{ color: "#334e68" }} />
-        </div>
-        <h2 className="text-xl font-bold mb-2" style={{ color: "#102a43" }}>
-          {title}
-        </h2>
-        <p className="text-slate-500">
-          This section is under development and will be available soon.
-        </p>
-      </div>
-    </div>
-  );
-}
-
 // ─── Main Component ──────────────────────────────────────────────────────────
 
 export function SuperAdminPortal() {
@@ -962,6 +943,8 @@ export function SuperAdminPortal() {
   const [consentFilter, setConsentFilter] = useState<string>("All");
   const [noteSpecialtyFilter, setNoteSpecialtyFilter] = useState<string>("All");
   const [selectedSpecialtyDetail, setSelectedSpecialtyDetail] = useState<MockSpecialty | null>(null);
+  const [supportFilter, setSupportFilter] = useState<string>("All");
+  const [selectedTicket, setSelectedTicket] = useState<string | null>(null);
 
 
   // ─── Fetch real data from API ─────────────────────────────────────────────
@@ -3032,6 +3015,786 @@ export function SuperAdminPortal() {
     );
   }
 
+  // ─── Analytics Tab ─────────────────────────────────────────────────────
+
+  function renderAnalytics() {
+    const mrrMonths = [
+      { label: "Apr", value: 4200 },
+      { label: "May", value: 5800 },
+      { label: "Jun", value: 7100 },
+      { label: "Jul", value: 8400 },
+      { label: "Aug", value: 9200 },
+      { label: "Sep", value: 10100 },
+      { label: "Oct", value: 10900 },
+      { label: "Nov", value: 11500 },
+      { label: "Dec", value: 12300 },
+      { label: "Jan", value: 13100 },
+      { label: "Feb", value: 13600 },
+      { label: "Mar", value: 14850 },
+    ];
+    const mrrMax = 14850;
+
+    const revenueBreakdown = [
+      { label: "Subscription Revenue", value: "$13,200", pct: "89%" },
+      { label: "Add-On Revenue", value: "$1,350", pct: "9%" },
+      { label: "Platform Fees", value: "$300", pct: "2%" },
+    ];
+
+    const growthStats = [
+      { label: "Total Practices", value: "12", change: "+3 this month", positive: true },
+      { label: "Total Members", value: "342", change: "+28 this month", positive: true },
+      { label: "Avg Members/Practice", value: "28.5", change: "", positive: true },
+      { label: "Avg Revenue/Practice", value: "$1,237/mo", change: "", positive: true },
+    ];
+
+    const newPracticesByMonth = [
+      { label: "Jan", value: 1 },
+      { label: "Feb", value: 2 },
+      { label: "Mar", value: 1 },
+      { label: "Apr", value: 3 },
+      { label: "May", value: 2 },
+      { label: "Jun", value: 3 },
+    ];
+    const newMembersByMonth = [
+      { label: "Jan", value: 18 },
+      { label: "Feb", value: 24 },
+      { label: "Mar", value: 31 },
+      { label: "Apr", value: 42 },
+      { label: "May", value: 38 },
+      { label: "Jun", value: 47 },
+    ];
+
+    const churnReasons = [
+      { label: "Cost too high", pct: 34 },
+      { label: "Moving/relocation", pct: 22 },
+      { label: "Switching providers", pct: 18 },
+      { label: "No longer needed", pct: 14 },
+      { label: "Other", pct: 12 },
+    ];
+
+    const planUtilization = [
+      { plan: "Essential", pct: 67, color: "#27ab83" },
+      { plan: "Complete", pct: 82, color: "#334e68" },
+      { plan: "Premium", pct: 94, color: "#D4A855" },
+    ];
+
+    const topSpecialties = [
+      { name: "Psychiatry", count: 128, pct: 37 },
+      { name: "Primary Care", count: 98, pct: 29 },
+      { name: "Family Medicine", count: 54, pct: 16 },
+      { name: "Pediatrics", count: 32, pct: 9 },
+      { name: "Other", count: 30, pct: 9 },
+    ];
+
+    const cohorts = [
+      { label: "Jan 2026", months: ["100%", "94%", "89%", "78%", "\u2014"] },
+      { label: "Feb 2026", months: ["100%", "92%", "87%", "\u2014", "\u2014"] },
+      { label: "Mar 2026", months: ["100%", "95%", "\u2014", "\u2014", "\u2014"] },
+    ];
+
+    function cohortColor(val: string): string {
+      if (val === "\u2014") return "transparent";
+      const n = parseInt(val);
+      if (n >= 90) return "#dcfce7";
+      if (n >= 80) return "#fef9c3";
+      return "#fee2e2";
+    }
+    function cohortTextColor(val: string): string {
+      if (val === "\u2014") return "#94a3b8";
+      const n = parseInt(val);
+      if (n >= 90) return "#166534";
+      if (n >= 80) return "#854d0e";
+      return "#991b1b";
+    }
+
+    return (
+      <div className="animate-page-in space-y-6">
+        {/* Revenue Section */}
+        <div>
+          <h2 className="text-xl font-bold mb-4" style={{ color: "#102a43" }}>Revenue</h2>
+
+          {/* MRR Overview */}
+          <div className="glass rounded-xl p-6 mb-4">
+            <div className="flex items-start justify-between mb-4">
+              <div>
+                <p className="text-sm font-medium text-slate-500">Monthly Recurring Revenue</p>
+                <p className="text-3xl font-bold mt-1" style={{ color: "#102a43" }}>$14,850</p>
+                <div className="flex items-center gap-1 mt-1">
+                  <ArrowUpRight className="w-3.5 h-3.5 text-green-600" />
+                  <span className="text-xs font-semibold" style={{ color: "#2f8132" }}>+12% from last month</span>
+                </div>
+              </div>
+              <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ backgroundColor: "#e6f7f2" }}>
+                <TrendingUp className="w-5 h-5" style={{ color: "#27ab83" }} />
+              </div>
+            </div>
+            <div className="flex items-end gap-1.5" style={{ height: "80px" }}>
+              {mrrMonths.map((m) => (
+                <div key={m.label} className="flex-1 flex flex-col items-center gap-1">
+                  <div
+                    className="w-full rounded-t"
+                    style={{
+                      height: `${(m.value / mrrMax) * 64}px`,
+                      backgroundColor: m.label === "Mar" ? "#27ab83" : "#334e68",
+                      opacity: m.label === "Mar" ? 1 : 0.6,
+                    }}
+                  />
+                  <span className="text-xs text-slate-400">{m.label}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Revenue Breakdown */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            {revenueBreakdown.map((r) => (
+              <div key={r.label} className="glass rounded-xl p-5">
+                <p className="text-sm font-medium text-slate-500">{r.label}</p>
+                <p className="text-2xl font-bold mt-1" style={{ color: "#102a43" }}>{r.value}</p>
+                <p className="text-xs text-slate-400 mt-1">{r.pct} of total</p>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Growth Section */}
+        <div>
+          <h2 className="text-xl font-bold mb-4" style={{ color: "#102a43" }}>Growth</h2>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-4">
+            {growthStats.map((s) => (
+              <div key={s.label} className="glass rounded-xl p-5">
+                <p className="text-sm font-medium text-slate-500">{s.label}</p>
+                <p className="text-2xl font-bold mt-1" style={{ color: "#102a43" }}>{s.value}</p>
+                {s.change && (
+                  <div className="flex items-center gap-1 mt-1">
+                    <ArrowUpRight className="w-3.5 h-3.5 text-green-600" />
+                    <span className="text-xs font-semibold" style={{ color: "#2f8132" }}>{s.change}</span>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+
+          {/* Growth Charts */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {/* New Practices Chart */}
+            <div className="glass rounded-xl p-6">
+              <h3 className="text-sm font-semibold mb-4" style={{ color: "#102a43" }}>New Practices (Last 6 Months)</h3>
+              <div className="flex items-end gap-3" style={{ height: "120px" }}>
+                {newPracticesByMonth.map((m) => (
+                  <div key={m.label} className="flex-1 flex flex-col items-center gap-1">
+                    <span className="text-xs font-semibold" style={{ color: "#334e68" }}>{m.value}</span>
+                    <div
+                      className="w-full rounded-t"
+                      style={{ height: `${(m.value / 3) * 80}px`, backgroundColor: "#334e68" }}
+                    />
+                    <span className="text-xs text-slate-400">{m.label}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* New Members Chart */}
+            <div className="glass rounded-xl p-6">
+              <h3 className="text-sm font-semibold mb-4" style={{ color: "#102a43" }}>New Members (Last 6 Months)</h3>
+              <div className="flex items-end gap-3" style={{ height: "120px" }}>
+                {newMembersByMonth.map((m) => (
+                  <div key={m.label} className="flex-1 flex flex-col items-center gap-1">
+                    <span className="text-xs font-semibold" style={{ color: "#27ab83" }}>{m.value}</span>
+                    <div
+                      className="w-full rounded-t"
+                      style={{ height: `${(m.value / 47) * 80}px`, backgroundColor: "#27ab83" }}
+                    />
+                    <span className="text-xs text-slate-400">{m.label}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Churn Section */}
+        <div>
+          <h2 className="text-xl font-bold mb-4" style={{ color: "#102a43" }}>Churn</h2>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
+            <div className="glass rounded-xl p-5">
+              <p className="text-sm font-medium text-slate-500">Monthly Churn Rate</p>
+              <div className="flex items-center gap-2 mt-1">
+                <p className="text-2xl font-bold" style={{ color: "#102a43" }}>3.2%</p>
+                <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold" style={{ backgroundColor: "#fee2e2", color: "#991b1b" }}>High</span>
+              </div>
+            </div>
+            <div className="glass rounded-xl p-5">
+              <p className="text-sm font-medium text-slate-500">Members Lost This Month</p>
+              <p className="text-2xl font-bold mt-1" style={{ color: "#102a43" }}>11</p>
+            </div>
+            <div className="glass rounded-xl p-5">
+              <p className="text-sm font-medium text-slate-500">Avg Member Lifetime</p>
+              <p className="text-2xl font-bold mt-1" style={{ color: "#102a43" }}>8.4 months</p>
+            </div>
+          </div>
+
+          {/* Churn Reasons */}
+          <div className="glass rounded-xl p-6">
+            <h3 className="text-sm font-semibold mb-4" style={{ color: "#102a43" }}>Churn Reasons</h3>
+            <div className="space-y-3">
+              {churnReasons.map((r) => (
+                <div key={r.label} className="flex items-center gap-3">
+                  <span className="text-sm text-slate-600 w-40 shrink-0">{r.label}</span>
+                  <div className="flex-1 rounded-full overflow-hidden" style={{ backgroundColor: "#f1f5f9", height: "20px" }}>
+                    <div className="h-full rounded-full" style={{ width: `${r.pct}%`, backgroundColor: "#334e68" }} />
+                  </div>
+                  <span className="text-sm font-semibold w-10 text-right" style={{ color: "#102a43" }}>{r.pct}%</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Utilization Section */}
+        <div>
+          <h2 className="text-xl font-bold mb-4" style={{ color: "#102a43" }}>Utilization</h2>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {/* Visit Utilization by Plan Tier */}
+            <div className="glass rounded-xl p-6">
+              <h3 className="text-sm font-semibold mb-4" style={{ color: "#102a43" }}>Visit Utilization by Plan Tier</h3>
+              <div className="space-y-4">
+                {planUtilization.map((p) => (
+                  <div key={p.plan}>
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-sm font-medium text-slate-600">{p.plan}</span>
+                      <span className="text-sm font-semibold" style={{ color: p.color }}>{p.pct}%</span>
+                    </div>
+                    <div className="w-full rounded-full overflow-hidden" style={{ backgroundColor: "#f1f5f9", height: "10px" }}>
+                      <div className="h-full rounded-full transition-all" style={{ width: `${p.pct}%`, backgroundColor: p.color }} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Top Specialties */}
+            <div className="glass rounded-xl p-6">
+              <h3 className="text-sm font-semibold mb-4" style={{ color: "#102a43" }}>Top Specialties by Member Count</h3>
+              <div className="space-y-3">
+                {topSpecialties.map((s) => (
+                  <div key={s.name} className="flex items-center gap-3">
+                    <span className="text-sm text-slate-600 w-28 shrink-0">{s.name}</span>
+                    <div className="flex-1 rounded-full overflow-hidden" style={{ backgroundColor: "#f1f5f9", height: "20px" }}>
+                      <div className="h-full rounded-full" style={{ width: `${s.pct}%`, backgroundColor: "#27ab83" }} />
+                    </div>
+                    <span className="text-xs text-slate-500 w-20 text-right">{s.count} ({s.pct}%)</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Retention Cohorts */}
+        <div>
+          <h2 className="text-xl font-bold mb-4" style={{ color: "#102a43" }}>Retention Cohorts</h2>
+          <div className="glass rounded-xl overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr style={{ backgroundColor: "#f8fafc" }}>
+                    <th className="text-left px-6 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Cohort</th>
+                    <th className="text-center px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Month 1</th>
+                    <th className="text-center px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Month 2</th>
+                    <th className="text-center px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Month 3</th>
+                    <th className="text-center px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Month 6</th>
+                    <th className="text-center px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Month 12</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {cohorts.map((c) => (
+                    <tr key={c.label} className="hover:bg-slate-50/50 transition-colors">
+                      <td className="px-6 py-3.5 text-sm font-medium" style={{ color: "#102a43" }}>{c.label}</td>
+                      {c.months.map((val, i) => (
+                        <td key={i} className="px-4 py-3.5 text-center">
+                          <span
+                            className="inline-flex items-center justify-center px-3 py-1 rounded text-xs font-semibold"
+                            style={{ backgroundColor: cohortColor(val), color: cohortTextColor(val) }}
+                          >
+                            {val}
+                          </span>
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ─── Billing Tab ──────────────────────────────────────────────────────────
+
+  function renderBilling() {
+    const revenueSummary = [
+      { label: "Total Revenue (All Time)", value: "$89,400", icon: DollarSign, gradient: "linear-gradient(135deg, #334e68, #243b53)" },
+      { label: "This Month", value: "$14,850", icon: TrendingUp, gradient: "linear-gradient(135deg, #27ab83, #147d64)" },
+      { label: "Platform Fees Collected", value: "$4,470", icon: CreditCard, gradient: "linear-gradient(135deg, #0369a1, #0c4a6e)" },
+      { label: "Outstanding Balances", value: "$2,340", icon: AlertTriangle, gradient: "linear-gradient(135deg, #d97706, #92400e)" },
+    ];
+
+    const practiceBilling = [
+      { name: "Clearstone Group", plan: "Professional", mrr: "$4,950", members: 45, fee: "$247.50", status: "Active" as const, lastPayment: "Mar 18, 2026" },
+      { name: "BellaCare Senior", plan: "Professional", mrr: "$3,200", members: 28, fee: "$160.00", status: "Active" as const, lastPayment: "Mar 17, 2026" },
+      { name: "Tranquil Mind", plan: "Starter", mrr: "$1,890", members: 22, fee: "$94.50", status: "Active" as const, lastPayment: "Mar 16, 2026" },
+      { name: "Sunrise Pediatrics", plan: "Professional", mrr: "$2,100", members: 18, fee: "$105.00", status: "Trial" as const, lastPayment: "\u2014" },
+      { name: "Metro Cardiology", plan: "Starter", mrr: "$980", members: 12, fee: "$49.00", status: "Active" as const, lastPayment: "Mar 15, 2026" },
+      { name: "NeuroVista Clinic", plan: "Enterprise", mrr: "$1,730", members: 15, fee: "$86.50", status: "Active" as const, lastPayment: "Mar 14, 2026" },
+    ];
+
+    const recentTransactions = [
+      { date: "Mar 18", practice: "Clearstone Group", type: "Platform Fee", amount: "$247.50", status: "Completed" },
+      { date: "Mar 17", practice: "BellaCare Senior", type: "Platform Fee", amount: "$160.00", status: "Completed" },
+      { date: "Mar 16", practice: "Tranquil Mind", type: "Platform Fee", amount: "$94.50", status: "Completed" },
+      { date: "Mar 15", practice: "Metro Cardiology", type: "Platform Fee", amount: "$49.00", status: "Completed" },
+      { date: "Mar 14", practice: "NeuroVista Clinic", type: "Platform Fee", amount: "$86.50", status: "Completed" },
+      { date: "Mar 13", practice: "Clearstone Group", type: "Refund", amount: "-$99.00", status: "Processed" },
+    ];
+
+    const dunning = [
+      { practice: "Pacific Orthopedics", amount: "$179/mo", failedAgo: "2 days ago", retryNum: 2 },
+      { practice: "ClearView ENT", amount: "$99/mo", failedAgo: "5 days ago", retryNum: 3 },
+    ];
+
+    function statusBadge(status: string) {
+      const map: Record<string, { bg: string; color: string }> = {
+        Active: { bg: "#dcfce7", color: "#166534" },
+        Trial: { bg: "#dbeafe", color: "#1e40af" },
+        "Past Due": { bg: "#fee2e2", color: "#991b1b" },
+        Suspended: { bg: "#f1f5f9", color: "#64748b" },
+      };
+      const s = map[status] || map["Suspended"];
+      return (
+        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold" style={{ backgroundColor: s.bg, color: s.color }}>
+          {status}
+        </span>
+      );
+    }
+
+    return (
+      <div className="animate-page-in space-y-6">
+        {/* Revenue Summary */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+          {revenueSummary.map((stat) => {
+            const Icon = stat.icon;
+            return (
+              <div key={stat.label} className="glass hover-lift rounded-xl p-5 relative overflow-hidden">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-slate-500">{stat.label}</p>
+                    <p className="text-2xl font-bold mt-1" style={{ color: "#102a43" }}>{stat.value}</p>
+                  </div>
+                  <div className="w-10 h-10 rounded-xl flex items-center justify-center text-white" style={{ background: stat.gradient }}>
+                    <Icon className="w-5 h-5" />
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Stripe Connect Status */}
+        <div className="glass rounded-xl p-6">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-bold" style={{ color: "#102a43" }}>Stripe Connect Status</h3>
+            <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold" style={{ backgroundColor: "#dcfce7", color: "#166534" }}>
+              <CheckCircle2 className="w-3.5 h-3.5 mr-1" /> Connected
+            </span>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div>
+              <p className="text-xs text-slate-400 uppercase tracking-wider">Account ID</p>
+              <p className="text-sm font-mono mt-1" style={{ color: "#334e68" }}>acct_1234...XXXX</p>
+            </div>
+            <div>
+              <p className="text-xs text-slate-400 uppercase tracking-wider">Payout Schedule</p>
+              <p className="text-sm font-medium mt-1" style={{ color: "#334e68" }}>Daily</p>
+            </div>
+            <div>
+              <p className="text-xs text-slate-400 uppercase tracking-wider">Next Payout</p>
+              <p className="text-sm font-medium mt-1" style={{ color: "#334e68" }}>$1,240 on March 20, 2026</p>
+            </div>
+            <div className="flex items-end">
+              <button className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors" style={{ backgroundColor: "#334e68" }}>
+                <ExternalLink className="w-4 h-4" />
+                View Stripe Dashboard
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Practice Billing Table */}
+        <div>
+          <h2 className="text-xl font-bold mb-4" style={{ color: "#102a43" }}>Practice Billing</h2>
+          <div className="glass rounded-xl overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr style={{ backgroundColor: "#f8fafc" }}>
+                    <th className="text-left px-6 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Practice</th>
+                    <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Plan</th>
+                    <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">MRR</th>
+                    <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Members</th>
+                    <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Platform Fee</th>
+                    <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Status</th>
+                    <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Last Payment</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {practiceBilling.map((p) => (
+                    <tr key={p.name} className="hover:bg-slate-50/50 transition-colors">
+                      <td className="px-6 py-3.5 text-sm font-medium" style={{ color: "#102a43" }}>{p.name}</td>
+                      <td className="px-4 py-3.5 text-sm text-slate-600">{p.plan}</td>
+                      <td className="px-4 py-3.5 text-sm font-semibold" style={{ color: "#102a43" }}>{p.mrr}</td>
+                      <td className="px-4 py-3.5 text-sm text-slate-600">{p.members}</td>
+                      <td className="px-4 py-3.5 text-sm text-slate-600">{p.fee}</td>
+                      <td className="px-4 py-3.5">{statusBadge(p.status)}</td>
+                      <td className="px-4 py-3.5 text-sm text-slate-500">{p.lastPayment}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        {/* Recent Transactions */}
+        <div>
+          <h2 className="text-xl font-bold mb-4" style={{ color: "#102a43" }}>Recent Transactions</h2>
+          <div className="glass rounded-xl overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr style={{ backgroundColor: "#f8fafc" }}>
+                    <th className="text-left px-6 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Date</th>
+                    <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Practice</th>
+                    <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Type</th>
+                    <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Amount</th>
+                    <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {recentTransactions.map((t, i) => (
+                    <tr key={i} className="hover:bg-slate-50/50 transition-colors">
+                      <td className="px-6 py-3.5 text-sm text-slate-600">{t.date}</td>
+                      <td className="px-4 py-3.5 text-sm font-medium" style={{ color: "#102a43" }}>{t.practice}</td>
+                      <td className="px-4 py-3.5">
+                        <span
+                          className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold"
+                          style={{
+                            backgroundColor: t.type === "Refund" ? "#fee2e2" : "#dbeafe",
+                            color: t.type === "Refund" ? "#991b1b" : "#1e40af",
+                          }}
+                        >
+                          {t.type}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3.5 text-sm font-semibold" style={{ color: t.amount.startsWith("-") ? "#dc2626" : "#102a43" }}>{t.amount}</td>
+                      <td className="px-4 py-3.5">
+                        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold" style={{ backgroundColor: "#dcfce7", color: "#166534" }}>
+                          {t.status}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        {/* Dunning Queue */}
+        <div>
+          <h2 className="text-xl font-bold mb-4" style={{ color: "#102a43" }}>Dunning Queue</h2>
+          <div className="space-y-3">
+            {dunning.map((d) => (
+              <div key={d.practice} className="glass rounded-xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ backgroundColor: "#fee2e2" }}>
+                    <AlertTriangle className="w-5 h-5" style={{ color: "#dc2626" }} />
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold" style={{ color: "#102a43" }}>{d.practice}</p>
+                    <p className="text-xs text-slate-500">{d.amount} failed {d.failedAgo} &middot; Retry #{d.retryNum}</p>
+                  </div>
+                </div>
+                <button
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors"
+                  style={{ backgroundColor: d.retryNum < 3 ? "#334e68" : "#dc2626" }}
+                >
+                  {d.retryNum < 3 ? (
+                    <>
+                      <RefreshCw className="w-4 h-4" />
+                      Retry Now
+                    </>
+                  ) : (
+                    <>
+                      <Mail className="w-4 h-4" />
+                      Contact Practice
+                    </>
+                  )}
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ─── Support Tab ──────────────────────────────────────────────────────────
+
+  function renderSupport() {
+    const supportStats = [
+      { label: "Open Tickets", value: "8", icon: MessageSquare, gradient: "linear-gradient(135deg, #334e68, #243b53)" },
+      { label: "Avg Response Time", value: "2.4 hours", icon: Clock, gradient: "linear-gradient(135deg, #27ab83, #147d64)" },
+      { label: "Resolution Rate", value: "94%", icon: CheckCircle2, gradient: "linear-gradient(135deg, #0369a1, #0c4a6e)" },
+      { label: "This Week", value: "12 tickets", icon: Activity, gradient: "linear-gradient(135deg, #d97706, #92400e)" },
+    ];
+
+    const tickets = [
+      { id: "#1024", subject: "Can't configure Stripe", practice: "Clearstone Group", priority: "High" as const, status: "Open" as const, created: "2 hours ago", assignedTo: "\u2014" },
+      { id: "#1023", subject: "Patient can't log in", practice: "BellaCare Senior", priority: "Medium" as const, status: "In Progress" as const, created: "5 hours ago", assignedTo: "Sarah M." },
+      { id: "#1022", subject: "Need to add provider", practice: "Tranquil Mind", priority: "Low" as const, status: "Open" as const, created: "1 day ago", assignedTo: "\u2014" },
+      { id: "#1021", subject: "Billing discrepancy", practice: "Metro Cardiology", priority: "High" as const, status: "In Progress" as const, created: "1 day ago", assignedTo: "Admin" },
+      { id: "#1020", subject: "Custom screening tool", practice: "NeuroVista", priority: "Medium" as const, status: "Resolved" as const, created: "2 days ago", assignedTo: "Sarah M." },
+      { id: "#1019", subject: "HIPAA compliance Q", practice: "Sunrise Pediatrics", priority: "Low" as const, status: "Resolved" as const, created: "3 days ago", assignedTo: "Admin" },
+      { id: "#1018", subject: "Import patient data", practice: "Pacific Ortho", priority: "Medium" as const, status: "Open" as const, created: "3 days ago", assignedTo: "\u2014" },
+      { id: "#1017", subject: "Plan pricing change", practice: "ClearView ENT", priority: "Low" as const, status: "Resolved" as const, created: "4 days ago", assignedTo: "Admin" },
+    ];
+
+    const filterTabs = ["All", "Open", "In Progress", "Resolved"];
+
+    const filteredTickets = supportFilter === "All"
+      ? tickets
+      : tickets.filter((t) => t.status === supportFilter);
+
+    function priorityBadge(priority: "High" | "Medium" | "Low") {
+      const map = {
+        High: { bg: "#fee2e2", color: "#991b1b" },
+        Medium: { bg: "#fef3c7", color: "#92400e" },
+        Low: { bg: "#f1f5f9", color: "#64748b" },
+      };
+      const s = map[priority];
+      return (
+        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold" style={{ backgroundColor: s.bg, color: s.color }}>
+          {priority}
+        </span>
+      );
+    }
+
+    function statusBadge(status: "Open" | "In Progress" | "Resolved") {
+      const map = {
+        Open: { bg: "#dbeafe", color: "#1e40af" },
+        "In Progress": { bg: "#fef3c7", color: "#92400e" },
+        Resolved: { bg: "#dcfce7", color: "#166534" },
+      };
+      const s = map[status];
+      return (
+        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold" style={{ backgroundColor: s.bg, color: s.color }}>
+          {status}
+        </span>
+      );
+    }
+
+    const ticketConversations: Record<string, { sender: string; role: string; message: string; time: string }[]> = {
+      "#1024": [
+        { sender: "Dr. James Chen", role: "Practice Owner", message: "We're trying to connect our Stripe account but keep getting an error about verification. We've uploaded all documents already.", time: "2 hours ago" },
+        { sender: "System", role: "Auto-Reply", message: "Thank you for reaching out. A support team member will respond shortly.", time: "2 hours ago" },
+      ],
+      "#1023": [
+        { sender: "Maria Lopez", role: "Office Manager", message: "One of our patients, John D., says he can't log in to the patient portal. He's tried resetting his password twice.", time: "5 hours ago" },
+        { sender: "Sarah M.", role: "Support", message: "I've looked into this. The patient's account was locked after 5 failed attempts. I've unlocked it and sent a password reset email. Can you confirm the patient received it?", time: "4 hours ago" },
+        { sender: "Maria Lopez", role: "Office Manager", message: "He got the email and can now log in. Thank you!", time: "3 hours ago" },
+      ],
+      "#1021": [
+        { sender: "Front Desk", role: "Staff", message: "Our February invoice shows $980 but we should only have 10 members, not 12. Two members cancelled mid-month.", time: "1 day ago" },
+        { sender: "Admin", role: "Support", message: "I'm reviewing the billing records now. It looks like the cancellations were processed on Feb 28, so they were counted for the full month. I'll issue a prorated credit.", time: "20 hours ago" },
+      ],
+    };
+
+    return (
+      <div className="animate-page-in space-y-6">
+        {/* Support Stats */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+          {supportStats.map((stat) => {
+            const Icon = stat.icon;
+            return (
+              <div key={stat.label} className="glass hover-lift rounded-xl p-5 relative overflow-hidden">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-slate-500">{stat.label}</p>
+                    <p className="text-2xl font-bold mt-1" style={{ color: "#102a43" }}>{stat.value}</p>
+                  </div>
+                  <div className="w-10 h-10 rounded-xl flex items-center justify-center text-white" style={{ background: stat.gradient }}>
+                    <Icon className="w-5 h-5" />
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Ticket List */}
+        <div>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
+            <h2 className="text-xl font-bold" style={{ color: "#102a43" }}>Support Tickets</h2>
+            <div className="flex items-center gap-2">
+              {filterTabs.map((tab) => (
+                <button
+                  key={tab}
+                  onClick={() => { setSupportFilter(tab); setSelectedTicket(null); }}
+                  className="px-3 py-1.5 rounded-lg text-sm font-medium transition-colors"
+                  style={{
+                    backgroundColor: supportFilter === tab ? "#334e68" : "transparent",
+                    color: supportFilter === tab ? "#ffffff" : "#64748b",
+                  }}
+                >
+                  {tab}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="glass rounded-xl overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr style={{ backgroundColor: "#f8fafc" }}>
+                    <th className="text-left px-6 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">ID</th>
+                    <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Subject</th>
+                    <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Practice</th>
+                    <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Priority</th>
+                    <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Status</th>
+                    <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Created</th>
+                    <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Assigned To</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {filteredTickets.map((t) => (
+                    <>
+                      <tr
+                        key={t.id}
+                        className="hover:bg-slate-50/50 transition-colors cursor-pointer"
+                        onClick={() => setSelectedTicket(selectedTicket === t.id ? null : t.id)}
+                      >
+                        <td className="px-6 py-3.5 text-sm font-mono font-semibold" style={{ color: "#334e68" }}>{t.id}</td>
+                        <td className="px-4 py-3.5 text-sm font-medium" style={{ color: "#102a43" }}>{t.subject}</td>
+                        <td className="px-4 py-3.5 text-sm text-slate-600">{t.practice}</td>
+                        <td className="px-4 py-3.5">{priorityBadge(t.priority)}</td>
+                        <td className="px-4 py-3.5">{statusBadge(t.status)}</td>
+                        <td className="px-4 py-3.5 text-sm text-slate-500">{t.created}</td>
+                        <td className="px-4 py-3.5 text-sm text-slate-600">{t.assignedTo}</td>
+                      </tr>
+                      {selectedTicket === t.id && (
+                        <tr key={`${t.id}-detail`}>
+                          <td colSpan={7} className="px-6 py-4" style={{ backgroundColor: "#f8fafc" }}>
+                            <div className="space-y-4">
+                              {/* Conversation Thread */}
+                              <div className="space-y-3">
+                                <h4 className="text-sm font-semibold" style={{ color: "#102a43" }}>Conversation</h4>
+                                {(ticketConversations[t.id] || [{ sender: t.practice, role: "Practice", message: `Submitted: ${t.subject}`, time: t.created }]).map((msg, i) => (
+                                  <div key={i} className="flex gap-3">
+                                    <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0" style={{ backgroundColor: msg.role === "Support" || msg.role === "Auto-Reply" ? "#e6f7f2" : "#e0e8f0" }}>
+                                      <Users className="w-4 h-4" style={{ color: msg.role === "Support" || msg.role === "Auto-Reply" ? "#27ab83" : "#334e68" }} />
+                                    </div>
+                                    <div className="flex-1">
+                                      <div className="flex items-center gap-2">
+                                        <span className="text-sm font-semibold" style={{ color: "#102a43" }}>{msg.sender}</span>
+                                        <span className="text-xs text-slate-400">{msg.role}</span>
+                                        <span className="text-xs text-slate-400">&middot; {msg.time}</span>
+                                      </div>
+                                      <p className="text-sm text-slate-600 mt-1">{msg.message}</p>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+
+                              {/* Reply Area */}
+                              <div className="flex gap-3">
+                                <textarea
+                                  className="flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2"
+                                  style={{ outlineColor: "#27ab83" }}
+                                  placeholder="Type a reply..."
+                                  rows={2}
+                                />
+                                <button className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white self-end transition-colors" style={{ backgroundColor: "#27ab83" }}>
+                                  <Send className="w-4 h-4" />
+                                  Send Reply
+                                </button>
+                              </div>
+
+                              {/* Quick Actions */}
+                              <div className="flex items-center gap-3 pt-2 border-t border-slate-200">
+                                <div className="flex items-center gap-2">
+                                  <label className="text-xs font-medium text-slate-500">Status:</label>
+                                  <select className="text-sm border border-slate-200 rounded-lg px-2 py-1 focus:outline-none" defaultValue={t.status}>
+                                    <option>Open</option>
+                                    <option>In Progress</option>
+                                    <option>Resolved</option>
+                                  </select>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <label className="text-xs font-medium text-slate-500">Assign to:</label>
+                                  <select className="text-sm border border-slate-200 rounded-lg px-2 py-1 focus:outline-none" defaultValue={t.assignedTo === "\u2014" ? "" : t.assignedTo}>
+                                    <option value="">Unassigned</option>
+                                    <option>Sarah M.</option>
+                                    <option>Admin</option>
+                                  </select>
+                                </div>
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        {/* Knowledge Base Quick Stats */}
+        <div className="glass rounded-xl p-6">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ backgroundColor: "#e0e8f0" }}>
+              <BookOpen className="w-5 h-5" style={{ color: "#334e68" }} />
+            </div>
+            <h3 className="text-lg font-bold" style={{ color: "#102a43" }}>Knowledge Base</h3>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div>
+              <p className="text-xs text-slate-400 uppercase tracking-wider">Articles Published</p>
+              <p className="text-xl font-bold mt-1" style={{ color: "#102a43" }}>24</p>
+            </div>
+            <div>
+              <p className="text-xs text-slate-400 uppercase tracking-wider">Most Viewed</p>
+              <p className="text-sm font-medium mt-1" style={{ color: "#334e68" }}>How to set up membership plans</p>
+              <p className="text-xs text-slate-400">342 views</p>
+            </div>
+            <div>
+              <p className="text-xs text-slate-400 uppercase tracking-wider">Search Queries This Week</p>
+              <p className="text-xl font-bold mt-1" style={{ color: "#102a43" }}>89</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   // ─── Tab Router ──────────────────────────────────────────────────────────
 
   function renderContent() {
@@ -3065,11 +3828,11 @@ export function SuperAdminPortal() {
       case "note-templates":
         return renderNoteTemplates();
       case "analytics":
-        return <ComingSoon title="Analytics" />;
+        return renderAnalytics();
       case "billing":
-        return <ComingSoon title="Platform Billing" />;
+        return renderBilling();
       case "support":
-        return <ComingSoon title="Support" />;
+        return renderSupport();
       case "settings":
         return <PlatformSettings />;
       default:
