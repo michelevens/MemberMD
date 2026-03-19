@@ -44,7 +44,7 @@ class DocumentController extends Controller
         abort_if($user->isPatient() && !$user->patient, 403);
 
         $validated = $request->validate([
-            'file' => 'required|file|max:20480', // 20MB max
+            'file' => 'required|file|max:20480|mimes:pdf,doc,docx,jpg,jpeg,png,gif,txt,csv,xlsx,xls', // 20MB max
             'patient_id' => 'required|uuid|exists:patients,id',
             'name' => 'nullable|string|max:255',
             'category' => 'nullable|string|max:100',
