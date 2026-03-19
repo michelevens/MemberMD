@@ -44,6 +44,9 @@ Route::prefix('external')->middleware('throttle:60,1')->group(function () {
     Route::get('/availability/{tenantCode}', [ExternalController::class, 'availability']);
 });
 
+// ===== Public Registration Data (no auth) =====
+Route::get('/registration/program-templates', [MasterProgramController::class, 'publicIndex'])->middleware('throttle:30,1');
+
 // ===== Coupon Validation (public-ish, no auth required) =====
 Route::post('/coupons/validate', [CouponController::class, 'validate_'])->middleware('throttle:30,1');
 
@@ -189,6 +192,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/{program}', [MasterProgramController::class, 'show']);
         Route::put('/{program}', [MasterProgramController::class, 'update']);
         Route::post('/{program}/provision', [MasterProgramController::class, 'provision']);
+        Route::post('/reprovision', [MasterProgramController::class, 'reprovision']);
     });
 
     // ===== Audit & Compliance =====

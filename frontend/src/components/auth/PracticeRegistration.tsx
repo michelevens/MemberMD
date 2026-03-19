@@ -2,12 +2,12 @@
 // Multi-step onboarding for doctors signing up their practice
 // Pattern from ShiftPulse TenantRegistration
 
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Brain, Heart, Baby, Stethoscope, Scan, Activity, Users, Leaf, Crown,
   Flame, Shield, Zap, ArrowLeft, ArrowRight, Check, Loader2, Eye, EyeOff,
-  Building2, User, Lock, ClipboardList, Sparkles, ChevronRight,
+  Building2, User, Lock, ClipboardList, Sparkles, ChevronRight, Layers,
 } from "lucide-react";
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || "/api";
@@ -97,16 +97,29 @@ const CREDENTIALS = [
   "MD", "DO", "NP", "DNP", "PA", "PA-C", "PMHNP", "FNP", "LCSW", "LPC", "PhD", "PsyD", "Other",
 ];
 
+// ─── Program type icons (fallback) ──────────────────────────────────────────
+
+const PROGRAM_TYPE_ICONS: Record<string, typeof Layers> = {
+  membership: Crown,
+  sponsor_based: Users,
+  insurance_billed: Shield,
+  grant_funded: Heart,
+  hybrid: Activity,
+};
+
 // ─── Step Names ─────────────────────────────────────────────────────────────
 
 const STEP_NAMES = [
   "Practice Info",
   "Specialty",
+  "Programs",
   "Practice Model",
   "Provider Info",
   "Create Account",
   "Review & Complete",
 ];
+
+const TOTAL_STEPS = 7;
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -138,7 +151,26 @@ interface AccountInfo {
   agreeTerms: boolean;
 }
 
-type StepNumber = 1 | 2 | 3 | 4 | 5 | 6;
+interface ProgramTemplate {
+  id: string;
+  name: string;
+  code: string | null;
+  type: string;
+  description: string | null;
+  icon: string | null;
+  specialties: string[] | null;
+  sortOrder: number;
+}
+
+interface ProvisioningSummary {
+  programs: number;
+  screeningTemplates: number;
+  consentTemplates: number;
+  appointmentTypes: number;
+  diagnosisFavorites: number;
+}
+
+type StepNumber = 1 | 2 | 3 | 4 | 5 | 6 | 7;
 type WizardStep = StepNumber | "welcome";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -181,23 +213,80 @@ export function PracticeRegistration() {
   // Step 2: Specialty
   const [selectedSpecialty, setSelectedSpecialty] = useState("");
 
-  // Step 3: Practice Model
+  // Step 3: Programs
+  const [programTemplates, setProgramTemplates] = useState<ProgramTemplate[]>([]);
+  const [selectedPrograms, setSelectedPrograms] = useState<string[]>([]);
+  const [programsLoading, setProgramsLoading] = useState(false);
+
+  // Step 4: Practice Model
   const [selectedModel, setSelectedModel] = useState("");
 
-  // Step 4: Provider Info
+  // Step 5: Provider Info
   const [providerInfo, setProviderInfo] = useState<ProviderInfo>({
     firstName: "", lastName: "", credentials: "", npi: "",
     licenseNumber: "", licenseState: "", bio: "",
   });
 
-  // Step 5: Account
+  // Step 6: Account
   const [accountInfo, setAccountInfo] = useState<AccountInfo>({
     email: "", password: "", confirmPassword: "", agreeTerms: false,
   });
   const [showPassword, setShowPassword] = useState(false);
 
+  // Welcome screen provisioning data
+  const [provisioningSummary, setProvisioningSummary] = useState<ProvisioningSummary | null>(null);
+
   // Field errors
   const [errors, setErrors] = useState<Record<string, string>>({});
+
+  // ─── Fetch program templates when specialty is selected ─────────────────
+
+  const fetchProgramTemplates = useCallback(async () => {
+    setProgramsLoading(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/registration/program-templates`, {
+        headers: { Accept: "application/json" },
+      });
+      if (response.ok) {
+        const json = await response.json();
+        const templates: ProgramTemplate[] = (json.data || []).map((p: Record<string, unknown>) => ({
+          id: p.id,
+          name: p.name,
+          code: p.code,
+          type: p.type,
+          description: p.description,
+          icon: p.icon,
+          specialties: p.specialties,
+          sortOrder: p.sort_order ?? p.sortOrder ?? 0,
+        }));
+        setProgramTemplates(templates);
+      }
+    } catch {
+      // Silently fail — programs step will show empty
+    }
+    setProgramsLoading(false);
+  }, []);
+
+  useEffect(() => {
+    if (step === 3 && programTemplates.length === 0) {
+      fetchProgramTemplates();
+    }
+  }, [step, programTemplates.length, fetchProgramTemplates]);
+
+  // Filter programs by selected specialty
+  const filteredPrograms = programTemplates.filter((p) => {
+    if (!p.specialties || p.specialties.length === 0) return true;
+    return p.specialties.includes(selectedSpecialty);
+  });
+
+  // ─── Toggle program selection ──────────────────────────────────────────
+
+  function toggleProgram(code: string | null) {
+    if (!code) return;
+    setSelectedPrograms((prev) =>
+      prev.includes(code) ? prev.filter((c) => c !== code) : [...prev, code]
+    );
+  }
 
   // ─── Validation ─────────────────────────────────────────────────────────
 
@@ -211,7 +300,7 @@ export function PracticeRegistration() {
     return Object.keys(e).length === 0;
   }
 
-  function validateStep4(): boolean {
+  function validateStep5(): boolean {
     const e: Record<string, string> = {};
     if (!providerInfo.firstName.trim()) e.firstName = "First name is required";
     if (!providerInfo.lastName.trim()) e.lastName = "Last name is required";
@@ -220,7 +309,7 @@ export function PracticeRegistration() {
     return Object.keys(e).length === 0;
   }
 
-  function validateStep5(): boolean {
+  function validateStep6(): boolean {
     const e: Record<string, string> = {};
     if (!accountInfo.email.trim()) e.accountEmail = "Email is required";
     else if (!isValidEmail(accountInfo.email)) e.accountEmail = "Enter a valid email address";
@@ -243,13 +332,20 @@ export function PracticeRegistration() {
         setStep(2);
       }
     } else if (step === 2) {
-      if (selectedSpecialty) setStep(3);
+      if (selectedSpecialty) {
+        // Reset program selections when specialty changes
+        setSelectedPrograms([]);
+        setStep(3);
+      }
     } else if (step === 3) {
-      if (selectedModel) setStep(4);
+      // Programs step — always allow continue (programs are optional)
+      setStep(4);
     } else if (step === 4) {
-      if (validateStep4()) setStep(5);
+      if (selectedModel) setStep(5);
     } else if (step === 5) {
       if (validateStep5()) setStep(6);
+    } else if (step === 6) {
+      if (validateStep6()) setStep(7);
     }
   }
 
@@ -281,6 +377,7 @@ export function PracticeRegistration() {
           state: practiceInfo.state,
           zip: practiceInfo.zip,
           specialty: selectedSpecialty,
+          selected_programs: selectedPrograms.length > 0 ? selectedPrograms : null,
           practice_model: selectedModel,
           first_name: providerInfo.firstName,
           last_name: providerInfo.lastName,
@@ -299,6 +396,17 @@ export function PracticeRegistration() {
         setSubmitError(data.message || "Registration failed. Please try again.");
         setLoading(false);
         return;
+      }
+      // Capture provisioning summary from response
+      if (data.data?.provisioning) {
+        const p = data.data.provisioning;
+        setProvisioningSummary({
+          programs: p.programs ?? p.programs ?? 0,
+          screeningTemplates: p.screening_templates ?? p.screeningTemplates ?? 0,
+          consentTemplates: p.consent_templates ?? p.consentTemplates ?? 0,
+          appointmentTypes: p.appointment_types ?? p.appointmentTypes ?? 0,
+          diagnosisFavorites: p.diagnosis_favorites ?? p.diagnosisFavorites ?? 0,
+        });
       }
       setStep("welcome");
     } catch {
@@ -330,9 +438,10 @@ export function PracticeRegistration() {
   function canContinue(): boolean {
     if (step === 1) return !!(practiceInfo.practiceName && practiceInfo.phone && practiceInfo.email);
     if (step === 2) return !!selectedSpecialty;
-    if (step === 3) return !!selectedModel;
-    if (step === 4) return !!(providerInfo.firstName && providerInfo.lastName);
-    if (step === 5) return !!(accountInfo.email && accountInfo.password && accountInfo.confirmPassword && accountInfo.agreeTerms);
+    if (step === 3) return true; // Programs are optional
+    if (step === 4) return !!selectedModel;
+    if (step === 5) return !!(providerInfo.firstName && providerInfo.lastName);
+    if (step === 6) return !!(accountInfo.email && accountInfo.password && accountInfo.confirmPassword && accountInfo.agreeTerms);
     return true;
   }
 
@@ -350,6 +459,25 @@ export function PracticeRegistration() {
 
   if (step === "welcome") {
     const specialtyName = SPECIALTIES.find(s => s.id === selectedSpecialty)?.name || "medical";
+    const summary = provisioningSummary;
+
+    const provisionedItems = summary
+      ? [
+          summary.programs > 0 ? `${summary.programs} program${summary.programs !== 1 ? "s" : ""} activated` : null,
+          summary.screeningTemplates > 0 ? `${summary.screeningTemplates} screening tool${summary.screeningTemplates !== 1 ? "s" : ""} loaded` : null,
+          summary.consentTemplates > 0 ? `${summary.consentTemplates} consent template${summary.consentTemplates !== 1 ? "s" : ""} added` : null,
+          summary.appointmentTypes > 0 ? `${summary.appointmentTypes} appointment type${summary.appointmentTypes !== 1 ? "s" : ""} configured` : null,
+          summary.diagnosisFavorites > 0 ? `${summary.diagnosisFavorites} diagnosis favorite${summary.diagnosisFavorites !== 1 ? "s" : ""} loaded` : null,
+          "Practice settings initialized",
+        ].filter(Boolean) as string[]
+      : [
+          "Membership plans created",
+          "Appointment types configured",
+          "Screening tools loaded",
+          "Consent templates added",
+          "Practice settings initialized",
+        ];
+
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-50 px-4">
         <div className="animate-page-in w-full max-w-lg text-center">
@@ -364,18 +492,12 @@ export function PracticeRegistration() {
 
             <h1 className="text-3xl font-bold text-navy-800 mb-2">Welcome to MemberMD!</h1>
             <p className="text-slate-500 mb-8">
-              Your {specialtyName} practice is ready.
+              Your {specialtyName} practice has been provisioned.
             </p>
 
             {/* Provisioned items */}
             <div className="text-left space-y-3 mb-8">
-              {[
-                "3 membership plans created",
-                "6 appointment types configured",
-                "7 screening tools loaded",
-                "6 consent templates added",
-                "Practice settings initialized",
-              ].map((item) => (
+              {provisionedItems.map((item) => (
                 <div key={item} className="flex items-center gap-3 px-4 py-2.5 rounded-xl bg-teal-50 border border-teal-100">
                   <div
                     className="w-6 h-6 rounded-full flex items-center justify-center shrink-0"
@@ -405,7 +527,7 @@ export function PracticeRegistration() {
   // ─── Progress ───────────────────────────────────────────────────────────
 
   const currentStep = step as StepNumber;
-  const progressPercent = (currentStep / 6) * 100;
+  const progressPercent = (currentStep / TOTAL_STEPS) * 100;
 
   return (
     <div className="min-h-screen bg-slate-50 pb-12">
@@ -420,12 +542,12 @@ export function PracticeRegistration() {
         </div>
       </div>
 
-      <div className="px-4" style={{ maxWidth: currentStep === 2 ? "56rem" : "42rem", margin: "0 auto" }}>
+      <div className="px-4" style={{ maxWidth: (currentStep === 2 || currentStep === 3) ? "56rem" : "42rem", margin: "0 auto" }}>
         {/* Progress Bar */}
         <div className="mb-8">
           <div className="flex items-center justify-between mb-3">
             <span className="text-sm font-medium text-navy-700">{STEP_NAMES[currentStep - 1]}</span>
-            <span className="text-sm text-slate-400">Step {currentStep} of 6</span>
+            <span className="text-sm text-slate-400">Step {currentStep} of {TOTAL_STEPS}</span>
           </div>
           <div className="w-full h-2 bg-slate-200 rounded-full overflow-hidden">
             <div
@@ -629,8 +751,113 @@ export function PracticeRegistration() {
               </div>
             )}
 
-            {/* ─── Step 3: Practice Model ────────────────────────────── */}
+            {/* ─── Step 3: Programs ───────────────────────────────────── */}
             {currentStep === 3 && (
+              <div className="p-8">
+                <div className="flex items-center gap-3 mb-2">
+                  <div
+                    className="w-10 h-10 rounded-xl flex items-center justify-center"
+                    style={{ background: "linear-gradient(135deg, #27ab83, #147d64)" }}
+                  >
+                    <Layers className="w-5 h-5 text-white" />
+                  </div>
+                  <div>
+                    <h2 className="text-lg font-semibold text-navy-800">Select Your Programs</h2>
+                    <p className="text-sm text-slate-500">
+                      Choose which programs to activate for your {SPECIALTIES.find(s => s.id === selectedSpecialty)?.name || ""} practice.
+                      You can add more later.
+                    </p>
+                  </div>
+                </div>
+
+                {programsLoading ? (
+                  <div className="flex items-center justify-center py-16">
+                    <Loader2 className="w-8 h-8 animate-spin text-teal-500" />
+                    <span className="ml-3 text-slate-500 text-sm">Loading available programs...</span>
+                  </div>
+                ) : filteredPrograms.length === 0 ? (
+                  <div className="text-center py-12">
+                    <Layers className="w-12 h-12 text-slate-300 mx-auto mb-3" />
+                    <p className="text-slate-500 text-sm">No program templates available for your specialty yet.</p>
+                    <p className="text-slate-400 text-xs mt-1">You can configure programs after registration.</p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-6">
+                    {filteredPrograms.map(prog => {
+                      const isSelected = prog.code ? selectedPrograms.includes(prog.code) : false;
+                      const TypeIcon = PROGRAM_TYPE_ICONS[prog.type] || Layers;
+                      return (
+                        <button
+                          key={prog.id}
+                          type="button"
+                          onClick={() => toggleProgram(prog.code)}
+                          className={`relative text-left p-5 rounded-xl border-2 transition-all duration-200 hover-lift ${
+                            isSelected
+                              ? "border-teal-400 bg-teal-50"
+                              : "border-slate-200 bg-white hover:border-slate-300"
+                          }`}
+                        >
+                          {/* Checkbox indicator */}
+                          <div className="absolute top-3 right-3">
+                            <div
+                              className="w-5 h-5 rounded border-2 flex items-center justify-center transition-colors duration-200"
+                              style={{
+                                borderColor: isSelected ? "#27ab83" : "#cbd5e1",
+                                background: isSelected ? "#27ab83" : "transparent",
+                              }}
+                            >
+                              {isSelected && <Check className="w-3 h-3 text-white" />}
+                            </div>
+                          </div>
+
+                          <div className="flex items-start gap-3 pr-6">
+                            <div
+                              className="w-10 h-10 rounded-lg flex items-center justify-center shrink-0"
+                              style={{
+                                background: isSelected
+                                  ? "linear-gradient(135deg, #27ab83, #147d64)"
+                                  : "linear-gradient(135deg, #e2e8f0, #cbd5e1)",
+                              }}
+                            >
+                              <TypeIcon className="w-5 h-5" style={{ color: isSelected ? "white" : "#475569" }} />
+                            </div>
+                            <div className="min-w-0">
+                              <h3
+                                className="font-semibold text-sm mb-1"
+                                style={{ color: isSelected ? "#102a43" : "#334155" }}
+                              >
+                                {prog.name}
+                              </h3>
+                              {prog.description && (
+                                <p className="text-xs text-slate-500 leading-snug">{prog.description}</p>
+                              )}
+                              <span
+                                className="inline-block mt-2 px-2 py-0.5 rounded-full text-xs font-medium"
+                                style={{
+                                  background: isSelected ? "#d1fae5" : "#f1f5f9",
+                                  color: isSelected ? "#065f46" : "#64748b",
+                                }}
+                              >
+                                {prog.type.replace(/_/g, " ")}
+                              </span>
+                            </div>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {selectedPrograms.length > 0 && (
+                  <div className="mt-4 px-4 py-2.5 rounded-xl bg-teal-50 border border-teal-100 text-sm text-teal-700">
+                    {selectedPrograms.length} program{selectedPrograms.length !== 1 ? "s" : ""} selected
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ─── Step 4: Practice Model ────────────────────────────── */}
+            {currentStep === 4 && (
               <div className="p-8">
                 <div className="flex items-center gap-3 mb-6">
                   <div
@@ -695,8 +922,8 @@ export function PracticeRegistration() {
               </div>
             )}
 
-            {/* ─── Step 4: Provider Info ──────────────────────────────── */}
-            {currentStep === 4 && (
+            {/* ─── Step 5: Provider Info ──────────────────────────────── */}
+            {currentStep === 5 && (
               <div className="p-8">
                 <div className="flex items-center gap-3 mb-6">
                   <div
@@ -811,8 +1038,8 @@ export function PracticeRegistration() {
               </div>
             )}
 
-            {/* ─── Step 5: Create Account ─────────────────────────────── */}
-            {currentStep === 5 && (
+            {/* ─── Step 6: Create Account ─────────────────────────────── */}
+            {currentStep === 6 && (
               <div className="p-8">
                 <div className="flex items-center gap-3 mb-6">
                   <div
@@ -923,8 +1150,8 @@ export function PracticeRegistration() {
               </div>
             )}
 
-            {/* ─── Step 6: Review & Complete ──────────────────────────── */}
-            {currentStep === 6 && (
+            {/* ─── Step 7: Review & Complete ──────────────────────────── */}
+            {currentStep === 7 && (
               <div className="p-8">
                 <div className="flex items-center gap-3 mb-6">
                   <div
@@ -978,10 +1205,10 @@ export function PracticeRegistration() {
                     </div>
                   </div>
 
-                  {/* Specialty & Model */}
+                  {/* Specialty, Programs & Model */}
                   <div className="rounded-xl border border-slate-200 p-4">
                     <h3 className="text-sm font-semibold text-navy-700 mb-3 flex items-center gap-2">
-                      <Stethoscope className="w-4 h-4" /> Specialty & Practice Model
+                      <Stethoscope className="w-4 h-4" /> Specialty, Programs & Practice Model
                     </h3>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2 text-sm">
                       <div>
@@ -996,6 +1223,16 @@ export function PracticeRegistration() {
                           {PRACTICE_MODELS.find(m => m.id === selectedModel)?.name}
                         </span>
                       </div>
+                      {selectedPrograms.length > 0 && (
+                        <div className="sm:col-span-2">
+                          <span className="text-slate-500">Programs:</span>{" "}
+                          <span className="font-medium text-slate-800">
+                            {selectedPrograms
+                              .map(code => filteredPrograms.find(p => p.code === code)?.name || code)
+                              .join(", ")}
+                          </span>
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -1062,7 +1299,7 @@ export function PracticeRegistration() {
                 {currentStep === 1 ? "Back to Login" : "Back"}
               </button>
 
-              {currentStep < 6 ? (
+              {currentStep < TOTAL_STEPS ? (
                 <button
                   type="button"
                   onClick={handleContinue}

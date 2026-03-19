@@ -13,7 +13,7 @@ class Practice extends Model
     use HasFactory, HasUuids, Auditable;
 
     protected $fillable = [
-        'name', 'slug', 'specialty', 'practice_model',
+        'name', 'slug', 'specialty', 'selected_programs', 'practice_model',
         'phone', 'email', 'website', 'address', 'city', 'state', 'zip',
         'npi', 'tax_id',
         'logo_url', 'primary_color', 'tagline',
@@ -27,6 +27,7 @@ class Practice extends Model
     ];
 
     protected $casts = [
+        'selected_programs' => 'array',
         'settings' => 'array',
         'branding' => 'array',
         'panel_capacity' => 'integer',

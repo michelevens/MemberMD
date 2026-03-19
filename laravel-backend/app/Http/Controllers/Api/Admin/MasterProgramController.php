@@ -3,10 +3,12 @@
 namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Models\Practice;
 use App\Models\Program;
 use App\Models\ProgramPlan;
 use App\Models\ProgramEligibilityRule;
 use App\Models\ProgramFundingSource;
+use App\Services\PracticeProvisioningService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -186,5 +188,41 @@ class MasterProgramController extends Controller
             'data' => $newProgram->load(['plans', 'eligibilityRules', 'fundingSources']),
             'message' => 'Program provisioned to practice successfully.',
         ], 201);
+    }
+
+    /**
+     * Re-provision an existing practice with all master data.
+     * Runs the full PracticeProvisioningService (idempotent).
+     */
+    public function reprovision(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'tenant_id' => 'required|uuid|exists:practices,id',
+        ]);
+
+        $practice = Practice::findOrFail($validated['tenant_id']);
+        $summary = (new PracticeProvisioningService())->provisionPractice($practice);
+
+        return response()->json([
+            'data' => $summary,
+            'message' => 'Practice reprovisioned successfully.',
+        ]);
+    }
+
+    /**
+     * Public listing of program templates for registration wizard.
+     * Returns minimal info (name, code, description, icon, specialties) — no auth required.
+     */
+    public function publicIndex(): JsonResponse
+    {
+        $programs = Program::withoutGlobalScope('tenant')
+            ->where('is_template', true)
+            ->whereNull('tenant_id')
+            ->where('is_active', true)
+            ->orderBy('sort_order')
+            ->orderBy('name')
+            ->get(['id', 'name', 'code', 'type', 'description', 'icon', 'specialties', 'sort_order']);
+
+        return response()->json(['data' => $programs]);
     }
 }

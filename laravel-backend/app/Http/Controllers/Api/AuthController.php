@@ -7,6 +7,7 @@ use App\Models\User;
 use App\Models\Practice;
 use App\Models\SecurityEvent;
 use App\Services\PracticeBootstrapService;
+use App\Services\PracticeProvisioningService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
@@ -60,7 +61,9 @@ class AuthController extends Controller
         $validated = $request->validate([
             'practice_name' => 'required|string|max:255',
             'specialty' => 'required|string|max:100',
-            'practice_model' => 'required|string|in:pure_dpc,hybrid,concierge,cash_pay,employer',
+            'practice_model' => 'required|string|in:pure_dpc,hybrid,hybrid_dpc,concierge,cash_pay,employer',
+            'selected_programs' => 'nullable|array',
+            'selected_programs.*' => 'string|max:100',
             'first_name' => 'required|string|max:100',
             'last_name' => 'required|string|max:100',
             'email' => 'required|email|unique:users,email',
@@ -74,17 +77,26 @@ class AuthController extends Controller
             'name' => $validated['practice_name'],
             'slug' => $slug,
             'specialty' => $validated['specialty'],
+            'selected_programs' => $validated['selected_programs'] ?? null,
             'practice_model' => $validated['practice_model'],
             'owner_email' => $validated['email'],
             'is_active' => true,
         ]);
 
         // Bootstrap practice with specialty defaults (plans, appointment types, screenings, consents, settings)
+        $provisioningSummary = [];
         try {
             (new PracticeBootstrapService())->bootstrap($practice);
         } catch (\Throwable $e) {
             // Don't block registration if bootstrap fails — practice can be configured later
             \Illuminate\Support\Facades\Log::warning('Bootstrap failed for practice ' . $practice->id . ': ' . $e->getMessage());
+        }
+
+        // Provision programs, screening templates, consent templates, appointment types, diagnosis favorites
+        try {
+            $provisioningSummary = (new PracticeProvisioningService())->provisionPractice($practice);
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('Provisioning failed for practice ' . $practice->id . ': ' . $e->getMessage());
         }
 
         // Create the practice admin user
@@ -111,6 +123,7 @@ class AuthController extends Controller
                 'token_type' => 'Bearer',
                 'expires_in' => 86400,
                 'user' => $this->userPayload($user),
+                'provisioning' => $provisioningSummary,
             ],
         ], 201);
     }
