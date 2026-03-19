@@ -3,14 +3,9 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Models\Appointment;
-use App\Models\Encounter;
-use App\Models\Invoice;
-use App\Models\Patient;
-use App\Models\PatientMembership;
-use App\Models\Provider;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class DashboardController extends Controller
 {
@@ -20,68 +15,73 @@ class DashboardController extends Controller
         abort_if($user->isPatient(), 403);
 
         $tenantId = $user->tenant_id;
+        $startOfMonth = now()->startOfMonth()->toDateTimeString();
+        $startOfWeek = now()->startOfWeek()->toDateTimeString();
+        $endOfWeek = now()->endOfWeek()->toDateTimeString();
+        $today = now()->toDateString();
 
-        // Active members
-        $totalMembers = Patient::where('tenant_id', $tenantId)->where('is_active', true)->count();
-        $activeSubscriptions = PatientMembership::where('tenant_id', $tenantId)->where('status', 'active')->count();
-        $newMembersThisMonth = Patient::where('tenant_id', $tenantId)
-            ->where('created_at', '>=', now()->startOfMonth())
-            ->count();
+        // Single aggregation query for patient/membership stats
+        $patientStats = DB::selectOne("
+            SELECT
+                COUNT(DISTINCT p.id) FILTER (WHERE p.is_active = true) AS total_members,
+                COUNT(DISTINCT p.id) FILTER (WHERE p.created_at >= ?) AS new_members_this_month,
+                COUNT(DISTINCT pm.id) FILTER (WHERE pm.status = 'active') AS active_subscriptions,
+                COUNT(DISTINCT pm.id) FILTER (WHERE pm.status = 'cancelled' AND pm.cancelled_at >= ?) AS churned_this_month,
+                COALESCE(SUM(
+                    CASE
+                        WHEN pm.status = 'active' AND pm.billing_frequency = 'annual' THEN mp.annual_price / 12
+                        WHEN pm.status = 'active' THEN mp.monthly_price
+                        ELSE 0
+                    END
+                ), 0) AS mrr
+            FROM patients p
+            LEFT JOIN patient_memberships pm ON pm.patient_id = p.id AND pm.tenant_id = ?
+            LEFT JOIN membership_plans mp ON mp.id = pm.plan_id
+            WHERE p.tenant_id = ?
+        ", [$startOfMonth, $startOfMonth, $tenantId, $tenantId]);
 
-        // MRR calculation
-        $mrr = PatientMembership::where('tenant_id', $tenantId)
-            ->where('status', 'active')
-            ->join('membership_plans', 'patient_memberships.plan_id', '=', 'membership_plans.id')
-            ->selectRaw("SUM(CASE WHEN patient_memberships.billing_frequency = 'annual' THEN membership_plans.annual_price / 12 ELSE membership_plans.monthly_price END) as mrr")
-            ->value('mrr') ?? 0;
+        // Single aggregation for appointments
+        $apptStats = DB::selectOne("
+            SELECT
+                COUNT(*) FILTER (WHERE scheduled_at::date = ?) AS appointments_today,
+                COUNT(*) FILTER (WHERE scheduled_at BETWEEN ? AND ?) AS appointments_this_week
+            FROM appointments
+            WHERE tenant_id = ?
+        ", [$today, $startOfWeek, $endOfWeek, $tenantId]);
 
-        // Today's appointments
-        $appointmentsToday = Appointment::where('tenant_id', $tenantId)
-            ->whereDate('scheduled_at', today())
-            ->count();
+        // Single aggregation for invoices
+        $invoiceStats = DB::selectOne("
+            SELECT
+                COALESCE(SUM(amount) FILTER (WHERE status = 'paid' AND paid_at >= ?), 0) AS revenue_this_month,
+                COALESCE(SUM(amount) FILTER (WHERE status = 'pending'), 0) AS outstanding_invoices
+            FROM invoices
+            WHERE tenant_id = ?
+        ", [$startOfMonth, $tenantId]);
 
-        $appointmentsThisWeek = Appointment::where('tenant_id', $tenantId)
-            ->whereBetween('scheduled_at', [now()->startOfWeek(), now()->endOfWeek()])
-            ->count();
+        // Encounters + providers (2 small queries)
+        $encountersThisMonth = DB::selectOne(
+            "SELECT COUNT(*) AS cnt FROM encounters WHERE tenant_id = ? AND encounter_date >= ?",
+            [$tenantId, $startOfMonth]
+        );
 
-        // Revenue this month
-        $revenueThisMonth = Invoice::where('tenant_id', $tenantId)
-            ->where('status', 'paid')
-            ->where('paid_at', '>=', now()->startOfMonth())
-            ->sum('amount');
-
-        // Outstanding invoices
-        $outstandingInvoices = Invoice::where('tenant_id', $tenantId)
-            ->where('status', 'pending')
-            ->sum('amount');
-
-        // Encounters this month
-        $encountersThisMonth = Encounter::where('tenant_id', $tenantId)
-            ->where('encounter_date', '>=', now()->startOfMonth())
-            ->count();
-
-        // Provider count
-        $providerCount = Provider::where('tenant_id', $tenantId)->count();
-
-        // Churn (cancelled this month)
-        $churnedThisMonth = PatientMembership::where('tenant_id', $tenantId)
-            ->where('status', 'cancelled')
-            ->where('cancelled_at', '>=', now()->startOfMonth())
-            ->count();
+        $providerCount = DB::selectOne(
+            "SELECT COUNT(*) AS cnt FROM providers WHERE tenant_id = ?",
+            [$tenantId]
+        );
 
         return response()->json([
             'data' => [
-                'total_members' => $totalMembers,
-                'active_subscriptions' => $activeSubscriptions,
-                'new_members_this_month' => $newMembersThisMonth,
-                'mrr' => round($mrr, 2),
-                'appointments_today' => $appointmentsToday,
-                'appointments_this_week' => $appointmentsThisWeek,
-                'revenue_this_month' => round($revenueThisMonth, 2),
-                'outstanding_invoices' => round($outstandingInvoices, 2),
-                'encounters_this_month' => $encountersThisMonth,
-                'provider_count' => $providerCount,
-                'churned_this_month' => $churnedThisMonth,
+                'total_members' => (int) $patientStats->total_members,
+                'active_subscriptions' => (int) $patientStats->active_subscriptions,
+                'new_members_this_month' => (int) $patientStats->new_members_this_month,
+                'mrr' => round((float) $patientStats->mrr, 2),
+                'appointments_today' => (int) $apptStats->appointments_today,
+                'appointments_this_week' => (int) $apptStats->appointments_this_week,
+                'revenue_this_month' => round((float) $invoiceStats->revenue_this_month, 2),
+                'outstanding_invoices' => round((float) $invoiceStats->outstanding_invoices, 2),
+                'encounters_this_month' => (int) $encountersThisMonth->cnt,
+                'provider_count' => (int) $providerCount->cnt,
+                'churned_this_month' => (int) $patientStats->churned_this_month,
             ],
         ]);
     }

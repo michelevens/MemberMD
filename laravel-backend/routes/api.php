@@ -29,7 +29,18 @@ use Illuminate\Support\Facades\Route;
 // ===== MemberMD API Routes =====
 
 // Health check
-Route::get('/health', fn () => response()->json(['status' => 'ok', 'app' => 'MemberMD']));
+Route::get('/health', function () {
+    $checks = ['app' => 'MemberMD', 'status' => 'ok'];
+    try {
+        \Illuminate\Support\Facades\DB::select('SELECT 1');
+        $checks['database'] = 'connected';
+    } catch (\Throwable) {
+        $checks['database'] = 'error';
+        $checks['status'] = 'degraded';
+    }
+    $checks['timestamp'] = now()->toIso8601String();
+    return response()->json($checks, $checks['status'] === 'ok' ? 200 : 503);
+});
 
 // ===== Auth (Public) =====
 Route::prefix('auth')->group(function () {
