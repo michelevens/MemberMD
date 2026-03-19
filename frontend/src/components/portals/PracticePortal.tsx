@@ -46,11 +46,11 @@ import {
   Video,
   Crown,
   UserPlus,
-  AlertCircle,
   ArrowLeft,
   Download,
   ChevronDown,
   ChevronUp,
+  Mail,
 } from "lucide-react";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -349,11 +349,7 @@ const MOCK_THREADS = [
   },
 ];
 
-// Coming-soon tabs
-const COMING_SOON_TABS: TabId[] = [
-  "intakes", "waitlist", "encounters", "prescriptions", "screenings",
-  "payments", "coupons", "providers", "staff", "notifications",
-];
+// All tabs are now implemented — no coming-soon tabs remain
 
 // ─── Helper Components ──────────────────────────────────────────────────────
 
@@ -442,6 +438,7 @@ export function PracticePortal() {
   const [selectedPatient, setSelectedPatient] = useState<MockPatient | null>(null);
   const [patientDetailTab, setPatientDetailTab] = useState("demographics");
   const [expandedEncounters, setExpandedEncounters] = useState<string[]>([]);
+  const [notificationFilter, setNotificationFilter] = useState<"all" | "members" | "appointments" | "billing" | "system">("all");
 
   const practiceName = auth.user
     ? `${auth.user.firstName}'s Practice`
@@ -2196,35 +2193,1171 @@ export function PracticePortal() {
     );
   }
 
-  // ─── Coming Soon Tab ────────────────────────────────────────────────────
+  // ─── Intakes Tab ────────────────────────────────────────────────────────
 
-  function renderComingSoon(tabId: TabId) {
-    const item = NAV_SECTIONS.flatMap((s) => s.items).find((i) => i.id === tabId);
-    const Icon = item?.icon || AlertCircle;
-    const label = item?.label || tabId;
+  function renderIntakes() {
+    const mockIntakes = [
+      { id: "INT-001", code: "INT-2026-001", name: "Robert Davis", dateSubmitted: "Mar 18, 2026", status: "pending" as const },
+      { id: "INT-002", code: "INT-2026-002", name: "Amanda Brooks", dateSubmitted: "Mar 17, 2026", status: "under_review" as const },
+      { id: "INT-003", code: "INT-2026-003", name: "Marcus Williams", dateSubmitted: "Mar 16, 2026", status: "approved" as const },
+      { id: "INT-004", code: "INT-2026-004", name: "Patricia Nguyen", dateSubmitted: "Mar 15, 2026", status: "converted" as const },
+      { id: "INT-005", code: "INT-2026-005", name: "Daniel Foster", dateSubmitted: "Mar 14, 2026", status: "approved" as const },
+      { id: "INT-006", code: "INT-2026-006", name: "Karen Mitchell", dateSubmitted: "Mar 13, 2026", status: "rejected" as const },
+    ];
+
+    const intakeStatusConfig: Record<string, { bg: string; text: string; dot: string }> = {
+      pending: { bg: "#fffbeb", text: "#d97706", dot: "#f59e0b" },
+      under_review: { bg: "#e0e8f0", text: "#334e68", dot: "#486581" },
+      approved: { bg: "#ecf9ec", text: "#2f8132", dot: "#3f9142" },
+      rejected: { bg: "#fef2f2", text: "#dc2626", dot: "#ef4444" },
+      converted: { bg: "#e6f7f2", text: "#147d64", dot: "#27ab83" },
+    };
 
     return (
-      <div className="flex items-center justify-center py-32">
-        <div className="glass rounded-2xl p-12 text-center max-w-md">
-          <div
-            className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4"
-            style={{ backgroundColor: "#e6f7f2" }}
-          >
-            <Icon className="w-8 h-8" style={{ color: "#147d64" }} />
+      <div className="space-y-6">
+        <div className="flex items-center justify-between">
+          <h2 className="text-xl font-bold text-slate-800">Intake Submissions</h2>
+        </div>
+
+        {/* Stats */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div className="glass rounded-lg p-4">
+            <p className="text-xs text-slate-500 mb-1">Total</p>
+            <p className="text-2xl font-bold text-slate-800">15</p>
           </div>
-          <h2 className="text-xl font-bold text-slate-800 mb-2">{label}</h2>
-          <p className="text-slate-500">
-            This feature is coming soon. We're building something great.
-          </p>
+          <div className="glass rounded-lg p-4">
+            <p className="text-xs text-slate-500 mb-1">Pending</p>
+            <p className="text-2xl font-bold" style={{ color: "#d97706" }}>4</p>
+          </div>
+          <div className="glass rounded-lg p-4">
+            <p className="text-xs text-slate-500 mb-1">Approved</p>
+            <p className="text-2xl font-bold" style={{ color: "#2f8132" }}>8</p>
+          </div>
+          <div className="glass rounded-lg p-4">
+            <p className="text-xs text-slate-500 mb-1">Converted</p>
+            <p className="text-2xl font-bold" style={{ color: "#147d64" }}>3</p>
+          </div>
+        </div>
+
+        {/* Table */}
+        <div className="glass rounded-xl overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr style={{ backgroundColor: "rgba(16,42,67,0.03)" }}>
+                  <th className="text-left px-4 py-3 font-medium text-slate-500">Submission Code</th>
+                  <th className="text-left px-4 py-3 font-medium text-slate-500">Name</th>
+                  <th className="text-left px-4 py-3 font-medium text-slate-500 hidden md:table-cell">Date Submitted</th>
+                  <th className="text-left px-4 py-3 font-medium text-slate-500">Status</th>
+                  <th className="text-left px-4 py-3 font-medium text-slate-500">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {mockIntakes.map((intake) => {
+                  const sc = intakeStatusConfig[intake.status] || intakeStatusConfig.pending;
+                  return (
+                    <tr key={intake.id} className="border-t border-slate-100 hover:bg-slate-50 transition-colors">
+                      <td className="px-4 py-3 font-mono text-sm font-medium text-slate-700">{intake.code}</td>
+                      <td className="px-4 py-3 text-slate-700 font-medium">{intake.name}</td>
+                      <td className="px-4 py-3 text-slate-500 hidden md:table-cell">{intake.dateSubmitted}</td>
+                      <td className="px-4 py-3">
+                        <span
+                          className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium capitalize"
+                          style={{ backgroundColor: sc.bg, color: sc.text }}
+                        >
+                          <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: sc.dot }} />
+                          {intake.status.replace("_", " ")}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-1">
+                          <button className="p-1.5 rounded-md hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors">
+                            <Eye className="w-4 h-4" />
+                          </button>
+                          {(intake.status === "pending" || intake.status === "under_review") && (
+                            <button
+                              className="px-2 py-1 rounded text-xs font-medium transition-colors"
+                              style={{ color: "#27ab83" }}
+                            >
+                              Approve
+                            </button>
+                          )}
+                          {intake.status === "approved" && (
+                            <button
+                              className="px-2 py-1 rounded text-xs font-medium transition-colors"
+                              style={{ color: "#147d64" }}
+                            >
+                              Convert
+                            </button>
+                          )}
+                          <button className="p-1.5 rounded-md hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors">
+                            <MoreHorizontal className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ─── Waitlist Tab ─────────────────────────────────────────────────────────
+
+  function renderWaitlist() {
+    const mockWaitlist = [
+      { id: "w1", name: "Steven Park", email: "steven.p@email.com", phone: "(555) 111-2233", desiredPlan: "Complete", requestedDate: "Mar 10, 2026", priority: "high" as const, status: "waiting" as const },
+      { id: "w2", name: "Monica Reyes", email: "monica.r@email.com", phone: "(555) 222-3344", desiredPlan: "Premium", requestedDate: "Mar 12, 2026", priority: "medium" as const, status: "contacted" as const },
+      { id: "w3", name: "Alan Cooper", email: "alan.c@email.com", phone: "(555) 333-4455", desiredPlan: "Essential", requestedDate: "Mar 14, 2026", priority: "low" as const, status: "waiting" as const },
+      { id: "w4", name: "Diane Tran", email: "diane.t@email.com", phone: "(555) 444-5566", desiredPlan: "Complete", requestedDate: "Mar 16, 2026", priority: "high" as const, status: "enrolled" as const },
+    ];
+
+    const priorityConfig: Record<string, { bg: string; text: string }> = {
+      high: { bg: "#fef2f2", text: "#dc2626" },
+      medium: { bg: "#fffbeb", text: "#d97706" },
+      low: { bg: "#e0e8f0", text: "#334e68" },
+    };
+
+    const waitlistStatusConfig: Record<string, { bg: string; text: string; dot: string }> = {
+      waiting: { bg: "#fffbeb", text: "#d97706", dot: "#f59e0b" },
+      contacted: { bg: "#e0e8f0", text: "#334e68", dot: "#486581" },
+      enrolled: { bg: "#ecf9ec", text: "#2f8132", dot: "#3f9142" },
+    };
+
+    const panelUsed = 85;
+    const panelMax = 400;
+    const panelPct = Math.round((panelUsed / panelMax) * 100);
+
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center justify-between">
+          <h2 className="text-xl font-bold text-slate-800">Waitlist</h2>
+        </div>
+
+        {/* Panel capacity */}
+        <div className="glass rounded-xl p-5">
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="font-semibold text-slate-800">Current Panel Capacity</h3>
+            <span className="text-sm font-medium" style={{ color: "#27ab83" }}>
+              {panelUsed} of {panelMax} members ({panelPct}%)
+            </span>
+          </div>
+          <div className="w-full h-3 rounded-full" style={{ backgroundColor: "#e6f7f2" }}>
+            <div
+              className="h-3 rounded-full transition-all duration-500"
+              style={{ width: `${panelPct}%`, backgroundColor: "#27ab83" }}
+            />
+          </div>
+          <p className="text-xs text-slate-400 mt-2">{panelMax - panelUsed} spots available</p>
+        </div>
+
+        {/* Table */}
+        <div className="glass rounded-xl overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr style={{ backgroundColor: "rgba(16,42,67,0.03)" }}>
+                  <th className="text-left px-4 py-3 font-medium text-slate-500">Name</th>
+                  <th className="text-left px-4 py-3 font-medium text-slate-500 hidden md:table-cell">Email</th>
+                  <th className="text-left px-4 py-3 font-medium text-slate-500 hidden lg:table-cell">Phone</th>
+                  <th className="text-left px-4 py-3 font-medium text-slate-500">Desired Plan</th>
+                  <th className="text-left px-4 py-3 font-medium text-slate-500 hidden md:table-cell">Requested</th>
+                  <th className="text-left px-4 py-3 font-medium text-slate-500">Priority</th>
+                  <th className="text-left px-4 py-3 font-medium text-slate-500">Status</th>
+                  <th className="text-left px-4 py-3 font-medium text-slate-500">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {mockWaitlist.map((entry) => {
+                  const pc = priorityConfig[entry.priority];
+                  const wsc = waitlistStatusConfig[entry.status];
+                  return (
+                    <tr key={entry.id} className="border-t border-slate-100 hover:bg-slate-50 transition-colors">
+                      <td className="px-4 py-3 font-medium text-slate-700">{entry.name}</td>
+                      <td className="px-4 py-3 text-slate-500 hidden md:table-cell">{entry.email}</td>
+                      <td className="px-4 py-3 text-slate-500 hidden lg:table-cell">{entry.phone}</td>
+                      <td className="px-4 py-3"><PlanBadge plan={entry.desiredPlan} /></td>
+                      <td className="px-4 py-3 text-slate-500 hidden md:table-cell">{entry.requestedDate}</td>
+                      <td className="px-4 py-3">
+                        <span className="px-2 py-0.5 rounded-full text-xs font-medium capitalize" style={{ backgroundColor: pc.bg, color: pc.text }}>
+                          {entry.priority}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium capitalize" style={{ backgroundColor: wsc.bg, color: wsc.text }}>
+                          <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: wsc.dot }} />
+                          {entry.status}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-1">
+                          {entry.status !== "enrolled" && (
+                            <button
+                              className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium text-white transition-colors"
+                              style={{ backgroundColor: "#27ab83" }}
+                              onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#147d64")}
+                              onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "#27ab83")}
+                            >
+                              <Mail className="w-3 h-3" /> Invite to Enroll
+                            </button>
+                          )}
+                          <button className="p-1.5 rounded-md hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors">
+                            <MoreHorizontal className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ─── Encounters Tab ───────────────────────────────────────────────────────
+
+  function renderEncounters() {
+    const mockPracticeEncounters = [
+      { id: "e1", date: "Mar 18, 2026", patient: "James Wilson", provider: "Dr. Michel", type: "Follow-Up", duration: "30 min", status: "signed" as const },
+      { id: "e2", date: "Mar 18, 2026", patient: "Sarah Mitchell", provider: "Dr. Michel", type: "Med Mgmt", duration: "20 min", status: "draft" as const },
+      { id: "e3", date: "Mar 17, 2026", patient: "Robert Kim", provider: "Dr. Michel", type: "Initial", duration: "60 min", status: "signed" as const },
+      { id: "e4", date: "Mar 17, 2026", patient: "Emily Chen", provider: "NP Johnson", type: "Follow-Up", duration: "30 min", status: "signed" as const },
+      { id: "e5", date: "Mar 16, 2026", patient: "Carlos Mendez", provider: "Dr. Michel", type: "Therapy", duration: "45 min", status: "amended" as const },
+      { id: "e6", date: "Mar 15, 2026", patient: "Lisa Patel", provider: "NP Johnson", type: "Med Mgmt", duration: "20 min", status: "signed" as const },
+      { id: "e7", date: "Mar 14, 2026", patient: "Rachel Adams", provider: "Dr. Michel", type: "Follow-Up", duration: "30 min", status: "signed" as const },
+      { id: "e8", date: "Mar 13, 2026", patient: "Thomas Lee", provider: "Dr. Michel", type: "Initial", duration: "60 min", status: "draft" as const },
+    ];
+
+    const encounterTypeConfig: Record<string, { bg: string; text: string }> = {
+      Initial: { bg: "#e6f7f2", text: "#147d64" },
+      "Follow-Up": { bg: "#e0e8f0", text: "#334e68" },
+      "Med Mgmt": { bg: "#fffbeb", text: "#d97706" },
+      Therapy: { bg: "#f3e8ff", text: "#7c3aed" },
+    };
+
+    const encounterStatusConfig: Record<string, { bg: string; text: string; dot: string }> = {
+      draft: { bg: "#fffbeb", text: "#d97706", dot: "#f59e0b" },
+      signed: { bg: "#ecf9ec", text: "#2f8132", dot: "#3f9142" },
+      amended: { bg: "#e0e8f0", text: "#334e68", dot: "#486581" },
+    };
+
+    return (
+      <div className="space-y-4">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+          <h2 className="text-xl font-bold text-slate-800">Encounters</h2>
           <button
-            onClick={() => setActiveTab("dashboard")}
-            className="mt-6 px-5 py-2.5 rounded-lg text-sm font-medium text-white transition-colors"
+            className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors shrink-0"
             style={{ backgroundColor: "#27ab83" }}
             onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#147d64")}
             onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "#27ab83")}
           >
-            Back to Dashboard
+            <Plus className="w-4 h-4" />
+            New Encounter
           </button>
+        </div>
+
+        {/* Filters */}
+        <div className="flex flex-wrap items-center gap-2">
+          {["Initial", "Follow-Up", "Med Mgmt", "Therapy"].map((type) => {
+            const tc = encounterTypeConfig[type];
+            return (
+              <button
+                key={type}
+                className="px-3 py-1.5 rounded-lg text-xs font-medium border border-slate-200 hover:bg-slate-50 transition-colors"
+                style={{ color: tc.text }}
+              >
+                {type}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Table */}
+        <div className="glass rounded-xl overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr style={{ backgroundColor: "rgba(16,42,67,0.03)" }}>
+                  <th className="text-left px-4 py-3 font-medium text-slate-500">Date</th>
+                  <th className="text-left px-4 py-3 font-medium text-slate-500">Patient</th>
+                  <th className="text-left px-4 py-3 font-medium text-slate-500 hidden md:table-cell">Provider</th>
+                  <th className="text-left px-4 py-3 font-medium text-slate-500">Type</th>
+                  <th className="text-left px-4 py-3 font-medium text-slate-500 hidden md:table-cell">Duration</th>
+                  <th className="text-left px-4 py-3 font-medium text-slate-500">Status</th>
+                  <th className="text-left px-4 py-3 font-medium text-slate-500">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {mockPracticeEncounters.map((enc) => {
+                  const tc = encounterTypeConfig[enc.type] || encounterTypeConfig["Follow-Up"];
+                  const esc = encounterStatusConfig[enc.status];
+                  return (
+                    <tr key={enc.id} className="border-t border-slate-100 hover:bg-slate-50 transition-colors">
+                      <td className="px-4 py-3 font-medium text-slate-700">{enc.date}</td>
+                      <td className="px-4 py-3 text-slate-700">{enc.patient}</td>
+                      <td className="px-4 py-3 text-slate-500 hidden md:table-cell">{enc.provider}</td>
+                      <td className="px-4 py-3">
+                        <span className="px-2 py-0.5 rounded text-xs font-medium" style={{ backgroundColor: tc.bg, color: tc.text }}>
+                          {enc.type}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-slate-500 hidden md:table-cell">{enc.duration}</td>
+                      <td className="px-4 py-3">
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium capitalize" style={{ backgroundColor: esc.bg, color: esc.text }}>
+                          <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: esc.dot }} />
+                          {enc.status}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-1">
+                          <button className="p-1.5 rounded-md hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors">
+                            <Eye className="w-4 h-4" />
+                          </button>
+                          <button className="p-1.5 rounded-md hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors">
+                            <Pencil className="w-4 h-4" />
+                          </button>
+                          {enc.status === "draft" && (
+                            <button
+                              className="px-2 py-1 rounded text-xs font-medium transition-colors"
+                              style={{ color: "#27ab83" }}
+                            >
+                              Sign
+                            </button>
+                          )}
+                          <button className="p-1.5 rounded-md hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors">
+                            <MoreHorizontal className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ─── Prescriptions Tab ────────────────────────────────────────────────────
+
+  function renderPrescriptions() {
+    const mockRefillRequests = [
+      { id: "ref1", patient: "James Wilson", medication: "Sertraline", dosage: "100mg", requestedDate: "Mar 18, 2026" },
+      { id: "ref2", patient: "Carlos Mendez", medication: "Metformin", dosage: "500mg", requestedDate: "Mar 17, 2026" },
+    ];
+
+    const mockPrescriptions = [
+      { id: "rx1", patient: "James Wilson", medication: "Sertraline", dosage: "100mg", frequency: "Daily", prescriber: "Dr. Michel", status: "active" as const, refillsLeft: 5 },
+      { id: "rx2", patient: "James Wilson", medication: "Bupropion XL", dosage: "150mg", frequency: "Daily", prescriber: "Dr. Michel", status: "active" as const, refillsLeft: 4 },
+      { id: "rx3", patient: "Sarah Mitchell", medication: "Lisinopril", dosage: "10mg", frequency: "Daily", prescriber: "Dr. Michel", status: "active" as const, refillsLeft: 3 },
+      { id: "rx4", patient: "Carlos Mendez", medication: "Metformin", dosage: "500mg", frequency: "Twice daily", prescriber: "Dr. Michel", status: "refill_requested" as const, refillsLeft: 0 },
+      { id: "rx5", patient: "Emily Chen", medication: "Atorvastatin", dosage: "20mg", frequency: "Daily", prescriber: "NP Johnson", status: "active" as const, refillsLeft: 6 },
+      { id: "rx6", patient: "Robert Kim", medication: "Omeprazole", dosage: "20mg", frequency: "Daily", prescriber: "Dr. Michel", status: "active" as const, refillsLeft: 2 },
+      { id: "rx7", patient: "Lisa Patel", medication: "Levothyroxine", dosage: "50mcg", frequency: "Daily", prescriber: "NP Johnson", status: "discontinued" as const, refillsLeft: 0 },
+      { id: "rx8", patient: "James Wilson", medication: "Trazodone", dosage: "50mg", frequency: "Bedtime", prescriber: "Dr. Michel", status: "discontinued" as const, refillsLeft: 0 },
+    ];
+
+    const rxStatusConfig: Record<string, { bg: string; text: string; dot: string }> = {
+      active: { bg: "#ecf9ec", text: "#2f8132", dot: "#3f9142" },
+      discontinued: { bg: "#f1f5f9", text: "#64748b", dot: "#94a3b8" },
+      refill_requested: { bg: "#fffbeb", text: "#d97706", dot: "#f59e0b" },
+    };
+
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center justify-between">
+          <h2 className="text-xl font-bold text-slate-800">Prescriptions</h2>
+        </div>
+
+        {/* Stats */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+          <div className="glass rounded-lg p-4">
+            <p className="text-xs text-slate-500 mb-1">Active</p>
+            <p className="text-2xl font-bold" style={{ color: "#2f8132" }}>45</p>
+          </div>
+          <div className="glass rounded-lg p-4">
+            <p className="text-xs text-slate-500 mb-1">Refill Requests</p>
+            <p className="text-2xl font-bold" style={{ color: "#d97706" }}>3</p>
+          </div>
+          <div className="glass rounded-lg p-4">
+            <p className="text-xs text-slate-500 mb-1">Discontinued</p>
+            <p className="text-2xl font-bold text-slate-500">12</p>
+          </div>
+        </div>
+
+        {/* Pending Refill Requests */}
+        {mockRefillRequests.length > 0 && (
+          <div>
+            <h3 className="text-sm font-semibold text-slate-800 mb-3">Pending Refill Requests</h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {mockRefillRequests.map((req) => (
+                <div
+                  key={req.id}
+                  className="glass rounded-xl p-4 border-l-4"
+                  style={{ borderLeftColor: "#d97706" }}
+                >
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <p className="font-medium text-slate-800">{req.patient}</p>
+                      <p className="text-sm text-slate-600 mt-1">{req.medication} {req.dosage}</p>
+                      <p className="text-xs text-slate-400 mt-1">Requested {req.requestedDate}</p>
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        className="px-3 py-1.5 rounded-lg text-xs font-medium text-white transition-colors"
+                        style={{ backgroundColor: "#27ab83" }}
+                        onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#147d64")}
+                        onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "#27ab83")}
+                      >
+                        Approve
+                      </button>
+                      <button className="px-3 py-1.5 rounded-lg text-xs font-medium border border-slate-200 text-slate-500 hover:bg-slate-50 transition-colors">
+                        Deny
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Prescriptions table */}
+        <div className="glass rounded-xl overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr style={{ backgroundColor: "rgba(16,42,67,0.03)" }}>
+                  <th className="text-left px-4 py-3 font-medium text-slate-500">Patient</th>
+                  <th className="text-left px-4 py-3 font-medium text-slate-500">Medication</th>
+                  <th className="text-left px-4 py-3 font-medium text-slate-500 hidden md:table-cell">Dosage</th>
+                  <th className="text-left px-4 py-3 font-medium text-slate-500 hidden lg:table-cell">Frequency</th>
+                  <th className="text-left px-4 py-3 font-medium text-slate-500 hidden md:table-cell">Prescriber</th>
+                  <th className="text-left px-4 py-3 font-medium text-slate-500">Status</th>
+                  <th className="text-left px-4 py-3 font-medium text-slate-500 hidden lg:table-cell">Refills Left</th>
+                  <th className="text-left px-4 py-3 font-medium text-slate-500">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {mockPrescriptions.map((rx) => {
+                  const rsc = rxStatusConfig[rx.status];
+                  return (
+                    <tr key={rx.id} className="border-t border-slate-100 hover:bg-slate-50 transition-colors">
+                      <td className="px-4 py-3 font-medium text-slate-700">{rx.patient}</td>
+                      <td className="px-4 py-3 text-slate-700">{rx.medication}</td>
+                      <td className="px-4 py-3 text-slate-500 hidden md:table-cell">{rx.dosage}</td>
+                      <td className="px-4 py-3 text-slate-500 hidden lg:table-cell">{rx.frequency}</td>
+                      <td className="px-4 py-3 text-slate-500 hidden md:table-cell">{rx.prescriber}</td>
+                      <td className="px-4 py-3">
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium capitalize" style={{ backgroundColor: rsc.bg, color: rsc.text }}>
+                          <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: rsc.dot }} />
+                          {rx.status.replace("_", " ")}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-slate-500 hidden lg:table-cell">{rx.refillsLeft}</td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-1">
+                          <button className="p-1.5 rounded-md hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors">
+                            <Eye className="w-4 h-4" />
+                          </button>
+                          <button className="p-1.5 rounded-md hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors">
+                            <Pencil className="w-4 h-4" />
+                          </button>
+                          <button className="p-1.5 rounded-md hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors">
+                            <MoreHorizontal className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ─── Screenings Tab ───────────────────────────────────────────────────────
+
+  function renderScreenings() {
+    const instruments = [
+      { id: "phq9", name: "PHQ-9", subtitle: "Patient Health Questionnaire", questions: 9, specialty: "Depression" },
+      { id: "gad7", name: "GAD-7", subtitle: "Generalized Anxiety Disorder", questions: 7, specialty: "Anxiety" },
+      { id: "asrs", name: "ASRS", subtitle: "Adult ADHD Self-Report Scale", questions: 18, specialty: "ADHD" },
+    ];
+
+    const specialtyConfig: Record<string, { bg: string; text: string }> = {
+      Depression: { bg: "#e0e8f0", text: "#334e68" },
+      Anxiety: { bg: "#fffbeb", text: "#d97706" },
+      ADHD: { bg: "#e6f7f2", text: "#147d64" },
+    };
+
+    const mockRecentScreenings = [
+      { id: "s1", date: "Mar 18, 2026", patient: "James Wilson", instrument: "PHQ-9", score: 7, severity: "Mild", administeredBy: "Dr. Michel" },
+      { id: "s2", date: "Mar 18, 2026", patient: "James Wilson", instrument: "GAD-7", score: 6, severity: "Mild", administeredBy: "Dr. Michel" },
+      { id: "s3", date: "Mar 17, 2026", patient: "Sarah Mitchell", instrument: "PHQ-9", score: 12, severity: "Moderate", administeredBy: "Dr. Michel" },
+      { id: "s4", date: "Mar 16, 2026", patient: "Carlos Mendez", instrument: "GAD-7", score: 15, severity: "Severe", administeredBy: "Dr. Michel" },
+      { id: "s5", date: "Mar 15, 2026", patient: "Emily Chen", instrument: "PHQ-9", score: 4, severity: "Minimal", administeredBy: "NP Johnson" },
+      { id: "s6", date: "Mar 14, 2026", patient: "Robert Kim", instrument: "ASRS", score: 14, severity: "Moderate", administeredBy: "Dr. Michel" },
+    ];
+
+    const severityBadge = (sev: string) => {
+      const config: Record<string, { bg: string; text: string }> = {
+        Minimal: { bg: "#ecf9ec", text: "#2f8132" },
+        Mild: { bg: "#fffbeb", text: "#d97706" },
+        Moderate: { bg: "#fef2f2", text: "#dc2626" },
+        Severe: { bg: "#fef2f2", text: "#991b1b" },
+      };
+      const c = config[sev] || config.Mild;
+      return c;
+    };
+
+    return (
+      <div className="space-y-6">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+          <h2 className="text-xl font-bold text-slate-800">Screenings</h2>
+          <button
+            className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors shrink-0"
+            style={{ backgroundColor: "#27ab83" }}
+            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#147d64")}
+            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "#27ab83")}
+          >
+            <Plus className="w-4 h-4" />
+            Administer Screening
+          </button>
+        </div>
+
+        {/* Available Instruments */}
+        <div>
+          <h3 className="text-sm font-semibold text-slate-800 mb-3">Available Instruments</h3>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            {instruments.map((inst) => {
+              const sc = specialtyConfig[inst.specialty];
+              return (
+                <div key={inst.id} className="glass rounded-xl p-5 hover-lift cursor-pointer">
+                  <div className="flex items-start justify-between mb-2">
+                    <h4 className="text-lg font-bold text-slate-800">{inst.name}</h4>
+                    <span className="px-2 py-0.5 rounded text-xs font-medium" style={{ backgroundColor: sc.bg, color: sc.text }}>
+                      {inst.specialty}
+                    </span>
+                  </div>
+                  <p className="text-sm text-slate-500 mb-3">{inst.subtitle}</p>
+                  <p className="text-xs text-slate-400">{inst.questions} questions</p>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Recent Results */}
+        <div>
+          <h3 className="text-sm font-semibold text-slate-800 mb-3">Recent Results</h3>
+          <div className="glass rounded-xl overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr style={{ backgroundColor: "rgba(16,42,67,0.03)" }}>
+                    <th className="text-left px-4 py-3 font-medium text-slate-500">Date</th>
+                    <th className="text-left px-4 py-3 font-medium text-slate-500">Patient</th>
+                    <th className="text-left px-4 py-3 font-medium text-slate-500">Instrument</th>
+                    <th className="text-left px-4 py-3 font-medium text-slate-500">Score</th>
+                    <th className="text-left px-4 py-3 font-medium text-slate-500">Severity</th>
+                    <th className="text-left px-4 py-3 font-medium text-slate-500 hidden md:table-cell">Administered By</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {mockRecentScreenings.map((scr) => {
+                    const sb = severityBadge(scr.severity);
+                    return (
+                      <tr key={scr.id} className="border-t border-slate-100 hover:bg-slate-50 transition-colors">
+                        <td className="px-4 py-3 font-medium text-slate-700">{scr.date}</td>
+                        <td className="px-4 py-3 text-slate-700">{scr.patient}</td>
+                        <td className="px-4 py-3">
+                          <span className="px-2 py-0.5 rounded text-xs font-medium font-mono" style={{ backgroundColor: "#e0e8f0", color: "#334e68" }}>
+                            {scr.instrument}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 font-bold text-slate-800">{scr.score}</td>
+                        <td className="px-4 py-3">
+                          <span className="px-2 py-0.5 rounded-full text-xs font-medium" style={{ backgroundColor: sb.bg, color: sb.text }}>
+                            {scr.severity}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-slate-500 hidden md:table-cell">{scr.administeredBy}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ─── Payments Tab ─────────────────────────────────────────────────────────
+
+  function renderPayments() {
+    const mockPayments = [
+      { id: "pay1", date: "Mar 18, 2026", patient: "Sarah Mitchell", amount: 199.00, method: "card" as const, status: "succeeded" as const, invoice: "INV-1042" },
+      { id: "pay2", date: "Mar 18, 2026", patient: "James Rivera", amount: 299.00, method: "card" as const, status: "succeeded" as const, invoice: "INV-1041" },
+      { id: "pay3", date: "Mar 17, 2026", patient: "Emily Chen", amount: 99.00, method: "bank" as const, status: "succeeded" as const, invoice: "INV-1040" },
+      { id: "pay4", date: "Mar 17, 2026", patient: "Tom Brown", amount: 99.00, method: "card" as const, status: "failed" as const, invoice: "INV-1043" },
+      { id: "pay5", date: "Mar 16, 2026", patient: "Lisa Patel", amount: 99.00, method: "card" as const, status: "succeeded" as const, invoice: "INV-1038" },
+      { id: "pay6", date: "Mar 16, 2026", patient: "Robert Kim", amount: 299.00, method: "card" as const, status: "succeeded" as const, invoice: "INV-1037" },
+      { id: "pay7", date: "Mar 15, 2026", patient: "Rachel Adams", amount: 199.00, method: "bank" as const, status: "succeeded" as const, invoice: "INV-1034" },
+      { id: "pay8", date: "Mar 15, 2026", patient: "Carlos Mendez", amount: 299.00, method: "card" as const, status: "succeeded" as const, invoice: "INV-1033" },
+      { id: "pay9", date: "Mar 14, 2026", patient: "Angela Foster", amount: 99.00, method: "card" as const, status: "refunded" as const, invoice: "INV-1036" },
+      { id: "pay10", date: "Mar 14, 2026", patient: "David Nguyen", amount: 99.00, method: "card" as const, status: "pending" as const, invoice: "INV-1035" },
+    ];
+
+    const payStatusConfig: Record<string, { bg: string; text: string; dot: string }> = {
+      succeeded: { bg: "#ecf9ec", text: "#2f8132", dot: "#3f9142" },
+      pending: { bg: "#fffbeb", text: "#d97706", dot: "#f59e0b" },
+      failed: { bg: "#fef2f2", text: "#dc2626", dot: "#ef4444" },
+      refunded: { bg: "#f1f5f9", text: "#64748b", dot: "#94a3b8" },
+    };
+
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center justify-between">
+          <h2 className="text-xl font-bold text-slate-800">Payments</h2>
+        </div>
+
+        {/* Stats */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+          <div className="glass rounded-lg p-4">
+            <p className="text-xs text-slate-500 mb-1">This Month</p>
+            <p className="text-2xl font-bold" style={{ color: "#2f8132" }}>$8,400</p>
+          </div>
+          <div className="glass rounded-lg p-4">
+            <p className="text-xs text-slate-500 mb-1">Outstanding</p>
+            <p className="text-2xl font-bold" style={{ color: "#d97706" }}>$450</p>
+          </div>
+          <div className="glass rounded-lg p-4">
+            <p className="text-xs text-slate-500 mb-1">Refunded</p>
+            <p className="text-2xl font-bold text-slate-500">$99</p>
+          </div>
+        </div>
+
+        {/* Table */}
+        <div className="glass rounded-xl overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr style={{ backgroundColor: "rgba(16,42,67,0.03)" }}>
+                  <th className="text-left px-4 py-3 font-medium text-slate-500">Date</th>
+                  <th className="text-left px-4 py-3 font-medium text-slate-500">Patient</th>
+                  <th className="text-left px-4 py-3 font-medium text-slate-500">Amount</th>
+                  <th className="text-left px-4 py-3 font-medium text-slate-500 hidden md:table-cell">Method</th>
+                  <th className="text-left px-4 py-3 font-medium text-slate-500">Status</th>
+                  <th className="text-left px-4 py-3 font-medium text-slate-500 hidden md:table-cell">Invoice</th>
+                  <th className="text-left px-4 py-3 font-medium text-slate-500">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {mockPayments.map((pay) => {
+                  const psc = payStatusConfig[pay.status];
+                  return (
+                    <tr
+                      key={pay.id}
+                      className="border-t border-slate-100 hover:bg-slate-50 transition-colors"
+                      style={pay.status === "failed" ? { backgroundColor: "rgba(254,242,242,0.5)" } : {}}
+                    >
+                      <td className="px-4 py-3 text-slate-700">{pay.date}</td>
+                      <td className="px-4 py-3 font-medium text-slate-700">{pay.patient}</td>
+                      <td className="px-4 py-3 font-medium text-slate-800">${pay.amount.toFixed(2)}</td>
+                      <td className="px-4 py-3 text-slate-500 hidden md:table-cell capitalize">{pay.method === "card" ? "Card" : "Bank Transfer"}</td>
+                      <td className="px-4 py-3">
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium capitalize" style={{ backgroundColor: psc.bg, color: psc.text }}>
+                          <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: psc.dot }} />
+                          {pay.status}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 font-mono text-sm text-slate-500 hidden md:table-cell">{pay.invoice}</td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-1">
+                          <button className="p-1.5 rounded-md hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors">
+                            <Eye className="w-4 h-4" />
+                          </button>
+                          {pay.status === "failed" && (
+                            <button
+                              className="px-2 py-1 rounded text-xs font-medium transition-colors"
+                              style={{ color: "#dc2626" }}
+                            >
+                              Retry
+                            </button>
+                          )}
+                          <button className="p-1.5 rounded-md hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors">
+                            <MoreHorizontal className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ─── Coupons Tab ──────────────────────────────────────────────────────────
+
+  function renderCoupons() {
+    const mockCoupons = [
+      { id: "c1", code: "WELCOME20", description: "20% off first month", discountType: "percent" as const, discountValue: 20, usesCount: 8, usesMax: 50, validUntil: "Jun 30, 2026", status: "active" as const },
+      { id: "c2", code: "ANNUAL10", description: "10% off annual plan", discountType: "percent" as const, discountValue: 10, usesCount: 3, usesMax: null, validUntil: "Dec 31, 2026", status: "active" as const },
+      { id: "c3", code: "FRIEND50", description: "$50 off", discountType: "amount" as const, discountValue: 50, usesCount: 12, usesMax: 20, validUntil: "Sep 30, 2026", status: "active" as const },
+      { id: "c4", code: "SUMMER2025", description: "1 month free", discountType: "free_months" as const, discountValue: 1, usesCount: 15, usesMax: 15, validUntil: "Aug 31, 2025", status: "expired" as const },
+    ];
+
+    const formatDiscount = (coupon: typeof mockCoupons[0]) => {
+      if (coupon.discountType === "percent") return `${coupon.discountValue}% off`;
+      if (coupon.discountType === "amount") return `$${coupon.discountValue} off`;
+      return `${coupon.discountValue} month${coupon.discountValue > 1 ? "s" : ""} free`;
+    };
+
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center justify-between">
+          <h2 className="text-xl font-bold text-slate-800">Coupons</h2>
+          <button
+            className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors"
+            style={{ backgroundColor: "#27ab83" }}
+            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#147d64")}
+            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "#27ab83")}
+          >
+            <Plus className="w-4 h-4" />
+            Create Coupon
+          </button>
+        </div>
+
+        {/* Table */}
+        <div className="glass rounded-xl overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr style={{ backgroundColor: "rgba(16,42,67,0.03)" }}>
+                  <th className="text-left px-4 py-3 font-medium text-slate-500">Code</th>
+                  <th className="text-left px-4 py-3 font-medium text-slate-500">Description</th>
+                  <th className="text-left px-4 py-3 font-medium text-slate-500">Discount</th>
+                  <th className="text-left px-4 py-3 font-medium text-slate-500 hidden md:table-cell">Uses</th>
+                  <th className="text-left px-4 py-3 font-medium text-slate-500 hidden md:table-cell">Valid Until</th>
+                  <th className="text-left px-4 py-3 font-medium text-slate-500">Status</th>
+                  <th className="text-left px-4 py-3 font-medium text-slate-500">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {mockCoupons.map((coupon) => (
+                  <tr key={coupon.id} className="border-t border-slate-100 hover:bg-slate-50 transition-colors">
+                    <td className="px-4 py-3">
+                      <span className="px-2 py-1 rounded text-xs font-mono font-bold" style={{ backgroundColor: "#e6f7f2", color: "#147d64" }}>
+                        {coupon.code}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-slate-700">{coupon.description}</td>
+                    <td className="px-4 py-3">
+                      <span className="font-medium" style={{ color: "#D4A855" }}>{formatDiscount(coupon)}</span>
+                    </td>
+                    <td className="px-4 py-3 text-slate-500 hidden md:table-cell">
+                      {coupon.usesCount}/{coupon.usesMax ?? "unlimited"}
+                    </td>
+                    <td className="px-4 py-3 text-slate-500 hidden md:table-cell">{coupon.validUntil}</td>
+                    <td className="px-4 py-3">
+                      <StatusBadge status={coupon.status === "active" ? "active" : "cancelled"} />
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-1">
+                        <button className="p-1.5 rounded-md hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors">
+                          <Pencil className="w-4 h-4" />
+                        </button>
+                        {coupon.status === "active" && (
+                          <button
+                            className="px-2 py-1 rounded text-xs font-medium transition-colors"
+                            style={{ color: "#dc2626" }}
+                          >
+                            Deactivate
+                          </button>
+                        )}
+                        <button className="p-1.5 rounded-md hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors">
+                          <MoreHorizontal className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ─── Providers Tab ────────────────────────────────────────────────────────
+
+  function renderProviders() {
+    const mockProviders = [
+      {
+        id: "prov1",
+        name: "Nageley Michel",
+        credentials: "DNP, PMHNP-BC",
+        specialty: "Psychiatric Mental Health",
+        panelCount: 45,
+        panelMax: 400,
+        panelStatus: "Open" as const,
+        telehealth: true,
+        initials: "NM",
+      },
+      {
+        id: "prov2",
+        name: "Amanda Johnson",
+        credentials: "NP",
+        specialty: "Family Medicine",
+        panelCount: 28,
+        panelMax: 300,
+        panelStatus: "Open" as const,
+        telehealth: true,
+        initials: "AJ",
+      },
+      {
+        id: "prov3",
+        name: "David Chen",
+        credentials: "MD",
+        specialty: "Internal Medicine",
+        panelCount: 12,
+        panelMax: 350,
+        panelStatus: "Waitlist" as const,
+        telehealth: false,
+        initials: "DC",
+      },
+    ];
+
+    const panelStatusConfig: Record<string, { bg: string; text: string }> = {
+      Open: { bg: "#ecf9ec", text: "#2f8132" },
+      Closed: { bg: "#fef2f2", text: "#dc2626" },
+      Waitlist: { bg: "#fffbeb", text: "#d97706" },
+    };
+
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center justify-between">
+          <h2 className="text-xl font-bold text-slate-800">Providers</h2>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+          {mockProviders.map((prov) => {
+            const panelPct = Math.round((prov.panelCount / prov.panelMax) * 100);
+            const psc = panelStatusConfig[prov.panelStatus];
+            return (
+              <div key={prov.id} className="glass rounded-2xl p-6 hover-lift">
+                {/* Avatar + Name */}
+                <div className="flex items-center gap-4 mb-4">
+                  <div
+                    className="w-14 h-14 rounded-full flex items-center justify-center text-lg font-bold text-white shrink-0"
+                    style={{ backgroundColor: "#334e68" }}
+                  >
+                    {prov.initials}
+                  </div>
+                  <div className="min-w-0">
+                    <h3 className="font-semibold text-slate-800 truncate">{prov.name}, {prov.credentials}</h3>
+                    <span className="px-2 py-0.5 rounded text-xs font-medium" style={{ backgroundColor: "#e6f7f2", color: "#147d64" }}>
+                      {prov.specialty}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Panel */}
+                <div className="mb-4">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <p className="text-xs text-slate-500">Panel</p>
+                    <p className="text-xs font-medium text-slate-700">{prov.panelCount} of {prov.panelMax} members</p>
+                  </div>
+                  <div className="w-full h-2 rounded-full" style={{ backgroundColor: "#e6f7f2" }}>
+                    <div
+                      className="h-2 rounded-full transition-all duration-500"
+                      style={{ width: `${panelPct}%`, backgroundColor: "#27ab83" }}
+                    />
+                  </div>
+                </div>
+
+                {/* Status row */}
+                <div className="flex items-center gap-3 mb-4">
+                  <span className="px-2 py-0.5 rounded-full text-xs font-medium" style={{ backgroundColor: psc.bg, color: psc.text }}>
+                    {prov.panelStatus}
+                  </span>
+                  <span className="flex items-center gap-1 text-xs text-slate-500">
+                    <Video className="w-3 h-3" />
+                    Telehealth: {prov.telehealth ? (
+                      <span style={{ color: "#2f8132" }}>Enabled</span>
+                    ) : (
+                      <span style={{ color: "#dc2626" }}>Disabled</span>
+                    )}
+                  </span>
+                </div>
+
+                {/* Buttons */}
+                <div className="flex gap-2">
+                  <button
+                    className="flex-1 px-3 py-2 rounded-lg text-sm font-medium border transition-colors"
+                    style={{ borderColor: "#27ab83", color: "#27ab83" }}
+                    onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#e6f7f2")}
+                    onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "")}
+                  >
+                    View Schedule
+                  </button>
+                  <button className="flex-1 px-3 py-2 rounded-lg text-sm font-medium border border-slate-200 text-slate-500 hover:bg-slate-50 transition-colors">
+                    Edit
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+
+          {/* Add Provider Card */}
+          <div
+            className="rounded-2xl flex flex-col items-center justify-center p-8 cursor-pointer transition-colors"
+            style={{
+              border: "2px dashed #cbd5e1",
+              backgroundColor: "transparent",
+              minHeight: "280px",
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.borderColor = "#27ab83";
+              e.currentTarget.style.backgroundColor = "rgba(39,171,131,0.03)";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.borderColor = "#cbd5e1";
+              e.currentTarget.style.backgroundColor = "transparent";
+            }}
+          >
+            <div
+              className="w-14 h-14 rounded-full flex items-center justify-center mb-4"
+              style={{ backgroundColor: "#e6f7f2" }}
+            >
+              <Plus className="w-7 h-7" style={{ color: "#27ab83" }} />
+            </div>
+            <p className="text-base font-semibold text-slate-600">Add Provider</p>
+            <p className="text-sm text-slate-400 mt-1 text-center">Onboard a new clinician</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ─── Staff Tab ────────────────────────────────────────────────────────────
+
+  function renderStaff() {
+    const mockStaff = [
+      { id: "st1", name: "Maria Garcia", email: "front.desk@example.com", role: "Front Desk", status: "active" as const, lastLogin: "Mar 18, 2026 9:15 AM" },
+      { id: "st2", name: "Jessica Lee", email: "billing@example.com", role: "Billing Coordinator", status: "active" as const, lastLogin: "Mar 18, 2026 8:30 AM" },
+      { id: "st3", name: "Tom Brown", email: "admin@example.com", role: "Office Manager", status: "active" as const, lastLogin: "Mar 17, 2026 5:00 PM" },
+    ];
+
+    const roleConfig: Record<string, { bg: string; text: string }> = {
+      "Front Desk": { bg: "#e6f7f2", text: "#147d64" },
+      "Billing Coordinator": { bg: "#fffbeb", text: "#d97706" },
+      "Office Manager": { bg: "#e0e8f0", text: "#334e68" },
+    };
+
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <h2 className="text-xl font-bold text-slate-800">Staff</h2>
+          <button
+            className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors"
+            style={{ backgroundColor: "#27ab83" }}
+            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#147d64")}
+            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "#27ab83")}
+          >
+            <UserPlus className="w-4 h-4" />
+            Invite Staff
+          </button>
+        </div>
+
+        <div className="glass rounded-xl overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr style={{ backgroundColor: "rgba(16,42,67,0.03)" }}>
+                  <th className="text-left px-4 py-3 font-medium text-slate-500">Name</th>
+                  <th className="text-left px-4 py-3 font-medium text-slate-500 hidden md:table-cell">Email</th>
+                  <th className="text-left px-4 py-3 font-medium text-slate-500">Role</th>
+                  <th className="text-left px-4 py-3 font-medium text-slate-500">Status</th>
+                  <th className="text-left px-4 py-3 font-medium text-slate-500 hidden md:table-cell">Last Login</th>
+                  <th className="text-left px-4 py-3 font-medium text-slate-500">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {mockStaff.map((staff) => {
+                  const rc = roleConfig[staff.role] || roleConfig["Office Manager"];
+                  return (
+                    <tr key={staff.id} className="border-t border-slate-100 hover:bg-slate-50 transition-colors">
+                      <td className="px-4 py-3 font-medium text-slate-700">{staff.name}</td>
+                      <td className="px-4 py-3 text-slate-500 hidden md:table-cell">{staff.email}</td>
+                      <td className="px-4 py-3">
+                        <span className="px-2 py-0.5 rounded text-xs font-medium" style={{ backgroundColor: rc.bg, color: rc.text }}>
+                          {staff.role}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <StatusBadge status={staff.status} />
+                      </td>
+                      <td className="px-4 py-3 text-slate-500 hidden md:table-cell">{staff.lastLogin}</td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-1">
+                          <button className="p-1.5 rounded-md hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors">
+                            <Pencil className="w-4 h-4" />
+                          </button>
+                          <button
+                            className="px-2 py-1 rounded text-xs font-medium transition-colors"
+                            style={{ color: "#dc2626" }}
+                          >
+                            Deactivate
+                          </button>
+                          <button className="p-1.5 rounded-md hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors">
+                            <MoreHorizontal className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ─── Notifications Tab ────────────────────────────────────────────────────
+
+  function renderNotifications() {
+    const mockNotifications = [
+      { id: "n1", title: "New member enrolled", description: "Sarah K. joined Complete Plan", time: "15 min ago", category: "members" as const, read: false },
+      { id: "n2", title: "Appointment cancelled", description: "James W. cancelled Mar 25 visit", time: "1 hour ago", category: "appointments" as const, read: false },
+      { id: "n3", title: "Payment received", description: "$199.00 from Lisa M.", time: "2 hours ago", category: "billing" as const, read: false },
+      { id: "n4", title: "Refill request", description: "James W. requested Sertraline refill", time: "3 hours ago", category: "members" as const, read: false },
+      { id: "n5", title: "Intake submitted", description: "New form from Robert D.", time: "5 hours ago", category: "members" as const, read: true },
+      { id: "n6", title: "Appointment completed", description: "Dr. Michel with Sarah K.", time: "Yesterday", category: "appointments" as const, read: true },
+      { id: "n7", title: "Payment failed", description: "Card declined for Tom B. ($99)", time: "Yesterday", category: "billing" as const, read: true },
+      { id: "n8", title: "Member paused", description: "David R. paused membership", time: "2 days ago", category: "members" as const, read: true },
+      { id: "n9", title: "Provider schedule updated", description: "Dr. Chen updated hours", time: "2 days ago", category: "system" as const, read: true },
+      { id: "n10", title: "System maintenance completed", description: "All systems operational", time: "3 days ago", category: "system" as const, read: true },
+    ];
+
+    const filterTabs: { id: typeof notificationFilter; label: string }[] = [
+      { id: "all", label: "All" },
+      { id: "members", label: "Members" },
+      { id: "appointments", label: "Appointments" },
+      { id: "billing", label: "Billing" },
+      { id: "system", label: "System" },
+    ];
+
+    const filtered = notificationFilter === "all"
+      ? mockNotifications
+      : mockNotifications.filter((n) => n.category === notificationFilter);
+
+    const categoryIcon = (cat: string) => {
+      switch (cat) {
+        case "members": return { color: "#27ab83" };
+        case "appointments": return { color: "#334e68" };
+        case "billing": return { color: "#D4A855" };
+        case "system": return { color: "#64748b" };
+        default: return { color: "#64748b" };
+      }
+    };
+
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <h2 className="text-xl font-bold text-slate-800">Notifications</h2>
+          <button
+            className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border border-slate-200 text-slate-500 hover:bg-slate-50 transition-colors"
+          >
+            <Check className="w-4 h-4" />
+            Mark All Read
+          </button>
+        </div>
+
+        {/* Filter Tabs */}
+        <div className="flex gap-1 border-b border-slate-200 overflow-x-auto">
+          {filterTabs.map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setNotificationFilter(tab.id)}
+              className="px-4 py-2.5 text-sm font-medium capitalize transition-colors whitespace-nowrap"
+              style={
+                notificationFilter === tab.id
+                  ? { color: "#27ab83", borderBottom: "2px solid #27ab83" }
+                  : { color: "#64748b", borderBottom: "2px solid transparent" }
+              }
+              onMouseEnter={(e) => {
+                if (notificationFilter !== tab.id) e.currentTarget.style.color = "#334e68";
+              }}
+              onMouseLeave={(e) => {
+                if (notificationFilter !== tab.id) e.currentTarget.style.color = "#64748b";
+              }}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Notification Feed */}
+        <div className="space-y-2">
+          {filtered.map((notif) => {
+            const ic = categoryIcon(notif.category);
+            return (
+              <div
+                key={notif.id}
+                className="glass rounded-xl p-4 flex items-start gap-3 transition-colors cursor-pointer hover:bg-slate-50"
+                style={!notif.read ? { borderLeft: "3px solid #27ab83" } : { borderLeft: "3px solid transparent" }}
+              >
+                {/* Dot indicator */}
+                <div className="mt-1.5 shrink-0">
+                  <div
+                    className="w-2.5 h-2.5 rounded-full"
+                    style={{ backgroundColor: notif.read ? "#e2e8f0" : ic.color }}
+                  />
+                </div>
+
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <p className={`text-sm ${notif.read ? "text-slate-600" : "text-slate-800 font-semibold"}`}>
+                        {notif.title}
+                      </p>
+                      <p className="text-sm text-slate-500 mt-0.5">{notif.description}</p>
+                    </div>
+                    <span className="text-xs text-slate-400 shrink-0 whitespace-nowrap">{notif.time}</span>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+          {filtered.length === 0 && (
+            <div className="py-12 text-center text-slate-400">
+              <Bell className="w-10 h-10 mx-auto mb-2 opacity-40" />
+              <p>No notifications in this category</p>
+            </div>
+          )}
         </div>
       </div>
     );
@@ -2234,21 +3367,40 @@ export function PracticePortal() {
 
   function renderContent() {
     if (selectedPatient) return renderPatientDetail();
-    if (COMING_SOON_TABS.includes(activeTab)) return renderComingSoon(activeTab);
 
     switch (activeTab) {
       case "dashboard":
         return renderDashboard();
       case "roster":
         return renderRoster();
+      case "intakes":
+        return renderIntakes();
+      case "waitlist":
+        return renderWaitlist();
       case "plans":
         return renderPlans();
       case "appointments":
         return renderAppointments();
-      case "messages":
-        return renderMessages();
+      case "encounters":
+        return renderEncounters();
+      case "prescriptions":
+        return renderPrescriptions();
+      case "screenings":
+        return renderScreenings();
       case "invoices":
         return renderInvoices();
+      case "payments":
+        return renderPayments();
+      case "coupons":
+        return renderCoupons();
+      case "providers":
+        return renderProviders();
+      case "staff":
+        return renderStaff();
+      case "messages":
+        return renderMessages();
+      case "notifications":
+        return renderNotifications();
       case "practice-settings":
         return <PracticeSettings />;
       case "branding":
