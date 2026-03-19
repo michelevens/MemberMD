@@ -54,7 +54,7 @@ return new class extends Migration
         $this->addIndexIfNotExists('documents', ['tenant_id', 'patient_id']);
 
         // Messages
-        $this->addIndexIfNotExists('messages', ['tenant_id', 'recipient_id', 'is_read']);
+        $this->addIndexIfNotExists('messages', ['tenant_id', 'recipient_id', 'read_at']);
 
         // Payments
         $this->addIndexIfNotExists('payments', ['tenant_id', 'patient_id']);
@@ -79,7 +79,7 @@ return new class extends Migration
             ['security_events', ['tenant_id', 'event_type']],
             ['security_events', ['user_id', 'created_at']],
             ['documents', ['tenant_id', 'patient_id']],
-            ['messages', ['tenant_id', 'recipient_id', 'is_read']],
+            ['messages', ['tenant_id', 'recipient_id', 'read_at']],
             ['payments', ['tenant_id', 'patient_id']],
             ['provider_schedule_overrides', ['provider_id', 'override_date']],
         ];
