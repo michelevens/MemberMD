@@ -640,118 +640,117 @@ export function PracticePortal() {
 
   const loadPracticeData = useCallback(async () => {
     setDataLoading(true);
-    try {
-      const [statsRes, plansRes, threadsRes, patientsRes, appointmentsRes, encountersRes, prescriptionsRes, invoicesRes, programsRes] = await Promise.all([
-        dashboardService.getPracticeStats(),
-        membershipPlanService.list(),
-        messageService.list(),
-        patientService.list(),
-        appointmentService.list(),
-        encounterService.list(),
-        prescriptionService.list(),
-        invoiceService.list(),
-        programService.list(),
-      ]);
-      if (statsRes.data && typeof statsRes.data === "object" && Object.keys(statsRes.data).length > 0) {
-        setApiDashStats(statsRes.data);
-        setIsRealApi(true);
-      }
-      if (plansRes.data && Array.isArray(plansRes.data) && plansRes.data.length > 0) {
-        setApiPlans(plansRes.data);
-      }
-      if (threadsRes.data && Array.isArray(threadsRes.data) && threadsRes.data.length > 0) {
-        setApiThreads(threadsRes.data);
-      }
-      // Patients
-      if (patientsRes.data && Array.isArray(patientsRes.data) && patientsRes.data.length > 0) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        setApiPatients(patientsRes.data.map((p: any) => ({
-          id: p.id,
-          name: [p.firstName, p.lastName].filter(Boolean).join(" ") || p.name || "",
-          preferredName: p.preferredName || undefined,
-          plan: p.activeMembership?.plan?.name || p.planName || "No Plan",
-          planPrice: p.activeMembership?.plan?.monthlyPrice || p.planPrice || 0,
-          status: p.isActive === false ? "cancelled" : (p.activeMembership?.status === "paused" ? "paused" : "active") as "active" | "paused" | "cancelled",
-          phone: p.phone || "",
-          email: p.email || "",
-          lastVisit: p.lastVisitAt || "N/A",
-          nextApt: p.nextAppointmentAt || "N/A",
-          memberId: p.activeMembership?.memberNumber || p.memberId || "",
-          memberSince: p.createdAt || "",
-          dob: p.dateOfBirth || p.dob || "",
-          gender: p.gender || "",
-          pronouns: p.pronouns || "",
-          language: p.language || "",
-          address: [p.addressLine1, p.addressLine2, p.city, p.state, p.zip].filter(Boolean).join(", ") || p.address || "",
-          visitsUsed: p.activeMembership?.visitsUsed ?? 0,
-          visitsTotal: p.activeMembership?.visitsTotal ?? 0,
-          provider: p.primaryProvider?.name || p.providerName || "",
-        })));
-      }
-      // Appointments
-      if (appointmentsRes.data && Array.isArray(appointmentsRes.data) && appointmentsRes.data.length > 0) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        setApiAppointments(appointmentsRes.data.map((a: any) => ({
-          id: a.id,
-          time: a.scheduledAt ? new Date(a.scheduledAt).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true }) : a.time || "",
-          patient: a.patient ? [a.patient.firstName, a.patient.lastName].filter(Boolean).join(" ") : a.patientName || "",
-          plan: a.patient?.activeMembership?.plan?.name || a.planName || "",
-          program: a.program?.name || a.programName || "DPC Membership",
-          type: a.appointmentType?.name || a.type || a.typeName || "Visit",
-          duration: a.durationMinutes ? `${a.durationMinutes} min` : a.duration || "30 min",
-          provider: a.provider ? `${a.provider.title || ""} ${a.provider.lastName || ""}`.trim() : a.providerName || "",
-          status: a.status || "confirmed",
-          isTelehealth: a.isTelehealth ?? a.is_telehealth ?? false,
-          sessionId: a.telehealthSessionId || a.sessionId || "",
-        })));
-      }
-      // Encounters
-      if (encountersRes.data && Array.isArray(encountersRes.data) && encountersRes.data.length > 0) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        setApiEncounters(encountersRes.data.map((e: any) => ({
-          id: e.id,
-          date: e.encounterDate ? new Date(e.encounterDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : e.date || "",
-          patient: e.patient ? [e.patient.firstName, e.patient.lastName].filter(Boolean).join(" ") : e.patientName || "",
-          provider: e.provider ? `${e.provider.title || ""} ${e.provider.lastName || ""}`.trim() : e.providerName || "",
-          type: e.encounterType || e.type || "Follow-Up",
-          program: e.program?.name || e.programName || "DPC Membership",
-          noteTemplate: e.noteTemplate || e.templateType || "SOAP",
-          duration: e.durationMinutes ? `${e.durationMinutes} min` : e.duration || "30 min",
-          status: e.status || "draft",
-        })));
-      }
-      // Prescriptions
-      if (prescriptionsRes.data && Array.isArray(prescriptionsRes.data) && prescriptionsRes.data.length > 0) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        setApiPrescriptions(prescriptionsRes.data.map((rx: any) => ({
-          id: rx.id,
-          patient: rx.patient ? [rx.patient.firstName, rx.patient.lastName].filter(Boolean).join(" ") : rx.patientName || "",
-          medication: rx.medicationName || rx.medication || "",
-          dosage: rx.dosage || "",
-          frequency: rx.frequency || "",
-          prescriber: rx.prescriber ? `${rx.prescriber.title || ""} ${rx.prescriber.lastName || ""}`.trim() : rx.prescriberName || "",
-          status: rx.status || "active",
-          refillsLeft: rx.refillsRemaining ?? rx.refillsLeft ?? 0,
-        })));
-      }
-      // Invoices
-      if (invoicesRes.data && Array.isArray(invoicesRes.data) && invoicesRes.data.length > 0) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        setApiInvoices(invoicesRes.data.map((inv: any) => ({
-          id: inv.invoiceNumber || inv.id || "",
-          patient: inv.patient ? [inv.patient.firstName, inv.patient.lastName].filter(Boolean).join(" ") : inv.patientName || "",
-          amount: inv.totalAmount ?? inv.amount ?? 0,
-          plan: inv.plan?.name || inv.planName || "",
-          status: inv.status || "open",
-          date: inv.issuedAt ? new Date(inv.issuedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : inv.date || "",
-        })));
-      }
-      // Programs
-      if (programsRes.data && Array.isArray(programsRes.data) && programsRes.data.length > 0) {
-        setApiPrograms(programsRes.data);
-      }
-    } catch {
-      // Fall back to mock data
+    const [statsRes, plansRes, threadsRes, patientsRes, appointmentsRes, encountersRes, prescriptionsRes, invoicesRes, programsRes] = await Promise.allSettled([
+      dashboardService.getPracticeStats(),
+      membershipPlanService.list(),
+      messageService.list(),
+      patientService.list(),
+      appointmentService.list(),
+      encounterService.list(),
+      prescriptionService.list(),
+      invoiceService.list(),
+      programService.list(),
+    ]);
+    // Dashboard stats
+    if (statsRes.status === "fulfilled" && statsRes.value.data && typeof statsRes.value.data === "object" && Object.keys(statsRes.value.data).length > 0) {
+      setApiDashStats(statsRes.value.data);
+      setIsRealApi(true);
+    }
+    // Plans
+    if (plansRes.status === "fulfilled" && plansRes.value.data && Array.isArray(plansRes.value.data) && plansRes.value.data.length > 0) {
+      setApiPlans(plansRes.value.data);
+    }
+    // Threads
+    if (threadsRes.status === "fulfilled" && threadsRes.value.data && Array.isArray(threadsRes.value.data) && threadsRes.value.data.length > 0) {
+      setApiThreads(threadsRes.value.data);
+    }
+    // Patients
+    if (patientsRes.status === "fulfilled" && patientsRes.value.data && Array.isArray(patientsRes.value.data) && patientsRes.value.data.length > 0) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      setApiPatients(patientsRes.value.data.map((p: any) => ({
+        id: p.id,
+        name: [p.firstName, p.lastName].filter(Boolean).join(" ") || p.name || "",
+        preferredName: p.preferredName || undefined,
+        plan: p.activeMembership?.plan?.name || p.planName || "No Plan",
+        planPrice: p.activeMembership?.plan?.monthlyPrice || p.planPrice || 0,
+        status: p.isActive === false ? "cancelled" : (p.activeMembership?.status === "paused" ? "paused" : "active") as "active" | "paused" | "cancelled",
+        phone: p.phone || "",
+        email: p.email || "",
+        lastVisit: p.lastVisitAt || "N/A",
+        nextApt: p.nextAppointmentAt || "N/A",
+        memberId: p.activeMembership?.memberNumber || p.memberId || "",
+        memberSince: p.createdAt || "",
+        dob: p.dateOfBirth || p.dob || "",
+        gender: p.gender || "",
+        pronouns: p.pronouns || "",
+        language: p.language || "",
+        address: [p.addressLine1, p.addressLine2, p.city, p.state, p.zip].filter(Boolean).join(", ") || p.address || "",
+        visitsUsed: p.activeMembership?.visitsUsed ?? 0,
+        visitsTotal: p.activeMembership?.visitsTotal ?? 0,
+        provider: p.primaryProvider?.name || p.providerName || "",
+      })));
+    }
+    // Appointments
+    if (appointmentsRes.status === "fulfilled" && appointmentsRes.value.data && Array.isArray(appointmentsRes.value.data) && appointmentsRes.value.data.length > 0) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      setApiAppointments(appointmentsRes.value.data.map((a: any) => ({
+        id: a.id,
+        time: a.scheduledAt ? new Date(a.scheduledAt).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true }) : a.time || "",
+        patient: a.patient ? [a.patient.firstName, a.patient.lastName].filter(Boolean).join(" ") : a.patientName || "",
+        plan: a.patient?.activeMembership?.plan?.name || a.planName || "",
+        program: a.program?.name || a.programName || "DPC Membership",
+        type: a.appointmentType?.name || a.type || a.typeName || "Visit",
+        duration: a.durationMinutes ? `${a.durationMinutes} min` : a.duration || "30 min",
+        provider: a.provider ? `${a.provider.title || ""} ${a.provider.lastName || ""}`.trim() : a.providerName || "",
+        status: a.status || "confirmed",
+        isTelehealth: a.isTelehealth ?? a.is_telehealth ?? false,
+        sessionId: a.telehealthSessionId || a.sessionId || "",
+      })));
+    }
+    // Encounters
+    if (encountersRes.status === "fulfilled" && encountersRes.value.data && Array.isArray(encountersRes.value.data) && encountersRes.value.data.length > 0) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      setApiEncounters(encountersRes.value.data.map((e: any) => ({
+        id: e.id,
+        date: e.encounterDate ? new Date(e.encounterDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : e.date || "",
+        patient: e.patient ? [e.patient.firstName, e.patient.lastName].filter(Boolean).join(" ") : e.patientName || "",
+        provider: e.provider ? `${e.provider.title || ""} ${e.provider.lastName || ""}`.trim() : e.providerName || "",
+        type: e.encounterType || e.type || "Follow-Up",
+        program: e.program?.name || e.programName || "DPC Membership",
+        noteTemplate: e.noteTemplate || e.templateType || "SOAP",
+        duration: e.durationMinutes ? `${e.durationMinutes} min` : e.duration || "30 min",
+        status: e.status || "draft",
+      })));
+    }
+    // Prescriptions
+    if (prescriptionsRes.status === "fulfilled" && prescriptionsRes.value.data && Array.isArray(prescriptionsRes.value.data) && prescriptionsRes.value.data.length > 0) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      setApiPrescriptions(prescriptionsRes.value.data.map((rx: any) => ({
+        id: rx.id,
+        patient: rx.patient ? [rx.patient.firstName, rx.patient.lastName].filter(Boolean).join(" ") : rx.patientName || "",
+        medication: rx.medicationName || rx.medication || "",
+        dosage: rx.dosage || "",
+        frequency: rx.frequency || "",
+        prescriber: rx.prescriber ? `${rx.prescriber.title || ""} ${rx.prescriber.lastName || ""}`.trim() : rx.prescriberName || "",
+        status: rx.status || "active",
+        refillsLeft: rx.refillsRemaining ?? rx.refillsLeft ?? 0,
+      })));
+    }
+    // Invoices
+    if (invoicesRes.status === "fulfilled" && invoicesRes.value.data && Array.isArray(invoicesRes.value.data) && invoicesRes.value.data.length > 0) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      setApiInvoices(invoicesRes.value.data.map((inv: any) => ({
+        id: inv.invoiceNumber || inv.id || "",
+        patient: inv.patient ? [inv.patient.firstName, inv.patient.lastName].filter(Boolean).join(" ") : inv.patientName || "",
+        amount: inv.totalAmount ?? inv.amount ?? 0,
+        plan: inv.plan?.name || inv.planName || "",
+        status: inv.status || "open",
+        date: inv.issuedAt ? new Date(inv.issuedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : inv.date || "",
+      })));
+    }
+    // Programs
+    if (programsRes.status === "fulfilled" && programsRes.value.data && Array.isArray(programsRes.value.data) && programsRes.value.data.length > 0) {
+      setApiPrograms(programsRes.value.data);
     }
     setDataLoading(false);
   }, []);

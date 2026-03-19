@@ -8,7 +8,15 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../contexts/AuthContext";
 import { HeaderToolbar } from "../shared/HeaderToolbar";
 import { AppointmentBookingWidget } from "../widgets/AppointmentBookingWidget";
-import { familyService } from "../../lib/api";
+import {
+  familyService,
+  appointmentService,
+  messageService,
+  prescriptionService,
+  documentService,
+  dashboardService,
+  authService,
+} from "../../lib/api";
 import {
   Home,
   Calendar,
@@ -504,11 +512,172 @@ export function PatientPortal() {
 
   useEffect(() => { loadFamilyMembers(); }, [loadFamilyMembers]);
 
+  // ─── API Data State ──────────────────────────────────────────────────────
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [apiPatient, setApiPatient] = useState<any>(null);
+  const [apiUpcoming, setApiUpcoming] = useState<Appointment[] | null>(null);
+  const [apiPast, setApiPast] = useState<Appointment[] | null>(null);
+  const [apiThreads, setApiThreads] = useState<MessageThread[] | null>(null);
+  const [apiMedications, setApiMedications] = useState<Medication[] | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [apiDocuments, setApiDocuments] = useState<any[] | null>(null);
+
+  useEffect(() => {
+    async function loadPatientData() {
+      try {
+        const results = await Promise.allSettled([
+          appointmentService.list({ status: "upcoming" }),
+          appointmentService.list({ status: "completed" }),
+          messageService.list(),
+          prescriptionService.list({ status: "active" }),
+          documentService.list(),
+          dashboardService.getPatientStats(),
+          authService.me(),
+        ]);
+
+        // Upcoming appointments
+        if (results[0].status === "fulfilled") {
+          const r = results[0].value;
+          if (r.data && Array.isArray(r.data) && r.data.length > 0) {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            setApiUpcoming(r.data.map((a: any) => ({
+              id: (a.id as string) || "",
+              date: (a.date as string) || (a.scheduledDate as string) || (a.scheduled_date as string) || "",
+              time: (a.time as string) || (a.scheduledTime as string) || (a.scheduled_time as string) || "",
+              provider: (a.providerName as string) || (a.provider_name as string) || (a.provider as string) || "",
+              type: (a.type as string) || (a.appointmentType as string) || (a.appointment_type as string) || "",
+              status: "upcoming" as const,
+              isVideo: !!(a.isVideo ?? a.is_video ?? a.isTelehealth ?? a.is_telehealth),
+            })));
+          }
+        }
+
+        // Past appointments
+        if (results[1].status === "fulfilled") {
+          const r = results[1].value;
+          if (r.data && Array.isArray(r.data) && r.data.length > 0) {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            setApiPast(r.data.map((a: any) => ({
+              id: (a.id as string) || "",
+              date: (a.date as string) || (a.scheduledDate as string) || (a.scheduled_date as string) || "",
+              time: (a.time as string) || (a.scheduledTime as string) || (a.scheduled_time as string) || "",
+              provider: (a.providerName as string) || (a.provider_name as string) || (a.provider as string) || "",
+              type: (a.type as string) || (a.appointmentType as string) || (a.appointment_type as string) || "",
+              status: "completed" as const,
+              isVideo: !!(a.isVideo ?? a.is_video ?? a.isTelehealth ?? a.is_telehealth),
+              chiefComplaint: (a.chiefComplaint as string) || (a.chief_complaint as string) || "",
+              assessment: (a.assessment as string) || "",
+              plan: (a.plan as string) || "",
+              followUp: (a.followUp as string) || (a.follow_up as string) || "",
+              diagnoses: (a.diagnoses as string) || "",
+            })));
+          }
+        }
+
+        // Messages → threads
+        if (results[2].status === "fulfilled") {
+          const r = results[2].value;
+          if (r.data && Array.isArray(r.data) && r.data.length > 0) {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const grouped: Record<string, any[]> = {};
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            r.data.forEach((m: any) => {
+              const tid = m.threadId || m.thread_id || m.id;
+              if (!grouped[tid]) grouped[tid] = [];
+              grouped[tid].push(m);
+            });
+            const threads: MessageThread[] = Object.entries(grouped).map(([tid, msgs]) => {
+              const last = msgs[msgs.length - 1];
+              return {
+                id: tid,
+                providerName: last.senderName || last.sender_name || last.providerName || last.provider_name || "Provider",
+                providerRole: last.senderRole || last.sender_role || "",
+                lastMessage: last.body || last.text || last.content || "",
+                timestamp: last.createdAt || last.created_at || last.timestamp || "",
+                unread: msgs.some((m: Record<string, unknown>) => !(m.isRead ?? m.is_read)),
+                messages: msgs.map((m: Record<string, unknown>) => ({
+                  id: (m.id as string) || "",
+                  text: (m.body as string) || (m.text as string) || (m.content as string) || "",
+                  sender: ((m.senderType as string) || (m.sender_type as string) || "provider") === "patient" ? "patient" as const : "provider" as const,
+                  timestamp: (m.createdAt as string) || (m.created_at as string) || (m.timestamp as string) || "",
+                })),
+              };
+            });
+            if (threads.length > 0) setApiThreads(threads);
+          }
+        }
+
+        // Medications (from prescriptions)
+        if (results[3].status === "fulfilled") {
+          const r = results[3].value;
+          if (r.data && Array.isArray(r.data) && r.data.length > 0) {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            setApiMedications(r.data.map((p: any) => ({
+              id: (p.id as string) || "",
+              name: (p.medicationName as string) || (p.medication_name as string) || (p.name as string) || "",
+              dosage: (p.dosage as string) || (p.dose as string) || "",
+              frequency: (p.frequency as string) || (p.sig as string) || "",
+              prescriber: (p.prescriberName as string) || (p.prescriber_name as string) || (p.providerName as string) || (p.provider_name as string) || "",
+              status: ((p.status as string) === "active" ? "active" : "discontinued") as "active" | "discontinued",
+            })));
+          }
+        }
+
+        // Documents
+        if (results[4].status === "fulfilled") {
+          const r = results[4].value;
+          if (r.data && Array.isArray(r.data) && r.data.length > 0) {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            setApiDocuments(r.data.map((d: any) => ({
+              id: (d.id as string) || "",
+              name: (d.name as string) || (d.title as string) || (d.fileName as string) || (d.file_name as string) || "",
+              date: (d.date as string) || (d.createdAt as string) || (d.created_at as string) || "",
+              type: (d.type as string) || (d.fileType as string) || (d.file_type as string) || "PDF",
+            })));
+          }
+        }
+
+        // Dashboard / patient profile
+        if (results[5].status === "fulfilled") {
+          const r = results[5].value;
+          if (r.data) setApiPatient((prev: Record<string, unknown> | null) => ({ ...prev, ...r.data }));
+        }
+
+        // Auth me → patient profile info
+        if (results[6].status === "fulfilled") {
+          const r = results[6].value;
+          if (r.data) {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const u = r.data as any;
+            setApiPatient((prev: Record<string, unknown> | null) => ({
+              ...prev,
+              firstName: u.firstName || u.first_name,
+              lastName: u.lastName || u.last_name,
+              email: u.email,
+              phone: u.phone,
+            }));
+          }
+        }
+      } catch {
+        // keep mock data on network failure
+      }
+    }
+    loadPatientData();
+  }, []);
+
+  // ─── Resolved data (API with mock fallback) ──────────────────────────────
+  const patient = apiPatient || PATIENT;
+  const upcomingAppointments = apiUpcoming || UPCOMING_APPOINTMENTS;
+  const pastAppointments = apiPast || PAST_APPOINTMENTS;
+  const messageThreads = apiThreads || MESSAGE_THREADS;
+  const medications = apiMedications || MEDICATIONS;
+  const documents = apiDocuments || DOCUMENTS;
+
   // Family member handlers — will be wired when Family UI section is built
   void setFamilyMembers; void setShowAddFamily; void setConfirmRemoveId; void familyForm; void _setFamilyForm;
 
-  const firstName = user?.firstName || PATIENT.firstName;
-  const lastName = user?.lastName || PATIENT.lastName;
+  const firstName = user?.firstName || patient.firstName || patient.firstName;
+  const lastName = user?.lastName || patient.lastName || patient.lastName;
 
   const desktopNavItems: { id: TabId; label: string }[] = [
     { id: "home", label: "Home" },
@@ -526,7 +695,7 @@ export function PatientPortal() {
     { id: "account", label: "Account", icon: User },
   ];
 
-  const unreadCount = MESSAGE_THREADS.filter((t) => t.unread).length;
+  const unreadCount = messageThreads.filter((t) => t.unread).length;
 
   // ─── Header ──────────────────────────────────────────────────────────────
 
@@ -686,21 +855,21 @@ export function PatientPortal() {
               style={{ backgroundColor: "rgba(233,185,73,0.2)", color: COLORS.gold }}
             >
               <Star className="w-3 h-3" />
-              {PATIENT.planName}
+              {patient.planName}
             </span>
           </div>
           <div className="grid grid-cols-2 gap-3 text-sm">
             <div>
               <p className="text-white/50 text-xs uppercase tracking-wider">Member Since</p>
-              <p className="text-white font-medium">{formatDate(PATIENT.memberSince)}</p>
+              <p className="text-white font-medium">{formatDate(patient.memberSince)}</p>
             </div>
             <div>
               <p className="text-white/50 text-xs uppercase tracking-wider">Member ID</p>
-              <p className="text-white font-medium">{PATIENT.memberId}</p>
+              <p className="text-white font-medium">{patient.memberId}</p>
             </div>
             <div className="col-span-2">
               <p className="text-white/50 text-xs uppercase tracking-wider">Provider</p>
-              <p className="text-white font-medium">{PATIENT.provider}</p>
+              <p className="text-white font-medium">{patient.provider}</p>
             </div>
           </div>
         </div>
@@ -746,10 +915,10 @@ export function PatientPortal() {
           style={{ borderColor: COLORS.slate200 }}
         >
           <span style={{ color: COLORS.slate500 }}>
-            Next renewal: {formatDate(PATIENT.nextPaymentDate)}
+            Next renewal: {formatDate(patient.nextPaymentDate)}
           </span>
           <span className="font-semibold" style={{ color: COLORS.navy800 }}>
-            ${PATIENT.planPrice}/mo
+            ${patient.planPrice}/mo
           </span>
         </div>
       </div>
@@ -814,7 +983,7 @@ export function PatientPortal() {
           </button>
         </div>
         <div className="space-y-3">
-          {UPCOMING_APPOINTMENTS.slice(0, 2).map((apt) => (
+          {upcomingAppointments.slice(0, 2).map((apt) => (
             <div
               key={apt.id}
               className="flex items-center gap-3 p-3 rounded-xl"
@@ -882,7 +1051,7 @@ export function PatientPortal() {
           </button>
         </div>
         <div className="space-y-2">
-          {MESSAGE_THREADS.map((thread) => (
+          {messageThreads.map((thread) => (
             <button
               key={thread.id}
               onClick={() => {
@@ -947,7 +1116,7 @@ export function PatientPortal() {
           UPCOMING
         </h2>
         <div className="space-y-3">
-          {UPCOMING_APPOINTMENTS.map((apt) => (
+          {upcomingAppointments.map((apt) => (
             <div key={apt.id} className="glass rounded-xl p-4">
               <div className="flex items-start gap-3">
                 <div
@@ -1021,7 +1190,7 @@ export function PatientPortal() {
           PAST VISITS
         </h2>
         <div className="space-y-2">
-          {PAST_APPOINTMENTS.map((apt) => (
+          {pastAppointments.map((apt) => (
             <div key={apt.id} className="glass rounded-xl overflow-hidden">
               <button
                 onClick={() => setExpandedVisit(expandedVisit === apt.id ? null : apt.id)}
@@ -1097,7 +1266,7 @@ export function PatientPortal() {
 
   // ─── Messages Tab ──────────────────────────────────────────────────────
 
-  const selectedThread = MESSAGE_THREADS.find((t) => t.id === activeThread);
+  const selectedThread = messageThreads.find((t) => t.id === activeThread);
 
   const renderMessages = () => (
     <div className="space-y-0">
@@ -1116,7 +1285,7 @@ export function PatientPortal() {
             </button>
           </div>
           <div className="space-y-2">
-            {MESSAGE_THREADS.map((thread) => (
+            {messageThreads.map((thread) => (
               <button
                 key={thread.id}
                 onClick={() => setActiveThread(thread.id)}
@@ -1260,7 +1429,7 @@ export function PatientPortal() {
           </h3>
         </div>
         <div className="space-y-3">
-          {MEDICATIONS.map((med) => (
+          {medications.map((med) => (
             <div
               key={med.id}
               className="rounded-xl p-3 border-l-4 flex items-center justify-between"
@@ -1428,7 +1597,7 @@ export function PatientPortal() {
           </h3>
         </div>
         <div className="space-y-2">
-          {DOCUMENTS.map((doc) => (
+          {documents.map((doc) => (
             <div
               key={doc.id}
               className="flex items-center justify-between p-3 rounded-xl transition-colors hover:bg-slate-50"
@@ -1479,11 +1648,11 @@ export function PatientPortal() {
         </div>
         <div className="space-y-3">
           {[
-            { icon: User, label: "Name", value: `${PATIENT.firstName} ${PATIENT.lastName}` },
-            { icon: Calendar, label: "Date of Birth", value: formatDate(PATIENT.dob) },
-            { icon: Phone, label: "Phone", value: PATIENT.phone },
-            { icon: Mail, label: "Email", value: PATIENT.email },
-            { icon: MapPin, label: "Address", value: PATIENT.address },
+            { icon: User, label: "Name", value: `${patient.firstName} ${patient.lastName}` },
+            { icon: Calendar, label: "Date of Birth", value: formatDate(patient.dob) },
+            { icon: Phone, label: "Phone", value: patient.phone },
+            { icon: Mail, label: "Email", value: patient.email },
+            { icon: MapPin, label: "Address", value: patient.address },
           ].map((item, i) => {
             const Icon = item.icon;
             return (
@@ -1511,28 +1680,28 @@ export function PatientPortal() {
           <div className="flex items-center justify-between">
             <div>
               <div className="flex items-center gap-2">
-                <span className="text-white font-bold">{PATIENT.planName}</span>
+                <span className="text-white font-bold">{patient.planName}</span>
                 <Star className="w-4 h-4" style={{ color: COLORS.gold }} />
               </div>
               <p className="text-white/60 text-xs mt-1">
-                Billed {PATIENT.billingFrequency}
+                Billed {patient.billingFrequency}
               </p>
             </div>
-            <span className="text-white text-2xl font-bold">${PATIENT.planPrice}</span>
+            <span className="text-white text-2xl font-bold">${patient.planPrice}</span>
           </div>
         </div>
         <div className="space-y-3">
           <div className="flex items-center justify-between text-sm">
             <span style={{ color: COLORS.slate500 }}>Next Payment</span>
             <span className="font-medium" style={{ color: COLORS.navy800 }}>
-              {formatDate(PATIENT.nextPaymentDate)}
+              {formatDate(patient.nextPaymentDate)}
             </span>
           </div>
           <div className="flex items-center justify-between text-sm">
             <span style={{ color: COLORS.slate500 }}>Payment Method</span>
             <span className="font-medium flex items-center gap-1" style={{ color: COLORS.navy800 }}>
               <CreditCard className="w-4 h-4" style={{ color: COLORS.slate400 }} />
-              {PATIENT.paymentMethod}
+              {patient.paymentMethod}
             </span>
           </div>
         </div>
@@ -1573,17 +1742,17 @@ export function PatientPortal() {
             <User className="w-4 h-4" style={{ color: COLORS.slate400 }} />
             <div>
               <p className="text-sm font-medium" style={{ color: COLORS.navy800 }}>
-                {PATIENT.emergencyContact.name}
+                {patient.emergencyContact.name}
               </p>
               <p className="text-xs" style={{ color: COLORS.slate400 }}>
-                {PATIENT.emergencyContact.relationship}
+                {patient.emergencyContact.relationship}
               </p>
             </div>
           </div>
           <div className="flex items-center gap-3">
             <Phone className="w-4 h-4" style={{ color: COLORS.slate400 }} />
             <p className="text-sm" style={{ color: COLORS.navy800 }}>
-              {PATIENT.emergencyContact.phone}
+              {patient.emergencyContact.phone}
             </p>
           </div>
         </div>
@@ -1601,18 +1770,18 @@ export function PatientPortal() {
         </div>
         <div className="space-y-2">
           <p className="text-sm font-medium" style={{ color: COLORS.navy800 }}>
-            {PATIENT.pharmacy.name}
+            {patient.pharmacy.name}
           </p>
           <div className="flex items-center gap-2">
             <MapPin className="w-3 h-3" style={{ color: COLORS.slate400 }} />
             <p className="text-xs" style={{ color: COLORS.slate500 }}>
-              {PATIENT.pharmacy.address}
+              {patient.pharmacy.address}
             </p>
           </div>
           <div className="flex items-center gap-2">
             <Phone className="w-3 h-3" style={{ color: COLORS.slate400 }} />
             <p className="text-xs" style={{ color: COLORS.slate500 }}>
-              {PATIENT.pharmacy.phone}
+              {patient.pharmacy.phone}
             </p>
           </div>
         </div>

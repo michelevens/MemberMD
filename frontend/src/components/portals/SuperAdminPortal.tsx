@@ -2,7 +2,7 @@
 // Platform admin dashboard for managing all practices (tenants) on MemberMD
 
 import { useState, useEffect, useCallback } from "react";
-import { practiceService, dashboardService, adminService } from "../../lib/api";
+import { practiceService, adminService, auditService } from "../../lib/api";
 import { ProgramTemplatesTab } from "./ProgramTemplatesTab";
 import { HeaderToolbar } from "../shared/HeaderToolbar";
 import { PlatformSettings } from "../settings/PlatformSettings";
@@ -953,6 +953,7 @@ export function SuperAdminPortal() {
   const [apiScreenings, setApiScreenings] = useState<MockScreeningInstrument[] | null>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [apiConsents, setApiConsents] = useState<any[] | null>(null);
+  const [apiAuditLogs, setApiAuditLogs] = useState<MockAuditLog[] | null>(null);
   const [adminLoading, setAdminLoading] = useState(false);
 
   // ─── Fetch real data from API ─────────────────────────────────────────────
@@ -960,80 +961,121 @@ export function SuperAdminPortal() {
   const loadData = useCallback(async () => {
     setAdminLoading(true);
     try {
-      const [practicesRes, statsRes, specialtiesRes, screeningsRes, consentsRes] = await Promise.all([
+      const results = await Promise.allSettled([
         practiceService.list(),
-        dashboardService.getStats(),
+        adminService.getStats(),
         adminService.getSpecialties(),
         adminService.getScreenings(),
         adminService.getConsents(),
+        auditService.list(),
       ]);
-      if (practicesRes.data && Array.isArray(practicesRes.data)) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        setApiPractices(practicesRes.data.map((p: any) => ({
-          id: p.id || "",
-          name: p.name || "",
-          specialty: p.specialty || "",
-          model: p.practiceModel || p.practice_model || "",
-          city: (p.city || "") + (p.state ? ", " + p.state : ""),
-          state: p.state || "",
-          providers: p.providerCount || p.providers_count || 0,
-          members: p.memberCount || p.member_count || p.patients_count || 0,
-          mrr: 0,
-          status: (p.status || (p.isActive || p.is_active ? "active" : "suspended")) as "active" | "trial" | "suspended",
-          joinedAt: p.createdAt || p.created_at || "",
-        })));
+
+      // Practices
+      if (results[0].status === "fulfilled") {
+        const practicesRes = results[0].value;
+        if (practicesRes.data && Array.isArray(practicesRes.data)) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          setApiPractices(practicesRes.data.map((p: any) => ({
+            id: p.id || "",
+            name: p.name || "",
+            specialty: p.specialty || "",
+            model: p.practiceModel || p.practice_model || "",
+            city: (p.city || "") + (p.state ? ", " + p.state : ""),
+            state: p.state || "",
+            providers: p.providerCount || p.providers_count || 0,
+            members: p.memberCount || p.member_count || p.patients_count || 0,
+            mrr: 0,
+            status: (p.status || (p.isActive || p.is_active ? "active" : "suspended")) as "active" | "trial" | "suspended",
+            joinedAt: p.createdAt || p.created_at || "",
+          })));
+        }
       }
-      if (statsRes.data) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        setApiStats(statsRes.data as any);
+
+      // Stats
+      if (results[1].status === "fulfilled") {
+        const statsRes = results[1].value;
+        if (statsRes.data) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          setApiStats(statsRes.data as any);
+        }
       }
-      if (specialtiesRes.data && Array.isArray(specialtiesRes.data) && specialtiesRes.data.length > 0) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        setApiSpecialties(specialtiesRes.data.map((s: any) => ({
-          id: s.id || "",
-          name: s.name || "",
-          code: s.code || s.abbreviation || "",
-          icon: Heart,
-          practiceCount: s.practiceCount ?? s.practice_count ?? 0,
-          screeningTools: s.screeningTools ?? s.screening_tools ?? 0,
-          category: s.category || "Specialty",
-        })));
+
+      // Specialties
+      if (results[2].status === "fulfilled") {
+        const specialtiesRes = results[2].value;
+        if (specialtiesRes.data && Array.isArray(specialtiesRes.data) && specialtiesRes.data.length > 0) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          setApiSpecialties(specialtiesRes.data.map((s: any) => ({
+            id: s.id || "",
+            name: s.name || "",
+            code: s.code || s.abbreviation || "",
+            icon: Heart,
+            practiceCount: s.practiceCount ?? s.practice_count ?? 0,
+            screeningTools: s.screeningTools ?? s.screening_tools ?? 0,
+            category: s.category || "Specialty",
+          })));
+        }
       }
-      if (screeningsRes.data && Array.isArray(screeningsRes.data) && screeningsRes.data.length > 0) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        setApiScreenings(screeningsRes.data.map((s: any) => ({
-          id: s.id || "",
-          name: s.name || s.title || "",
-          code: s.code || s.abbreviation || "",
-          fullName: s.fullName || s.full_name || s.description || s.name || "",
-          category: s.category || "General",
-          questionCount: s.questionCount ?? s.question_count ?? (s.questions?.length || 0),
-          scoreMin: s.scoreMin ?? s.score_min ?? 0,
-          scoreMax: s.scoreMax ?? s.score_max ?? 0,
-          severities: s.severities || [],
-          specialties: s.specialties || [],
-          active: s.active ?? s.isActive ?? true,
-          questions: s.questions || [],
-          answerOptions: s.answerOptions || s.answer_options || [],
-        })));
+
+      // Screenings
+      if (results[3].status === "fulfilled") {
+        const screeningsRes = results[3].value;
+        if (screeningsRes.data && Array.isArray(screeningsRes.data) && screeningsRes.data.length > 0) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          setApiScreenings(screeningsRes.data.map((s: any) => ({
+            id: s.id || "",
+            name: s.name || s.title || "",
+            code: s.code || s.abbreviation || "",
+            fullName: s.fullName || s.full_name || s.description || s.name || "",
+            category: s.category || "General",
+            questionCount: s.questionCount ?? s.question_count ?? (s.questions?.length || 0),
+            scoreMin: s.scoreMin ?? s.score_min ?? 0,
+            scoreMax: s.scoreMax ?? s.score_max ?? 0,
+            severities: s.severities || [],
+            specialties: s.specialties || [],
+            active: s.active ?? s.isActive ?? true,
+            questions: s.questions || [],
+            answerOptions: s.answerOptions || s.answer_options || [],
+          })));
+        }
       }
+
       // Consents
-      if (consentsRes.data && Array.isArray(consentsRes.data) && consentsRes.data.length > 0) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        setApiConsents(consentsRes.data.map((c: any) => ({
-          id: c.id || "",
-          name: c.name || c.title || "",
-          type: c.type || c.consentType || "General",
-          required: c.required ?? c.isRequired ?? false,
-          specialty: c.specialty || "All",
-          version: c.version || "1.0",
-          active: c.active ?? c.isActive ?? true,
-          practiceCount: c.practiceCount ?? c.practice_count ?? 0,
-          previewText: c.previewText || c.description || c.body || "",
-        })));
+      if (results[4].status === "fulfilled") {
+        const consentsRes = results[4].value;
+        if (consentsRes.data && Array.isArray(consentsRes.data) && consentsRes.data.length > 0) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          setApiConsents(consentsRes.data.map((c: any) => ({
+            id: c.id || "",
+            name: c.name || c.title || "",
+            type: c.type || c.consentType || "General",
+            required: c.required ?? c.isRequired ?? false,
+            specialty: c.specialty || "All",
+            version: c.version || "1.0",
+            active: c.active ?? c.isActive ?? true,
+            practiceCount: c.practiceCount ?? c.practice_count ?? 0,
+            previewText: c.previewText || c.description || c.body || "",
+          })));
+        }
+      }
+
+      // Audit Logs
+      if (results[5].status === "fulfilled") {
+        const auditRes = results[5].value;
+        if (auditRes.data && Array.isArray(auditRes.data) && auditRes.data.length > 0) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          setApiAuditLogs(auditRes.data.map((l: any) => ({
+            id: l.id || "",
+            timestamp: l.timestamp || l.createdAt || l.created_at || "",
+            user: l.user || l.userName || l.user_name || l.causer || "system",
+            action: l.action || l.event || "",
+            resource: l.resource || l.subject || l.description || "",
+            ipAddress: l.ipAddress || l.ip_address || l.ip || "",
+          })));
+        }
       }
     } catch {
-      // Fall back to mock data
+      // Fall back to mock data on unexpected errors
     }
     setAdminLoading(false);
   }, []);
@@ -1278,7 +1320,7 @@ export function SuperAdminPortal() {
                 Manage Specialties
               </p>
               <p className="text-xs text-slate-500">
-                {MOCK_SPECIALTIES.length} active specialties
+                {(apiSpecialties || MOCK_SPECIALTIES).length} active specialties
               </p>
             </div>
             <ChevronRight className="w-4 h-4 text-slate-400 shrink-0" />
@@ -1299,7 +1341,7 @@ export function SuperAdminPortal() {
                 Audit Logs
               </p>
               <p className="text-xs text-slate-500">
-                {MOCK_AUDIT_LOGS.length} recent events
+                {(apiAuditLogs || MOCK_AUDIT_LOGS).length} recent events
               </p>
             </div>
             <ChevronRight className="w-4 h-4 text-slate-400 shrink-0" />
@@ -1906,7 +1948,7 @@ export function SuperAdminPortal() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {MOCK_AUDIT_LOGS.map((log) => {
+                {(apiAuditLogs || MOCK_AUDIT_LOGS).map((log) => {
                   const actionColor = log.action.includes("suspended")
                     ? "#dc2626"
                     : log.action.includes("approved") ||
