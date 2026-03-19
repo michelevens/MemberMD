@@ -45,6 +45,16 @@ import {
   Search,
   Filter,
   Calendar,
+  ArrowLeft,
+  Mail,
+  Phone,
+  MapPin,
+  Globe,
+  Hash,
+  CheckCircle2,
+  XCircle,
+  UserCheck,
+  Star,
 } from "lucide-react";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -83,10 +93,51 @@ interface MockPractice {
   providers: number;
   members: number;
   mrr: number;
-  status: "active" | "trial" | "suspended";
+  status: "active" | "trial" | "suspended" | "pending";
   joinedAt: string;
   city: string;
   state: string;
+  ownerName?: string;
+  ownerEmail?: string;
+  phone?: string;
+  address?: string;
+  website?: string;
+  npi?: string;
+  taxId?: string;
+  tenantCode?: string;
+}
+
+interface MockPendingPractice extends MockPractice {
+  ownerName: string;
+  ownerEmail: string;
+  submittedAt: string;
+}
+
+interface MockMember {
+  id: string;
+  name: string;
+  plan: string;
+  status: "active" | "inactive" | "pending";
+  joined: string;
+  lastVisit: string;
+}
+
+interface MockProvider {
+  id: string;
+  name: string;
+  credentials: string;
+  npi: string;
+  panelCapacity: number;
+  panelCurrent: number;
+  panelStatus: "open" | "closed";
+}
+
+interface MockActivityEvent {
+  id: string;
+  event: string;
+  timestamp: string;
+  icon: React.ElementType;
+  color: string;
 }
 
 interface MockSpecialty {
@@ -220,6 +271,145 @@ const MOCK_AUDIT_LOGS: MockAuditLog[] = [
   { id: "10", timestamp: "2026-03-16 15:33:42", user: "system", action: "backup.completed", resource: "Full platform backup", ipAddress: "10.0.0.1" },
 ];
 
+const MOCK_PENDING_PRACTICES: MockPendingPractice[] = [
+  {
+    id: "p1", name: "Tranquil Mind Psychiatry", specialty: "Psychiatry", model: "Hybrid DPC",
+    providers: 2, members: 0, mrr: 0, status: "pending", joinedAt: "2026-03-16",
+    city: "Seattle", state: "WA", ownerName: "Dr. Lisa Chen", ownerEmail: "l.chen@tranquilmind.com",
+    submittedAt: "2 days ago", phone: "(206) 555-0142", address: "4521 Aurora Ave N",
+    website: "tranquilmindpsych.com", npi: "1234567890", taxId: "91-1234567", tenantCode: "TM82A1",
+  },
+  {
+    id: "p2", name: "Sunrise Pediatrics", specialty: "Pediatrics", model: "Pure DPC",
+    providers: 3, members: 0, mrr: 0, status: "pending", joinedAt: "2026-03-17",
+    city: "San Diego", state: "CA", ownerName: "Dr. Robert Kim", ownerEmail: "r.kim@sunrisepeds.com",
+    submittedAt: "1 day ago", phone: "(619) 555-0198", address: "7890 La Jolla Village Dr",
+    website: "sunrisepediatrics.com", npi: "2345678901", taxId: "95-2345678", tenantCode: "SP47B3",
+  },
+  {
+    id: "p3", name: "Metro Cardiology Associates", specialty: "Cardiology", model: "Membership Add-on",
+    providers: 4, members: 0, mrr: 0, status: "pending", joinedAt: "2026-03-18",
+    city: "Houston", state: "TX", ownerName: "Dr. Ahmed Patel", ownerEmail: "a.patel@metrocardio.com",
+    submittedAt: "3 hours ago", phone: "(713) 555-0276", address: "1200 Binz St Suite 400",
+    website: "metrocardiology.com", npi: "3456789012", taxId: "76-3456789", tenantCode: "MC19D5",
+  },
+];
+
+// Mock plan data by specialty
+function getMockPlans(specialty: string) {
+  const planMap: Record<string, { name: string; price: number; visits: number; features: string[] }[]> = {
+    "Psychiatry": [
+      { name: "Essential", price: 99, visits: 2, features: ["Monthly check-in", "Messaging", "Rx management"] },
+      { name: "Complete", price: 199, visits: 4, features: ["Weekly sessions", "Crisis support", "Rx management", "Telehealth"] },
+      { name: "Premium", price: 299, visits: 8, features: ["Unlimited sessions", "24/7 crisis line", "Full Rx", "Family consults"] },
+    ],
+    "Primary Care": [
+      { name: "Basic", price: 79, visits: 2, features: ["Bi-monthly visits", "Lab orders", "Messaging"] },
+      { name: "Standard", price: 149, visits: 4, features: ["Weekly visits", "Telehealth", "Lab orders", "Messaging"] },
+      { name: "Premium", price: 249, visits: 8, features: ["Unlimited visits", "Same-day appts", "Full labs", "Specialist referrals"] },
+    ],
+    "Family Medicine": [
+      { name: "Basic", price: 79, visits: 2, features: ["Bi-monthly visits", "Lab orders", "Messaging"] },
+      { name: "Standard", price: 149, visits: 4, features: ["Weekly visits", "Telehealth", "Lab orders", "Messaging"] },
+      { name: "Premium", price: 249, visits: 8, features: ["Unlimited visits", "Same-day appts", "Full labs", "Specialist referrals"] },
+    ],
+  };
+  return planMap[specialty] || [
+    { name: "Standard", price: 99, visits: 3, features: ["Regular visits", "Messaging", "Telehealth"] },
+    { name: "Professional", price: 179, visits: 6, features: ["Priority scheduling", "Extended visits", "Telehealth", "Messaging"] },
+  ];
+}
+
+// Mock members by practice
+function getMockMembers(practiceName: string, specialty: string): MockMember[] {
+  if (practiceName.includes("Clearstone") || specialty === "Psychiatry") {
+    return [
+      { id: "m1", name: "Marcus Williams", plan: "Complete", status: "active", joined: "2026-01-15", lastVisit: "2026-03-14" },
+      { id: "m2", name: "Sarah Chen", plan: "Essential", status: "active", joined: "2026-02-01", lastVisit: "2026-03-12" },
+      { id: "m3", name: "James Rodriguez", plan: "Premium", status: "active", joined: "2025-11-20", lastVisit: "2026-03-16" },
+      { id: "m4", name: "Emily Thompson", plan: "Complete", status: "active", joined: "2026-01-28", lastVisit: "2026-03-10" },
+      { id: "m5", name: "David Park", plan: "Essential", status: "inactive", joined: "2025-10-05", lastVisit: "2026-02-18" },
+      { id: "m6", name: "Rachel Green", plan: "Premium", status: "active", joined: "2026-02-14", lastVisit: "2026-03-17" },
+    ];
+  }
+  if (practiceName.includes("BellaCare") || specialty === "Primary Care" || specialty === "Family Medicine" || specialty === "Internal Medicine") {
+    return [
+      { id: "m1", name: "Eleanor Patterson", plan: "Standard", status: "active", joined: "2025-09-01", lastVisit: "2026-03-15" },
+      { id: "m2", name: "Harold Mitchell", plan: "Premium", status: "active", joined: "2025-08-15", lastVisit: "2026-03-12" },
+      { id: "m3", name: "Dorothy Lewis", plan: "Basic", status: "active", joined: "2025-10-20", lastVisit: "2026-03-08" },
+      { id: "m4", name: "Walter Johnson", plan: "Standard", status: "active", joined: "2025-11-05", lastVisit: "2026-03-16" },
+      { id: "m5", name: "Betty Anderson", plan: "Premium", status: "active", joined: "2025-12-01", lastVisit: "2026-03-14" },
+      { id: "m6", name: "Frank Morrison", plan: "Basic", status: "inactive", joined: "2025-07-10", lastVisit: "2026-01-20" },
+      { id: "m7", name: "Margaret Clark", plan: "Standard", status: "active", joined: "2026-01-10", lastVisit: "2026-03-17" },
+      { id: "m8", name: "George Turner", plan: "Premium", status: "pending", joined: "2026-03-10", lastVisit: "-" },
+    ];
+  }
+  // For other specialties, return fewer or empty
+  if (specialty === "Pediatrics" || specialty === "Cardiology" || specialty === "Orthopedics" || specialty === "OB/GYN") {
+    return [
+      { id: "m1", name: "Patient Alpha", plan: "Standard", status: "active", joined: "2026-01-05", lastVisit: "2026-03-10" },
+      { id: "m2", name: "Patient Beta", plan: "Professional", status: "active", joined: "2026-02-12", lastVisit: "2026-03-15" },
+      { id: "m3", name: "Patient Gamma", plan: "Standard", status: "pending", joined: "2026-03-01", lastVisit: "-" },
+    ];
+  }
+  return [];
+}
+
+function getMockProviders(practiceName: string, count: number): MockProvider[] {
+  const providerPool: MockProvider[] = [
+    { id: "pr1", name: "Dr. Sarah Mitchell", credentials: "MD, FACP", npi: "1122334455", panelCapacity: 250, panelCurrent: 180, panelStatus: "open" },
+    { id: "pr2", name: "Dr. James Foster", credentials: "DO", npi: "2233445566", panelCapacity: 200, panelCurrent: 195, panelStatus: "closed" },
+    { id: "pr3", name: "Dr. Maria Santos", credentials: "MD, PhD", npi: "3344556677", panelCapacity: 300, panelCurrent: 120, panelStatus: "open" },
+    { id: "pr4", name: "Dr. Kevin O'Brien", credentials: "MD", npi: "4455667788", panelCapacity: 150, panelCurrent: 88, panelStatus: "open" },
+    { id: "pr5", name: "NP Jennifer Wu", credentials: "APRN, FNP-C", npi: "5566778899", panelCapacity: 180, panelCurrent: 162, panelStatus: "open" },
+    { id: "pr6", name: "PA Robert Chang", credentials: "PA-C", npi: "6677889900", panelCapacity: 160, panelCurrent: 155, panelStatus: "closed" },
+  ];
+  void practiceName;
+  return providerPool.slice(0, Math.min(count || 2, providerPool.length));
+}
+
+function getMockActivity(practiceName: string): MockActivityEvent[] {
+  return [
+    { id: "a1", event: `${practiceName} registered on platform`, timestamp: "Mar 15, 2026", icon: Building2, color: "#27ab83" },
+    { id: "a2", event: "Owner completed profile setup", timestamp: "Mar 15, 2026", icon: UserCheck, color: "#0369a1" },
+    { id: "a3", event: "First membership plan created", timestamp: "Mar 16, 2026", icon: FileText, color: "#7c3aed" },
+    { id: "a4", event: "Provider added to practice", timestamp: "Mar 16, 2026", icon: Stethoscope, color: "#147d64" },
+    { id: "a5", event: "First member enrolled", timestamp: "Mar 17, 2026", icon: Users, color: "#d97706" },
+    { id: "a6", event: "Practice approved by admin", timestamp: "Mar 17, 2026", icon: CheckCircle2, color: "#2f8132" },
+  ];
+}
+
+function MemberStatusBadge({ status }: { status: "active" | "inactive" | "pending" }) {
+  const config = {
+    active: { label: "Active", bg: "#ecf9ec", color: "#2f8132" },
+    inactive: { label: "Inactive", bg: "#f1f5f9", color: "#64748b" },
+    pending: { label: "Pending", bg: "#fffbeb", color: "#d97706" },
+  };
+  const c = config[status];
+  return (
+    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium" style={{ backgroundColor: c.bg, color: c.color }}>
+      {c.label}
+    </span>
+  );
+}
+
+function PlanBadge({ plan }: { plan: string }) {
+  const colors: Record<string, { bg: string; color: string }> = {
+    Essential: { bg: "#e0f2fe", color: "#0369a1" },
+    Complete: { bg: "#e6f7f2", color: "#147d64" },
+    Premium: { bg: "#f3e8ff", color: "#7c3aed" },
+    Basic: { bg: "#f1f5f9", color: "#475569" },
+    Standard: { bg: "#e0f2fe", color: "#0369a1" },
+    Professional: { bg: "#e6f7f2", color: "#147d64" },
+  };
+  const c = colors[plan] || { bg: "#f1f5f9", color: "#475569" };
+  return (
+    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold" style={{ backgroundColor: c.bg, color: c.color }}>
+      {plan}
+    </span>
+  );
+}
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function formatCurrency(amount: number): string {
@@ -235,11 +425,12 @@ function formatNumber(n: number): string {
   return new Intl.NumberFormat("en-US").format(n);
 }
 
-function StatusBadge({ status }: { status: "active" | "trial" | "suspended" }) {
+function StatusBadge({ status }: { status: "active" | "trial" | "suspended" | "pending" }) {
   const config = {
     active: { label: "Active", bg: "#ecf9ec", color: "#2f8132", border: "#3f9142" },
     trial: { label: "Trial", bg: "#e0f2fe", color: "#0369a1", border: "#38bdf8" },
     suspended: { label: "Suspended", bg: "#fef2f2", color: "#dc2626", border: "#ef4444" },
+    pending: { label: "Pending", bg: "#fffbeb", color: "#d97706", border: "#f59e0b" },
   };
   const c = config[status];
   return (
@@ -301,6 +492,9 @@ export function SuperAdminPortal() {
   const [practiceSearch, setPracticeSearch] = useState("");
   const [apiPractices, setApiPractices] = useState<MockPractice[] | null>(null);
   const [apiStats, setApiStats] = useState<Record<string, number> | null>(null);
+  const [selectedPractice, setSelectedPractice] = useState<MockPractice | null>(null);
+  const [pendingPractices, setPendingPractices] = useState<MockPendingPractice[]>(MOCK_PENDING_PRACTICES);
+  const [approvalMessage, setApprovalMessage] = useState<string | null>(null);
 
   const userName = auth.user
     ? `${auth.user.firstName} ${auth.user.lastName}`
@@ -348,7 +542,7 @@ export function SuperAdminPortal() {
   const totalPractices = apiStats?.total_practices ?? apiStats?.totalPractices ?? practices.length;
   const totalMembers = apiStats?.total_patients ?? apiStats?.totalPatients ?? practices.reduce((sum, p) => sum + p.members, 0);
   const platformMRR = practices.reduce((sum, p) => sum + p.mrr, 0);
-  const activeTrials = practices.filter((p) => p.status === "trial").length;
+  const activeTrials = practices.filter((p) => p.status === "trial" || p.status === "pending").length + pendingPractices.length;
 
   // ─── Filtered practices ──────────────────────────────────────────────────
 
@@ -408,6 +602,7 @@ export function SuperAdminPortal() {
                       onClick={() => {
                         setActiveTab(item.id);
                         setSidebarOpen(false);
+                        setSelectedPractice(null);
                       }}
                       className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 ${
                         isActive
@@ -681,16 +876,18 @@ export function SuperAdminPortal() {
                   {recentPractices.map((practice) => (
                     <tr
                       key={practice.id}
-                      className="hover:bg-slate-50/50 transition-colors"
+                      className="hover:bg-slate-50/50 transition-colors cursor-pointer"
+                      onClick={() => setSelectedPractice(practice)}
                     >
                       <td className="px-6 py-3.5">
                         <div>
-                          <p
-                            className="text-sm font-medium"
+                          <button
+                            onClick={(e) => { e.stopPropagation(); setSelectedPractice(practice); }}
+                            className="text-sm font-medium hover:underline text-left"
                             style={{ color: "#102a43" }}
                           >
                             {practice.name}
-                          </p>
+                          </button>
                           <p className="text-xs text-slate-400">
                             {practice.city}, {practice.state}
                           </p>
@@ -880,12 +1077,13 @@ export function SuperAdminPortal() {
                           {practice.name.charAt(0)}
                         </div>
                         <div>
-                          <p
-                            className="text-sm font-medium"
+                          <button
+                            onClick={() => setSelectedPractice(practice)}
+                            className="text-sm font-medium hover:underline text-left"
                             style={{ color: "#102a43" }}
                           >
                             {practice.name}
-                          </p>
+                          </button>
                           <p className="text-xs text-slate-400">
                             {practice.city}, {practice.state}
                           </p>
@@ -920,6 +1118,7 @@ export function SuperAdminPortal() {
                     <td className="px-4 py-3.5">
                       <div className="flex items-center justify-center gap-1">
                         <button
+                          onClick={() => setSelectedPractice(practice)}
                           className="p-1.5 rounded-lg hover:bg-slate-100 transition-colors"
                           title="View practice"
                         >
@@ -1281,9 +1480,479 @@ export function SuperAdminPortal() {
     );
   }
 
+  // ─── Pending Approvals Tab ─────────────────────────────────────────────
+
+  function renderPendingApprovals() {
+    return (
+      <div className="animate-page-in space-y-4">
+        <div>
+          <h2 className="text-xl font-bold" style={{ color: "#102a43" }}>
+            Pending Approvals
+          </h2>
+          <p className="text-sm text-slate-500 mt-0.5">
+            {pendingPractices.length} practice{pendingPractices.length !== 1 ? "s" : ""} awaiting review
+          </p>
+        </div>
+
+        {approvalMessage && (
+          <div className="flex items-center gap-3 px-4 py-3 rounded-xl" style={{ backgroundColor: "#ecf9ec", border: "1px solid #3f9142" }}>
+            <CheckCircle2 className="w-5 h-5 shrink-0" style={{ color: "#2f8132" }} />
+            <p className="text-sm font-medium" style={{ color: "#2f8132" }}>{approvalMessage}</p>
+            <button onClick={() => setApprovalMessage(null)} className="ml-auto p-1 rounded hover:bg-white/50">
+              <X className="w-4 h-4" style={{ color: "#2f8132" }} />
+            </button>
+          </div>
+        )}
+
+        {pendingPractices.length === 0 ? (
+          <div className="glass rounded-xl p-12 text-center">
+            <div className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4" style={{ backgroundColor: "#ecf9ec" }}>
+              <CheckCircle2 className="w-8 h-8" style={{ color: "#2f8132" }} />
+            </div>
+            <h3 className="text-lg font-semibold mb-1" style={{ color: "#102a43" }}>All Caught Up</h3>
+            <p className="text-sm text-slate-500">No pending practice approvals at this time.</p>
+          </div>
+        ) : (
+          <div className="glass rounded-xl overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr style={{ backgroundColor: "#f8fafc" }}>
+                    <th className="text-left px-6 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Practice</th>
+                    <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Specialty</th>
+                    <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Owner</th>
+                    <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Submitted</th>
+                    <th className="text-center px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {pendingPractices.map((practice) => (
+                    <tr key={practice.id} className="hover:bg-slate-50/50 transition-colors">
+                      <td className="px-6 py-4">
+                        <div className="flex items-center gap-3">
+                          <div
+                            className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0 text-sm font-bold text-white"
+                            style={{ background: "linear-gradient(135deg, #d97706, #92400e)" }}
+                          >
+                            {practice.name.charAt(0)}
+                          </div>
+                          <div>
+                            <button
+                              onClick={() => setSelectedPractice(practice)}
+                              className="text-sm font-medium hover:underline text-left"
+                              style={{ color: "#102a43" }}
+                            >
+                              {practice.name}
+                            </button>
+                            <p className="text-xs text-slate-400">{practice.city}, {practice.state}</p>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-4 py-4">
+                        <span
+                          className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium"
+                          style={{ backgroundColor: "#e0f2fe", color: "#0369a1" }}
+                        >
+                          {practice.specialty}
+                        </span>
+                      </td>
+                      <td className="px-4 py-4">
+                        <p className="text-sm font-medium" style={{ color: "#102a43" }}>{practice.ownerName}</p>
+                        <p className="text-xs text-slate-400">{practice.ownerEmail}</p>
+                      </td>
+                      <td className="px-4 py-4">
+                        <p className="text-sm text-slate-600">{practice.submittedAt}</p>
+                      </td>
+                      <td className="px-4 py-4">
+                        <div className="flex items-center justify-center gap-2">
+                          <button
+                            onClick={() => {
+                              setApprovalMessage(`${practice.name} has been approved and is now active.`);
+                              setPendingPractices((prev) => prev.filter((p) => p.id !== practice.id));
+                            }}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white transition-colors"
+                            style={{ background: "linear-gradient(135deg, #27ab83, #147d64)" }}
+                          >
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            Approve
+                          </button>
+                          <button
+                            onClick={() => {
+                              if (window.confirm(`Reject ${practice.name}? This cannot be undone.`)) {
+                                setPendingPractices((prev) => prev.filter((p) => p.id !== practice.id));
+                                setApprovalMessage(`${practice.name} has been rejected.`);
+                              }
+                            }}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors"
+                            style={{ border: "1px solid #ef4444", color: "#dc2626", backgroundColor: "transparent" }}
+                          >
+                            <XCircle className="w-3.5 h-3.5" />
+                            Reject
+                          </button>
+                          <button
+                            onClick={() => setSelectedPractice(practice)}
+                            className="p-1.5 rounded-lg hover:bg-slate-100 transition-colors"
+                            title="View details"
+                          >
+                            <Eye className="w-4 h-4 text-slate-500" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // ─── Practice Detail Page ─────────────────────────────────────────────
+
+  function renderPracticeDetail() {
+    if (!selectedPractice) return null;
+    const p = selectedPractice;
+    const plans = getMockPlans(p.specialty);
+    const members = getMockMembers(p.name, p.specialty);
+    const providers = getMockProviders(p.name, p.providers);
+    const activity = getMockActivity(p.name);
+
+    return (
+      <div className="animate-page-in space-y-6">
+        {/* Header Bar */}
+        <div className="glass rounded-xl p-5">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex items-center gap-4">
+              <button
+                onClick={() => setSelectedPractice(null)}
+                className="p-2 rounded-lg hover:bg-slate-100 transition-colors shrink-0"
+                title="Back"
+              >
+                <ArrowLeft className="w-5 h-5" style={{ color: "#334e68" }} />
+              </button>
+              <div
+                className="w-12 h-12 rounded-xl flex items-center justify-center text-lg font-bold text-white shrink-0"
+                style={{ background: "linear-gradient(135deg, #334e68, #243b53)" }}
+              >
+                {p.name.charAt(0)}
+              </div>
+              <div>
+                <div className="flex items-center gap-3">
+                  <h2 className="text-xl font-bold" style={{ color: "#102a43" }}>{p.name}</h2>
+                  <StatusBadge status={p.status} />
+                </div>
+                <p className="text-sm text-slate-500 mt-0.5">{p.specialty} &middot; {p.model} &middot; {p.city}, {p.state}</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 pl-14 sm:pl-0">
+              {p.status === "pending" && (
+                <button
+                  onClick={() => {
+                    setSelectedPractice({ ...p, status: "active" });
+                    setApprovalMessage(`${p.name} has been approved.`);
+                    setPendingPractices((prev) => prev.filter((pp) => pp.id !== p.id));
+                  }}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold text-white transition-colors"
+                  style={{ background: "linear-gradient(135deg, #27ab83, #147d64)" }}
+                >
+                  <CheckCircle2 className="w-4 h-4" />
+                  Approve
+                </button>
+              )}
+              {p.status !== "suspended" && (
+                <button
+                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold transition-colors"
+                  style={{ border: "1px solid #ef4444", color: "#dc2626", backgroundColor: "transparent" }}
+                >
+                  <Shield className="w-4 h-4" />
+                  Suspend
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Stats Row */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          {[
+            { label: "Members", value: formatNumber(p.members), icon: Users, gradient: "linear-gradient(135deg, #334e68, #243b53)" },
+            { label: "Providers", value: formatNumber(p.providers), icon: Stethoscope, gradient: "linear-gradient(135deg, #27ab83, #147d64)" },
+            { label: "Monthly Revenue", value: formatCurrency(p.mrr), icon: DollarSign, gradient: "linear-gradient(135deg, #0369a1, #0c4a6e)" },
+            { label: "Plan", value: p.specialty, subvalue: p.model, icon: FileText, gradient: "linear-gradient(135deg, #7c3aed, #5b21b6)" },
+          ].map((stat) => {
+            const Icon = stat.icon;
+            return (
+              <div key={stat.label} className="glass rounded-xl p-4">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">{stat.label}</p>
+                    <p className="text-xl font-bold mt-1" style={{ color: "#102a43" }}>{stat.value}</p>
+                    {stat.subvalue && <p className="text-xs text-slate-400 mt-0.5">{stat.subvalue}</p>}
+                  </div>
+                  <div className="w-9 h-9 rounded-lg flex items-center justify-center" style={{ background: stat.gradient }}>
+                    <Icon className="w-4.5 h-4.5 text-white" />
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Practice Info */}
+        <div className="glass rounded-xl p-6">
+          <h3 className="text-base font-semibold mb-4" style={{ color: "#102a43" }}>Practice Information</h3>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="space-y-3">
+              {[
+                { icon: Building2, label: "Name", value: p.name },
+                { icon: Stethoscope, label: "Specialty", value: p.specialty },
+                { icon: Star, label: "Practice Model", value: p.model },
+                { icon: Hash, label: "Tenant Code", value: p.tenantCode || `TC${p.id.toUpperCase().slice(0, 4)}` },
+                { icon: Mail, label: "Owner Email", value: p.ownerEmail || `admin@${p.name.toLowerCase().replace(/\s+/g, "")}.com` },
+              ].map((item) => {
+                const Icon = item.icon;
+                return (
+                  <div key={item.label} className="flex items-center gap-3">
+                    <Icon className="w-4 h-4 shrink-0 text-slate-400" />
+                    <span className="text-sm text-slate-500 w-28 shrink-0">{item.label}</span>
+                    <span className="text-sm font-medium" style={{ color: "#102a43" }}>{item.value}</span>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="space-y-3">
+              {[
+                { icon: Phone, label: "Phone", value: p.phone || "(555) 000-0000" },
+                { icon: MapPin, label: "Address", value: p.address || "123 Main St" },
+                { icon: MapPin, label: "City/State", value: `${p.city}, ${p.state}` },
+                { icon: Globe, label: "Website", value: p.website || "-" },
+                { icon: Hash, label: "NPI", value: p.npi || "-" },
+                { icon: FileText, label: "Tax ID", value: p.taxId || "-" },
+              ].map((item, idx) => {
+                const Icon = item.icon;
+                return (
+                  <div key={item.label + idx} className="flex items-center gap-3">
+                    <Icon className="w-4 h-4 shrink-0 text-slate-400" />
+                    <span className="text-sm text-slate-500 w-28 shrink-0">{item.label}</span>
+                    <span className="text-sm font-medium" style={{ color: "#102a43" }}>{item.value}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+          <div className="mt-4 pt-4 border-t border-slate-100 flex items-center gap-3">
+            <Calendar className="w-4 h-4 text-slate-400" />
+            <span className="text-sm text-slate-500">Joined</span>
+            <span className="text-sm font-medium" style={{ color: "#102a43" }}>
+              {new Date(p.joinedAt).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}
+            </span>
+          </div>
+        </div>
+
+        {/* Membership Plans */}
+        <div className="glass rounded-xl p-6">
+          <h3 className="text-base font-semibold mb-4" style={{ color: "#102a43" }}>Membership Plans</h3>
+          {p.members === 0 && p.status === "pending" ? (
+            <div className="text-center py-8">
+              <FileText className="w-10 h-10 mx-auto mb-2 text-slate-300" />
+              <p className="text-sm text-slate-500">No membership plans configured yet</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {plans.map((plan, idx) => {
+                const isPopular = idx === 1;
+                return (
+                  <div
+                    key={plan.name}
+                    className="rounded-xl p-5 relative overflow-hidden"
+                    style={{
+                      border: isPopular ? "2px solid #27ab83" : "1px solid #e2e8f0",
+                      background: isPopular ? "linear-gradient(180deg, rgba(39,171,131,0.04) 0%, rgba(255,255,255,1) 100%)" : "#fff",
+                    }}
+                  >
+                    {isPopular && (
+                      <div
+                        className="absolute top-0 right-0 px-3 py-1 text-xs font-bold text-white rounded-bl-lg"
+                        style={{ backgroundColor: "#27ab83" }}
+                      >
+                        Popular
+                      </div>
+                    )}
+                    <h4 className="text-lg font-bold" style={{ color: "#102a43" }}>{plan.name}</h4>
+                    <div className="flex items-baseline gap-1 mt-1">
+                      <span className="text-3xl font-bold" style={{ color: isPopular ? "#147d64" : "#334e68" }}>
+                        ${plan.price}
+                      </span>
+                      <span className="text-sm text-slate-400">/mo</span>
+                    </div>
+                    <p className="text-xs text-slate-500 mt-1">{plan.visits} visits/month</p>
+                    <div className="mt-4 space-y-2">
+                      {plan.features.map((f) => (
+                        <div key={f} className="flex items-center gap-2">
+                          <CheckCircle2 className="w-3.5 h-3.5 shrink-0" style={{ color: "#27ab83" }} />
+                          <span className="text-xs text-slate-600">{f}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Members */}
+        <div className="glass rounded-xl overflow-hidden">
+          <div className="px-6 py-4 border-b border-slate-200/60">
+            <h3 className="text-base font-semibold" style={{ color: "#102a43" }}>Members</h3>
+            <p className="text-xs text-slate-500 mt-0.5">{members.length} member{members.length !== 1 ? "s" : ""} enrolled</p>
+          </div>
+          {members.length === 0 ? (
+            <div className="px-6 py-12 text-center">
+              <Users className="w-10 h-10 mx-auto mb-2 text-slate-300" />
+              <p className="text-sm text-slate-500">No members yet</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr style={{ backgroundColor: "#f8fafc" }}>
+                    <th className="text-left px-6 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Name</th>
+                    <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Plan</th>
+                    <th className="text-center px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Status</th>
+                    <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Joined</th>
+                    <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Last Visit</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {members.map((member) => (
+                    <tr key={member.id} className="hover:bg-slate-50/50 transition-colors">
+                      <td className="px-6 py-3.5">
+                        <div className="flex items-center gap-3">
+                          <div
+                            className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-white shrink-0"
+                            style={{ background: "linear-gradient(135deg, #334e68, #243b53)" }}
+                          >
+                            {member.name.split(" ").map(n => n[0]).join("")}
+                          </div>
+                          <span className="text-sm font-medium" style={{ color: "#102a43" }}>{member.name}</span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3.5"><PlanBadge plan={member.plan} /></td>
+                      <td className="px-4 py-3.5 text-center"><MemberStatusBadge status={member.status} /></td>
+                      <td className="px-4 py-3.5 text-sm text-slate-500">
+                        {new Date(member.joined).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                      </td>
+                      <td className="px-4 py-3.5 text-sm text-slate-500">
+                        {member.lastVisit === "-" ? "-" : new Date(member.lastVisit).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
+        {/* Providers */}
+        <div className="glass rounded-xl p-6">
+          <h3 className="text-base font-semibold mb-4" style={{ color: "#102a43" }}>Providers</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {providers.map((prov) => {
+              const pctFull = Math.round((prov.panelCurrent / prov.panelCapacity) * 100);
+              const barColor = prov.panelStatus === "closed" ? "#dc2626" : pctFull > 80 ? "#d97706" : "#27ab83";
+              return (
+                <div
+                  key={prov.id}
+                  className="rounded-xl p-5"
+                  style={{ border: "1px solid #e2e8f0", backgroundColor: "#fff" }}
+                >
+                  <div className="flex items-start justify-between mb-3">
+                    <div className="flex items-center gap-3">
+                      <div
+                        className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold text-white"
+                        style={{ background: "linear-gradient(135deg, #27ab83, #147d64)" }}
+                      >
+                        {prov.name.split(" ").slice(1).map(n => n[0]).join("")}
+                      </div>
+                      <div>
+                        <p className="text-sm font-semibold" style={{ color: "#102a43" }}>{prov.name}</p>
+                        <p className="text-xs text-slate-500">{prov.credentials}</p>
+                      </div>
+                    </div>
+                    <span
+                      className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold"
+                      style={{
+                        backgroundColor: prov.panelStatus === "open" ? "#ecf9ec" : "#fef2f2",
+                        color: prov.panelStatus === "open" ? "#2f8132" : "#dc2626",
+                      }}
+                    >
+                      Panel {prov.panelStatus}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2 text-xs text-slate-500 mb-3">
+                    <Hash className="w-3.5 h-3.5" />
+                    <span>NPI: {prov.npi}</span>
+                  </div>
+                  <div>
+                    <div className="flex items-center justify-between text-xs mb-1.5">
+                      <span className="text-slate-500">Panel Capacity</span>
+                      <span className="font-semibold" style={{ color: "#102a43" }}>{prov.panelCurrent} / {prov.panelCapacity}</span>
+                    </div>
+                    <div className="w-full h-2 rounded-full overflow-hidden" style={{ backgroundColor: "#e2e8f0" }}>
+                      <div
+                        className="h-full rounded-full transition-all"
+                        style={{ width: `${pctFull}%`, backgroundColor: barColor }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Recent Activity */}
+        <div className="glass rounded-xl p-6">
+          <h3 className="text-base font-semibold mb-4" style={{ color: "#102a43" }}>Recent Activity</h3>
+          <div className="relative">
+            {/* Timeline line */}
+            <div className="absolute left-4 top-2 bottom-2 w-0.5" style={{ backgroundColor: "#e2e8f0" }} />
+            <div className="space-y-4">
+              {activity.map((evt) => {
+                const Icon = evt.icon;
+                return (
+                  <div key={evt.id} className="flex items-start gap-4 relative">
+                    <div
+                      className="w-8 h-8 rounded-full flex items-center justify-center shrink-0 relative z-10"
+                      style={{ backgroundColor: "#fff", border: `2px solid ${evt.color}` }}
+                    >
+                      <Icon className="w-3.5 h-3.5" style={{ color: evt.color }} />
+                    </div>
+                    <div className="flex-1 pt-1">
+                      <p className="text-sm" style={{ color: "#102a43" }}>{evt.event}</p>
+                      <p className="text-xs text-slate-400 mt-0.5">{evt.timestamp}</p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   // ─── Tab Router ──────────────────────────────────────────────────────────
 
   function renderContent() {
+    // If a practice is selected, show its detail page regardless of tab
+    if (selectedPractice) {
+      return renderPracticeDetail();
+    }
+
     switch (activeTab) {
       case "dashboard":
         return renderDashboard();
@@ -1296,7 +1965,7 @@ export function SuperAdminPortal() {
       case "audit-logs":
         return renderAuditLogs();
       case "pending-approvals":
-        return <ComingSoon title="Pending Approvals" />;
+        return renderPendingApprovals();
       case "screening-library":
         return <ComingSoon title="Screening Library" />;
       case "consent-templates":
@@ -1354,7 +2023,7 @@ export function SuperAdminPortal() {
                   className="text-lg font-bold"
                   style={{ color: "#102a43" }}
                 >
-                  {currentNavItem?.label || "Dashboard"}
+                  {selectedPractice ? selectedPractice.name : (currentNavItem?.label || "Dashboard")}
                 </h2>
                 <p className="text-xs text-slate-500 hidden sm:block">
                   {new Date().toLocaleDateString("en-US", {
