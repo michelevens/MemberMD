@@ -156,7 +156,7 @@ async function apiFetch<T>(
 
 // ===== File Upload Helper =====
 
-async function apiUpload<T>(endpoint: string, fieldName: string, file: File): Promise<ApiResponse<T>> {
+export async function apiUpload<T>(endpoint: string, fieldName: string, file: File): Promise<ApiResponse<T>> {
   const token = getAuthToken();
   const formData = new FormData();
   formData.append(fieldName, file);
@@ -256,6 +256,17 @@ export const authService = {
     });
   },
 
+  register: async (data: { email: string; password: string; firstName: string; lastName: string; practiceName?: string }): Promise<ApiResponse<LoginResponse>> => {
+    if (useMockData()) {
+      const user: User = { ...MOCK_USER, email: data.email, firstName: data.firstName, lastName: data.lastName };
+      return { data: { accessToken: `mock_token_practice_admin_${Date.now()}`, user } };
+    }
+    return apiFetch<LoginResponse>("/auth/register", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  },
+
   logout: async (): Promise<void> => {
     if (!useMockData()) {
       await apiFetch("/auth/logout", { method: "POST" }).catch(() => {});
@@ -266,6 +277,11 @@ export const authService = {
   me: async (): Promise<ApiResponse<User>> => {
     if (useMockData()) return { data: MOCK_USER };
     return apiFetch<User>("/auth/me");
+  },
+
+  updateProfile: async (data: Partial<User>): Promise<ApiResponse<User>> => {
+    if (useMockData()) return mockUpdate<User>(data);
+    return apiFetch<User>("/auth/profile", { method: "PUT", body: JSON.stringify(data) });
   },
 
   mfaLogin: async (mfaToken: string, code: string): Promise<ApiResponse<LoginResponse>> => {
@@ -283,8 +299,50 @@ export const authService = {
   },
 };
 
+// ─── Admin (SuperAdmin only) ────────────────────────────────────────────────
+
+export const adminService = {
+  // Practice management
+  listPractices: async (params?: { search?: string }): Promise<ApiResponse<Practice[]>> => {
+    if (useMockData()) return { data: [] };
+    const qs = params?.search ? `?search=${encodeURIComponent(params.search)}` : "";
+    return apiFetch<Practice[]>(`/admin/practices${qs}`);
+  },
+  getPractice: async (id: string): Promise<ApiResponse<Practice>> => {
+    if (useMockData()) return { data: MOCK_PRACTICE };
+    return apiFetch<Practice>(`/admin/practices/${id}`);
+  },
+  getStats: async (): Promise<ApiResponse<DashboardStats>> => {
+    if (useMockData()) return { data: MOCK_DASHBOARD };
+    return apiFetch<DashboardStats>("/admin/stats");
+  },
+  // Master data
+  getSpecialties: async (): Promise<ApiResponse<MasterSpecialty[]>> => {
+    if (useMockData()) return { data: [] };
+    return apiFetch<MasterSpecialty[]>("/admin/master-data/specialties");
+  },
+  getSpecialty: async (id: string): Promise<ApiResponse<MasterSpecialty>> => {
+    if (useMockData()) return { data: {} as MasterSpecialty };
+    return apiFetch<MasterSpecialty>(`/admin/master-data/specialties/${id}`);
+  },
+  getScreenings: async (): Promise<ApiResponse<ScreeningTemplate[]>> => {
+    if (useMockData()) return { data: [] };
+    return apiFetch<ScreeningTemplate[]>("/admin/master-data/screenings");
+  },
+  getConsents: async (): Promise<ApiResponse<ConsentTemplate[]>> => {
+    if (useMockData()) return { data: [] };
+    return apiFetch<ConsentTemplate[]>("/admin/master-data/consents");
+  },
+  getMasterDataStats: async (): Promise<ApiResponse<Record<string, number>>> => {
+    if (useMockData()) return { data: {} };
+    return apiFetch<Record<string, number>>("/admin/master-data/stats");
+  },
+};
+
+// ─── Practice ───────────────────────────────────────────────────────────────
+
 export const practiceService = {
-  // SuperAdmin: list all practices
+  // SuperAdmin: list all practices (delegates to adminService)
   list: async (params?: { search?: string }): Promise<ApiResponse<Practice[]>> => {
     if (useMockData()) return { data: [] };
     const qs = params?.search ? `?search=${encodeURIComponent(params.search)}` : "";
@@ -302,7 +360,7 @@ export const practiceService = {
   },
   update: async (data: Partial<Practice>): Promise<ApiResponse<Practice>> => {
     if (useMockData()) return mockUpdate<Practice>(data);
-    return apiFetch<Practice>("/practice", { method: "PUT", body: JSON.stringify(data) });
+    return apiFetch<Practice>("/practice/me", { method: "PUT", body: JSON.stringify(data) });
   },
   getSettings: async (): Promise<ApiResponse<PracticeSettings>> => {
     if (useMockData()) return { data: {} as PracticeSettings };
@@ -322,6 +380,8 @@ export const practiceService = {
   },
 };
 
+// ─── Providers ──────────────────────────────────────────────────────────────
+
 export const providerService = {
   list: async (): Promise<ApiResponse<Provider[]>> => {
     if (useMockData()) return { data: [] };
@@ -339,10 +399,6 @@ export const providerService = {
     if (useMockData()) return mockUpdate<Provider>(data);
     return apiFetch<Provider>(`/providers/${id}`, { method: "PUT", body: JSON.stringify(data) });
   },
-  delete: async (id: string): Promise<ApiResponse<void>> => {
-    if (useMockData()) return mockDelete();
-    return apiFetch<void>(`/providers/${id}`, { method: "DELETE" });
-  },
   getAvailability: async (id: string): Promise<ApiResponse<ProviderAvailability[]>> => {
     if (useMockData()) return { data: [] };
     return apiFetch<ProviderAvailability[]>(`/providers/${id}/availability`);
@@ -351,7 +407,14 @@ export const providerService = {
     if (useMockData()) return { data: [] };
     return apiFetch<ProviderAvailability[]>(`/providers/${id}/availability`, { method: "PUT", body: JSON.stringify(data) });
   },
+  getAppointments: async (id: string, params?: Record<string, string>): Promise<ApiResponse<Appointment[]>> => {
+    if (useMockData()) return { data: [] };
+    const query = params ? "?" + new URLSearchParams(params).toString() : "";
+    return apiFetch<Appointment[]>(`/providers/${id}/appointments${query}`);
+  },
 };
+
+// ─── Membership Plans ───────────────────────────────────────────────────────
 
 export const membershipPlanService = {
   list: async (): Promise<ApiResponse<MembershipPlan[]>> => {
@@ -384,6 +447,8 @@ export const membershipPlanService = {
   },
 };
 
+// ─── Patients ───────────────────────────────────────────────────────────────
+
 export const patientService = {
   list: async (params?: Record<string, string>): Promise<ApiResponse<Patient[]>> => {
     if (useMockData()) return { data: [] };
@@ -406,7 +471,39 @@ export const patientService = {
     if (useMockData()) return mockDelete();
     return apiFetch<void>(`/patients/${id}`, { method: "DELETE" });
   },
+  // Sub-resources
+  getMemberships: async (id: string): Promise<ApiResponse<PatientMembership[]>> => {
+    if (useMockData()) return { data: [] };
+    return apiFetch<PatientMembership[]>(`/patients/${id}/memberships`);
+  },
+  getAppointments: async (id: string, params?: Record<string, string>): Promise<ApiResponse<Appointment[]>> => {
+    if (useMockData()) return { data: [] };
+    const query = params ? "?" + new URLSearchParams(params).toString() : "";
+    return apiFetch<Appointment[]>(`/patients/${id}/appointments${query}`);
+  },
+  getEncounters: async (id: string, params?: Record<string, string>): Promise<ApiResponse<Encounter[]>> => {
+    if (useMockData()) return { data: [] };
+    const query = params ? "?" + new URLSearchParams(params).toString() : "";
+    return apiFetch<Encounter[]>(`/patients/${id}/encounters${query}`);
+  },
+  getPrescriptions: async (id: string, params?: Record<string, string>): Promise<ApiResponse<Prescription[]>> => {
+    if (useMockData()) return { data: [] };
+    const query = params ? "?" + new URLSearchParams(params).toString() : "";
+    return apiFetch<Prescription[]>(`/patients/${id}/prescriptions${query}`);
+  },
+  getScreenings: async (id: string, params?: Record<string, string>): Promise<ApiResponse<ScreeningResponse[]>> => {
+    if (useMockData()) return { data: [] };
+    const query = params ? "?" + new URLSearchParams(params).toString() : "";
+    return apiFetch<ScreeningResponse[]>(`/patients/${id}/screenings${query}`);
+  },
+  getDocuments: async (id: string, params?: Record<string, string>): Promise<ApiResponse<Document[]>> => {
+    if (useMockData()) return { data: [] };
+    const query = params ? "?" + new URLSearchParams(params).toString() : "";
+    return apiFetch<Document[]>(`/patients/${id}/documents${query}`);
+  },
 };
+
+// ─── Memberships ────────────────────────────────────────────────────────────
 
 export const membershipService = {
   list: async (params?: Record<string, string>): Promise<ApiResponse<PatientMembership[]>> => {
@@ -426,30 +523,43 @@ export const membershipService = {
     if (useMockData()) return mockUpdate<PatientMembership>(data);
     return apiFetch<PatientMembership>(`/memberships/${id}`, { method: "PUT", body: JSON.stringify(data) });
   },
+  getEntitlements: async (id: string): Promise<ApiResponse<PatientEntitlement[]>> => {
+    if (useMockData()) return { data: [] };
+    return apiFetch<PatientEntitlement[]>(`/memberships/${id}/entitlements`);
+  },
+  recordVisit: async (id: string, data?: Record<string, unknown>): Promise<ApiResponse<PatientMembership>> => {
+    if (useMockData()) return mockUpdate<PatientMembership>({ id });
+    return apiFetch<PatientMembership>(`/memberships/${id}/record-visit`, { method: "POST", body: JSON.stringify(data || {}) });
+  },
+  // Convenience aliases (cancel/pause/resume use update with status)
   cancel: async (id: string, reason?: string): Promise<ApiResponse<PatientMembership>> => {
     if (useMockData()) return mockUpdate<PatientMembership>({ id, status: "canceled", cancelReason: reason });
-    return apiFetch<PatientMembership>(`/memberships/${id}/cancel`, { method: "POST", body: JSON.stringify({ reason }) });
+    return apiFetch<PatientMembership>(`/memberships/${id}`, { method: "PUT", body: JSON.stringify({ status: "canceled", cancelReason: reason }) });
   },
   pause: async (id: string): Promise<ApiResponse<PatientMembership>> => {
     if (useMockData()) return mockUpdate<PatientMembership>({ id, status: "paused" });
-    return apiFetch<PatientMembership>(`/memberships/${id}/pause`, { method: "POST" });
+    return apiFetch<PatientMembership>(`/memberships/${id}`, { method: "PUT", body: JSON.stringify({ status: "paused" }) });
   },
   resume: async (id: string): Promise<ApiResponse<PatientMembership>> => {
     if (useMockData()) return mockUpdate<PatientMembership>({ id, status: "active" });
-    return apiFetch<PatientMembership>(`/memberships/${id}/resume`, { method: "POST" });
+    return apiFetch<PatientMembership>(`/memberships/${id}`, { method: "PUT", body: JSON.stringify({ status: "active" }) });
   },
 };
+
+// ─── Entitlements ───────────────────────────────────────────────────────────
 
 export const entitlementService = {
   listForMembership: async (membershipId: string): Promise<ApiResponse<PatientEntitlement[]>> => {
     if (useMockData()) return { data: [] };
     return apiFetch<PatientEntitlement[]>(`/memberships/${membershipId}/entitlements`);
   },
-  recordUsage: async (entitlementId: string, quantity?: number): Promise<ApiResponse<PatientEntitlement>> => {
-    if (useMockData()) return mockUpdate<PatientEntitlement>({ id: entitlementId });
-    return apiFetch<PatientEntitlement>(`/entitlements/${entitlementId}/usage`, { method: "POST", body: JSON.stringify({ quantity: quantity ?? 1 }) });
+  recordUsage: async (membershipId: string, quantity?: number): Promise<ApiResponse<PatientMembership>> => {
+    if (useMockData()) return mockUpdate<PatientMembership>({ id: membershipId });
+    return apiFetch<PatientMembership>(`/memberships/${membershipId}/record-visit`, { method: "POST", body: JSON.stringify({ quantity: quantity ?? 1 }) });
   },
 };
+
+// ─── Appointments ───────────────────────────────────────────────────────────
 
 export const appointmentService = {
   list: async (params?: Record<string, string>): Promise<ApiResponse<Appointment[]>> => {
@@ -469,13 +579,22 @@ export const appointmentService = {
     if (useMockData()) return mockUpdate<Appointment>(data);
     return apiFetch<Appointment>(`/appointments/${id}`, { method: "PUT", body: JSON.stringify(data) });
   },
+  delete: async (id: string): Promise<ApiResponse<void>> => {
+    if (useMockData()) return mockDelete();
+    return apiFetch<void>(`/appointments/${id}`, { method: "DELETE" });
+  },
+  today: async (): Promise<ApiResponse<Appointment[]>> => {
+    if (useMockData()) return { data: [] };
+    return apiFetch<Appointment[]>("/appointments/today");
+  },
+  // Convenience methods that use update under the hood
   cancel: async (id: string, reason?: string): Promise<ApiResponse<Appointment>> => {
     if (useMockData()) return mockUpdate<Appointment>({ id, status: "canceled", cancelReason: reason });
-    return apiFetch<Appointment>(`/appointments/${id}/cancel`, { method: "POST", body: JSON.stringify({ reason }) });
+    return apiFetch<Appointment>(`/appointments/${id}`, { method: "PUT", body: JSON.stringify({ status: "canceled", cancelReason: reason }) });
   },
   checkIn: async (id: string): Promise<ApiResponse<Appointment>> => {
     if (useMockData()) return mockUpdate<Appointment>({ id, status: "checked_in" });
-    return apiFetch<Appointment>(`/appointments/${id}/check-in`, { method: "POST" });
+    return apiFetch<Appointment>(`/appointments/${id}`, { method: "PUT", body: JSON.stringify({ status: "checked_in" }) });
   },
   getTypes: async (): Promise<ApiResponse<AppointmentType[]>> => {
     if (useMockData()) return { data: [] };
@@ -490,6 +609,8 @@ export const appointmentService = {
     return apiFetch<AppointmentType>(`/appointment-types/${id}`, { method: "PUT", body: JSON.stringify(data) });
   },
 };
+
+// ─── Encounters ─────────────────────────────────────────────────────────────
 
 export const encounterService = {
   list: async (params?: Record<string, string>): Promise<ApiResponse<Encounter[]>> => {
@@ -515,6 +636,8 @@ export const encounterService = {
   },
 };
 
+// ─── Prescriptions ──────────────────────────────────────────────────────────
+
 export const prescriptionService = {
   list: async (params?: Record<string, string>): Promise<ApiResponse<Prescription[]>> => {
     if (useMockData()) return { data: [] };
@@ -533,31 +656,58 @@ export const prescriptionService = {
     if (useMockData()) return mockUpdate<Prescription>(data);
     return apiFetch<Prescription>(`/prescriptions/${id}`, { method: "PUT", body: JSON.stringify(data) });
   },
+  refill: async (id: string): Promise<ApiResponse<Prescription>> => {
+    if (useMockData()) return mockUpdate<Prescription>({ id });
+    return apiFetch<Prescription>(`/prescriptions/${id}/refill`, { method: "POST" });
+  },
+  updateRefill: async (id: string, data: Partial<Prescription>): Promise<ApiResponse<Prescription>> => {
+    if (useMockData()) return mockUpdate<Prescription>(data);
+    return apiFetch<Prescription>(`/prescriptions/${id}/refill`, { method: "PUT", body: JSON.stringify(data) });
+  },
+  // Convenience: cancel via update
   cancel: async (id: string): Promise<ApiResponse<Prescription>> => {
     if (useMockData()) return mockUpdate<Prescription>({ id, status: "canceled" });
-    return apiFetch<Prescription>(`/prescriptions/${id}/cancel`, { method: "POST" });
+    return apiFetch<Prescription>(`/prescriptions/${id}`, { method: "PUT", body: JSON.stringify({ status: "canceled" }) });
   },
 };
 
+// ─── Screenings ─────────────────────────────────────────────────────────────
+
 export const screeningService = {
+  list: async (params?: Record<string, string>): Promise<ApiResponse<ScreeningResponse[]>> => {
+    if (useMockData()) return { data: [] };
+    const query = params ? "?" + new URLSearchParams(params).toString() : "";
+    return apiFetch<ScreeningResponse[]>(`/screenings${query}`);
+  },
+  getById: async (id: string): Promise<ApiResponse<ScreeningResponse>> => {
+    if (useMockData()) return { data: {} as ScreeningResponse };
+    return apiFetch<ScreeningResponse>(`/screenings/${id}`);
+  },
+  create: async (data: Partial<ScreeningResponse>): Promise<ApiResponse<ScreeningResponse>> => {
+    if (useMockData()) return mockCreate<ScreeningResponse>(data);
+    return apiFetch<ScreeningResponse>("/screenings", { method: "POST", body: JSON.stringify(data) });
+  },
   listTemplates: async (): Promise<ApiResponse<ScreeningTemplate[]>> => {
     if (useMockData()) return { data: [] };
     return apiFetch<ScreeningTemplate[]>("/screening-templates");
+  },
+  // Legacy aliases
+  listResponses: async (params?: Record<string, string>): Promise<ApiResponse<ScreeningResponse[]>> => {
+    if (useMockData()) return { data: [] };
+    const query = params ? "?" + new URLSearchParams(params).toString() : "";
+    return apiFetch<ScreeningResponse[]>(`/screenings${query}`);
+  },
+  submitResponse: async (data: Partial<ScreeningResponse>): Promise<ApiResponse<ScreeningResponse>> => {
+    if (useMockData()) return mockCreate<ScreeningResponse>(data);
+    return apiFetch<ScreeningResponse>("/screenings", { method: "POST", body: JSON.stringify(data) });
   },
   createTemplate: async (data: Partial<ScreeningTemplate>): Promise<ApiResponse<ScreeningTemplate>> => {
     if (useMockData()) return mockCreate<ScreeningTemplate>(data);
     return apiFetch<ScreeningTemplate>("/screening-templates", { method: "POST", body: JSON.stringify(data) });
   },
-  listResponses: async (params?: Record<string, string>): Promise<ApiResponse<ScreeningResponse[]>> => {
-    if (useMockData()) return { data: [] };
-    const query = params ? "?" + new URLSearchParams(params).toString() : "";
-    return apiFetch<ScreeningResponse[]>(`/screening-responses${query}`);
-  },
-  submitResponse: async (data: Partial<ScreeningResponse>): Promise<ApiResponse<ScreeningResponse>> => {
-    if (useMockData()) return mockCreate<ScreeningResponse>(data);
-    return apiFetch<ScreeningResponse>("/screening-responses", { method: "POST", body: JSON.stringify(data) });
-  },
 };
+
+// ─── Messages ───────────────────────────────────────────────────────────────
 
 export const messageService = {
   list: async (params?: Record<string, string>): Promise<ApiResponse<Message[]>> => {
@@ -565,9 +715,9 @@ export const messageService = {
     const query = params ? "?" + new URLSearchParams(params).toString() : "";
     return apiFetch<Message[]>(`/messages${query}`);
   },
-  getById: async (id: string): Promise<ApiResponse<Message>> => {
-    if (useMockData()) return { data: {} as Message };
-    return apiFetch<Message>(`/messages/${id}`);
+  getThread: async (threadId: string): Promise<ApiResponse<Message[]>> => {
+    if (useMockData()) return { data: [] };
+    return apiFetch<Message[]>(`/messages/thread/${threadId}`);
   },
   send: async (data: Partial<Message>): Promise<ApiResponse<Message>> => {
     if (useMockData()) return mockCreate<Message>(data);
@@ -575,9 +725,20 @@ export const messageService = {
   },
   markRead: async (id: string): Promise<ApiResponse<Message>> => {
     if (useMockData()) return mockUpdate<Message>({ id, isRead: true });
-    return apiFetch<Message>(`/messages/${id}/read`, { method: "POST" });
+    return apiFetch<Message>(`/messages/${id}/read`, { method: "PUT" });
+  },
+  getUnreadCount: async (): Promise<ApiResponse<{ count: number }>> => {
+    if (useMockData()) return { data: { count: 0 } };
+    return apiFetch<{ count: number }>("/messages/unread-count");
+  },
+  // Legacy alias
+  getById: async (id: string): Promise<ApiResponse<Message>> => {
+    if (useMockData()) return { data: {} as Message };
+    return apiFetch<Message>(`/messages/thread/${id}`);
   },
 };
+
+// ─── Invoices ───────────────────────────────────────────────────────────────
 
 export const invoiceService = {
   list: async (params?: Record<string, string>): Promise<ApiResponse<Invoice[]>> => {
@@ -593,25 +754,39 @@ export const invoiceService = {
     if (useMockData()) return mockCreate<Invoice>(data);
     return apiFetch<Invoice>("/invoices", { method: "POST", body: JSON.stringify(data) });
   },
+  getPdf: async (id: string): Promise<ApiResponse<Blob>> => {
+    if (useMockData()) return { data: new Blob() };
+    // PDF download — use raw fetch to get blob
+    const token = getAuthToken();
+    const headers: Record<string, string> = { Accept: "application/pdf" };
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+    try {
+      const res = await fetch(`${API_BASE_URL}/invoices/${id}/pdf`, { headers, credentials: "include" });
+      if (!res.ok) return { error: `Failed to download PDF (${res.status})` };
+      const blob = await res.blob();
+      return { data: blob };
+    } catch (e) {
+      return { error: e instanceof Error ? e.message : "Network error" };
+    }
+  },
+  // Legacy convenience methods
   send: async (id: string): Promise<ApiResponse<Invoice>> => {
     if (useMockData()) return mockUpdate<Invoice>({ id, status: "sent" });
-    return apiFetch<Invoice>(`/invoices/${id}/send`, { method: "POST" });
+    return apiFetch<Invoice>(`/invoices/${id}`, { method: "PUT", body: JSON.stringify({ status: "sent" }) });
   },
   void: async (id: string): Promise<ApiResponse<Invoice>> => {
     if (useMockData()) return mockUpdate<Invoice>({ id, status: "void" });
-    return apiFetch<Invoice>(`/invoices/${id}/void`, { method: "POST" });
+    return apiFetch<Invoice>(`/invoices/${id}`, { method: "PUT", body: JSON.stringify({ status: "void" }) });
   },
 };
+
+// ─── Payments ───────────────────────────────────────────────────────────────
 
 export const paymentService = {
   list: async (params?: Record<string, string>): Promise<ApiResponse<Payment[]>> => {
     if (useMockData()) return { data: [] };
     const query = params ? "?" + new URLSearchParams(params).toString() : "";
     return apiFetch<Payment[]>(`/payments${query}`);
-  },
-  getById: async (id: string): Promise<ApiResponse<Payment>> => {
-    if (useMockData()) return { data: {} as Payment };
-    return apiFetch<Payment>(`/payments/${id}`);
   },
   create: async (data: Partial<Payment>): Promise<ApiResponse<Payment>> => {
     if (useMockData()) return mockCreate<Payment>(data);
@@ -621,7 +796,14 @@ export const paymentService = {
     if (useMockData()) return mockUpdate<Payment>({ id, status: "refunded" });
     return apiFetch<Payment>(`/payments/${id}/refund`, { method: "POST", body: JSON.stringify({ amount }) });
   },
+  // Legacy alias
+  getById: async (id: string): Promise<ApiResponse<Payment>> => {
+    if (useMockData()) return { data: {} as Payment };
+    return apiFetch<Payment>(`/payments/${id}`);
+  },
 };
+
+// ─── Consent ────────────────────────────────────────────────────────────────
 
 export const consentService = {
   listTemplates: async (): Promise<ApiResponse<ConsentTemplate[]>> => {
@@ -647,25 +829,64 @@ export const consentService = {
   },
 };
 
+// ─── Documents ──────────────────────────────────────────────────────────────
+
 export const documentService = {
   list: async (params?: Record<string, string>): Promise<ApiResponse<Document[]>> => {
     if (useMockData()) return { data: [] };
     const query = params ? "?" + new URLSearchParams(params).toString() : "";
     return apiFetch<Document[]>(`/documents${query}`);
   },
-  getById: async (id: string): Promise<ApiResponse<Document>> => {
-    if (useMockData()) return { data: {} as Document };
-    return apiFetch<Document>(`/documents/${id}`);
+  upload: async (file: File, meta?: Record<string, string>): Promise<ApiResponse<Document>> => {
+    if (useMockData()) return mockCreate<Document>(meta as Partial<Document>);
+    const token = getAuthToken();
+    const formData = new FormData();
+    formData.append("file", file);
+    if (meta) {
+      for (const [key, value] of Object.entries(meta)) {
+        formData.append(camelToSnake(key), value);
+      }
+    }
+    try {
+      const res = await fetch(`${API_BASE_URL}/documents`, {
+        method: "POST",
+        headers: { Accept: "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        credentials: "include",
+        body: formData,
+      });
+      const json = await res.json();
+      if (!res.ok) return { error: json.message || "Upload failed" };
+      return { data: transformKeys<Document>(json.data ?? json, snakeToCamel) };
+    } catch (e) {
+      return { error: e instanceof Error ? e.message : "Network error" };
+    }
   },
-  upload: async (file: File, data: Partial<Document>): Promise<ApiResponse<Document>> => {
-    if (useMockData()) return mockCreate<Document>(data);
-    return apiUpload<Document>("/documents", "file", file);
+  download: async (id: string): Promise<ApiResponse<Blob>> => {
+    if (useMockData()) return { data: new Blob() };
+    const token = getAuthToken();
+    const headers: Record<string, string> = {};
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+    try {
+      const res = await fetch(`${API_BASE_URL}/documents/${id}/download`, { headers, credentials: "include" });
+      if (!res.ok) return { error: `Download failed (${res.status})` };
+      const blob = await res.blob();
+      return { data: blob };
+    } catch (e) {
+      return { error: e instanceof Error ? e.message : "Network error" };
+    }
   },
   delete: async (id: string): Promise<ApiResponse<void>> => {
     if (useMockData()) return mockDelete();
     return apiFetch<void>(`/documents/${id}`, { method: "DELETE" });
   },
+  // Legacy alias
+  getById: async (id: string): Promise<ApiResponse<Document>> => {
+    if (useMockData()) return { data: {} as Document };
+    return apiFetch<Document>(`/documents/${id}`);
+  },
 };
+
+// ─── Audit ──────────────────────────────────────────────────────────────────
 
 export const auditService = {
   list: async (params?: Record<string, string>): Promise<ApiResponse<AuditLog[]>> => {
@@ -675,12 +896,32 @@ export const auditService = {
   },
 };
 
+// ─── Master Data ────────────────────────────────────────────────────────────
+
 export const masterDataService = {
   getSpecialties: async (): Promise<ApiResponse<MasterSpecialty[]>> => {
     if (useMockData()) return { data: [] };
-    return apiFetch<MasterSpecialty[]>("/master/specialties");
+    return apiFetch<MasterSpecialty[]>("/admin/master-data/specialties");
+  },
+  getSpecialty: async (id: string): Promise<ApiResponse<MasterSpecialty>> => {
+    if (useMockData()) return { data: {} as MasterSpecialty };
+    return apiFetch<MasterSpecialty>(`/admin/master-data/specialties/${id}`);
+  },
+  getScreenings: async (): Promise<ApiResponse<ScreeningTemplate[]>> => {
+    if (useMockData()) return { data: [] };
+    return apiFetch<ScreeningTemplate[]>("/admin/master-data/screenings");
+  },
+  getConsents: async (): Promise<ApiResponse<ConsentTemplate[]>> => {
+    if (useMockData()) return { data: [] };
+    return apiFetch<ConsentTemplate[]>("/admin/master-data/consents");
+  },
+  getStats: async (): Promise<ApiResponse<Record<string, number>>> => {
+    if (useMockData()) return { data: {} };
+    return apiFetch<Record<string, number>>("/admin/master-data/stats");
   },
 };
+
+// ─── Coupons ────────────────────────────────────────────────────────────────
 
 export const couponService = {
   list: async (): Promise<ApiResponse<CouponCode[]>> => {
@@ -695,40 +936,94 @@ export const couponService = {
     if (useMockData()) return mockUpdate<CouponCode>(data);
     return apiFetch<CouponCode>(`/coupons/${id}`, { method: "PUT", body: JSON.stringify(data) });
   },
+  delete: async (id: string): Promise<ApiResponse<void>> => {
+    if (useMockData()) return mockDelete();
+    return apiFetch<void>(`/coupons/${id}`, { method: "DELETE" });
+  },
   validate: async (code: string, planId?: string): Promise<ApiResponse<CouponCode>> => {
     if (useMockData()) return { data: {} as CouponCode };
-    return apiFetch<CouponCode>(`/coupons/validate`, { method: "POST", body: JSON.stringify({ code, planId }) });
+    return apiFetch<CouponCode>("/coupons/validate", { method: "POST", body: JSON.stringify({ code, planId }) });
   },
 };
 
+// ─── Notifications ──────────────────────────────────────────────────────────
+
 export const notificationService = {
+  list: async (params?: Record<string, string>): Promise<ApiResponse<NotificationPreference[]>> => {
+    if (useMockData()) return { data: [] };
+    const query = params ? "?" + new URLSearchParams(params).toString() : "";
+    return apiFetch<NotificationPreference[]>(`/notifications${query}`);
+  },
+  getUnreadCount: async (): Promise<ApiResponse<{ count: number }>> => {
+    if (useMockData()) return { data: { count: 0 } };
+    return apiFetch<{ count: number }>("/notifications/unread-count");
+  },
+  markRead: async (id: string): Promise<ApiResponse<void>> => {
+    if (useMockData()) return { data: undefined };
+    return apiFetch<void>(`/notifications/${id}/read`, { method: "PUT" });
+  },
+  markAllRead: async (): Promise<ApiResponse<void>> => {
+    if (useMockData()) return { data: undefined };
+    return apiFetch<void>("/notifications/read-all", { method: "POST" });
+  },
+  // Legacy aliases
   getPreferences: async (): Promise<ApiResponse<NotificationPreference[]>> => {
     if (useMockData()) return { data: [] };
-    return apiFetch<NotificationPreference[]>("/notification-preferences");
+    return apiFetch<NotificationPreference[]>("/notifications");
   },
   updatePreference: async (id: string, data: Partial<NotificationPreference>): Promise<ApiResponse<NotificationPreference>> => {
     if (useMockData()) return mockUpdate<NotificationPreference>(data);
-    return apiFetch<NotificationPreference>(`/notification-preferences/${id}`, { method: "PUT", body: JSON.stringify(data) });
+    return apiFetch<NotificationPreference>(`/notifications/${id}/read`, { method: "PUT", body: JSON.stringify(data) });
   },
 };
 
+// ─── External (public, no auth) ─────────────────────────────────────────────
+
+export const externalService = {
+  getPlans: async (tenantCode: string): Promise<ApiResponse<MembershipPlan[]>> => {
+    if (useMockData()) return { data: [] };
+    return apiFetch<MembershipPlan[]>(`/external/plans/${tenantCode}`);
+  },
+  enroll: async (tenantCode: string, data: Record<string, unknown>): Promise<ApiResponse<{ patientId: string; membershipId: string }>> => {
+    if (useMockData()) return { data: { patientId: "mock_patient", membershipId: "mock_membership" } };
+    return apiFetch(`/external/enroll/${tenantCode}`, { method: "POST", body: JSON.stringify(data) });
+  },
+  getAvailability: async (tenantCode: string): Promise<ApiResponse<ProviderAvailability[]>> => {
+    if (useMockData()) return { data: [] };
+    return apiFetch<ProviderAvailability[]>(`/external/availability/${tenantCode}`);
+  },
+};
+
+// Legacy alias for intakeService
 export const intakeService = {
   getByTenantCode: async (tenantCode: string): Promise<ApiResponse<{ practice: Practice; plans: MembershipPlan[]; consents: ConsentTemplate[] }>> => {
     if (useMockData()) return { data: { practice: MOCK_PRACTICE, plans: [], consents: [] } };
-    return apiFetch(`/intake/${tenantCode}`);
+    return apiFetch(`/external/plans/${tenantCode}`);
   },
   submit: async (tenantCode: string, data: Record<string, unknown>): Promise<ApiResponse<{ patientId: string; membershipId: string }>> => {
     if (useMockData()) return { data: { patientId: "mock_patient", membershipId: "mock_membership" } };
-    return apiFetch(`/intake/${tenantCode}/submit`, { method: "POST", body: JSON.stringify(data) });
+    return apiFetch(`/external/enroll/${tenantCode}`, { method: "POST", body: JSON.stringify(data) });
   },
 };
+
+// ─── Dashboard ──────────────────────────────────────────────────────────────
 
 export const dashboardService = {
   getStats: async (): Promise<ApiResponse<DashboardStats>> => {
     if (useMockData()) return { data: MOCK_DASHBOARD };
-    return apiFetch<DashboardStats>("/admin/stats");
+    return apiFetch<DashboardStats>("/dashboard/practice");
+  },
+  getPracticeStats: async (): Promise<ApiResponse<DashboardStats>> => {
+    if (useMockData()) return { data: MOCK_DASHBOARD };
+    return apiFetch<DashboardStats>("/dashboard/practice");
+  },
+  getPatientStats: async (): Promise<ApiResponse<DashboardStats>> => {
+    if (useMockData()) return { data: MOCK_DASHBOARD };
+    return apiFetch<DashboardStats>("/dashboard/patient");
   },
 };
+
+// ─── Dunning ────────────────────────────────────────────────────────────────
 
 export const dunningService = {
   list: async (params?: Record<string, string>): Promise<ApiResponse<DunningEvent[]>> => {
