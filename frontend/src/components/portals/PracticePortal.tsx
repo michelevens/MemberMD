@@ -516,6 +516,10 @@ export function PracticePortal() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [apiInvoices, setApiInvoices] = useState<any[] | null>(null);
   const [dataLoading, setDataLoading] = useState(false);
+  const [showAddPatient, setShowAddPatient] = useState(false);
+  const [addPatientForm, setAddPatientForm] = useState<{ firstName: string; lastName: string; email: string; phone: string; dateOfBirth: string; gender: "male" | "female" | "other" | "prefer_not_to_say" }>({ firstName: "", lastName: "", email: "", phone: "", dateOfBirth: "", gender: "male" });
+  const [addPatientLoading, setAddPatientLoading] = useState(false);
+  const [addPatientError, setAddPatientError] = useState<string | null>(null);
 
   const loadPracticeData = useCallback(async () => {
     setDataLoading(true);
@@ -631,6 +635,28 @@ export function PracticePortal() {
   }, []);
 
   useEffect(() => { loadPracticeData(); }, [loadPracticeData]);
+
+  const handleAddPatient = async () => {
+    if (!addPatientForm.firstName || !addPatientForm.lastName || !addPatientForm.dateOfBirth) {
+      setAddPatientError("First name, last name, and date of birth are required.");
+      return;
+    }
+    setAddPatientLoading(true);
+    setAddPatientError(null);
+    try {
+      const res = await patientService.create(addPatientForm);
+      if (res.data) {
+        // Refresh patient list
+        loadPracticeData();
+        setShowAddPatient(false);
+        setAddPatientForm({ firstName: "", lastName: "", email: "", phone: "", dateOfBirth: "", gender: "male" });
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to create patient. Please try again.";
+      setAddPatientError(msg);
+    }
+    setAddPatientLoading(false);
+  };
 
   // Polling for unread messages
   useEffect(() => {
@@ -976,6 +1002,7 @@ export function PracticePortal() {
               style={{ backgroundColor: "#27ab83" }}
               onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#147d64")}
               onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "#27ab83")}
+              onClick={() => setShowAddPatient(true)}
             >
               <Plus className="w-4 h-4" />
               Add Patient
@@ -2201,6 +2228,74 @@ export function PracticePortal() {
             onClose={() => setShowBookingWidget(false)}
             onBooked={() => setShowBookingWidget(false)}
           />
+        )}
+
+        {/* Add Patient Modal */}
+        {showAddPatient && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: "rgba(0,0,0,0.5)" }}>
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden">
+              <div className="p-6" style={{ background: "linear-gradient(135deg, #1B2B4D, #243b53)" }}>
+                <h3 className="text-xl font-bold text-white">Add New Patient</h3>
+                <p className="text-sm text-slate-300 mt-1">Enter patient demographics to create a new record.</p>
+              </div>
+              <div className="p-6 space-y-4">
+                {addPatientError && (
+                  <div className="rounded-lg p-3 text-sm" style={{ backgroundColor: "#fef2f2", color: "#dc2626" }}>{addPatientError}</div>
+                )}
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">First Name *</label>
+                    <input className="w-full border rounded-lg px-3 py-2 text-sm" value={addPatientForm.firstName}
+                      onChange={(e) => setAddPatientForm(f => ({ ...f, firstName: e.target.value }))} placeholder="John" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Last Name *</label>
+                    <input className="w-full border rounded-lg px-3 py-2 text-sm" value={addPatientForm.lastName}
+                      onChange={(e) => setAddPatientForm(f => ({ ...f, lastName: e.target.value }))} placeholder="Smith" />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Date of Birth *</label>
+                    <input type="date" className="w-full border rounded-lg px-3 py-2 text-sm" value={addPatientForm.dateOfBirth}
+                      onChange={(e) => setAddPatientForm(f => ({ ...f, dateOfBirth: e.target.value }))} />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Gender</label>
+                    <select className="w-full border rounded-lg px-3 py-2 text-sm" value={addPatientForm.gender}
+                      onChange={(e) => setAddPatientForm(f => ({ ...f, gender: e.target.value as "male" | "female" | "other" | "prefer_not_to_say" }))}>
+                      <option value="male">Male</option>
+                      <option value="female">Female</option>
+                      <option value="other">Other</option>
+                      <option value="prefer_not_to_say">Prefer not to say</option>
+                    </select>
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Email</label>
+                  <input type="email" className="w-full border rounded-lg px-3 py-2 text-sm" value={addPatientForm.email}
+                    onChange={(e) => setAddPatientForm(f => ({ ...f, email: e.target.value }))} placeholder="john@example.com" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Phone</label>
+                  <input type="tel" className="w-full border rounded-lg px-3 py-2 text-sm" value={addPatientForm.phone}
+                    onChange={(e) => setAddPatientForm(f => ({ ...f, phone: e.target.value }))} placeholder="(407) 555-1234" />
+                </div>
+              </div>
+              <div className="px-6 pb-6 flex items-center justify-end gap-3">
+                <button className="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100 transition-colors"
+                  onClick={() => { setShowAddPatient(false); setAddPatientError(null); }}>Cancel</button>
+                <button className="px-6 py-2 rounded-lg text-sm font-medium text-white transition-colors"
+                  style={{ backgroundColor: "#27ab83" }}
+                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#147d64")}
+                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "#27ab83")}
+                  onClick={handleAddPatient}
+                  disabled={addPatientLoading}>
+                  {addPatientLoading ? "Creating..." : "Create Patient"}
+                </button>
+              </div>
+            </div>
+          </div>
         )}
       </div>
     );
