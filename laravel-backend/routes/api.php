@@ -42,6 +42,13 @@ use App\Http\Controllers\Api\ChartTemplateController;
 use App\Http\Controllers\Api\LabOrderController;
 use App\Http\Controllers\Api\PharmacyController;
 use App\Http\Controllers\Api\MedicationHistoryController;
+use App\Http\Controllers\Api\InventoryController;
+use App\Http\Controllers\Api\CareCoordinationController;
+use App\Http\Controllers\Api\CommunicationHubController;
+use App\Http\Controllers\Api\WidgetConfigController;
+use App\Http\Controllers\Api\PublicWidgetController;
+use App\Http\Controllers\Api\EngagementController;
+use App\Http\Controllers\Api\OutcomeController;
 use App\Http\Controllers\Api\Admin\MasterProgramController;
 use Illuminate\Support\Facades\Route;
 
@@ -95,6 +102,12 @@ Route::prefix('kiosk')->middleware('throttle:30,1')->group(function () {
     Route::post('/check-in', [KioskController::class, 'checkIn']);
     Route::get('/{tenantCode}/patient/{patientId}/screenings', [KioskController::class, 'screenings']);
     Route::get('/{tenantCode}/patient/{patientId}/consents', [KioskController::class, 'consents']);
+});
+
+// ===== Public Widget Endpoints (no auth) =====
+Route::prefix('public/widget')->middleware('throttle:60,1')->group(function () {
+    Route::get('/{tenantCode}/{type}', [PublicWidgetController::class, 'config']);
+    Route::post('/{tenantCode}/{type}/submit', [PublicWidgetController::class, 'submit'])->middleware('throttle:5,1');
 });
 
 // ===== Authenticated Routes =====
@@ -338,6 +351,35 @@ Route::middleware(['auth:sanctum', 'phi.log'])->group(function () {
     // ===== Drug Interaction Check =====
     Route::post('/prescriptions/check-interactions', [PrescriptionController::class, 'checkInteractions']);
 
+    // ===== Inventory & Dispensing =====
+    Route::prefix('inventory')->group(function () {
+        Route::get('/low-stock', [InventoryController::class, 'lowStock']);
+        Route::get('/dispensing-report', [InventoryController::class, 'dispensingReport']);
+        Route::post('/{id}/dispense', [InventoryController::class, 'dispense']);
+        Route::get('/', [InventoryController::class, 'index']);
+        Route::post('/', [InventoryController::class, 'store']);
+        Route::get('/{id}', [InventoryController::class, 'show']);
+        Route::put('/{id}', [InventoryController::class, 'update']);
+        Route::delete('/{id}', [InventoryController::class, 'destroy']);
+    });
+
+    // ===== Care Coordination =====
+    Route::prefix('care-coordination')->group(function () {
+        Route::get('/dashboard', [CareCoordinationController::class, 'dashboard']);
+        Route::get('/patient/{patientId}', [CareCoordinationController::class, 'patientGaps']);
+        Route::put('/gaps/{id}', [CareCoordinationController::class, 'updateGap']);
+        Route::get('/population-health', [CareCoordinationController::class, 'populationHealth']);
+        Route::get('/overdue', [CareCoordinationController::class, 'overdue']);
+    });
+
+    // ===== Communications Hub =====
+    Route::prefix('communications')->group(function () {
+        Route::get('/patient/{patientId}/timeline', [CommunicationHubController::class, 'patientTimeline']);
+        Route::post('/log-call', [CommunicationHubController::class, 'logCall']);
+        Route::get('/sla-status', [CommunicationHubController::class, 'slaStatus']);
+        Route::get('/stats', [CommunicationHubController::class, 'stats']);
+    });
+
     // ===== Employer Management (Practice-side) =====
     Route::prefix('employers')->group(function () {
         Route::get('/', [EmployerController::class, 'index']);
@@ -380,5 +422,32 @@ Route::middleware(['auth:sanctum', 'phi.log'])->group(function () {
         Route::post('/{id}/clone', [ChartTemplateController::class, 'clone']);
         Route::post('/{id}/apply', [ChartTemplateController::class, 'applyToEncounter']);
         Route::post('/suggest-codes', [ChartTemplateController::class, 'suggestCodes']);
+    });
+
+    // ===== Embeddable Widgets (Authenticated) =====
+    Route::prefix('widgets')->group(function () {
+        Route::get('/', [WidgetConfigController::class, 'index']);
+        Route::post('/', [WidgetConfigController::class, 'store']);
+        Route::get('/submissions', [WidgetConfigController::class, 'submissions']);
+        Route::put('/submissions/{id}/status', [WidgetConfigController::class, 'updateSubmissionStatus']);
+    });
+
+    // ===== Patient Engagement Scoring =====
+    Route::prefix('engagement')->group(function () {
+        Route::get('/dashboard', [EngagementController::class, 'dashboard']);
+        Route::get('/patient/{patientId}', [EngagementController::class, 'patientScore']);
+        Route::get('/rules', [EngagementController::class, 'rules']);
+        Route::post('/rules', [EngagementController::class, 'storeRule']);
+        Route::delete('/rules/{id}', [EngagementController::class, 'deleteRule']);
+    });
+
+    // ===== Outcome Tracking & Value Reporting =====
+    Route::prefix('outcomes')->group(function () {
+        Route::post('/metrics', [OutcomeController::class, 'recordMetric']);
+        Route::get('/metrics/patient/{patientId}', [OutcomeController::class, 'patientMetrics']);
+        Route::get('/trends/patient/{patientId}', [OutcomeController::class, 'patientTrends']);
+        Route::post('/reports/generate', [OutcomeController::class, 'generateReport']);
+        Route::get('/reports', [OutcomeController::class, 'listReports']);
+        Route::get('/reports/{id}', [OutcomeController::class, 'showReport']);
     });
 });
