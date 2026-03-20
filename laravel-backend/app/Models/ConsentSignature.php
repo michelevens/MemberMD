@@ -16,8 +16,8 @@ class ConsentSignature extends Model
 
     protected $fillable = [
         'tenant_id', 'patient_id', 'template_id',
-        'signature_type', 'signature_data',
-        'signed_at', 'ip_address',
+        'signature_type', 'signature_data', 'signature_image_url',
+        'signed_at', 'ip_address', 'user_agent',
     ];
 
     protected $casts = [

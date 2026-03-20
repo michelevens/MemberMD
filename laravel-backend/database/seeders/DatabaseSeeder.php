@@ -50,6 +50,7 @@ class DatabaseSeeder extends Seeder
             ScreeningTemplateSeeder::class,
             ConsentTemplateSeeder::class,
             ProgramTemplateSeeder::class,
+            HipaaComplianceSeeder::class,
         ]);
     }
 }

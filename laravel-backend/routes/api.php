@@ -18,11 +18,16 @@ use App\Http\Controllers\Api\DocumentController;
 use App\Http\Controllers\Api\ProviderController;
 use App\Http\Controllers\Api\CouponController;
 use App\Http\Controllers\Api\NotificationController;
+use App\Http\Controllers\Api\ConsentFormController;
 use App\Http\Controllers\Api\DashboardController;
 use App\Http\Controllers\Api\TelehealthController;
 use App\Http\Controllers\Api\CalendarController;
 use App\Http\Controllers\Api\AuditController;
 use App\Http\Controllers\Api\ProgramController;
+use App\Http\Controllers\Api\ProviderCredentialController;
+use App\Http\Controllers\Api\HipaaComplianceController;
+use App\Http\Controllers\Api\BroadcastController;
+use App\Http\Controllers\Api\IncidentController;
 use App\Http\Controllers\Api\Admin\MasterProgramController;
 use Illuminate\Support\Facades\Route;
 
@@ -156,10 +161,21 @@ Route::middleware(['auth:sanctum', 'phi.log'])->group(function () {
     Route::apiResource('coupons', CouponController::class)->except(['show']);
 
     // ===== Notifications =====
+    Route::get('/notifications/preferences', [NotificationController::class, 'getPreferences']);
+    Route::put('/notifications/preferences', [NotificationController::class, 'updatePreferences']);
     Route::get('/notifications/unread-count', [NotificationController::class, 'unreadCount']);
     Route::post('/notifications/read-all', [NotificationController::class, 'markAllAsRead']);
     Route::put('/notifications/{id}/read', [NotificationController::class, 'markAsRead']);
     Route::get('/notifications', [NotificationController::class, 'index']);
+
+    // ===== Consent Forms =====
+    Route::prefix('consents')->group(function () {
+        Route::get('/templates', [ConsentFormController::class, 'templates']);
+        Route::post('/templates', [ConsentFormController::class, 'storeTemplate']);
+        Route::put('/templates/{id}', [ConsentFormController::class, 'updateTemplate']);
+        Route::post('/sign', [ConsentFormController::class, 'sign']);
+        Route::get('/patient/{patientId}', [ConsentFormController::class, 'patientConsents']);
+    });
 
     // ===== Appointment Enhancements =====
     Route::get('/appointments/available-slots', [AppointmentController::class, 'availableSlots']);
@@ -217,4 +233,28 @@ Route::middleware(['auth:sanctum', 'phi.log'])->group(function () {
         Route::get('/export', [AuditController::class, 'export']);
         Route::get('/hipaa-checklist', [AuditController::class, 'hipaaChecklist']);
     });
+
+    // ===== Provider Credentials =====
+    Route::get('provider-credentials/compliance-score', [ProviderCredentialController::class, 'complianceScore']);
+    Route::get('provider-credentials/expiring', [ProviderCredentialController::class, 'expiring']);
+    Route::apiResource('provider-credentials', ProviderCredentialController::class);
+
+    // ===== HIPAA Compliance =====
+    Route::prefix('hipaa-compliance')->group(function () {
+        Route::get('/requirements', [HipaaComplianceController::class, 'requirements']);
+        Route::get('/records', [HipaaComplianceController::class, 'records']);
+        Route::put('/records/{id}', [HipaaComplianceController::class, 'updateRecord']);
+        Route::get('/score', [HipaaComplianceController::class, 'score']);
+        Route::get('/critical-issues', [HipaaComplianceController::class, 'criticalIssues']);
+    });
+
+    // ===== Broadcast Messaging =====
+    Route::prefix('broadcasts')->group(function () {
+        Route::get('/', [BroadcastController::class, 'index']);
+        Route::post('/', [BroadcastController::class, 'store']);
+        Route::post('/{id}/send', [BroadcastController::class, 'send']);
+    });
+
+    // ===== Incidents / Safety Events =====
+    Route::apiResource('incidents', IncidentController::class);
 });
