@@ -13,6 +13,15 @@ import { CalendarView } from "../shared/CalendarView";
 import { AppointmentBookingWidget } from "../widgets/AppointmentBookingWidget";
 import { AuditDashboard } from "../shared/AuditDashboard";
 import { ProgramsSection } from "./ProgramsSection";
+import { RevenueAnalyticsTab } from "./RevenueAnalyticsTab";
+import { DunningDashboardTab } from "./DunningDashboardTab";
+import { ReferralManagementTab } from "./ReferralManagementTab";
+import { EngagementDashboardTab } from "./EngagementDashboardTab";
+import { CareCoordinationTab } from "./CareCoordinationTab";
+import { LabOrdersTab } from "./LabOrdersTab";
+import { EmployerManagementTab } from "./EmployerManagementTab";
+import { InventoryTab } from "./InventoryTab";
+import { CommunicationsTab } from "./CommunicationsTab";
 import {
   LayoutDashboard,
   Users,
@@ -60,6 +69,15 @@ import {
   Wifi,
   XCircle,
   AlertTriangle,
+  BarChart3,
+  AlertCircle,
+  GitBranch,
+  HeartPulse,
+  Crosshair,
+  FlaskConical,
+  Building2,
+  Package,
+  Radio,
 } from "lucide-react";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -85,7 +103,16 @@ type TabId =
   | "notifications"
   | "compliance"
   | "practice-settings"
-  | "branding";
+  | "branding"
+  | "revenue-analytics"
+  | "dunning"
+  | "referrals"
+  | "engagement"
+  | "care-coordination"
+  | "lab-orders"
+  | "employers"
+  | "inventory"
+  | "communications";
 
 interface NavItem {
   id: TabId;
@@ -124,6 +151,9 @@ const NAV_SECTIONS: NavSection[] = [
       { id: "encounters", label: "Encounters", icon: Stethoscope },
       { id: "prescriptions", label: "Prescriptions", icon: Pill },
       { id: "screenings", label: "Screenings", icon: Activity },
+      { id: "lab-orders", label: "Lab Orders", icon: FlaskConical },
+      { id: "referrals", label: "Referrals", icon: GitBranch },
+      { id: "care-coordination", label: "Care Coordination", icon: Crosshair },
     ],
   },
   {
@@ -133,6 +163,9 @@ const NAV_SECTIONS: NavSection[] = [
       { id: "invoices", label: "Invoices", icon: FileText },
       { id: "payments", label: "Payments", icon: Receipt },
       { id: "coupons", label: "Coupons", icon: Ticket },
+      { id: "revenue-analytics", label: "Revenue Analytics", icon: BarChart3 },
+      { id: "dunning", label: "Payment Recovery", icon: AlertCircle },
+      { id: "employers", label: "Employers", icon: Building2 },
     ],
   },
   {
@@ -140,6 +173,14 @@ const NAV_SECTIONS: NavSection[] = [
     items: [
       { id: "providers", label: "Providers", icon: UserCog },
       { id: "staff", label: "Staff", icon: UsersRound },
+    ],
+  },
+  {
+    title: "Operations",
+    items: [
+      { id: "inventory", label: "Inventory", icon: Package },
+      { id: "engagement", label: "Patient Engagement", icon: HeartPulse },
+      { id: "communications", label: "Communications", icon: Radio },
     ],
   },
   {
@@ -4669,6 +4710,24 @@ export function PracticePortal() {
         return renderNotifications();
       case "compliance":
         return <AuditDashboard />;
+      case "revenue-analytics":
+        return <RevenueAnalyticsTab />;
+      case "dunning":
+        return <DunningDashboardTab />;
+      case "referrals":
+        return <ReferralManagementTab />;
+      case "engagement":
+        return <EngagementDashboardTab />;
+      case "care-coordination":
+        return <CareCoordinationTab />;
+      case "lab-orders":
+        return <LabOrdersTab />;
+      case "employers":
+        return <EmployerManagementTab />;
+      case "inventory":
+        return <InventoryTab />;
+      case "communications":
+        return <CommunicationsTab />;
       case "practice-settings":
         return <PracticeSettings />;
       case "branding":
