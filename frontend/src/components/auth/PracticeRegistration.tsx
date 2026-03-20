@@ -2,12 +2,13 @@
 // Multi-step onboarding for doctors signing up their practice
 // Pattern from ShiftPulse TenantRegistration
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Brain, Heart, Baby, Stethoscope, Scan, Activity, Users, Leaf, Crown,
   Flame, Shield, Zap, ArrowLeft, ArrowRight, Check, Loader2, Eye, EyeOff,
   Building2, User, Lock, ClipboardList, Sparkles, ChevronRight, Layers,
+  Search, Plus, Trash2, Copy, AlertTriangle,
 } from "lucide-react";
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || "/api";
@@ -134,14 +135,29 @@ interface PracticeInfo {
   zip: string;
 }
 
+interface LicenseEntry {
+  number: string;
+  state: string;
+}
+
 interface ProviderInfo {
   firstName: string;
   lastName: string;
   credentials: string;
   npi: string;
-  licenseNumber: string;
-  licenseState: string;
+  licenses: LicenseEntry[];
   bio: string;
+}
+
+interface NpiLookupResult {
+  found: boolean;
+  name: string;
+  credential: string;
+  practiceName?: string;
+  address?: string;
+  city?: string;
+  state?: string;
+  zip?: string;
 }
 
 interface AccountInfo {
@@ -194,6 +210,35 @@ function isValidEmail(email: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
+function generateStrongPassword(): string {
+  const upper = "ABCDEFGHJKMNPQRSTUVWXYZ";
+  const lower = "abcdefghjkmnpqrstuvwxyz";
+  const digits = "23456789";
+  const symbols = "!@#$%&*";
+  const all = upper + lower + digits + symbols;
+
+  // Ensure at least one of each category
+  const required = [
+    upper[Math.floor(Math.random() * upper.length)],
+    lower[Math.floor(Math.random() * lower.length)],
+    digits[Math.floor(Math.random() * digits.length)],
+    symbols[Math.floor(Math.random() * symbols.length)],
+  ];
+
+  // Fill remaining with random chars
+  for (let i = required.length; i < 16; i++) {
+    required.push(all[Math.floor(Math.random() * all.length)]);
+  }
+
+  // Shuffle
+  for (let i = required.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [required[i], required[j]] = [required[j], required[i]];
+  }
+
+  return required.join("");
+}
+
 // ─── Component ──────────────────────────────────────────────────────────────
 
 export function PracticeRegistration() {
@@ -224,8 +269,14 @@ export function PracticeRegistration() {
   // Step 5: Provider Info
   const [providerInfo, setProviderInfo] = useState<ProviderInfo>({
     firstName: "", lastName: "", credentials: "", npi: "",
-    licenseNumber: "", licenseState: "", bio: "",
+    licenses: [{ number: "", state: "" }],
+    bio: "",
   });
+
+  // NPI Lookup
+  const [npiLookupResult, setNpiLookupResult] = useState<NpiLookupResult | null>(null);
+  const [npiLookupLoading, setNpiLookupLoading] = useState(false);
+  const npiLookupTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Step 6: Account
   const [accountInfo, setAccountInfo] = useState<AccountInfo>({
@@ -278,6 +329,98 @@ export function PracticeRegistration() {
     if (!p.specialties || p.specialties.length === 0) return true;
     return p.specialties.includes(selectedSpecialty);
   });
+
+  // ─── NPI Lookup ────────────────────────────────────────────────────────
+
+  const lookupNpi = useCallback(async (npi: string) => {
+    if (!/^\d{10}$/.test(npi)) return;
+    setNpiLookupLoading(true);
+    setNpiLookupResult(null);
+    try {
+      const response = await fetch(
+        `https://npiregistry.cms.hhs.gov/api/?version=2.1&number=${npi}`
+      );
+      const data = await response.json();
+      if (data.results && data.results.length > 0) {
+        const result = data.results[0];
+        const basic = result.basic || {};
+        const addr = result.addresses?.[0] || {};
+        const credential = basic.credential || "";
+        const firstName = basic.first_name || "";
+        const lastName = basic.last_name || "";
+        const practiceName = basic.organization_name || "";
+        setNpiLookupResult({
+          found: true,
+          name: `${firstName} ${lastName}`.trim(),
+          credential,
+          practiceName: practiceName || undefined,
+          address: addr.address_1 || undefined,
+          city: addr.city || undefined,
+          state: addr.state || undefined,
+          zip: addr.postal_code?.slice(0, 5) || undefined,
+        });
+      } else {
+        setNpiLookupResult({ found: false, name: "", credential: "" });
+      }
+    } catch {
+      setNpiLookupResult({ found: false, name: "", credential: "" });
+    }
+    setNpiLookupLoading(false);
+  }, []);
+
+  function applyNpiData() {
+    if (!npiLookupResult || !npiLookupResult.found) return;
+    const nameParts = npiLookupResult.name.split(" ");
+    const firstName = nameParts[0] || "";
+    const lastName = nameParts.slice(1).join(" ") || "";
+    setProviderInfo(prev => ({
+      ...prev,
+      firstName: firstName || prev.firstName,
+      lastName: lastName || prev.lastName,
+      credentials: npiLookupResult.credential
+        ? (CREDENTIALS.includes(npiLookupResult.credential.replace(/\./g, ""))
+            ? npiLookupResult.credential.replace(/\./g, "")
+            : prev.credentials)
+        : prev.credentials,
+    }));
+    if (npiLookupResult.practiceName && !practiceInfo.practiceName) {
+      setPracticeInfo(prev => ({ ...prev, practiceName: npiLookupResult.practiceName! }));
+    }
+    if (npiLookupResult.address && !practiceInfo.address) {
+      setPracticeInfo(prev => ({
+        ...prev,
+        address: npiLookupResult.address || prev.address,
+        city: npiLookupResult.city || prev.city,
+        state: npiLookupResult.state || prev.state,
+        zip: npiLookupResult.zip || prev.zip,
+      }));
+    }
+  }
+
+  // ─── License management ───────────────────────────────────────────────
+
+  function addLicense() {
+    setProviderInfo(prev => ({
+      ...prev,
+      licenses: [...prev.licenses, { number: "", state: "" }],
+    }));
+  }
+
+  function removeLicense(index: number) {
+    setProviderInfo(prev => ({
+      ...prev,
+      licenses: prev.licenses.length > 1
+        ? prev.licenses.filter((_, i) => i !== index)
+        : [{ number: "", state: "" }],
+    }));
+  }
+
+  function updateLicense(index: number, field: keyof LicenseEntry, value: string) {
+    setProviderInfo(prev => ({
+      ...prev,
+      licenses: prev.licenses.map((lic, i) => i === index ? { ...lic, [field]: value } : lic),
+    }));
+  }
 
   // ─── Toggle program selection ──────────────────────────────────────────
 
@@ -383,8 +526,7 @@ export function PracticeRegistration() {
           last_name: providerInfo.lastName,
           credentials: providerInfo.credentials,
           npi: providerInfo.npi,
-          license_number: providerInfo.licenseNumber,
-          license_state: providerInfo.licenseState,
+          licenses: providerInfo.licenses.filter(l => l.number && l.state),
           bio: providerInfo.bio,
           email: accountInfo.email,
           password: accountInfo.password,
@@ -984,44 +1126,122 @@ export function PracticeRegistration() {
 
                   <div>
                     <label className={labelClass}>NPI</label>
-                    <input
-                      type="text"
-                      value={providerInfo.npi}
-                      onChange={e => {
-                        const val = e.target.value.replace(/\D/g, "").slice(0, 10);
-                        updateProvider("npi", val);
-                      }}
-                      className={inputClass}
-                      placeholder="10-digit National Provider Identifier"
-                      maxLength={10}
-                    />
-                    {errors.npi && <p className="text-xs text-red-500 mt-1">{errors.npi}</p>}
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className={labelClass}>State License Number</label>
+                    <div className="flex gap-2">
                       <input
                         type="text"
-                        value={providerInfo.licenseNumber}
-                        onChange={e => updateProvider("licenseNumber", e.target.value)}
-                        className={inputClass}
-                        placeholder="License number"
+                        value={providerInfo.npi}
+                        onChange={e => {
+                          const val = e.target.value.replace(/\D/g, "").slice(0, 10);
+                          updateProvider("npi", val);
+                          // Auto-lookup when 10 digits reached (debounced)
+                          if (npiLookupTimer.current) clearTimeout(npiLookupTimer.current);
+                          if (val.length === 10) {
+                            npiLookupTimer.current = setTimeout(() => lookupNpi(val), 400);
+                          } else {
+                            setNpiLookupResult(null);
+                          }
+                        }}
+                        className={`${inputClass} flex-1`}
+                        placeholder="10-digit National Provider Identifier"
+                        maxLength={10}
                       />
-                    </div>
-                    <div>
-                      <label className={labelClass}>License State</label>
-                      <select
-                        value={providerInfo.licenseState}
-                        onChange={e => updateProvider("licenseState", e.target.value)}
-                        className={selectClass}
+                      <button
+                        type="button"
+                        onClick={() => lookupNpi(providerInfo.npi)}
+                        disabled={providerInfo.npi.length !== 10 || npiLookupLoading}
+                        className="px-3 py-2.5 rounded-xl border border-slate-200 text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5 shrink-0"
                       >
-                        <option value="">Select state</option>
-                        {US_STATES.map(s => (
-                          <option key={s.value} value={s.value}>{s.label}</option>
-                        ))}
-                      </select>
+                        {npiLookupLoading ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : (
+                          <Search className="w-4 h-4" />
+                        )}
+                        Lookup
+                      </button>
                     </div>
+                    {errors.npi && <p className="text-xs text-red-500 mt-1">{errors.npi}</p>}
+
+                    {/* NPI Lookup Result */}
+                    {npiLookupLoading && (
+                      <div className="mt-2 flex items-center gap-2 text-sm text-slate-500">
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        Looking up NPI...
+                      </div>
+                    )}
+                    {npiLookupResult && !npiLookupLoading && npiLookupResult.found && (
+                      <div
+                        className="mt-2 rounded-lg px-3 py-2.5 border flex items-center justify-between gap-2"
+                        style={{ background: "#f0fdf4", borderColor: "#bbf7d0" }}
+                      >
+                        <div className="flex items-center gap-2 text-sm min-w-0">
+                          <Check className="w-4 h-4 shrink-0" style={{ color: "#16a34a" }} />
+                          <span style={{ color: "#15803d" }} className="font-medium truncate">
+                            Verified: {npiLookupResult.name}
+                            {npiLookupResult.credential && `, ${npiLookupResult.credential}`}
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={applyNpiData}
+                          className="px-2.5 py-1 rounded-lg text-xs font-semibold text-white shrink-0 hover:opacity-90 transition-opacity"
+                          style={{ background: "#16a34a" }}
+                        >
+                          Apply
+                        </button>
+                      </div>
+                    )}
+                    {npiLookupResult && !npiLookupLoading && !npiLookupResult.found && (
+                      <div
+                        className="mt-2 rounded-lg px-3 py-2.5 border flex items-center gap-2 text-sm"
+                        style={{ background: "#fefce8", borderColor: "#fde68a", color: "#a16207" }}
+                      >
+                        <AlertTriangle className="w-4 h-4 shrink-0" />
+                        NPI not found in registry — you can continue manually
+                      </div>
+                    )}
+                  </div>
+
+                  <div>
+                    <label className={labelClass}>State Licenses</label>
+                    <div className="space-y-2">
+                      {providerInfo.licenses.map((lic, idx) => (
+                        <div key={idx} className="flex items-center gap-2">
+                          <input
+                            type="text"
+                            value={lic.number}
+                            onChange={e => updateLicense(idx, "number", e.target.value)}
+                            className={`${inputClass} flex-1`}
+                            placeholder="License number"
+                          />
+                          <select
+                            value={lic.state}
+                            onChange={e => updateLicense(idx, "state", e.target.value)}
+                            className={`${selectClass} w-36 shrink-0`}
+                          >
+                            <option value="">State</option>
+                            {US_STATES.map(s => (
+                              <option key={s.value} value={s.value}>{s.label}</option>
+                            ))}
+                          </select>
+                          <button
+                            type="button"
+                            onClick={() => removeLicense(idx)}
+                            className="p-2 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors shrink-0"
+                            title="Remove license"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={addLicense}
+                      className="mt-2 flex items-center gap-1.5 text-sm font-medium text-teal-600 hover:text-teal-700 transition-colors"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      Add Another State License
+                    </button>
                   </div>
 
                   <div>
@@ -1112,6 +1332,38 @@ export function PracticeRegistration() {
                             }}
                           />
                         </div>
+                      </div>
+                    )}
+
+                    {/* Generate strong password */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const pw = generateStrongPassword();
+                        setAccountInfo(prev => ({ ...prev, password: pw, confirmPassword: pw }));
+                        setShowPassword(true);
+                      }}
+                      className="mt-2 flex items-center gap-1.5 text-sm font-medium text-teal-600 hover:text-teal-700 transition-colors"
+                    >
+                      <Sparkles className="w-3.5 h-3.5" />
+                      Generate Strong Password
+                    </button>
+
+                    {/* Show generated password in copyable format */}
+                    {accountInfo.password && showPassword && (
+                      <div
+                        className="mt-2 rounded-lg px-3 py-2 border flex items-center justify-between gap-2"
+                        style={{ background: "#f8fafc", borderColor: "#e2e8f0" }}
+                      >
+                        <code className="text-sm font-mono text-slate-700 truncate">{accountInfo.password}</code>
+                        <button
+                          type="button"
+                          onClick={() => navigator.clipboard.writeText(accountInfo.password)}
+                          className="p-1 rounded text-slate-400 hover:text-slate-600 transition-colors shrink-0"
+                          title="Copy password"
+                        >
+                          <Copy className="w-3.5 h-3.5" />
+                        </button>
                       </div>
                     )}
                   </div>
@@ -1255,12 +1507,14 @@ export function PracticeRegistration() {
                           <span className="font-medium text-slate-800">{providerInfo.npi}</span>
                         </div>
                       )}
-                      {providerInfo.licenseNumber && (
-                        <div>
-                          <span className="text-slate-500">License:</span>{" "}
+                      {providerInfo.licenses.filter(l => l.number && l.state).length > 0 && (
+                        <div className="sm:col-span-2">
+                          <span className="text-slate-500">Licenses:</span>{" "}
                           <span className="font-medium text-slate-800">
-                            {providerInfo.licenseNumber}
-                            {providerInfo.licenseState && ` (${providerInfo.licenseState})`}
+                            {providerInfo.licenses
+                              .filter(l => l.number && l.state)
+                              .map(l => `${l.number} (${l.state})`)
+                              .join(", ")}
                           </span>
                         </div>
                       )}

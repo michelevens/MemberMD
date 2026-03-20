@@ -17,10 +17,11 @@ class Provider extends Model
 
     protected $fillable = [
         'tenant_id', 'user_id',
+        'first_name', 'last_name', 'email', 'phone',
         'title', 'credentials', 'bio',
-        'specialties', 'languages',
-        'npi', 'license_number', 'license_state',
-        'panel_capacity', 'panel_status',
+        'specialty', 'specialties', 'languages',
+        'npi', 'license_number', 'license_state', 'licensed_states',
+        'panel_capacity', 'panel_status', 'status',
         'accepts_new_patients', 'telehealth_enabled',
         'consultation_fee',
         'ical_feed_token',
@@ -29,6 +30,7 @@ class Provider extends Model
     protected $casts = [
         'specialties' => 'array',
         'languages' => 'array',
+        'licensed_states' => 'array',
         'panel_capacity' => 'integer',
         'accepts_new_patients' => 'boolean',
         'telehealth_enabled' => 'boolean',

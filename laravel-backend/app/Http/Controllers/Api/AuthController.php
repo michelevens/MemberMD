@@ -69,6 +69,20 @@ class AuthController extends Controller
             'email' => 'required|email|unique:users,email',
             'password' => ['required', 'string', 'min:12', 'confirmed', 'regex:/[A-Z]/', 'regex:/[a-z]/', 'regex:/[0-9]/', 'regex:/[^A-Za-z0-9]/'],
             'phone' => 'nullable|string|max:30',
+            // Practice details
+            'practice_email' => 'nullable|email|max:255',
+            'website' => 'nullable|string|max:255',
+            'address' => 'nullable|string|max:500',
+            'city' => 'nullable|string|max:100',
+            'state' => 'nullable|string|max:2',
+            'zip' => 'nullable|string|max:10',
+            // Provider details
+            'credentials' => 'nullable|string|max:20',
+            'npi' => 'nullable|string|max:10',
+            'licenses' => 'nullable|array',
+            'licenses.*.number' => 'required_with:licenses|string|max:50',
+            'licenses.*.state' => 'required_with:licenses|string|max:2',
+            'bio' => 'nullable|string|max:2000',
         ]);
 
         // Create the practice (tenant)
@@ -80,6 +94,14 @@ class AuthController extends Controller
             'selected_programs' => $validated['selected_programs'] ?? null,
             'practice_model' => $validated['practice_model'],
             'owner_email' => $validated['email'],
+            'phone' => $validated['phone'] ?? $request->input('phone'),
+            'email' => $validated['practice_email'] ?? $validated['email'],
+            'website' => $validated['website'] ?? null,
+            'address' => $validated['address'] ?? null,
+            'city' => $validated['city'] ?? null,
+            'state' => $validated['state'] ?? null,
+            'zip' => $validated['zip'] ?? null,
+            'npi' => $validated['npi'] ?? null,
             'is_active' => true,
         ]);
 
@@ -124,6 +146,49 @@ class AuthController extends Controller
             'status' => 'active',
             'onboarding_completed' => false,
         ]);
+
+        // Create Provider record for the registering provider
+        try {
+            $licenses = $validated['licenses'] ?? [];
+            $primaryLicense = $licenses[0] ?? null;
+
+            $provider = \App\Models\Provider::create([
+                'tenant_id' => $practice->id,
+                'user_id' => $user->id,
+                'first_name' => $validated['first_name'],
+                'last_name' => $validated['last_name'],
+                'credentials' => $validated['credentials'] ?? null,
+                'npi' => $validated['npi'] ?? null,
+                'license_number' => $primaryLicense['number'] ?? null,
+                'license_state' => $primaryLicense['state'] ?? null,
+                'licensed_states' => !empty($licenses) ? array_column($licenses, 'state') : null,
+                'bio' => $validated['bio'] ?? null,
+                'email' => $validated['email'],
+                'phone' => $validated['phone'] ?? null,
+                'status' => 'active',
+                'specialty' => $validated['specialty'],
+            ]);
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('Provider creation during registration failed: ' . $e->getMessage());
+        }
+
+        // Send welcome email
+        try {
+            \Illuminate\Support\Facades\Mail::raw(
+                "Welcome to MemberMD!\n\n" .
+                "Your practice \"{$practice->name}\" has been created successfully.\n\n" .
+                "Practice Code: {$practice->tenant_code}\n" .
+                "Login: {$validated['email']}\n\n" .
+                "Get started at https://app.membermd.io\n\n" .
+                "— The MemberMD Team",
+                function ($message) use ($validated, $practice) {
+                    $message->to($validated['email'])
+                        ->subject("Welcome to MemberMD — {$practice->name} is ready!");
+                }
+            );
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('Welcome email failed: ' . $e->getMessage());
+        }
 
         $user->update(['last_login_at' => now()]);
 
