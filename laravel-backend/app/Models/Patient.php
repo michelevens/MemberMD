@@ -54,7 +54,12 @@ class Patient extends Model
     public function memberships(): HasMany { return $this->hasMany(PatientMembership::class); }
     public function activeMembership()
     {
-        return $this->hasOne(PatientMembership::class)->where('status', 'active')->latestOfMany('created_at');
+        return $this->hasOne(PatientMembership::class)->ofMany(
+            ['created_at' => 'max'],
+            function ($query) {
+                $query->where('status', 'active');
+            }
+        );
     }
     public function entitlements(): HasMany { return $this->hasMany(PatientEntitlement::class); }
     public function appointments(): HasMany { return $this->hasMany(Appointment::class); }
