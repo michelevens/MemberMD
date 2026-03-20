@@ -86,7 +86,7 @@ class ProviderController extends Controller
             'npi' => $validated['npi'] ?? null,
             'license_number' => $validated['license_number'] ?? null,
             'license_state' => $validated['license_state'] ?? null,
-            'panel_capacity' => $validated['panel_capacity'] ?? null,
+            'panel_capacity' => $validated['panel_capacity'] ?? 500,
             'panel_status' => $validated['panel_status'] ?? 'open',
             'accepts_new_patients' => $validated['accepts_new_patients'] ?? true,
             'telehealth_enabled' => $validated['telehealth_enabled'] ?? false,
