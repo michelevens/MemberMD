@@ -111,7 +111,7 @@ function transformKeys<T>(obj: unknown, transformer: (key: string) => string): T
 
 // ===== apiFetch Wrapper =====
 
-async function apiFetch<T>(
+export async function apiFetch<T>(
   endpoint: string,
   options: RequestInit = {}
 ): Promise<ApiResponse<T>> {
