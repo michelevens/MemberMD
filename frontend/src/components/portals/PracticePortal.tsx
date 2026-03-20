@@ -5,7 +5,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../contexts/AuthContext";
-import { dashboardService, membershipPlanService, messageService, patientService, appointmentService, encounterService, prescriptionService, invoiceService, programService } from "../../lib/api";
+import { dashboardService, membershipPlanService, messageService, patientService, appointmentService, encounterService, prescriptionService, invoiceService, programService, telehealthService } from "../../lib/api";
 import { HeaderToolbar } from "../shared/HeaderToolbar";
 import { UserSettingsDropdown } from "../shared/UserSettingsDropdown";
 import { PracticeSettings } from "../settings/PracticeSettings";
@@ -2826,10 +2826,22 @@ export function PracticePortal() {
       custom: "https://your-video-platform.com/room/...",
     };
 
-    const handleQuickLaunch = () => {
-      const sessionId = `adhoc-${Date.now()}`;
+    const handleQuickLaunch = async () => {
       if (telehealthMode === "builtin") {
-        navigate(`/telehealth/${sessionId}`);
+        // Create a real telehealth session via API, then navigate
+        try {
+          const res = await telehealthService.createSession({
+            isExternal: false,
+            recordingEnabled: false,
+          });
+          if (res.data && res.data.id) {
+            navigate(`/telehealth/${res.data.id}`);
+          } else {
+            setToast({ message: res.error || "Failed to create telehealth session. Select an appointment first.", type: "error" });
+          }
+        } catch {
+          setToast({ message: "Failed to create telehealth session.", type: "error" });
+        }
       } else {
         const url = externalUrl || "#";
         window.open(url, "_blank", "noopener,noreferrer");

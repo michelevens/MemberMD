@@ -975,25 +975,29 @@ export const auditService = {
 // ─── Telehealth ──────────────────────────────────────────────────────────────
 
 export const telehealthService = {
+  createSession: async (data: { appointmentId?: string; isExternal?: boolean; externalVideoUrl?: string; recordingEnabled?: boolean }): Promise<ApiResponse<TelehealthSession>> => {
+    if (useMockData()) return mockCreate<TelehealthSession>(data);
+    return apiFetch<TelehealthSession>("/telehealth", { method: "POST", body: JSON.stringify(data) });
+  },
   getSession: async (id: string): Promise<ApiResponse<TelehealthSession>> => {
     if (useMockData()) return { data: {} as TelehealthSession };
-    return apiFetch<TelehealthSession>(`/telehealth/sessions/${id}`);
+    return apiFetch<TelehealthSession>(`/telehealth/${id}`);
   },
-  joinSession: async (sessionId: string): Promise<ApiResponse<{ token: string; roomUrl: string }>> => {
-    if (useMockData()) return { data: { token: "mock_meeting_token", roomUrl: "https://membermd.daily.co/mock-room" } };
-    return apiFetch<{ token: string; roomUrl: string }>(`/telehealth/sessions/${sessionId}/join`, { method: "POST" });
+  joinSession: async (sessionId: string): Promise<ApiResponse<{ token: string; roomUrl: string; roomName: string; session: TelehealthSession }>> => {
+    if (useMockData()) return { data: { token: "mock_meeting_token", roomUrl: "https://membermd.daily.co/mock-room", roomName: "mock-room", session: {} as TelehealthSession } };
+    return apiFetch<{ token: string; roomUrl: string; roomName: string; session: TelehealthSession }>(`/telehealth/${sessionId}/join`, { method: "POST" });
   },
   endSession: async (sessionId: string): Promise<ApiResponse<TelehealthSession>> => {
     if (useMockData()) return mockUpdate<TelehealthSession>({ id: sessionId, status: "completed" });
-    return apiFetch<TelehealthSession>(`/telehealth/sessions/${sessionId}/end`, { method: "POST" });
+    return apiFetch<TelehealthSession>(`/telehealth/${sessionId}/end`, { method: "POST" });
   },
   giveConsent: async (sessionId: string): Promise<ApiResponse<TelehealthSession>> => {
     if (useMockData()) return mockUpdate<TelehealthSession>({ id: sessionId, recordingConsentGiven: true });
-    return apiFetch<TelehealthSession>(`/telehealth/sessions/${sessionId}/consent`, { method: "POST" });
+    return apiFetch<TelehealthSession>(`/telehealth/${sessionId}/consent`, { method: "POST" });
   },
   getToken: async (appointmentId: string): Promise<ApiResponse<{ token: string; roomUrl: string }>> => {
     if (useMockData()) return { data: { token: "mock_meeting_token", roomUrl: "https://membermd.daily.co/mock-room" } };
-    return apiFetch<{ token: string; roomUrl: string }>(`/telehealth/token/${appointmentId}`);
+    return apiFetch<{ token: string; roomUrl: string }>(`/telehealth/appointment/${appointmentId}/token`);
   },
 };
 
