@@ -128,10 +128,6 @@ const TelehealthRoom = namedLazy(
   "TelehealthRoom"
 );
 
-const LandingPage = namedLazy(
-  () => import("./components/LandingPage"),
-  "LandingPage"
-);
 
 // ─── Loading Fallback ─────────────────────────────────────────────────────────
 
@@ -160,13 +156,12 @@ function AuthGate() {
     return (
       <Suspense fallback={<LoadingFallback />}>
         <Routes>
-          <Route path="/" element={<LandingPage />} />
           <Route path="/login" element={<LoginScreen />} />
           <Route path="/register" element={<PracticeRegistration />} />
           <Route path="/plans/:tenantCode" element={<PlanWidget />} />
           <Route path="/enroll/:tenantCode" element={<EnrollmentWidget />} />
           <Route path="/intake/:tenantCode" element={<div className="min-h-screen flex items-center justify-center"><p className="text-slate-500">Patient Intake — Coming Soon</p></div>} />
-          <Route path="*" element={<Navigate to="/" replace />} />
+          <Route path="*" element={<Navigate to="/login" replace />} />
         </Routes>
       </Suspense>
     );
