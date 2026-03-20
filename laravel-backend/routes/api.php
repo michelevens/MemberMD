@@ -34,6 +34,14 @@ use App\Http\Controllers\Api\SmsWebhookController;
 use App\Http\Controllers\Api\KioskController;
 use App\Http\Controllers\Api\DunningController;
 use App\Http\Controllers\Api\ReportController;
+use App\Http\Controllers\Api\EmployerController;
+use App\Http\Controllers\Api\EmployerContractController;
+use App\Http\Controllers\Api\EmployerBillingController;
+use App\Http\Controllers\Api\EmployerPortalController;
+use App\Http\Controllers\Api\ChartTemplateController;
+use App\Http\Controllers\Api\LabOrderController;
+use App\Http\Controllers\Api\PharmacyController;
+use App\Http\Controllers\Api\MedicationHistoryController;
 use App\Http\Controllers\Api\Admin\MasterProgramController;
 use Illuminate\Support\Facades\Route;
 
@@ -299,5 +307,78 @@ Route::middleware(['auth:sanctum', 'phi.log'])->group(function () {
         Route::get('/membership', [ReportController::class, 'membership']);
         Route::get('/financial', [ReportController::class, 'financial']);
         Route::get('/export', [ReportController::class, 'export']);
+    });
+
+    // ===== Lab Orders =====
+    Route::prefix('lab-orders')->group(function () {
+        Route::get('/common-panels', [LabOrderController::class, 'commonPanels']);
+        Route::get('/patient/{patientId}', [LabOrderController::class, 'patientHistory']);
+        Route::get('/', [LabOrderController::class, 'index']);
+        Route::post('/', [LabOrderController::class, 'store']);
+        Route::get('/{id}', [LabOrderController::class, 'show']);
+        Route::put('/{id}', [LabOrderController::class, 'update']);
+        Route::post('/{id}/results', [LabOrderController::class, 'addResults']);
+    });
+
+    // ===== Pharmacies =====
+    Route::prefix('pharmacies')->group(function () {
+        Route::get('/search', [PharmacyController::class, 'search']);
+        Route::post('/', [PharmacyController::class, 'store']);
+        Route::get('/{id}', [PharmacyController::class, 'show']);
+    });
+
+    // ===== Medication History =====
+    Route::prefix('medication-history')->group(function () {
+        Route::get('/patient/{patientId}', [MedicationHistoryController::class, 'index']);
+        Route::post('/', [MedicationHistoryController::class, 'store']);
+        Route::put('/{id}', [MedicationHistoryController::class, 'update']);
+        Route::post('/reconcile', [MedicationHistoryController::class, 'reconcile']);
+    });
+
+    // ===== Drug Interaction Check =====
+    Route::post('/prescriptions/check-interactions', [PrescriptionController::class, 'checkInteractions']);
+
+    // ===== Employer Management (Practice-side) =====
+    Route::prefix('employers')->group(function () {
+        Route::get('/', [EmployerController::class, 'index']);
+        Route::post('/', [EmployerController::class, 'store']);
+        Route::get('/{id}', [EmployerController::class, 'show']);
+        Route::put('/{id}', [EmployerController::class, 'update']);
+        Route::delete('/{id}', [EmployerController::class, 'destroy']);
+    });
+
+    // ===== Employer Contracts =====
+    Route::prefix('employer-contracts')->group(function () {
+        Route::get('/', [EmployerContractController::class, 'index']);
+        Route::post('/', [EmployerContractController::class, 'store']);
+        Route::put('/{id}', [EmployerContractController::class, 'update']);
+    });
+
+    // ===== Employer Billing =====
+    Route::prefix('employer-billing')->group(function () {
+        Route::get('/invoices', [EmployerBillingController::class, 'invoices']);
+        Route::post('/invoices/generate', [EmployerBillingController::class, 'generateInvoice']);
+        Route::put('/invoices/{id}/paid', [EmployerBillingController::class, 'markPaid']);
+        Route::get('/enrollment-report/{employerId}', [EmployerBillingController::class, 'enrollmentReport']);
+    });
+
+    // ===== Employer Portal (employer_admin role) =====
+    Route::prefix('employer-portal')->group(function () {
+        Route::get('/dashboard', [EmployerPortalController::class, 'dashboard']);
+        Route::get('/employees', [EmployerPortalController::class, 'employees']);
+        Route::get('/invoices', [EmployerPortalController::class, 'invoices']);
+        Route::post('/enroll-roster', [EmployerPortalController::class, 'enrollRoster']);
+    });
+
+    // ===== Chart Templates =====
+    Route::prefix('chart-templates')->group(function () {
+        Route::get('/', [ChartTemplateController::class, 'index']);
+        Route::post('/', [ChartTemplateController::class, 'store']);
+        Route::get('/{id}', [ChartTemplateController::class, 'show']);
+        Route::put('/{id}', [ChartTemplateController::class, 'update']);
+        Route::delete('/{id}', [ChartTemplateController::class, 'destroy']);
+        Route::post('/{id}/clone', [ChartTemplateController::class, 'clone']);
+        Route::post('/{id}/apply', [ChartTemplateController::class, 'applyToEncounter']);
+        Route::post('/suggest-codes', [ChartTemplateController::class, 'suggestCodes']);
     });
 });

@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\StorePrescriptionRequest;
 use App\Models\Practice;
 use App\Models\Prescription;
+use App\Services\DrugInteractionService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
@@ -254,5 +255,36 @@ class PrescriptionController extends Controller
                 'message' => 'eFax service error: ' . $e->getMessage(),
             ], 500);
         }
+    }
+
+    /**
+     * Check drug interactions for a given drug against a patient's active medications.
+     */
+    public function checkInteractions(Request $request, DrugInteractionService $interactionService): JsonResponse
+    {
+        $user = $request->user();
+        abort_if(!in_array($user->role, ['superadmin', 'practice_admin', 'provider']), 403, 'Unauthorized.');
+
+        $validated = $request->validate([
+            'drug_name' => 'required|string|max:255',
+            'drug_ndc' => 'nullable|string|max:20',
+            'patient_id' => 'required|uuid|exists:patients,id',
+        ]);
+
+        $interactions = $interactionService->checkInteractions(
+            $validated['drug_name'],
+            $validated['patient_id'],
+            $user->tenant_id
+        );
+
+        return response()->json([
+            'data' => [
+                'drug_name' => $validated['drug_name'],
+                'patient_id' => $validated['patient_id'],
+                'interactions' => $interactions,
+                'interaction_count' => count($interactions),
+                'has_major_interactions' => collect($interactions)->contains('severity', 'major'),
+            ],
+        ]);
     }
 }

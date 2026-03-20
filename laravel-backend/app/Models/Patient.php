@@ -30,6 +30,7 @@ class Patient extends Model
         'photo_url',
         'pharmacy_name', 'pharmacy_address', 'pharmacy_phone',
         'referral_source', 'is_active',
+        'employer_id', 'employer_group_number',
     ];
 
     protected $casts = [
@@ -69,6 +70,7 @@ class Patient extends Model
     public function documents(): HasMany { return $this->hasMany(Document::class); }
     public function familyMembers(): HasMany { return $this->hasMany(PatientFamilyMember::class, 'primary_patient_id'); }
     public function programEnrollments(): HasMany { return $this->hasMany(ProgramEnrollment::class); }
+    public function employer(): BelongsTo { return $this->belongsTo(Employer::class); }
 
     public function getFullNameAttribute(): string
     {

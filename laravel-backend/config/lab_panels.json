@@ -1,0 +1,81 @@
+[
+    {
+        "code": "BMP",
+        "name": "Basic Metabolic Panel",
+        "cpt": "80048",
+        "tests": [
+            "Glucose", "BUN", "Creatinine", "Sodium", "Potassium",
+            "Chloride", "CO2", "Calcium"
+        ]
+    },
+    {
+        "code": "CMP",
+        "name": "Comprehensive Metabolic Panel",
+        "cpt": "80053",
+        "tests": [
+            "Glucose", "BUN", "Creatinine", "Sodium", "Potassium",
+            "Chloride", "CO2", "Calcium", "Total Protein", "Albumin",
+            "Bilirubin Total", "Alkaline Phosphatase", "AST", "ALT"
+        ]
+    },
+    {
+        "code": "CBC",
+        "name": "Complete Blood Count",
+        "cpt": "85025",
+        "tests": [
+            "WBC", "RBC", "Hemoglobin", "Hematocrit", "MCV",
+            "MCH", "MCHC", "RDW", "Platelet Count", "MPV"
+        ]
+    },
+    {
+        "code": "LIPID",
+        "name": "Lipid Panel",
+        "cpt": "80061",
+        "tests": [
+            "Total Cholesterol", "HDL Cholesterol", "LDL Cholesterol (calc)",
+            "Triglycerides", "VLDL Cholesterol (calc)"
+        ]
+    },
+    {
+        "code": "TSH",
+        "name": "Thyroid Stimulating Hormone",
+        "cpt": "84443",
+        "tests": ["TSH"]
+    },
+    {
+        "code": "A1C",
+        "name": "Hemoglobin A1C",
+        "cpt": "83036",
+        "tests": ["Hemoglobin A1C", "Estimated Average Glucose (eAG)"]
+    },
+    {
+        "code": "UA",
+        "name": "Urinalysis",
+        "cpt": "81003",
+        "tests": [
+            "Color", "Clarity", "Specific Gravity", "pH", "Protein",
+            "Glucose", "Ketones", "Blood", "Bilirubin", "Urobilinogen",
+            "Nitrite", "Leukocyte Esterase"
+        ]
+    },
+    {
+        "code": "VITD",
+        "name": "Vitamin D, 25-Hydroxy",
+        "cpt": "82306",
+        "tests": ["Vitamin D, 25-Hydroxy"]
+    },
+    {
+        "code": "PSA",
+        "name": "Prostate-Specific Antigen",
+        "cpt": "84153",
+        "tests": ["PSA, Total"]
+    },
+    {
+        "code": "IRON",
+        "name": "Iron Panel",
+        "cpt": "83540",
+        "tests": [
+            "Iron, Serum", "TIBC", "Iron Saturation", "Ferritin"
+        ]
+    }
+]

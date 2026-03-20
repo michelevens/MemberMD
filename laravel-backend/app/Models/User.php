@@ -24,6 +24,7 @@ class User extends Authenticatable
         'mfa_enabled', 'mfa_secret',
         'pin', 'last_login_at',
         'onboarding_completed', 'stripe_customer_id',
+        'employer_id',
     ];
 
     protected $hidden = [
@@ -62,4 +63,6 @@ class User extends Authenticatable
     public function isProvider(): bool { return $this->role === 'provider'; }
     public function isStaff(): bool { return $this->role === 'staff'; }
     public function isPatient(): bool { return $this->role === 'patient'; }
+    public function isEmployerAdmin(): bool { return $this->role === 'employer_admin'; }
+    public function employer(): BelongsTo { return $this->belongsTo(Employer::class); }
 }

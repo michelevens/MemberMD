@@ -22,6 +22,7 @@ class Encounter extends Model
         'diagnoses', 'vitals', 'prescriptions_written', 'labs_ordered',
         'follow_up_instructions', 'follow_up_weeks',
         'screening_scores',
+        'template_id', 'structured_data',
         'status', 'signed_at', 'signed_by',
         'amended_at', 'amendment_reason',
     ];
@@ -36,6 +37,7 @@ class Encounter extends Model
         'signed_at' => 'datetime',
         'amended_at' => 'datetime',
         'follow_up_weeks' => 'integer',
+        'structured_data' => 'array',
     ];
 
     public function patient(): BelongsTo { return $this->belongsTo(Patient::class); }
@@ -45,4 +47,6 @@ class Encounter extends Model
     public function prescriptions(): HasMany { return $this->hasMany(Prescription::class); }
     public function screeningResponses(): HasMany { return $this->hasMany(ScreeningResponse::class); }
     public function signer(): BelongsTo { return $this->belongsTo(User::class, 'signed_by'); }
+    public function chartTemplate(): BelongsTo { return $this->belongsTo(ChartTemplate::class, 'template_id'); }
+    public function chartTemplateResponses(): HasMany { return $this->hasMany(ChartTemplateResponse::class); }
 }
