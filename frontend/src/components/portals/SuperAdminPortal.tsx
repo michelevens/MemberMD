@@ -1003,7 +1003,7 @@ export function SuperAdminPortal() {
       // Specialties
       if (results[2].status === "fulfilled") {
         const specialtiesRes = results[2].value;
-        if (specialtiesRes.data && Array.isArray(specialtiesRes.data) && specialtiesRes.data.length > 0) {
+        if (specialtiesRes.data && Array.isArray(specialtiesRes.data)) {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           setApiSpecialties(specialtiesRes.data.map((s: any) => ({
             id: s.id || "",
@@ -1020,7 +1020,7 @@ export function SuperAdminPortal() {
       // Screenings
       if (results[3].status === "fulfilled") {
         const screeningsRes = results[3].value;
-        if (screeningsRes.data && Array.isArray(screeningsRes.data) && screeningsRes.data.length > 0) {
+        if (screeningsRes.data && Array.isArray(screeningsRes.data)) {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           setApiScreenings(screeningsRes.data.map((s: any) => ({
             id: s.id || "",
@@ -1043,7 +1043,7 @@ export function SuperAdminPortal() {
       // Consents
       if (results[4].status === "fulfilled") {
         const consentsRes = results[4].value;
-        if (consentsRes.data && Array.isArray(consentsRes.data) && consentsRes.data.length > 0) {
+        if (consentsRes.data && Array.isArray(consentsRes.data)) {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           setApiConsents(consentsRes.data.map((c: any) => ({
             id: c.id || "",
@@ -1062,7 +1062,7 @@ export function SuperAdminPortal() {
       // Audit Logs
       if (results[5].status === "fulfilled") {
         const auditRes = results[5].value;
-        if (auditRes.data && Array.isArray(auditRes.data) && auditRes.data.length > 0) {
+        if (auditRes.data && Array.isArray(auditRes.data)) {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           setApiAuditLogs(auditRes.data.map((l: any) => ({
             id: l.id || "",

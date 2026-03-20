@@ -502,7 +502,7 @@ export function PatientPortal() {
   const loadFamilyMembers = useCallback(async () => {
     try {
       const res = await familyService.list();
-      if (res.data && Array.isArray(res.data) && res.data.length > 0) {
+      if (res.data && Array.isArray(res.data)) {
         setFamilyMembers(res.data);
       }
     } catch {
@@ -538,7 +538,7 @@ export function PatientPortal() {
         // Upcoming appointments
         if (results[0].status === "fulfilled") {
           const r = results[0].value;
-          if (r.data && Array.isArray(r.data) && r.data.length > 0) {
+          if (r.data && Array.isArray(r.data)) {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             setApiUpcoming(r.data.map((a: any) => ({
               id: (a.id as string) || "",
@@ -555,7 +555,7 @@ export function PatientPortal() {
         // Past appointments
         if (results[1].status === "fulfilled") {
           const r = results[1].value;
-          if (r.data && Array.isArray(r.data) && r.data.length > 0) {
+          if (r.data && Array.isArray(r.data)) {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             setApiPast(r.data.map((a: any) => ({
               id: (a.id as string) || "",
@@ -577,7 +577,7 @@ export function PatientPortal() {
         // Messages → threads
         if (results[2].status === "fulfilled") {
           const r = results[2].value;
-          if (r.data && Array.isArray(r.data) && r.data.length > 0) {
+          if (r.data && Array.isArray(r.data)) {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const grouped: Record<string, any[]> = {};
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -603,14 +603,14 @@ export function PatientPortal() {
                 })),
               };
             });
-            if (threads.length > 0) setApiThreads(threads);
+            setApiThreads(threads);
           }
         }
 
         // Medications (from prescriptions)
         if (results[3].status === "fulfilled") {
           const r = results[3].value;
-          if (r.data && Array.isArray(r.data) && r.data.length > 0) {
+          if (r.data && Array.isArray(r.data)) {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             setApiMedications(r.data.map((p: any) => ({
               id: (p.id as string) || "",
@@ -626,7 +626,7 @@ export function PatientPortal() {
         // Documents
         if (results[4].status === "fulfilled") {
           const r = results[4].value;
-          if (r.data && Array.isArray(r.data) && r.data.length > 0) {
+          if (r.data && Array.isArray(r.data)) {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             setApiDocuments(r.data.map((d: any) => ({
               id: (d.id as string) || "",

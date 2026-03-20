@@ -652,20 +652,20 @@ export function PracticePortal() {
       programService.list(),
     ]);
     // Dashboard stats
-    if (statsRes.status === "fulfilled" && statsRes.value.data && typeof statsRes.value.data === "object" && Object.keys(statsRes.value.data).length > 0) {
+    if (statsRes.status === "fulfilled" && statsRes.value.data && typeof statsRes.value.data === "object") {
       setApiDashStats(statsRes.value.data);
       setIsRealApi(true);
     }
     // Plans
-    if (plansRes.status === "fulfilled" && plansRes.value.data && Array.isArray(plansRes.value.data) && plansRes.value.data.length > 0) {
+    if (plansRes.status === "fulfilled" && plansRes.value.data && Array.isArray(plansRes.value.data)) {
       setApiPlans(plansRes.value.data);
     }
     // Threads
-    if (threadsRes.status === "fulfilled" && threadsRes.value.data && Array.isArray(threadsRes.value.data) && threadsRes.value.data.length > 0) {
+    if (threadsRes.status === "fulfilled" && threadsRes.value.data && Array.isArray(threadsRes.value.data)) {
       setApiThreads(threadsRes.value.data);
     }
     // Patients
-    if (patientsRes.status === "fulfilled" && patientsRes.value.data && Array.isArray(patientsRes.value.data) && patientsRes.value.data.length > 0) {
+    if (patientsRes.status === "fulfilled" && patientsRes.value.data && Array.isArray(patientsRes.value.data)) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       setApiPatients(patientsRes.value.data.map((p: any) => ({
         id: p.id,
@@ -691,7 +691,7 @@ export function PracticePortal() {
       })));
     }
     // Appointments
-    if (appointmentsRes.status === "fulfilled" && appointmentsRes.value.data && Array.isArray(appointmentsRes.value.data) && appointmentsRes.value.data.length > 0) {
+    if (appointmentsRes.status === "fulfilled" && appointmentsRes.value.data && Array.isArray(appointmentsRes.value.data)) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       setApiAppointments(appointmentsRes.value.data.map((a: any) => ({
         id: a.id,
@@ -708,7 +708,7 @@ export function PracticePortal() {
       })));
     }
     // Encounters
-    if (encountersRes.status === "fulfilled" && encountersRes.value.data && Array.isArray(encountersRes.value.data) && encountersRes.value.data.length > 0) {
+    if (encountersRes.status === "fulfilled" && encountersRes.value.data && Array.isArray(encountersRes.value.data)) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       setApiEncounters(encountersRes.value.data.map((e: any) => ({
         id: e.id,
@@ -723,7 +723,7 @@ export function PracticePortal() {
       })));
     }
     // Prescriptions
-    if (prescriptionsRes.status === "fulfilled" && prescriptionsRes.value.data && Array.isArray(prescriptionsRes.value.data) && prescriptionsRes.value.data.length > 0) {
+    if (prescriptionsRes.status === "fulfilled" && prescriptionsRes.value.data && Array.isArray(prescriptionsRes.value.data)) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       setApiPrescriptions(prescriptionsRes.value.data.map((rx: any) => ({
         id: rx.id,
@@ -737,7 +737,7 @@ export function PracticePortal() {
       })));
     }
     // Invoices
-    if (invoicesRes.status === "fulfilled" && invoicesRes.value.data && Array.isArray(invoicesRes.value.data) && invoicesRes.value.data.length > 0) {
+    if (invoicesRes.status === "fulfilled" && invoicesRes.value.data && Array.isArray(invoicesRes.value.data)) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       setApiInvoices(invoicesRes.value.data.map((inv: any) => ({
         id: inv.invoiceNumber || inv.id || "",
@@ -749,7 +749,7 @@ export function PracticePortal() {
       })));
     }
     // Programs
-    if (programsRes.status === "fulfilled" && programsRes.value.data && Array.isArray(programsRes.value.data) && programsRes.value.data.length > 0) {
+    if (programsRes.status === "fulfilled" && programsRes.value.data && Array.isArray(programsRes.value.data)) {
       setApiPrograms(programsRes.value.data);
     }
     setDataLoading(false);
