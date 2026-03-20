@@ -28,6 +28,12 @@ use App\Http\Controllers\Api\ProviderCredentialController;
 use App\Http\Controllers\Api\HipaaComplianceController;
 use App\Http\Controllers\Api\BroadcastController;
 use App\Http\Controllers\Api\IncidentController;
+use App\Http\Controllers\Api\ReferralController;
+use App\Http\Controllers\Api\SpecialistDirectoryController;
+use App\Http\Controllers\Api\SmsWebhookController;
+use App\Http\Controllers\Api\KioskController;
+use App\Http\Controllers\Api\DunningController;
+use App\Http\Controllers\Api\ReportController;
 use App\Http\Controllers\Api\Admin\MasterProgramController;
 use Illuminate\Support\Facades\Route;
 
@@ -68,6 +74,20 @@ Route::post('/coupons/validate', [CouponController::class, 'validate_'])->middle
 
 // ===== Public iCal Feed (no auth) =====
 Route::get('/calendar/ical/{token}', [CalendarController::class, 'icalFeed']);
+
+// ===== SMS Webhooks (public, no auth — Twilio callbacks) =====
+Route::prefix('webhooks/sms')->middleware('throttle:120,1')->group(function () {
+    Route::post('/inbound', [SmsWebhookController::class, 'inbound']);
+    Route::post('/status', [SmsWebhookController::class, 'status']);
+});
+
+// ===== Patient Check-In Kiosk (public, no auth) =====
+Route::prefix('kiosk')->middleware('throttle:30,1')->group(function () {
+    Route::post('/identify', [KioskController::class, 'identify']);
+    Route::post('/check-in', [KioskController::class, 'checkIn']);
+    Route::get('/{tenantCode}/patient/{patientId}/screenings', [KioskController::class, 'screenings']);
+    Route::get('/{tenantCode}/patient/{patientId}/consents', [KioskController::class, 'consents']);
+});
 
 // ===== Authenticated Routes =====
 Route::middleware(['auth:sanctum', 'phi.log'])->group(function () {
@@ -257,4 +277,27 @@ Route::middleware(['auth:sanctum', 'phi.log'])->group(function () {
 
     // ===== Incidents / Safety Events =====
     Route::apiResource('incidents', IncidentController::class);
+
+    // ===== Referrals =====
+    Route::get('referrals/stats', [ReferralController::class, 'stats']);
+    Route::apiResource('referrals', ReferralController::class);
+
+    // ===== Specialist Directory =====
+    Route::apiResource('specialists', SpecialistDirectoryController::class);
+
+    // ===== Dunning & Payment Recovery =====
+    Route::prefix('dunning')->group(function () {
+        Route::get('/policies', [DunningController::class, 'index']);
+        Route::post('/policies', [DunningController::class, 'store']);
+        Route::get('/dashboard', [DunningController::class, 'dashboard']);
+        Route::post('/{membershipId}/retry', [DunningController::class, 'retryPayment']);
+    });
+
+    // ===== Revenue Analytics & Reporting =====
+    Route::prefix('reports')->group(function () {
+        Route::get('/revenue', [ReportController::class, 'revenue']);
+        Route::get('/membership', [ReportController::class, 'membership']);
+        Route::get('/financial', [ReportController::class, 'financial']);
+        Route::get('/export', [ReportController::class, 'export']);
+    });
 });

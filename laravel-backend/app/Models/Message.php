@@ -18,6 +18,7 @@ class Message extends Model
         'sender_id', 'recipient_id',
         'body', 'attachments',
         'read_at', 'is_system_message',
+        'channel', 'external_id', 'delivery_status',
     ];
 
     protected $casts = [
@@ -25,6 +26,8 @@ class Message extends Model
         'attachments' => 'encrypted:array',
         'read_at' => 'datetime',
         'is_system_message' => 'boolean',
+        'channel' => 'string',
+        'delivery_status' => 'string',
     ];
 
     public function sender(): BelongsTo { return $this->belongsTo(User::class, 'sender_id'); }

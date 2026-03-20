@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Message;
+use App\Services\TwilioSmsService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
@@ -72,9 +73,12 @@ class MessageController extends Controller
             'body' => 'required|string|max:5000',
             'thread_id' => 'nullable|uuid',
             'attachments' => 'nullable|array',
+            'channel' => 'nullable|string|in:portal,sms,email',
         ]);
 
-        $message = Message::create([
+        $channel = $validated['channel'] ?? 'portal';
+
+        $messageData = [
             'tenant_id' => $user->tenant_id,
             'thread_id' => $validated['thread_id'] ?? (string) Str::uuid(),
             'sender_id' => $user->id,
@@ -82,7 +86,30 @@ class MessageController extends Controller
             'body' => $validated['body'],
             'attachments' => $validated['attachments'] ?? null,
             'is_system_message' => false,
-        ]);
+            'channel' => $channel,
+        ];
+
+        // If SMS channel, send via Twilio
+        if ($channel === 'sms') {
+            $recipient = \App\Models\User::find($validated['recipient_id']);
+            $patient = $recipient?->patient;
+            $phone = $patient?->phone ?? $recipient?->phone;
+
+            if (!$phone) {
+                return response()->json([
+                    'message' => 'Recipient has no phone number on file.',
+                    'errors' => ['channel' => ['No phone number available for SMS.']],
+                ], 422);
+            }
+
+            $twilioService = new TwilioSmsService();
+            $sid = $twilioService->sendSms($phone, $validated['body'], $user->tenant_id);
+
+            $messageData['external_id'] = $sid;
+            $messageData['delivery_status'] = $sid ? 'sent' : 'failed';
+        }
+
+        $message = Message::create($messageData);
 
         return response()->json([
             'data' => $message->load(['sender', 'recipient'])

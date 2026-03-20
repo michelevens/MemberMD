@@ -23,7 +23,7 @@ class Appointment extends Model
         'cancel_reason', 'cancelled_at', 'no_show_fee',
         'notes', 'reminder_sent_at',
         'recurrence_rule', 'parent_appointment_id', 'patient_timezone',
-        'confirmed_at', 'checked_in_at', 'started_at', 'completed_at',
+        'confirmed_at', 'checked_in_at', 'check_in_method', 'started_at', 'completed_at',
     ];
 
     protected $casts = [
