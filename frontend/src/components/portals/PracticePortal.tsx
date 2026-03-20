@@ -766,11 +766,15 @@ export function PracticePortal() {
     setAddPatientError(null);
     try {
       const res = await patientService.create(addPatientForm);
-      if (res.data) {
+      if (res.error) {
+        setAddPatientError(res.error);
+      } else if (res.data) {
         // Refresh patient list
         loadPracticeData();
         setShowAddPatient(false);
         setAddPatientForm({ firstName: "", lastName: "", email: "", phone: "", dateOfBirth: "", gender: "male" });
+      } else {
+        setAddPatientError("Failed to create patient. Please try again.");
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Failed to create patient. Please try again.";
