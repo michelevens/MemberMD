@@ -3376,7 +3376,7 @@ export function PracticePortal() {
 
     const monthlyPrice = plan.monthlyPrice ?? plan.monthly_price ?? 0;
     const annualPrice = plan.annualPrice ?? plan.annual_price ?? 0;
-    const memberCount = plan.memberCount ?? plan.member_count ?? 0;
+    const memberCount = plan.membershipsCount ?? plan.memberCount ?? plan.member_count ?? 0;
     const mrr = memberCount * monthlyPrice;
     const arr = mrr * 12;
     const isActive = plan.isActive !== false && plan.is_active !== false;
@@ -4173,7 +4173,7 @@ export function PracticePortal() {
           {(apiPlans || (isDemoMode ? MOCK_PLANS : [])).map((plan) => {
             const Icon = planIcons[plan.name] || Heart;
             const gradient = planGradients[plan.name] || planGradients.Essential;
-            const memberCount = plan.memberCount ?? plan.member_count ?? 0;
+            const memberCount = plan.membershipsCount ?? plan.memberCount ?? plan.member_count ?? 0;
             const monthlyPrice = plan.monthlyPrice ?? plan.monthly_price ?? 0;
             const revenue = memberCount * monthlyPrice;
 

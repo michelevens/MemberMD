@@ -13,7 +13,7 @@ class MembershipPlanController extends Controller
     {
         $user = $request->user();
         $query = MembershipPlan::where('tenant_id', $user->tenant_id)
-            ->withCount('memberships');
+            ->withCount(['memberships', 'planEntitlements']);
 
         // Non-admins only see active plans
         if (!$user->isPracticeAdmin()) {
@@ -36,8 +36,8 @@ class MembershipPlanController extends Controller
     {
         $user = $request->user();
         $plan = MembershipPlan::where('tenant_id', $user->tenant_id)
-            ->withCount('memberships')
-            ->with(['addons', 'program'])
+            ->withCount(['memberships', 'planEntitlements'])
+            ->with(['addons', 'program', 'planEntitlements.entitlementType'])
             ->findOrFail($id);
 
         return response()->json(['data' => $plan]);
