@@ -179,7 +179,12 @@ class ProgramController extends Controller
             return response()->json(['message' => 'Patient is already enrolled in this program.'], 422);
         }
 
-        $enrollment = ProgramEnrollment::create(array_merge($validated, [
+        // Store the membership plan ID separately — program_enrollments.plan_id FK points to program_plans
+        $membershipPlanId = $validated['plan_id'] ?? null;
+        $enrollData = $validated;
+        unset($enrollData['plan_id']); // Remove to avoid FK violation with program_plans
+
+        $enrollment = ProgramEnrollment::create(array_merge($enrollData, [
             'program_id' => $program->id,
             'status' => 'active',
             'enrolled_at' => now(),
@@ -189,11 +194,31 @@ class ProgramController extends Controller
                 : null,
         ]));
 
+        // Also create a PatientMembership if a membership plan was selected
+        if ($membershipPlanId) {
+            try {
+                $plan = \App\Models\MembershipPlan::findOrFail($membershipPlanId);
+                \App\Models\PatientMembership::create([
+                    'tenant_id' => $request->user()->tenant_id,
+                    'patient_id' => $validated['patient_id'],
+                    'plan_id' => $membershipPlanId,
+                    'program_id' => $program->id,
+                    'status' => 'active',
+                    'billing_frequency' => 'monthly',
+                    'started_at' => now(),
+                    'current_period_start' => now(),
+                    'current_period_end' => now()->addMonth(),
+                ]);
+            } catch (\Throwable $e) {
+                \Illuminate\Support\Facades\Log::warning('Membership creation during program enrollment failed: ' . $e->getMessage());
+            }
+        }
+
         // Increment enrollment count
         $program->increment('current_enrollment');
 
         return response()->json([
-            'data' => $enrollment->load(['program', 'patient', 'plan', 'provider']),
+            'data' => $enrollment->load(['program', 'patient', 'provider']),
             'message' => 'Patient enrolled successfully.',
         ], 201);
     }
