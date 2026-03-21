@@ -23,6 +23,14 @@ class EntitlementTypeController extends Controller
             $query->where('is_active', filter_var($request->is_active, FILTER_VALIDATE_BOOLEAN));
         }
 
+        if ($request->filled('program_type')) {
+            $programType = $request->program_type;
+            $query->where(function ($q) use ($programType) {
+                $q->whereNull('applicable_programs')
+                  ->orWhereJsonContains('applicable_programs', $programType);
+            });
+        }
+
         $types = $query->orderBy('sort_order')->orderBy('name')->get();
 
         return response()->json(['data' => $types]);
@@ -42,6 +50,8 @@ class EntitlementTypeController extends Controller
             'trackable' => 'boolean',
             'cash_value' => 'nullable|numeric|min:0',
             'sort_order' => 'integer|min:0',
+            'applicable_programs' => 'nullable|array',
+            'applicable_programs.*' => 'string|in:pure_dpc,hybrid_dpc,concierge,cash_pay,ccm,behavioral_health,employer',
             'is_active' => 'boolean',
         ]);
 
@@ -77,6 +87,8 @@ class EntitlementTypeController extends Controller
             'trackable' => 'boolean',
             'cash_value' => 'nullable|numeric|min:0',
             'sort_order' => 'integer|min:0',
+            'applicable_programs' => 'nullable|array',
+            'applicable_programs.*' => 'string|in:pure_dpc,hybrid_dpc,concierge,cash_pay,ccm,behavioral_health,employer',
             'is_active' => 'boolean',
         ]);
 

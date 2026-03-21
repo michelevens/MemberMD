@@ -15,13 +15,14 @@ class EntitlementType extends Model
     protected $fillable = [
         'tenant_id', 'code', 'name', 'category', 'description',
         'unit_of_measure', 'trackable', 'cash_value',
-        'sort_order', 'is_active',
+        'sort_order', 'applicable_programs', 'is_active',
     ];
 
     protected $casts = [
         'trackable' => 'boolean',
         'cash_value' => 'decimal:2',
         'sort_order' => 'integer',
+        'applicable_programs' => 'array',
         'is_active' => 'boolean',
     ];
 

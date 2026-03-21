@@ -10,6 +10,7 @@ use App\Models\PlanAddon;
 use App\Models\PracticeSetting;
 use App\Models\Practice;
 use App\Models\ScreeningTemplate;
+use Database\Seeders\EntitlementTypeSeeder;
 
 class PracticeBootstrapService
 {
@@ -22,7 +23,8 @@ class PracticeBootstrapService
         $specialty = MasterSpecialty::where('code', $practice->specialty)->first();
 
         if (!$specialty) {
-            // Fallback: still copy universal consents and create default settings
+            // Fallback: still seed entitlements, copy universal consents and create default settings
+            $this->seedEntitlementTypes($practice);
             $this->copyConsentTemplates($practice);
             $this->createDefaultSettings($practice);
             return;
@@ -30,6 +32,7 @@ class PracticeBootstrapService
 
         $this->createDefaultPlans($practice, $specialty);
         $this->createDefaultAppointmentTypes($practice, $specialty);
+        $this->seedEntitlementTypes($practice);
         $this->copyScreeningTemplates($practice, $specialty);
         $this->copyConsentTemplates($practice);
         $this->createDefaultSettings($practice);
@@ -180,6 +183,18 @@ class PracticeBootstrapService
                 ]
             );
         }
+    }
+
+    /**
+     * Seed entitlement types for the practice, filtered by practice_model.
+     * Maps practice_model to the appropriate program type for filtering.
+     */
+    protected function seedEntitlementTypes(Practice $practice): void
+    {
+        // Map practice_model to the program type tag used in applicable_programs
+        $programType = $practice->practice_model ?? null;
+
+        EntitlementTypeSeeder::seedForPractice($practice, null, $programType);
     }
 
     /**

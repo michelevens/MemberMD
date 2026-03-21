@@ -20,6 +20,7 @@ return new class extends Migration
             $table->boolean('trackable')->default(true);
             $table->decimal('cash_value', 10, 2)->nullable();
             $table->integer('sort_order')->default(0);
+            $table->jsonb('applicable_programs')->nullable(); // null = all programs
             $table->boolean('is_active')->default(true);
             $table->timestamps();
 
