@@ -30,7 +30,7 @@ import {
   XCircle,
   AlertTriangle,
 } from "lucide-react";
-import { programService, patientService, providerService } from "../../lib/api";
+import { programService, patientService, providerService, apiFetch, membershipPlanService } from "../../lib/api";
 
 const isDemoMode = import.meta.env.VITE_DEMO_MODE !== "false";
 
@@ -437,6 +437,16 @@ export function ProgramsSection() {
   const [enrollSuccess, setEnrollSuccess] = useState(false);
   const [patientsLoading, setPatientsLoading] = useState(false);
 
+  // ─── Enrollment Action State ───────────────────────────────────────────────
+  const [cancelReasonModal, setCancelReasonModal] = useState<{ enrollmentId: string; patientName: string } | null>(null);
+  const [cancelReason, setCancelReason] = useState("");
+  const [changePlanModal, setChangePlanModal] = useState<{ enrollmentId: string; patientName: string } | null>(null);
+  const [changePlanSelectedId, setChangePlanSelectedId] = useState<string | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [availablePlans, setAvailablePlans] = useState<any[]>([]);
+  const [availablePlansLoading, setAvailablePlansLoading] = useState(false);
+  const [enrollmentActionLoading, setEnrollmentActionLoading] = useState<string | null>(null);
+
   // ─── Map API response to MockProgram shape ─────────────────────────────────
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const mapApiProgram = useCallback((p: any): MockProgram => ({
@@ -538,6 +548,76 @@ export function ProgramsSection() {
   useEffect(() => {
     fetchPrograms();
   }, [fetchPrograms]);
+
+  // ─── Enrollment Action Handlers ─────────────────────────────────────────────
+  const handlePauseEnrollment = useCallback(async (enrollmentId: string) => {
+    setEnrollmentActionLoading(enrollmentId);
+    try {
+      await apiFetch(`/memberships/${enrollmentId}/pause`, { method: "POST" });
+      setToast({ message: "Enrollment paused.", type: "success" });
+      fetchPrograms();
+    } catch {
+      setToast({ message: "Failed to pause enrollment.", type: "error" });
+    }
+    setEnrollmentActionLoading(null);
+  }, [fetchPrograms, setToast]);
+
+  const handleResumeEnrollment = useCallback(async (enrollmentId: string) => {
+    setEnrollmentActionLoading(enrollmentId);
+    try {
+      await apiFetch(`/memberships/${enrollmentId}/resume`, { method: "POST" });
+      setToast({ message: "Enrollment resumed.", type: "success" });
+      fetchPrograms();
+    } catch {
+      setToast({ message: "Failed to resume enrollment.", type: "error" });
+    }
+    setEnrollmentActionLoading(null);
+  }, [fetchPrograms, setToast]);
+
+  const handleCancelEnrollment = useCallback(async (enrollmentId: string, reason: string) => {
+    setEnrollmentActionLoading(enrollmentId);
+    try {
+      await apiFetch(`/memberships/${enrollmentId}/cancel`, {
+        method: "POST",
+        body: JSON.stringify({ reason }),
+      });
+      setToast({ message: "Enrollment cancelled.", type: "success" });
+      setCancelReasonModal(null);
+      setCancelReason("");
+      fetchPrograms();
+    } catch {
+      setToast({ message: "Failed to cancel enrollment.", type: "error" });
+    }
+    setEnrollmentActionLoading(null);
+  }, [fetchPrograms, setToast]);
+
+  const handleChangePlan = useCallback(async (enrollmentId: string, planId: string) => {
+    setEnrollmentActionLoading(enrollmentId);
+    try {
+      await apiFetch(`/memberships/${enrollmentId}/change-plan`, {
+        method: "POST",
+        body: JSON.stringify({ planId }),
+      });
+      setToast({ message: "Plan changed successfully.", type: "success" });
+      setChangePlanModal(null);
+      setChangePlanSelectedId(null);
+      fetchPrograms();
+    } catch {
+      setToast({ message: "Failed to change plan.", type: "error" });
+    }
+    setEnrollmentActionLoading(null);
+  }, [fetchPrograms, setToast]);
+
+  const fetchAvailablePlans = useCallback(async () => {
+    setAvailablePlansLoading(true);
+    try {
+      const res = await membershipPlanService.list();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const list = Array.isArray(res.data) ? res.data : (res.data as any)?.data || [];
+      setAvailablePlans(list);
+    } catch { /* ignore */ }
+    setAvailablePlansLoading(false);
+  }, []);
 
   // ─── Search patients for enroll dialog ─────────────────────────────────────
   useEffect(() => {
@@ -1111,6 +1191,68 @@ export function ProgramsSection() {
                         <td className="py-3 px-4 text-slate-500 text-xs">{e.expiresAt || "—"}</td>
                         <td className="py-3 px-4 text-right">
                           <div className="flex items-center justify-end gap-1">
+                            {/* Pause / Resume */}
+                            {e.status === "active" && (
+                              <button
+                                className="p-1.5 rounded hover:bg-amber-50 text-slate-400 hover:text-amber-600 transition-colors"
+                                title="Pause enrollment"
+                                disabled={enrollmentActionLoading === e.id}
+                                onClick={() => {
+                                  setConfirmDialog({
+                                    title: "Pause Enrollment",
+                                    message: `Pause ${e.patientName}'s enrollment? They will retain their membership but benefits will be suspended.`,
+                                    confirmLabel: "Pause",
+                                    danger: false,
+                                    onConfirm: async () => {
+                                      setConfirmDialog(null);
+                                      await handlePauseEnrollment(e.id);
+                                    },
+                                  });
+                                }}
+                              >
+                                <PauseCircle className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                            {e.status === "paused" && (
+                              <button
+                                className="p-1.5 rounded hover:bg-green-50 text-slate-400 hover:text-green-600 transition-colors"
+                                title="Resume enrollment"
+                                disabled={enrollmentActionLoading === e.id}
+                                onClick={() => handleResumeEnrollment(e.id)}
+                              >
+                                <PlayCircle className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                            {/* Change Plan */}
+                            {(e.status === "active" || e.status === "paused") && (
+                              <button
+                                className="p-1.5 rounded hover:bg-slate-100 text-slate-400 hover:text-blue-600 transition-colors"
+                                title="Change plan"
+                                disabled={enrollmentActionLoading === e.id}
+                                onClick={() => {
+                                  setChangePlanModal({ enrollmentId: e.id, patientName: e.patientName });
+                                  setChangePlanSelectedId(null);
+                                  fetchAvailablePlans();
+                                }}
+                              >
+                                <Pencil className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                            {/* Cancel */}
+                            {e.status !== "cancelled" && e.status !== "completed" && (
+                              <button
+                                className="p-1.5 rounded hover:bg-red-50 text-slate-400 hover:text-red-500 transition-colors"
+                                title="Cancel enrollment"
+                                disabled={enrollmentActionLoading === e.id}
+                                onClick={() => {
+                                  setCancelReasonModal({ enrollmentId: e.id, patientName: e.patientName });
+                                  setCancelReason("");
+                                }}
+                              >
+                                <XCircle className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                            {/* View */}
                             <button
                               className="p-1.5 rounded hover:bg-slate-100 text-slate-400"
                               title="View enrollment"
@@ -1118,47 +1260,10 @@ export function ProgramsSection() {
                             >
                               <Eye className="w-3.5 h-3.5" />
                             </button>
-                            <button
-                              className="p-1.5 rounded hover:bg-slate-100 text-slate-400"
-                              title="Edit enrollment"
-                              onClick={() => {
-                                setPromptModal({
-                                  title: "Change Enrollment Status",
-                                  label: `Status for ${e.patientName} (active/paused/cancelled)`,
-                                  defaultValue: e.status,
-                                  onSubmit: async (newStatus) => {
-                                    if (!newStatus || newStatus === e.status) return;
-                                    try {
-                                      await programService.update(selectedProgram.id, {} as Record<string, unknown>);
-                                      fetchPrograms();
-                                    } catch { /* ignore */ }
-                                  },
-                                });
-                              }}
-                            >
-                              <Pencil className="w-3.5 h-3.5" />
-                            </button>
-                            <button
-                              className="p-1.5 rounded hover:bg-slate-100 text-slate-400"
-                              title="Unenroll"
-                              onClick={() => {
-                                setConfirmDialog({
-                                  title: "Unenroll Patient",
-                                  message: `Unenroll ${e.patientName} from ${selectedProgram.name}?`,
-                                  confirmLabel: "Unenroll",
-                                  danger: true,
-                                  onConfirm: async () => {
-                                    setConfirmDialog(null);
-                                    try {
-                                      await programService.unenrollPatient(selectedProgram.id, e.id);
-                                      fetchPrograms();
-                                    } catch { /* ignore */ }
-                                  },
-                                });
-                              }}
-                            >
-                              <MoreHorizontal className="w-3.5 h-3.5" />
-                            </button>
+                            {/* Loading indicator */}
+                            {enrollmentActionLoading === e.id && (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin text-slate-400" />
+                            )}
                           </div>
                         </td>
                       </tr>
@@ -1933,6 +2038,114 @@ export function ProgramsSection() {
               }}
             >
               {addProviderSubmitting ? "Adding..." : "Add Provider"}
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+
+    {/* ─── Cancel Enrollment Modal ─────────────────────────────────────── */}
+    {cancelReasonModal && (
+      <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: "rgba(0,0,0,0.5)" }}>
+        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
+          <div className="p-6" style={{ background: "linear-gradient(135deg, #dc2626, #ef4444)" }}>
+            <h3 className="text-lg font-bold text-white">Cancel Enrollment</h3>
+            <p className="text-sm text-red-100 mt-1">Cancel {cancelReasonModal.patientName}&apos;s enrollment</p>
+          </div>
+          <div className="p-6">
+            <label className="block text-sm font-medium text-slate-700 mb-1">Cancellation Reason *</label>
+            <textarea
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-red-300 resize-none"
+              rows={3}
+              placeholder="Enter reason for cancellation..."
+              value={cancelReason}
+              onChange={(e) => setCancelReason(e.target.value)}
+              autoFocus
+            />
+          </div>
+          <div className="px-6 pb-6 flex justify-end gap-3">
+            <button
+              onClick={() => { setCancelReasonModal(null); setCancelReason(""); }}
+              className="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100 transition-colors"
+            >
+              Go Back
+            </button>
+            <button
+              onClick={() => handleCancelEnrollment(cancelReasonModal.enrollmentId, cancelReason)}
+              disabled={!cancelReason.trim() || enrollmentActionLoading === cancelReasonModal.enrollmentId}
+              className="px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors disabled:opacity-50"
+              style={{ backgroundColor: "#dc2626" }}
+            >
+              {enrollmentActionLoading === cancelReasonModal.enrollmentId ? "Cancelling..." : "Cancel Enrollment"}
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+
+    {/* ─── Change Plan Modal ──────────────────────────────────────────────── */}
+    {changePlanModal && (
+      <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: "rgba(0,0,0,0.5)" }}>
+        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
+          <div className="p-6" style={{ background: "linear-gradient(135deg, #1B2B4D, #243b53)" }}>
+            <h3 className="text-lg font-bold text-white">Change Plan</h3>
+            <p className="text-sm text-slate-300 mt-1">Select a new plan for {changePlanModal.patientName}</p>
+          </div>
+          <div className="p-6">
+            {availablePlansLoading && (
+              <div className="flex items-center justify-center py-6">
+                <Loader2 className="w-5 h-5 animate-spin text-slate-400" />
+                <span className="ml-2 text-sm text-slate-500">Loading plans...</span>
+              </div>
+            )}
+            {!availablePlansLoading && availablePlans.length === 0 && (
+              <p className="text-sm text-slate-400 text-center py-4">No plans available.</p>
+            )}
+            {!availablePlansLoading && availablePlans.length > 0 && (
+              <div className="space-y-2 max-h-60 overflow-y-auto">
+                {availablePlans.map((plan) => {
+                  const isSelected = changePlanSelectedId === plan.id;
+                  const planName = plan.name || "Unnamed Plan";
+                  const price = plan.monthlyPrice ?? plan.monthly_price ?? 0;
+                  return (
+                    <button
+                      key={plan.id}
+                      className="w-full text-left px-4 py-3 rounded-lg border transition-colors flex items-center justify-between"
+                      style={{
+                        borderColor: isSelected ? "#0D9488" : "#e2e8f0",
+                        backgroundColor: isSelected ? "#e6f7f2" : "transparent",
+                      }}
+                      onClick={() => setChangePlanSelectedId(isSelected ? null : plan.id)}
+                    >
+                      <div>
+                        <p className="text-sm font-medium text-slate-800">{planName}</p>
+                        <p className="text-xs text-slate-500">${price}/month</p>
+                      </div>
+                      {isSelected && <Check className="w-4 h-4 shrink-0" style={{ color: "#0D9488" }} />}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+          <div className="px-6 pb-6 flex justify-end gap-3">
+            <button
+              onClick={() => { setChangePlanModal(null); setChangePlanSelectedId(null); }}
+              className="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={() => {
+                if (changePlanSelectedId && changePlanModal) {
+                  handleChangePlan(changePlanModal.enrollmentId, changePlanSelectedId);
+                }
+              }}
+              disabled={!changePlanSelectedId || enrollmentActionLoading === changePlanModal.enrollmentId}
+              className="px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors disabled:opacity-50"
+              style={{ backgroundColor: "#0D9488" }}
+            >
+              {enrollmentActionLoading === changePlanModal.enrollmentId ? "Changing..." : "Change Plan"}
             </button>
           </div>
         </div>

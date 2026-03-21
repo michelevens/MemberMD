@@ -728,6 +728,28 @@ export function PracticePortal() {
   const [editPlanForm, setEditPlanForm] = useState({ id: "", name: "", monthlyPrice: "", annualPrice: "", description: "" });
   const [editPlanLoading, setEditPlanLoading] = useState(false);
 
+  // ─── Plan Entitlements Builder ───────────────────────────────────────
+  interface PlanEntitlementRow {
+    tempId: string;
+    entitlementTypeId: string;
+    typeName: string;
+    quantity: number;
+    unlimited: boolean;
+    period: "monthly" | "quarterly" | "yearly";
+    overagePolicy: "block" | "charge" | "notify" | "allow";
+  }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [entitlementTypes, setEntitlementTypes] = useState<any[]>([]);
+  const [entitlementTypesLoading, setEntitlementTypesLoading] = useState(false);
+  const [createPlanEntitlements, setCreatePlanEntitlements] = useState<PlanEntitlementRow[]>([]);
+  const [editPlanEntitlements, setEditPlanEntitlements] = useState<PlanEntitlementRow[]>([]);
+  const [editPlanExistingEntitlementIds, setEditPlanExistingEntitlementIds] = useState<string[]>([]);
+
+  // ─── Patient Utilization ─────────────────────────────────────────────
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [patientUtilization, setPatientUtilization] = useState<any[] | null>(null);
+  const [utilizationLoading, setUtilizationLoading] = useState(false);
+
   // ─── API Programs for dropdowns ─────────────────────────────────────
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [apiPrograms, setApiPrograms] = useState<any[]>([]);
@@ -967,6 +989,80 @@ export function PracticePortal() {
 
   useEffect(() => { loadPracticeData(); }, [loadPracticeData]);
 
+  // ─── Fetch Entitlement Types ─────────────────────────────────────────
+  const fetchEntitlementTypes = useCallback(async () => {
+    if (entitlementTypes.length > 0) return;
+    setEntitlementTypesLoading(true);
+    try {
+      const res = await apiFetch<unknown[]>("/entitlement-types");
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const list = Array.isArray(res.data) ? res.data : (res.data as any)?.data || [];
+      setEntitlementTypes(list);
+    } catch { /* ignore */ }
+    setEntitlementTypesLoading(false);
+  }, [entitlementTypes.length]);
+
+  // ─── Fetch Plan Entitlements (for edit) ──────────────────────────────
+  const fetchPlanEntitlements = useCallback(async (planId: string) => {
+    try {
+      const res = await apiFetch<unknown[]>(`/membership-plans/${planId}/entitlements`);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const list = Array.isArray(res.data) ? res.data : (res.data as any)?.data || [];
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const rows: PlanEntitlementRow[] = list.map((e: any) => ({
+        tempId: e.id || `existing_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        entitlementTypeId: e.entitlementTypeId || e.entitlement_type_id || "",
+        typeName: e.entitlementType?.name || e.typeName || e.type_name || "Unknown",
+        quantity: e.quantity ?? e.allowedQuantity ?? 0,
+        unlimited: e.unlimited ?? (e.allowedQuantity === null || e.allowedQuantity === -1),
+        period: e.period || "monthly",
+        overagePolicy: e.overagePolicy || e.overage_policy || "block",
+      }));
+      setEditPlanEntitlements(rows);
+      setEditPlanExistingEntitlementIds(list.map((e: any) => e.id).filter(Boolean));
+    } catch { /* ignore */ }
+  }, []);
+
+  // ─── Save Plan Entitlements ──────────────────────────────────────────
+  const savePlanEntitlements = useCallback(async (planId: string, entitlements: PlanEntitlementRow[], existingIds: string[]) => {
+    // Delete removed entitlements
+    for (const existingId of existingIds) {
+      if (!entitlements.find(e => e.tempId === existingId)) {
+        await apiFetch(`/membership-plans/${planId}/entitlements/${existingId}`, { method: "DELETE" }).catch(() => {});
+      }
+    }
+    // Add new entitlements
+    for (const ent of entitlements) {
+      if (!existingIds.includes(ent.tempId)) {
+        await apiFetch(`/membership-plans/${planId}/entitlements`, {
+          method: "POST",
+          body: JSON.stringify({
+            entitlementTypeId: ent.entitlementTypeId,
+            quantity: ent.unlimited ? null : ent.quantity,
+            unlimited: ent.unlimited,
+            period: ent.period,
+            overagePolicy: ent.overagePolicy,
+          }),
+        }).catch(() => {});
+      }
+    }
+  }, []);
+
+  // ─── Fetch Patient Utilization ───────────────────────────────────────
+  const fetchPatientUtilization = useCallback(async (membershipId: string) => {
+    setUtilizationLoading(true);
+    setPatientUtilization(null);
+    try {
+      const res = await apiFetch<unknown[]>(`/entitlement-usage/patient/${membershipId}`);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const list = Array.isArray(res.data) ? res.data : (res.data as any)?.data || [];
+      setPatientUtilization(list);
+    } catch {
+      setPatientUtilization([]);
+    }
+    setUtilizationLoading(false);
+  }, []);
+
   const handleAddPatient = async () => {
     if (!addPatientForm.firstName || !addPatientForm.lastName || !addPatientForm.dateOfBirth) {
       setAddPatientError("First name, last name, and date of birth are required.");
@@ -1188,9 +1284,16 @@ export function PracticePortal() {
         description: createPlanForm.description || undefined,
       });
       if (res.data || !res.error) {
+        // Save entitlements if plan was created successfully
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const newPlanId = (res.data as any)?.id;
+        if (newPlanId && createPlanEntitlements.length > 0) {
+          await savePlanEntitlements(newPlanId, createPlanEntitlements, []);
+        }
         setToast({ message: "Plan created successfully.", type: "success" });
         setShowCreatePlan(false);
         setCreatePlanForm({ name: "", monthlyPrice: "", annualPrice: "", description: "" });
+        setCreatePlanEntitlements([]);
         loadPracticeData();
       } else {
         setToast({ message: res.error || "Failed to create plan.", type: "error" });
@@ -1216,8 +1319,12 @@ export function PracticePortal() {
         description: editPlanForm.description || undefined,
       });
       if (res.data || !res.error) {
+        // Save entitlements
+        await savePlanEntitlements(editPlanForm.id, editPlanEntitlements, editPlanExistingEntitlementIds);
         setToast({ message: "Plan updated successfully.", type: "success" });
         setShowEditPlan(false);
+        setEditPlanEntitlements([]);
+        setEditPlanExistingEntitlementIds([]);
         loadPracticeData();
       } else {
         setToast({ message: res.error || "Failed to update plan.", type: "error" });
@@ -2183,7 +2290,7 @@ export function PracticePortal() {
         {/* ── Header ──────────────────────────────────────────────────── */}
         <div className="flex flex-col sm:flex-row items-start gap-4">
           <button
-            onClick={() => setSelectedPatient(null)}
+            onClick={() => { setSelectedPatient(null); setPatientUtilization(null); }}
             className="p-2 rounded-lg hover:bg-slate-100 text-slate-500 transition-colors shrink-0"
           >
             <ArrowLeft className="w-5 h-5" />
@@ -2332,6 +2439,97 @@ export function PracticePortal() {
             )}
           </div>
         )}
+
+        {/* ── Benefits & Utilization Card ──────────────────────────────── */}
+        {(() => {
+          // Determine membershipId: use patient ID as proxy or from programEnrollments
+          const membershipId = pt.memberId || pt.id;
+          // Auto-fetch utilization when patient is viewed
+          const shouldFetch = patientUtilization === null && !utilizationLoading;
+          if (shouldFetch) {
+            // Trigger fetch (non-blocking side-effect pattern)
+            setTimeout(() => fetchPatientUtilization(membershipId), 0);
+          }
+
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const usageItems: any[] = patientUtilization || [];
+          const getUsageColor = (used: number, allowed: number | null) => {
+            if (allowed === null || allowed === -1 || allowed === 0) return { bar: "#3b82f6", bg: "#eff6ff", text: "#1d4ed8" }; // blue for unlimited
+            const pct = (used / allowed) * 100;
+            if (pct > 80) return { bar: "#ef4444", bg: "#fef2f2", text: "#dc2626" }; // red
+            if (pct > 50) return { bar: "#f59e0b", bg: "#fffbeb", text: "#d97706" }; // yellow
+            return { bar: "#22c55e", bg: "#ecf9ec", text: "#2f8132" }; // green
+          };
+
+          return (
+            <div className="glass rounded-xl p-5">
+              <h3 className="font-semibold text-slate-800 mb-3 flex items-center gap-2">
+                <Activity className="w-4 h-4" style={{ color: "#27ab83" }} />
+                Benefits & Utilization
+              </h3>
+              {utilizationLoading && (
+                <div className="flex items-center justify-center py-6">
+                  <div className="w-5 h-5 border-2 rounded-full animate-spin" style={{ borderColor: "#e2e8f0", borderTopColor: "#27ab83" }} />
+                  <span className="ml-2 text-sm text-slate-400">Loading utilization...</span>
+                </div>
+              )}
+              {!utilizationLoading && usageItems.length === 0 && (
+                <p className="text-sm text-slate-400 text-center py-4">No entitlement usage data available.</p>
+              )}
+              {!utilizationLoading && usageItems.length > 0 && (
+                <div className="space-y-3">
+                  {usageItems.map((item, idx) => {
+                    const name = item.entitlementTypeName || item.entitlementType?.name || item.typeName || item.name || "Benefit";
+                    const used = item.usedQuantity ?? item.used ?? 0;
+                    const allowed = item.allowedQuantity ?? item.allowed ?? item.total ?? null;
+                    const isUnlimited = allowed === null || allowed === -1;
+                    const pctRaw = isUnlimited ? 30 : (allowed > 0 ? (used / allowed) * 100 : 0);
+                    const pct = Math.min(pctRaw, 100);
+                    const colors = getUsageColor(used, allowed);
+                    const savings = item.savings ?? item.savingsAmount ?? 0;
+
+                    return (
+                      <div key={idx} className="p-3 rounded-lg" style={{ backgroundColor: colors.bg }}>
+                        <div className="flex items-center justify-between mb-1.5">
+                          <span className="text-sm font-medium text-slate-700">{name}</span>
+                          <span className="text-xs font-semibold" style={{ color: colors.text }}>
+                            {isUnlimited
+                              ? `${used} used (unlimited)`
+                              : `${used} of ${allowed} used`}
+                          </span>
+                        </div>
+                        <div className="w-full h-2 rounded-full" style={{ backgroundColor: "#e2e8f0" }}>
+                          <div
+                            className="h-2 rounded-full transition-all"
+                            style={{ width: `${pct}%`, backgroundColor: colors.bar }}
+                          />
+                        </div>
+                        {savings > 0 && (
+                          <p className="text-xs mt-1" style={{ color: colors.text }}>
+                            Savings: ${typeof savings === "number" ? savings.toFixed(2) : savings}
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })}
+                  {/* Total savings */}
+                  {(() => {
+                    const totalSavings = usageItems.reduce((sum, item) => sum + (item.savings ?? item.savingsAmount ?? 0), 0);
+                    if (totalSavings <= 0) return null;
+                    return (
+                      <div className="pt-2 border-t border-slate-200 flex items-center justify-between">
+                        <span className="text-sm font-semibold text-slate-700">Total Savings</span>
+                        <span className="text-sm font-bold" style={{ color: "#2f8132" }}>
+                          ${totalSavings.toFixed(2)}
+                        </span>
+                      </div>
+                    );
+                  })()}
+                </div>
+              )}
+            </div>
+          );
+        })()}
 
         {/* ── Detail Tab Bar ──────────────────────────────────────────── */}
         <div className="border-b border-slate-200 overflow-x-auto">
@@ -3158,6 +3356,8 @@ export function PracticePortal() {
                           annualPrice: String(plan.annualPrice ?? plan.annual_price ?? 0),
                           description: plan.description ?? "",
                         });
+                        fetchEntitlementTypes();
+                        fetchPlanEntitlements(plan.id);
                         setShowEditPlan(true);
                       }}
                     >
@@ -3206,12 +3406,12 @@ export function PracticePortal() {
         {/* Create Plan Modal */}
         {showCreatePlan && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: "rgba(0,0,0,0.4)" }}>
-            <div className="bg-white rounded-xl shadow-xl w-full max-w-md">
-              <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
+            <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col">
+              <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 shrink-0">
                 <h3 className="text-base font-semibold text-slate-800">Create Membership Plan</h3>
-                <button onClick={() => setShowCreatePlan(false)} className="p-1.5 rounded hover:bg-slate-100 text-slate-400"><X className="w-4 h-4" /></button>
+                <button onClick={() => { setShowCreatePlan(false); setCreatePlanEntitlements([]); }} className="p-1.5 rounded hover:bg-slate-100 text-slate-400"><X className="w-4 h-4" /></button>
               </div>
-              <div className="px-6 py-5 space-y-4">
+              <div className="px-6 py-5 space-y-4 overflow-y-auto flex-1">
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Plan Name *</label>
                   <input type="text" value={createPlanForm.name} onChange={(e) => setCreatePlanForm({ ...createPlanForm, name: e.target.value })} placeholder="e.g. Essential" className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2" />
@@ -3230,9 +3430,136 @@ export function PracticePortal() {
                   <label className="block text-sm font-medium text-slate-700 mb-1">Description</label>
                   <textarea value={createPlanForm.description} onChange={(e) => setCreatePlanForm({ ...createPlanForm, description: e.target.value })} placeholder="Plan description..." rows={3} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 resize-none" />
                 </div>
+
+                {/* ── Entitlements Section ──────────────────────────── */}
+                <div className="border-t border-slate-200 pt-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <h4 className="text-sm font-semibold text-slate-800">Entitlements</h4>
+                    <button
+                      type="button"
+                      className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors"
+                      style={{ backgroundColor: "#e6f7f2", color: "#147d64" }}
+                      onClick={() => {
+                        fetchEntitlementTypes();
+                      }}
+                      onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "#d1f0e5"; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "#e6f7f2"; }}
+                    >
+                      <Plus className="w-3.5 h-3.5" /> Add Entitlement
+                    </button>
+                  </div>
+
+                  {/* Entitlement type selector dropdown (shown when types loaded & user wants to add) */}
+                  {entitlementTypes.length > 0 && (
+                    <div className="mb-3 p-2 rounded-lg border border-slate-200" style={{ backgroundColor: "#f8fafc" }}>
+                      <p className="text-xs text-slate-500 mb-1">Select entitlement type:</p>
+                      <div className="flex flex-wrap gap-1">
+                        {entitlementTypesLoading && <span className="text-xs text-slate-400">Loading...</span>}
+                        {entitlementTypes.map((et: { id: string; name: string; code?: string }) => {
+                          const alreadyAdded = createPlanEntitlements.some(e => e.entitlementTypeId === et.id);
+                          return (
+                            <button
+                              key={et.id}
+                              type="button"
+                              disabled={alreadyAdded}
+                              className="px-2 py-1 rounded text-xs font-medium border transition-colors disabled:opacity-40"
+                              style={{ borderColor: "#27ab83", color: alreadyAdded ? "#94a3b8" : "#147d64" }}
+                              onClick={() => {
+                                setCreatePlanEntitlements(prev => [...prev, {
+                                  tempId: `new_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+                                  entitlementTypeId: et.id,
+                                  typeName: et.name,
+                                  quantity: 1,
+                                  unlimited: false,
+                                  period: "monthly",
+                                  overagePolicy: "block",
+                                }]);
+                              }}
+                            >
+                              {et.name}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {createPlanEntitlements.length === 0 && (
+                    <p className="text-xs text-slate-400 text-center py-3">No entitlements added yet. Click "Add Entitlement" to configure benefits.</p>
+                  )}
+
+                  {createPlanEntitlements.map((ent, idx) => (
+                    <div key={ent.tempId} className="flex flex-wrap items-center gap-2 p-2.5 rounded-lg border border-slate-200 mb-2" style={{ backgroundColor: "#fafbfc" }}>
+                      <span className="text-sm font-medium text-slate-700 min-w-20">{ent.typeName}</span>
+                      <div className="flex items-center gap-1.5">
+                        <label className="text-xs text-slate-500">Qty:</label>
+                        <input
+                          type="number"
+                          min={1}
+                          value={ent.quantity}
+                          disabled={ent.unlimited}
+                          onChange={(e) => {
+                            const updated = [...createPlanEntitlements];
+                            updated[idx] = { ...ent, quantity: parseInt(e.target.value) || 1 };
+                            setCreatePlanEntitlements(updated);
+                          }}
+                          className="w-16 px-2 py-1 border border-slate-200 rounded text-xs focus:outline-none focus:ring-1 disabled:opacity-40"
+                        />
+                      </div>
+                      <label className="flex items-center gap-1 text-xs text-slate-600 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={ent.unlimited}
+                          onChange={(e) => {
+                            const updated = [...createPlanEntitlements];
+                            updated[idx] = { ...ent, unlimited: e.target.checked };
+                            setCreatePlanEntitlements(updated);
+                          }}
+                          className="accent-teal-600"
+                        />
+                        Unlimited
+                      </label>
+                      <select
+                        value={ent.period}
+                        onChange={(e) => {
+                          const updated = [...createPlanEntitlements];
+                          updated[idx] = { ...ent, period: e.target.value as PlanEntitlementRow["period"] };
+                          setCreatePlanEntitlements(updated);
+                        }}
+                        className="px-2 py-1 border border-slate-200 rounded text-xs bg-white focus:outline-none"
+                      >
+                        <option value="monthly">Monthly</option>
+                        <option value="quarterly">Quarterly</option>
+                        <option value="yearly">Yearly</option>
+                      </select>
+                      <select
+                        value={ent.overagePolicy}
+                        onChange={(e) => {
+                          const updated = [...createPlanEntitlements];
+                          updated[idx] = { ...ent, overagePolicy: e.target.value as PlanEntitlementRow["overagePolicy"] };
+                          setCreatePlanEntitlements(updated);
+                        }}
+                        className="px-2 py-1 border border-slate-200 rounded text-xs bg-white focus:outline-none"
+                      >
+                        <option value="block">Block</option>
+                        <option value="charge">Charge</option>
+                        <option value="notify">Notify</option>
+                        <option value="allow">Allow</option>
+                      </select>
+                      <button
+                        type="button"
+                        className="p-1 rounded hover:bg-red-50 text-slate-400 hover:text-red-500 transition-colors ml-auto"
+                        onClick={() => setCreatePlanEntitlements(prev => prev.filter((_, i) => i !== idx))}
+                        title="Remove entitlement"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
               </div>
-              <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-200">
-                <button onClick={() => setShowCreatePlan(false)} className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 rounded-lg">Cancel</button>
+              <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-200 shrink-0">
+                <button onClick={() => { setShowCreatePlan(false); setCreatePlanEntitlements([]); }} className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 rounded-lg">Cancel</button>
                 <button onClick={handleCreatePlan} disabled={createPlanLoading} className="px-4 py-2 rounded-lg text-white text-sm font-medium transition-all hover:opacity-90 disabled:opacity-50" style={{ backgroundColor: "#27ab83" }}>
                   {createPlanLoading ? "Creating..." : "Create Plan"}
                 </button>
@@ -3244,12 +3571,12 @@ export function PracticePortal() {
         {/* Edit Plan Modal */}
         {showEditPlan && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: "rgba(0,0,0,0.4)" }}>
-            <div className="bg-white rounded-xl shadow-xl w-full max-w-md">
-              <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
+            <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col">
+              <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 shrink-0">
                 <h3 className="text-base font-semibold text-slate-800">Edit Plan: {editPlanForm.name}</h3>
-                <button onClick={() => setShowEditPlan(false)} className="p-1.5 rounded hover:bg-slate-100 text-slate-400"><X className="w-4 h-4" /></button>
+                <button onClick={() => { setShowEditPlan(false); setEditPlanEntitlements([]); setEditPlanExistingEntitlementIds([]); }} className="p-1.5 rounded hover:bg-slate-100 text-slate-400"><X className="w-4 h-4" /></button>
               </div>
-              <div className="px-6 py-5 space-y-4">
+              <div className="px-6 py-5 space-y-4 overflow-y-auto flex-1">
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Plan Name *</label>
                   <input type="text" value={editPlanForm.name} onChange={(e) => setEditPlanForm({ ...editPlanForm, name: e.target.value })} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2" />
@@ -3268,9 +3595,133 @@ export function PracticePortal() {
                   <label className="block text-sm font-medium text-slate-700 mb-1">Description</label>
                   <textarea value={editPlanForm.description} onChange={(e) => setEditPlanForm({ ...editPlanForm, description: e.target.value })} rows={3} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 resize-none" />
                 </div>
+
+                {/* ── Entitlements Section ──────────────────────────── */}
+                <div className="border-t border-slate-200 pt-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <h4 className="text-sm font-semibold text-slate-800">Entitlements</h4>
+                    <button
+                      type="button"
+                      className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors"
+                      style={{ backgroundColor: "#e6f7f2", color: "#147d64" }}
+                      onClick={() => { fetchEntitlementTypes(); }}
+                      onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "#d1f0e5"; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "#e6f7f2"; }}
+                    >
+                      <Plus className="w-3.5 h-3.5" /> Add Entitlement
+                    </button>
+                  </div>
+
+                  {entitlementTypes.length > 0 && (
+                    <div className="mb-3 p-2 rounded-lg border border-slate-200" style={{ backgroundColor: "#f8fafc" }}>
+                      <p className="text-xs text-slate-500 mb-1">Select entitlement type:</p>
+                      <div className="flex flex-wrap gap-1">
+                        {entitlementTypesLoading && <span className="text-xs text-slate-400">Loading...</span>}
+                        {entitlementTypes.map((et: { id: string; name: string; code?: string }) => {
+                          const alreadyAdded = editPlanEntitlements.some(e => e.entitlementTypeId === et.id);
+                          return (
+                            <button
+                              key={et.id}
+                              type="button"
+                              disabled={alreadyAdded}
+                              className="px-2 py-1 rounded text-xs font-medium border transition-colors disabled:opacity-40"
+                              style={{ borderColor: "#27ab83", color: alreadyAdded ? "#94a3b8" : "#147d64" }}
+                              onClick={() => {
+                                setEditPlanEntitlements(prev => [...prev, {
+                                  tempId: `new_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+                                  entitlementTypeId: et.id,
+                                  typeName: et.name,
+                                  quantity: 1,
+                                  unlimited: false,
+                                  period: "monthly",
+                                  overagePolicy: "block",
+                                }]);
+                              }}
+                            >
+                              {et.name}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {editPlanEntitlements.length === 0 && (
+                    <p className="text-xs text-slate-400 text-center py-3">No entitlements configured. Click "Add Entitlement" to configure benefits.</p>
+                  )}
+
+                  {editPlanEntitlements.map((ent, idx) => (
+                    <div key={ent.tempId} className="flex flex-wrap items-center gap-2 p-2.5 rounded-lg border border-slate-200 mb-2" style={{ backgroundColor: "#fafbfc" }}>
+                      <span className="text-sm font-medium text-slate-700 min-w-20">{ent.typeName}</span>
+                      <div className="flex items-center gap-1.5">
+                        <label className="text-xs text-slate-500">Qty:</label>
+                        <input
+                          type="number"
+                          min={1}
+                          value={ent.quantity}
+                          disabled={ent.unlimited}
+                          onChange={(e) => {
+                            const updated = [...editPlanEntitlements];
+                            updated[idx] = { ...ent, quantity: parseInt(e.target.value) || 1 };
+                            setEditPlanEntitlements(updated);
+                          }}
+                          className="w-16 px-2 py-1 border border-slate-200 rounded text-xs focus:outline-none focus:ring-1 disabled:opacity-40"
+                        />
+                      </div>
+                      <label className="flex items-center gap-1 text-xs text-slate-600 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={ent.unlimited}
+                          onChange={(e) => {
+                            const updated = [...editPlanEntitlements];
+                            updated[idx] = { ...ent, unlimited: e.target.checked };
+                            setEditPlanEntitlements(updated);
+                          }}
+                          className="accent-teal-600"
+                        />
+                        Unlimited
+                      </label>
+                      <select
+                        value={ent.period}
+                        onChange={(e) => {
+                          const updated = [...editPlanEntitlements];
+                          updated[idx] = { ...ent, period: e.target.value as PlanEntitlementRow["period"] };
+                          setEditPlanEntitlements(updated);
+                        }}
+                        className="px-2 py-1 border border-slate-200 rounded text-xs bg-white focus:outline-none"
+                      >
+                        <option value="monthly">Monthly</option>
+                        <option value="quarterly">Quarterly</option>
+                        <option value="yearly">Yearly</option>
+                      </select>
+                      <select
+                        value={ent.overagePolicy}
+                        onChange={(e) => {
+                          const updated = [...editPlanEntitlements];
+                          updated[idx] = { ...ent, overagePolicy: e.target.value as PlanEntitlementRow["overagePolicy"] };
+                          setEditPlanEntitlements(updated);
+                        }}
+                        className="px-2 py-1 border border-slate-200 rounded text-xs bg-white focus:outline-none"
+                      >
+                        <option value="block">Block</option>
+                        <option value="charge">Charge</option>
+                        <option value="notify">Notify</option>
+                        <option value="allow">Allow</option>
+                      </select>
+                      <button
+                        type="button"
+                        className="p-1 rounded hover:bg-red-50 text-slate-400 hover:text-red-500 transition-colors ml-auto"
+                        onClick={() => setEditPlanEntitlements(prev => prev.filter((_, i) => i !== idx))}
+                        title="Remove entitlement"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
               </div>
-              <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-200">
-                <button onClick={() => setShowEditPlan(false)} className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 rounded-lg">Cancel</button>
+              <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-200 shrink-0">
+                <button onClick={() => { setShowEditPlan(false); setEditPlanEntitlements([]); setEditPlanExistingEntitlementIds([]); }} className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 rounded-lg">Cancel</button>
                 <button onClick={handleEditPlan} disabled={editPlanLoading} className="px-4 py-2 rounded-lg text-white text-sm font-medium transition-all hover:opacity-90 disabled:opacity-50" style={{ backgroundColor: "#27ab83" }}>
                   {editPlanLoading ? "Saving..." : "Save Changes"}
                 </button>
