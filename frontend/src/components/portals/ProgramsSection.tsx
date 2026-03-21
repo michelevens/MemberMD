@@ -1767,6 +1767,59 @@ export function ProgramsSection() {
         {/* Enroll Patient Dialog (inside detail view) */}
         {enrollDialogJsx}
 
+        {/* Cancel Enrollment Modal (inside detail view) */}
+        {cancelReasonModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: "rgba(0,0,0,0.5)" }}>
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
+              <div className="p-6" style={{ background: "linear-gradient(135deg, #dc2626, #ef4444)" }}>
+                <h3 className="text-lg font-bold text-white">Cancel Enrollment</h3>
+                <p className="text-sm text-red-100 mt-1">Cancel {cancelReasonModal.patientName}&apos;s enrollment</p>
+              </div>
+              <div className="p-6">
+                <label className="block text-sm font-medium text-slate-700 mb-1">Cancellation Reason *</label>
+                <textarea className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none resize-none" rows={3} placeholder="Enter reason..." value={cancelReason} onChange={(e) => setCancelReason(e.target.value)} autoFocus />
+              </div>
+              <div className="px-6 pb-6 flex justify-end gap-3">
+                <button onClick={() => { setCancelReasonModal(null); setCancelReason(""); }} className="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100">Go Back</button>
+                <button onClick={() => handleCancelEnrollment(cancelReasonModal.enrollmentId, cancelReason)} disabled={!cancelReason.trim() || enrollmentActionLoading === cancelReasonModal.enrollmentId} className="px-4 py-2 rounded-lg text-sm font-medium text-white disabled:opacity-50" style={{ backgroundColor: "#dc2626" }}>
+                  {enrollmentActionLoading === cancelReasonModal.enrollmentId ? "Cancelling..." : "Cancel Enrollment"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Change Plan Modal (inside detail view) */}
+        {changePlanModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: "rgba(0,0,0,0.5)" }}>
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
+              <div className="p-6" style={{ background: "linear-gradient(135deg, #1B2B4D, #243b53)" }}>
+                <h3 className="text-lg font-bold text-white">Change Plan</h3>
+                <p className="text-sm text-slate-300 mt-1">Select a new plan for {changePlanModal.patientName}</p>
+              </div>
+              <div className="p-6">
+                {availablePlansLoading && <div className="flex items-center justify-center py-6"><Loader2 className="w-5 h-5 animate-spin text-slate-400" /></div>}
+                {!availablePlansLoading && availablePlans.length > 0 && (
+                  <div className="space-y-2 max-h-60 overflow-y-auto">
+                    {availablePlans.map((plan) => (
+                      <button key={plan.id} className="w-full text-left px-4 py-3 rounded-lg border transition-colors flex items-center justify-between" style={{ borderColor: changePlanSelectedId === plan.id ? "#0D9488" : "#e2e8f0", backgroundColor: changePlanSelectedId === plan.id ? "#e6f7f2" : "transparent" }} onClick={() => setChangePlanSelectedId(changePlanSelectedId === plan.id ? null : plan.id)}>
+                        <div><p className="text-sm font-medium text-slate-800">{plan.name || "Unnamed"}</p><p className="text-xs text-slate-500">${plan.monthlyPrice ?? plan.monthly_price ?? 0}/month</p></div>
+                        {changePlanSelectedId === plan.id && <Check className="w-4 h-4 shrink-0" style={{ color: "#0D9488" }} />}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div className="px-6 pb-6 flex justify-end gap-3">
+                <button onClick={() => { setChangePlanModal(null); setChangePlanSelectedId(null); }} className="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100">Cancel</button>
+                <button onClick={() => { if (changePlanSelectedId && changePlanModal) handleChangePlan(changePlanModal.enrollmentId, changePlanSelectedId); }} disabled={!changePlanSelectedId || enrollmentActionLoading === changePlanModal.enrollmentId} className="px-4 py-2 rounded-lg text-sm font-medium text-white disabled:opacity-50" style={{ backgroundColor: "#0D9488" }}>
+                  {enrollmentActionLoading === changePlanModal.enrollmentId ? "Changing..." : "Change Plan"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Add Provider to Program Modal (inside detail view) */}
         {addProviderToProgram && addProviderProgramId && (
           <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: "rgba(0,0,0,0.5)" }}>
