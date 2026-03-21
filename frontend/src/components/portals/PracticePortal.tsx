@@ -78,6 +78,7 @@ import {
   Building2,
   Package,
   Radio,
+  Trash2,
 } from "lucide-react";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -745,6 +746,25 @@ export function PracticePortal() {
   const [editPlanEntitlements, setEditPlanEntitlements] = useState<PlanEntitlementRow[]>([]);
   const [editPlanExistingEntitlementIds, setEditPlanExistingEntitlementIds] = useState<string[]>([]);
 
+  // ─── Plan Detail View ─────────────────────────────────────────────
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [selectedPlan, setSelectedPlan] = useState<any | null>(null);
+  const [planDetailTab, setPlanDetailTab] = useState<"overview" | "entitlements" | "members" | "utilization" | "revenue">("overview");
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [planDetailEntitlements, setPlanDetailEntitlements] = useState<any[]>([]);
+  const [planDetailEntitlementsLoading, setPlanDetailEntitlementsLoading] = useState(false);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [planDetailMembers, setPlanDetailMembers] = useState<any[]>([]);
+  const [planDetailMembersLoading, setPlanDetailMembersLoading] = useState(false);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [planDetailUsage, setPlanDetailUsage] = useState<any[]>([]);
+  const [planDetailUsageLoading, setPlanDetailUsageLoading] = useState(false);
+  // Entitlement editing within plan detail
+  const [planDetailEditingEntitlement, setPlanDetailEditingEntitlement] = useState<string | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [planDetailEditForm, setPlanDetailEditForm] = useState<any>({});
+  const [planDetailShowAddEntitlement, setPlanDetailShowAddEntitlement] = useState(false);
+
   // ─── Patient Utilization ─────────────────────────────────────────────
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [patientUtilization, setPatientUtilization] = useState<any[] | null>(null);
@@ -1047,6 +1067,98 @@ export function PracticePortal() {
       }
     }
   }, []);
+
+  // ─── Fetch Plan Detail Data ────────────────────────────────────────
+  const fetchPlanDetailEntitlements = useCallback(async (planId: string) => {
+    setPlanDetailEntitlementsLoading(true);
+    try {
+      const res = await apiFetch<unknown[]>(`/membership-plans/${planId}/entitlements`);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const raw = res.data as any;
+      const list = Array.isArray(raw) ? raw : raw?.data || [];
+      setPlanDetailEntitlements(list);
+    } catch { setPlanDetailEntitlements([]); }
+    setPlanDetailEntitlementsLoading(false);
+  }, []);
+
+  const fetchPlanDetailMembers = useCallback(async (planId: string) => {
+    setPlanDetailMembersLoading(true);
+    try {
+      const res = await apiFetch<unknown[]>(`/memberships?plan_id=${planId}`);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const raw = res.data as any;
+      const list = Array.isArray(raw) ? raw : raw?.data || [];
+      setPlanDetailMembers(list);
+    } catch { setPlanDetailMembers([]); }
+    setPlanDetailMembersLoading(false);
+  }, []);
+
+  const fetchPlanDetailUsage = useCallback(async (planId: string) => {
+    setPlanDetailUsageLoading(true);
+    try {
+      const res = await apiFetch<unknown[]>(`/entitlement-usage/plan/${planId}`);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const raw = res.data as any;
+      const list = Array.isArray(raw) ? raw : raw?.data || [];
+      setPlanDetailUsage(list);
+    } catch { setPlanDetailUsage([]); }
+    setPlanDetailUsageLoading(false);
+  }, []);
+
+  const openPlanDetail = useCallback((plan: Record<string, unknown>) => {
+    setSelectedPlan(plan);
+    setPlanDetailTab("overview");
+    setPlanDetailEditingEntitlement(null);
+    setPlanDetailShowAddEntitlement(false);
+    const planId = plan.id as string;
+    fetchPlanDetailEntitlements(planId);
+    fetchPlanDetailMembers(planId);
+    fetchPlanDetailUsage(planId);
+  }, [fetchPlanDetailEntitlements, fetchPlanDetailMembers, fetchPlanDetailUsage]);
+
+  const handleDeletePlanEntitlement = useCallback(async (planId: string, entitlementId: string) => {
+    try {
+      await apiFetch(`/membership-plans/${planId}/entitlements/${entitlementId}`, { method: "DELETE" });
+      setToast({ message: "Entitlement removed.", type: "success" });
+      fetchPlanDetailEntitlements(planId);
+    } catch {
+      setToast({ message: "Failed to remove entitlement.", type: "error" });
+    }
+  }, [fetchPlanDetailEntitlements, setToast]);
+
+  const handleAddPlanDetailEntitlement = useCallback(async (planId: string, entitlementTypeId: string) => {
+    try {
+      await apiFetch(`/membership-plans/${planId}/entitlements`, {
+        method: "POST",
+        body: JSON.stringify({
+          entitlementTypeId,
+          quantity: 1,
+          unlimited: false,
+          period: "monthly",
+          overagePolicy: "block",
+        }),
+      });
+      setToast({ message: "Entitlement added.", type: "success" });
+      fetchPlanDetailEntitlements(planId);
+      setPlanDetailShowAddEntitlement(false);
+    } catch {
+      setToast({ message: "Failed to add entitlement.", type: "error" });
+    }
+  }, [fetchPlanDetailEntitlements, setToast]);
+
+  const handleUpdatePlanDetailEntitlement = useCallback(async (planId: string, entitlementId: string, data: Record<string, unknown>) => {
+    try {
+      await apiFetch(`/membership-plans/${planId}/entitlements/${entitlementId}`, {
+        method: "PUT",
+        body: JSON.stringify(data),
+      });
+      setToast({ message: "Entitlement updated.", type: "success" });
+      fetchPlanDetailEntitlements(planId);
+      setPlanDetailEditingEntitlement(null);
+    } catch {
+      setToast({ message: "Failed to update entitlement.", type: "error" });
+    }
+  }, [fetchPlanDetailEntitlements, setToast]);
 
   // ─── Fetch Patient Utilization ───────────────────────────────────────
   const fetchPatientUtilization = useCallback(async (membershipId: string) => {
@@ -3237,9 +3349,783 @@ export function PracticePortal() {
     );
   }
 
+  // ─── Plan Detail View ──────────────────────────────────────────────────
+
+  function renderPlanDetail() {
+    const plan = selectedPlan;
+    if (!plan) return null;
+
+    const monthlyPrice = plan.monthlyPrice ?? plan.monthly_price ?? 0;
+    const annualPrice = plan.annualPrice ?? plan.annual_price ?? 0;
+    const memberCount = plan.memberCount ?? plan.member_count ?? 0;
+    const mrr = memberCount * monthlyPrice;
+    const arr = mrr * 12;
+    const isActive = plan.isActive !== false && plan.is_active !== false;
+    const createdAt = plan.createdAt || plan.created_at || null;
+
+    const planIcons: Record<string, React.ElementType> = {
+      Essential: Heart,
+      Complete: Star,
+      Premium: Crown,
+    };
+    const planGradients: Record<string, { from: string; to: string; accent: string; light: string }> = {
+      Essential: { from: "#334e68", to: "#486581", accent: "#334e68", light: "#e0e8f0" },
+      Complete: { from: "#147d64", to: "#27ab83", accent: "#147d64", light: "#e6f7f2" },
+      Premium: { from: "#d97706", to: "#f59e0b", accent: "#d97706", light: "#fffbeb" },
+    };
+    const gradient = planGradients[plan.name] || planGradients.Essential;
+    const Icon = planIcons[plan.name] || Heart;
+
+    const categoryColors: Record<string, { bg: string; text: string }> = {
+      visit: { bg: "#dbeafe", text: "#1d4ed8" },
+      communication: { bg: "#dcfce7", text: "#15803d" },
+      lab: { bg: "#f3e8ff", text: "#7c3aed" },
+      procedure: { bg: "#ffedd5", text: "#c2410c" },
+      rx: { bg: "#fce7f3", text: "#be185d" },
+      program: { bg: "#ccfbf1", text: "#0f766e" },
+      access: { bg: "#f1f5f9", text: "#475569" },
+    };
+
+    const getCategoryColor = (category: string) => {
+      const key = (category || "").toLowerCase();
+      for (const [k, v] of Object.entries(categoryColors)) {
+        if (key.includes(k)) return v;
+      }
+      return categoryColors.access;
+    };
+
+    // Group entitlements by category
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const groupedEntitlements: Record<string, any[]> = {};
+    for (const ent of planDetailEntitlements) {
+      const cat = ent.entitlementType?.category || ent.category || "Other";
+      if (!groupedEntitlements[cat]) groupedEntitlements[cat] = [];
+      groupedEntitlements[cat].push(ent);
+    }
+
+    const detailTabs = [
+      { id: "overview" as const, label: "Overview" },
+      { id: "entitlements" as const, label: "Entitlements" },
+      { id: "members" as const, label: "Members" },
+      { id: "utilization" as const, label: "Utilization" },
+      { id: "revenue" as const, label: "Revenue" },
+    ];
+
+    return (
+      <div className="space-y-6">
+        {/* ── Header ──────────────────────────────────────────────────── */}
+        <div className="flex flex-col sm:flex-row items-start gap-4">
+          <button
+            onClick={() => setSelectedPlan(null)}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors"
+            style={{ color: "#475569" }}
+            onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "#f1f5f9"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = ""; }}
+          >
+            <ArrowLeft className="w-4 h-4" />
+            Back to Plans
+          </button>
+        </div>
+
+        {/* Plan Header Card */}
+        <div
+          className="rounded-2xl overflow-hidden"
+          style={{ background: `linear-gradient(135deg, ${gradient.from}, ${gradient.to})` }}
+        >
+          <div className="p-6 text-white relative overflow-hidden">
+            <div className="absolute top-0 right-0 w-32 h-32 opacity-10">
+              <Icon className="w-32 h-32 -mt-6 -mr-6" />
+            </div>
+            <div className="relative flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+              <div>
+                <div className="flex items-center gap-3 mb-2">
+                  <h1 className="text-2xl font-bold">{plan.name}</h1>
+                  {plan.badge && (
+                    <span
+                      className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold"
+                      style={{ backgroundColor: "rgba(255,255,255,0.2)", color: "#ffffff" }}
+                    >
+                      {plan.badge}
+                    </span>
+                  )}
+                  <span
+                    className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold"
+                    style={{
+                      backgroundColor: isActive ? "rgba(39,171,131,0.3)" : "rgba(239,68,68,0.3)",
+                      color: "#ffffff",
+                    }}
+                  >
+                    {isActive ? "Active" : "Inactive"}
+                  </span>
+                </div>
+                <div className="flex items-baseline gap-3">
+                  <span className="text-3xl font-bold">${monthlyPrice}</span>
+                  <span className="text-sm opacity-80">/month</span>
+                  {annualPrice > 0 && (
+                    <>
+                      <span className="text-sm opacity-50">|</span>
+                      <span className="text-lg font-semibold">${annualPrice.toLocaleString()}</span>
+                      <span className="text-sm opacity-80">/year</span>
+                    </>
+                  )}
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  className="px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+                  style={{ backgroundColor: "rgba(255,255,255,0.2)", color: "#ffffff" }}
+                  onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "rgba(255,255,255,0.3)"; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "rgba(255,255,255,0.2)"; }}
+                  onClick={() => {
+                    setEditPlanForm({
+                      id: plan.id,
+                      name: plan.name,
+                      monthlyPrice: String(monthlyPrice),
+                      annualPrice: String(annualPrice),
+                      description: plan.description ?? "",
+                    });
+                    fetchEntitlementTypes();
+                    fetchPlanEntitlements(plan.id);
+                    setShowEditPlan(true);
+                  }}
+                >
+                  <Pencil className="w-4 h-4 inline mr-1.5" />
+                  Edit Plan
+                </button>
+                <button
+                  className="px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+                  style={{ backgroundColor: "rgba(255,255,255,0.15)", color: "#ffffff" }}
+                  onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "rgba(239,68,68,0.3)"; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "rgba(255,255,255,0.15)"; }}
+                  onClick={() => handleDeactivatePlan(plan.id, plan.name)}
+                >
+                  {isActive ? "Deactivate" : "Activate"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* ── Detail Tabs ──────────────────────────────────────────── */}
+        <div className="flex gap-1 border-b border-slate-200 overflow-x-auto">
+          {detailTabs.map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setPlanDetailTab(tab.id)}
+              className="px-4 py-2.5 text-sm font-medium whitespace-nowrap transition-colors border-b-2"
+              style={{
+                borderBottomColor: planDetailTab === tab.id ? gradient.accent : "transparent",
+                color: planDetailTab === tab.id ? gradient.accent : "#64748b",
+              }}
+              onMouseEnter={(e) => { if (planDetailTab !== tab.id) e.currentTarget.style.color = "#334155"; }}
+              onMouseLeave={(e) => { if (planDetailTab !== tab.id) e.currentTarget.style.color = "#64748b"; }}
+            >
+              {tab.label}
+              {tab.id === "entitlements" && planDetailEntitlements.length > 0 && (
+                <span
+                  className="ml-1.5 px-1.5 py-0.5 rounded-full text-xs"
+                  style={{ backgroundColor: gradient.light, color: gradient.accent }}
+                >
+                  {planDetailEntitlements.length}
+                </span>
+              )}
+              {tab.id === "members" && (
+                <span
+                  className="ml-1.5 px-1.5 py-0.5 rounded-full text-xs"
+                  style={{ backgroundColor: gradient.light, color: gradient.accent }}
+                >
+                  {planDetailMembers.length || memberCount}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+
+        {/* ── Section 1: Overview ───────────────────────────────────── */}
+        {planDetailTab === "overview" && (
+          <div className="space-y-6">
+            {/* Description */}
+            {plan.description && (
+              <div className="glass rounded-xl p-5">
+                <h3 className="text-sm font-semibold text-slate-800 mb-2">Description</h3>
+                <p className="text-sm text-slate-600 leading-relaxed">{plan.description}</p>
+              </div>
+            )}
+
+            {/* Key Stats */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="glass rounded-xl p-5">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-lg flex items-center justify-center" style={{ backgroundColor: "#dbeafe" }}>
+                    <Users className="w-5 h-5" style={{ color: "#1d4ed8" }} />
+                  </div>
+                  <div>
+                    <p className="text-xs text-slate-500">Members</p>
+                    <p className="text-xl font-bold text-slate-800">{memberCount}</p>
+                  </div>
+                </div>
+              </div>
+              <div className="glass rounded-xl p-5">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-lg flex items-center justify-center" style={{ backgroundColor: "#dcfce7" }}>
+                    <DollarSign className="w-5 h-5" style={{ color: "#15803d" }} />
+                  </div>
+                  <div>
+                    <p className="text-xs text-slate-500">MRR</p>
+                    <p className="text-xl font-bold text-slate-800">${mrr.toLocaleString()}</p>
+                  </div>
+                </div>
+              </div>
+              <div className="glass rounded-xl p-5">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-lg flex items-center justify-center" style={{ backgroundColor: "#f3e8ff" }}>
+                    <TrendingUp className="w-5 h-5" style={{ color: "#7c3aed" }} />
+                  </div>
+                  <div>
+                    <p className="text-xs text-slate-500">Annual Revenue</p>
+                    <p className="text-xl font-bold text-slate-800">${arr.toLocaleString()}</p>
+                  </div>
+                </div>
+              </div>
+              <div className="glass rounded-xl p-5">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-lg flex items-center justify-center" style={{ backgroundColor: "#ffedd5" }}>
+                    <Calendar className="w-5 h-5" style={{ color: "#c2410c" }} />
+                  </div>
+                  <div>
+                    <p className="text-xs text-slate-500">Created</p>
+                    <p className="text-sm font-semibold text-slate-800">
+                      {createdAt ? new Date(createdAt).toLocaleDateString() : "—"}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Entitlements Summary */}
+            <div className="glass rounded-xl p-5">
+              <h3 className="text-sm font-semibold text-slate-800 mb-3">Plan Benefits</h3>
+              {planDetailEntitlementsLoading ? (
+                <p className="text-sm text-slate-400 py-4 text-center">Loading entitlements...</p>
+              ) : planDetailEntitlements.length === 0 ? (
+                <div className="py-4 text-center">
+                  <p className="text-sm text-slate-400">No entitlements configured.</p>
+                  {/* Show mock entitlement list if available */}
+                  {Array.isArray(plan.entitlements) && plan.entitlements.length > 0 && (
+                    <ul className="mt-3 space-y-2">
+                      {plan.entitlements.map((item: string, i: number) => (
+                        <li key={i} className="flex items-start gap-2 text-sm text-slate-600">
+                          <Check className="w-4 h-4 shrink-0 mt-0.5" style={{ color: gradient.accent }} />
+                          {item}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              ) : (
+                <ul className="space-y-2">
+                  {planDetailEntitlements.map((ent: Record<string, unknown>, i: number) => {
+                    const name = (ent.entitlementType as Record<string, unknown>)?.name || ent.typeName || ent.type_name || "Benefit";
+                    const cat = (ent.entitlementType as Record<string, unknown>)?.category || ent.category || "";
+                    const catColor = getCategoryColor(cat as string);
+                    const qty = ent.unlimited ? "\u221E" : String(ent.quantity ?? ent.allowedQuantity ?? 0);
+                    return (
+                      <li key={i} className="flex items-center gap-3 text-sm text-slate-600">
+                        <Check className="w-4 h-4 shrink-0" style={{ color: gradient.accent }} />
+                        <span className="font-medium">{String(name)}</span>
+                        <span
+                          className="px-2 py-0.5 rounded-full text-xs font-medium"
+                          style={{ backgroundColor: catColor.bg, color: catColor.text }}
+                        >
+                          {String(cat)}
+                        </span>
+                        <span className="text-slate-400">{qty}/{String(ent.period || "month")}</span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ── Section 2: Entitlements ──────────────────────────────── */}
+        {planDetailTab === "entitlements" && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-base font-semibold text-slate-800">Plan Entitlements</h3>
+              <button
+                className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors"
+                style={{ backgroundColor: "#e6f7f2", color: "#147d64" }}
+                onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "#d1f0e5"; }}
+                onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "#e6f7f2"; }}
+                onClick={() => {
+                  fetchEntitlementTypes();
+                  setPlanDetailShowAddEntitlement(true);
+                }}
+              >
+                <Plus className="w-4 h-4" /> Add Entitlement
+              </button>
+            </div>
+
+            {/* Add entitlement type selector */}
+            {planDetailShowAddEntitlement && entitlementTypes.length > 0 && (
+              <div className="glass rounded-xl p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <p className="text-sm font-medium text-slate-700">Select entitlement type to add:</p>
+                  <button
+                    onClick={() => setPlanDetailShowAddEntitlement(false)}
+                    className="p-1 rounded hover:bg-slate-100 text-slate-400"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {entitlementTypesLoading && <span className="text-sm text-slate-400">Loading...</span>}
+                  {entitlementTypes.map((et: { id: string; name: string; code?: string; category?: string }) => {
+                    const alreadyAdded = planDetailEntitlements.some(
+                      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                      (e: any) => (e.entitlementTypeId || e.entitlement_type_id) === et.id
+                    );
+                    const catColor = getCategoryColor(et.category || "");
+                    return (
+                      <button
+                        key={et.id}
+                        disabled={alreadyAdded}
+                        className="px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors disabled:opacity-40"
+                        style={{ borderColor: catColor.text, color: alreadyAdded ? "#94a3b8" : catColor.text }}
+                        onClick={() => handleAddPlanDetailEntitlement(plan.id, et.id)}
+                      >
+                        {et.name}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {planDetailEntitlementsLoading ? (
+              <div className="py-8 text-center text-slate-400">Loading entitlements...</div>
+            ) : planDetailEntitlements.length === 0 ? (
+              <div className="glass rounded-xl py-12 text-center">
+                <CreditCard className="w-10 h-10 mx-auto mb-2 opacity-40" style={{ color: "#94a3b8" }} />
+                <p className="text-sm text-slate-400">No entitlements configured yet.</p>
+                <p className="text-xs text-slate-300 mt-1">Click "Add Entitlement" to configure plan benefits.</p>
+              </div>
+            ) : (
+              Object.entries(groupedEntitlements).map(([category, ents]) => {
+                const catColor = getCategoryColor(category);
+                return (
+                  <div key={category} className="glass rounded-xl overflow-hidden">
+                    <div
+                      className="px-5 py-3 border-b"
+                      style={{ backgroundColor: catColor.bg, borderColor: `${catColor.text}22` }}
+                    >
+                      <h4 className="text-sm font-semibold" style={{ color: catColor.text }}>
+                        {category}
+                      </h4>
+                    </div>
+                    <div className="divide-y divide-slate-100">
+                      {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+                      {ents.map((ent: any) => {
+                        const entId = ent.id;
+                        const name = ent.entitlementType?.name || ent.typeName || ent.type_name || "Benefit";
+                        const qty = ent.unlimited ? "Unlimited" : String(ent.quantity ?? ent.allowedQuantity ?? 0);
+                        const period = ent.period || "monthly";
+                        const overage = ent.overagePolicy || ent.overage_policy || "block";
+                        const cashValue = ent.cashValue ?? ent.cash_value ?? null;
+                        const isEditing = planDetailEditingEntitlement === entId;
+
+                        if (isEditing) {
+                          return (
+                            <div key={entId} className="px-5 py-3" style={{ backgroundColor: "#fafbfc" }}>
+                              <div className="flex flex-wrap items-center gap-3">
+                                <span className="text-sm font-medium text-slate-700 min-w-24">{name}</span>
+                                <div className="flex items-center gap-1.5">
+                                  <label className="text-xs text-slate-500">Qty:</label>
+                                  <input
+                                    type="number"
+                                    min={1}
+                                    value={planDetailEditForm.quantity ?? 1}
+                                    disabled={planDetailEditForm.unlimited}
+                                    onChange={(e) => setPlanDetailEditForm({ ...planDetailEditForm, quantity: parseInt(e.target.value) || 1 })}
+                                    className="w-16 px-2 py-1 border border-slate-200 rounded text-xs focus:outline-none focus:ring-1 disabled:opacity-40"
+                                  />
+                                </div>
+                                <label className="flex items-center gap-1 text-xs text-slate-600 cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    checked={planDetailEditForm.unlimited ?? false}
+                                    onChange={(e) => setPlanDetailEditForm({ ...planDetailEditForm, unlimited: e.target.checked })}
+                                    className="accent-teal-600"
+                                  />
+                                  Unlimited
+                                </label>
+                                <select
+                                  value={planDetailEditForm.period || "monthly"}
+                                  onChange={(e) => setPlanDetailEditForm({ ...planDetailEditForm, period: e.target.value })}
+                                  className="px-2 py-1 border border-slate-200 rounded text-xs bg-white focus:outline-none"
+                                >
+                                  <option value="monthly">Monthly</option>
+                                  <option value="quarterly">Quarterly</option>
+                                  <option value="yearly">Yearly</option>
+                                </select>
+                                <select
+                                  value={planDetailEditForm.overagePolicy || "block"}
+                                  onChange={(e) => setPlanDetailEditForm({ ...planDetailEditForm, overagePolicy: e.target.value })}
+                                  className="px-2 py-1 border border-slate-200 rounded text-xs bg-white focus:outline-none"
+                                >
+                                  <option value="block">Block</option>
+                                  <option value="charge">Charge</option>
+                                  <option value="notify">Notify</option>
+                                  <option value="allow">Allow</option>
+                                </select>
+                                <div className="flex gap-1 ml-auto">
+                                  <button
+                                    className="px-2.5 py-1 rounded text-xs font-medium text-white transition-colors"
+                                    style={{ backgroundColor: "#27ab83" }}
+                                    onClick={() => handleUpdatePlanDetailEntitlement(plan.id, entId, {
+                                      quantity: planDetailEditForm.unlimited ? null : planDetailEditForm.quantity,
+                                      unlimited: planDetailEditForm.unlimited,
+                                      period: planDetailEditForm.period,
+                                      overagePolicy: planDetailEditForm.overagePolicy,
+                                    })}
+                                  >
+                                    Save
+                                  </button>
+                                  <button
+                                    className="px-2.5 py-1 rounded text-xs font-medium text-slate-500 hover:bg-slate-100 transition-colors"
+                                    onClick={() => setPlanDetailEditingEntitlement(null)}
+                                  >
+                                    Cancel
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        }
+
+                        return (
+                          <div key={entId} className="px-5 py-3 flex items-center gap-4 hover:bg-slate-50 transition-colors">
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-medium text-slate-700">{name}</p>
+                            </div>
+                            <span
+                              className="px-2 py-0.5 rounded-full text-xs font-medium"
+                              style={{ backgroundColor: catColor.bg, color: catColor.text }}
+                            >
+                              {category}
+                            </span>
+                            <div className="text-sm text-slate-600 w-20 text-center font-medium">{qty}</div>
+                            <div className="text-xs text-slate-400 w-16 text-center capitalize">{period}</div>
+                            <div className="text-xs text-slate-400 w-16 text-center capitalize">{overage}</div>
+                            {cashValue !== null && cashValue !== undefined && (
+                              <div className="text-xs text-slate-500 w-16 text-right">${Number(cashValue).toFixed(2)}</div>
+                            )}
+                            <div className="flex gap-1 shrink-0">
+                              <button
+                                className="p-1.5 rounded hover:bg-slate-100 text-slate-400 transition-colors"
+                                title="Edit entitlement"
+                                onClick={() => {
+                                  setPlanDetailEditingEntitlement(entId);
+                                  setPlanDetailEditForm({
+                                    quantity: ent.quantity ?? ent.allowedQuantity ?? 1,
+                                    unlimited: ent.unlimited ?? false,
+                                    period: ent.period || "monthly",
+                                    overagePolicy: ent.overagePolicy || ent.overage_policy || "block",
+                                  });
+                                }}
+                              >
+                                <Pencil className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                className="p-1.5 rounded hover:bg-red-50 text-slate-400 hover:text-red-500 transition-colors"
+                                title="Remove entitlement"
+                                onClick={() => handleDeletePlanEntitlement(plan.id, entId)}
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        )}
+
+        {/* ── Section 3: Enrolled Members ──────────────────────────── */}
+        {planDetailTab === "members" && (
+          <div className="space-y-4">
+            <h3 className="text-base font-semibold text-slate-800">Enrolled Members</h3>
+            {planDetailMembersLoading ? (
+              <div className="py-8 text-center text-slate-400">Loading members...</div>
+            ) : planDetailMembers.length === 0 ? (
+              <div className="glass rounded-xl py-12 text-center">
+                <Users className="w-10 h-10 mx-auto mb-2 opacity-40" style={{ color: "#94a3b8" }} />
+                <p className="text-sm text-slate-400">No members enrolled in this plan yet.</p>
+              </div>
+            ) : (
+              <div className="glass rounded-xl overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr style={{ backgroundColor: "#f8fafc" }}>
+                        <th className="px-5 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Patient</th>
+                        <th className="px-5 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Member ID</th>
+                        <th className="px-5 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Status</th>
+                        <th className="px-5 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Enrolled</th>
+                        <th className="px-5 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Utilization</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+                      {planDetailMembers.map((member: any) => {
+                        const patientName = member.patient?.firstName && member.patient?.lastName
+                          ? `${member.patient.firstName} ${member.patient.lastName}`
+                          : member.patient?.name || member.patientName || member.patient_name || "Unknown";
+                        const memberId = member.id || member.memberId || member.member_id || "—";
+                        const status = member.status || "active";
+                        const enrollDate = member.createdAt || member.created_at || member.enrolledAt || member.enrolled_at || null;
+                        const utilPct = member.utilizationPercent ?? member.utilization_percent ?? null;
+                        const statusColors: Record<string, { bg: string; text: string }> = {
+                          active: { bg: "#dcfce7", text: "#15803d" },
+                          paused: { bg: "#fffbeb", text: "#d97706" },
+                          cancelled: { bg: "#fef2f2", text: "#dc2626" },
+                          expired: { bg: "#f1f5f9", text: "#475569" },
+                        };
+                        const sc = statusColors[status] || statusColors.active;
+
+                        return (
+                          <tr
+                            key={memberId}
+                            className="hover:bg-slate-50 transition-colors cursor-pointer"
+                            onClick={() => {
+                              // Try to find matching patient and navigate
+                              const patients = apiPatients || [];
+                              const match = patients.find(
+                                (p) => p.id === (member.patientId || member.patient_id || member.patient?.id)
+                              );
+                              if (match) {
+                                setSelectedPlan(null);
+                                setSelectedPatient(match);
+                              }
+                            }}
+                          >
+                            <td className="px-5 py-3">
+                              <div className="flex items-center gap-3">
+                                <div
+                                  className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-semibold text-white"
+                                  style={{ backgroundColor: gradient.accent }}
+                                >
+                                  {patientName.charAt(0)}
+                                </div>
+                                <span className="font-medium text-slate-700">{patientName}</span>
+                              </div>
+                            </td>
+                            <td className="px-5 py-3 text-slate-500 font-mono text-xs">{String(memberId).slice(0, 8)}</td>
+                            <td className="px-5 py-3">
+                              <span
+                                className="px-2 py-0.5 rounded-full text-xs font-medium capitalize"
+                                style={{ backgroundColor: sc.bg, color: sc.text }}
+                              >
+                                {status}
+                              </span>
+                            </td>
+                            <td className="px-5 py-3 text-slate-500 text-xs">
+                              {enrollDate ? new Date(enrollDate).toLocaleDateString() : "—"}
+                            </td>
+                            <td className="px-5 py-3">
+                              {utilPct !== null && utilPct !== undefined ? (
+                                <div className="flex items-center gap-2">
+                                  <div className="w-16 h-1.5 rounded-full" style={{ backgroundColor: "#e2e8f0" }}>
+                                    <div
+                                      className="h-1.5 rounded-full"
+                                      style={{
+                                        width: `${Math.min(Number(utilPct), 100)}%`,
+                                        backgroundColor: Number(utilPct) > 80 ? "#ef4444" : Number(utilPct) > 50 ? "#f59e0b" : "#27ab83",
+                                      }}
+                                    />
+                                  </div>
+                                  <span className="text-xs text-slate-500">{Number(utilPct).toFixed(0)}%</span>
+                                </div>
+                              ) : (
+                                <span className="text-xs text-slate-300">—</span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── Section 4: Utilization Summary ──────────────────────── */}
+        {planDetailTab === "utilization" && (
+          <div className="space-y-4">
+            <h3 className="text-base font-semibold text-slate-800">Plan Utilization Summary</h3>
+            {planDetailUsageLoading ? (
+              <div className="py-8 text-center text-slate-400">Loading utilization data...</div>
+            ) : planDetailUsage.length === 0 ? (
+              <div className="glass rounded-xl py-12 text-center">
+                <BarChart3 className="w-10 h-10 mx-auto mb-2 opacity-40" style={{ color: "#94a3b8" }} />
+                <p className="text-sm text-slate-400">No utilization data available yet.</p>
+                <p className="text-xs text-slate-300 mt-1">Usage data will appear as members use their entitlements.</p>
+              </div>
+            ) : (
+              <div className="glass rounded-xl overflow-hidden">
+                <div className="divide-y divide-slate-100">
+                  {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+                  {planDetailUsage.map((usage: any, i: number) => {
+                    const name = usage.entitlementType?.name || usage.entitlementName || usage.entitlement_name || usage.name || "Benefit";
+                    const category = usage.entitlementType?.category || usage.category || "";
+                    const catColor = getCategoryColor(category);
+                    const totalAllowed = usage.totalAllowed ?? usage.total_allowed ?? 0;
+                    const totalUsed = usage.totalUsed ?? usage.total_used ?? 0;
+                    const isUnlimited = usage.unlimited || totalAllowed === null || totalAllowed === -1;
+                    const pct = isUnlimited ? (totalUsed > 0 ? 50 : 0) : totalAllowed > 0 ? (totalUsed / totalAllowed) * 100 : 0;
+                    const savings = usage.savingsGenerated ?? usage.savings_generated ?? null;
+                    const barColor = pct > 80 ? "#ef4444" : pct > 50 ? "#f59e0b" : "#27ab83";
+
+                    return (
+                      <div key={i} className="px-5 py-4">
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="flex items-center gap-3">
+                            <span className="text-sm font-medium text-slate-700">{name}</span>
+                            <span
+                              className="px-2 py-0.5 rounded-full text-xs font-medium"
+                              style={{ backgroundColor: catColor.bg, color: catColor.text }}
+                            >
+                              {category}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-4 text-xs text-slate-500">
+                            <span>
+                              {totalUsed} / {isUnlimited ? "\u221E" : totalAllowed} used
+                            </span>
+                            <span className="font-semibold" style={{ color: barColor }}>
+                              {isUnlimited ? "—" : `${pct.toFixed(0)}%`}
+                            </span>
+                            {savings !== null && savings !== undefined && (
+                              <span style={{ color: "#15803d" }}>
+                                ${Number(savings).toLocaleString()} saved
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <div className="w-full h-2 rounded-full" style={{ backgroundColor: "#e2e8f0" }}>
+                          <div
+                            className="h-2 rounded-full transition-all"
+                            style={{
+                              width: `${Math.min(pct, 100)}%`,
+                              backgroundColor: barColor,
+                            }}
+                          />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── Section 5: Revenue ───────────────────────────────────── */}
+        {planDetailTab === "revenue" && (
+          <div className="space-y-6">
+            <h3 className="text-base font-semibold text-slate-800">Revenue Breakdown</h3>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              <div className="glass rounded-xl p-6">
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="w-10 h-10 rounded-lg flex items-center justify-center" style={{ backgroundColor: "#dcfce7" }}>
+                    <DollarSign className="w-5 h-5" style={{ color: "#15803d" }} />
+                  </div>
+                  <div>
+                    <p className="text-xs text-slate-500">Monthly Recurring Revenue</p>
+                    <p className="text-2xl font-bold text-slate-800">${mrr.toLocaleString()}</p>
+                  </div>
+                </div>
+                <p className="text-xs text-slate-400">{memberCount} members x ${monthlyPrice}/mo</p>
+              </div>
+              <div className="glass rounded-xl p-6">
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="w-10 h-10 rounded-lg flex items-center justify-center" style={{ backgroundColor: "#dbeafe" }}>
+                    <TrendingUp className="w-5 h-5" style={{ color: "#1d4ed8" }} />
+                  </div>
+                  <div>
+                    <p className="text-xs text-slate-500">Projected Annual Revenue</p>
+                    <p className="text-2xl font-bold text-slate-800">${arr.toLocaleString()}</p>
+                  </div>
+                </div>
+                <p className="text-xs text-slate-400">${mrr.toLocaleString()}/mo x 12 months</p>
+              </div>
+              <div className="glass rounded-xl p-6">
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="w-10 h-10 rounded-lg flex items-center justify-center" style={{ backgroundColor: "#f3e8ff" }}>
+                    <Receipt className="w-5 h-5" style={{ color: "#7c3aed" }} />
+                  </div>
+                  <div>
+                    <p className="text-xs text-slate-500">Overage Fees</p>
+                    <p className="text-2xl font-bold text-slate-800">
+                      ${(() => {
+                        const totalOverage = planDetailUsage.reduce((sum: number, u: Record<string, unknown>) => {
+                          return sum + (Number(u.overageFees ?? u.overage_fees ?? 0));
+                        }, 0);
+                        return totalOverage.toLocaleString();
+                      })()}
+                    </p>
+                  </div>
+                </div>
+                <p className="text-xs text-slate-400">From overage charges this period</p>
+              </div>
+            </div>
+
+            {/* Revenue per member breakdown */}
+            <div className="glass rounded-xl p-5">
+              <h4 className="text-sm font-semibold text-slate-800 mb-3">Revenue per Member</h4>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                <div>
+                  <p className="text-xs text-slate-500">Avg Monthly/Member</p>
+                  <p className="text-lg font-bold text-slate-800">${monthlyPrice}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-slate-500">Avg Annual/Member</p>
+                  <p className="text-lg font-bold text-slate-800">${annualPrice > 0 ? annualPrice.toLocaleString() : (monthlyPrice * 12).toLocaleString()}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-slate-500">Annual Savings vs Monthly</p>
+                  <p className="text-lg font-bold" style={{ color: "#15803d" }}>
+                    {annualPrice > 0 && monthlyPrice > 0
+                      ? `${Math.round((1 - annualPrice / (monthlyPrice * 12)) * 100)}%`
+                      : "—"}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-slate-500">Total Active Members</p>
+                  <p className="text-lg font-bold text-slate-800">{memberCount}</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   // ─── Membership Plans Tab ───────────────────────────────────────────────
 
   function renderPlans() {
+    if (selectedPlan) return renderPlanDetail();
+
     const planIcons: Record<string, React.ElementType> = {
       Essential: Heart,
       Complete: Star,
@@ -3273,7 +4159,7 @@ export function PracticePortal() {
             const revenue = memberCount * monthlyPrice;
 
             return (
-              <div key={plan.id} className="glass rounded-2xl overflow-hidden hover-lift flex flex-col">
+              <div key={plan.id} className="glass rounded-2xl overflow-hidden hover-lift flex flex-col cursor-pointer" onClick={() => openPlanDetail(plan)}>
                 {/* Header */}
                 <div
                   className="p-5 text-white relative overflow-hidden"
@@ -3348,7 +4234,8 @@ export function PracticePortal() {
                       onMouseLeave={(e) => {
                         e.currentTarget.style.backgroundColor = "";
                       }}
-                      onClick={() => {
+                      onClick={(e) => {
+                        e.stopPropagation();
                         setEditPlanForm({
                           id: plan.id,
                           name: plan.name,
@@ -3365,7 +4252,7 @@ export function PracticePortal() {
                     </button>
                     <button
                       className="flex-1 px-3 py-2 rounded-lg text-sm font-medium border border-slate-200 text-slate-500 hover:bg-slate-50 transition-colors"
-                      onClick={() => handleDeactivatePlan(plan.id, plan.name)}
+                      onClick={(e) => { e.stopPropagation(); handleDeactivatePlan(plan.id, plan.name); }}
                     >
                       Deactivate
                     </button>
@@ -5837,6 +6724,8 @@ export function PracticePortal() {
 
   const activeLabel = selectedPatient
     ? `Patient: ${selectedPatient.name}`
+    : selectedPlan
+    ? `Plan: ${selectedPlan.name}`
     : NAV_SECTIONS.flatMap((s) => s.items).find((i) => i.id === activeTab)?.label || "Dashboard";
 
   // ─── Render ─────────────────────────────────────────────────────────────
