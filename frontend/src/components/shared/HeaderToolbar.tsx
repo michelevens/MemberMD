@@ -5,6 +5,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { MessageSquare, Bell, Settings, Moon, Sun, X } from "lucide-react";
 import { UserSettingsDropdown } from "./UserSettingsDropdown";
+import { useTheme } from "../../contexts/ThemeContext";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -163,12 +164,7 @@ export function HeaderToolbar({ variant, onNavigate }: HeaderToolbarProps) {
   const [showMessages, setShowMessages] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const [notifications, setNotifications] = useState(MOCK_NOTIFICATIONS);
-  const [isDark, setIsDark] = useState(() => {
-    return (
-      localStorage.getItem("membermd_theme") === "dark" ||
-      document.documentElement.classList.contains("dark")
-    );
-  });
+  const { isDark, toggleTheme } = useTheme();
 
   const unreadMessages = MOCK_MESSAGES.filter((m) => m.unread).length;
   const unreadNotifications = notifications.filter((n) => !n.read).length;
@@ -177,13 +173,6 @@ export function HeaderToolbar({ variant, onNavigate }: HeaderToolbarProps) {
     setShowMessages(false);
     setShowNotifications(false);
   }, []);
-
-  const toggleTheme = () => {
-    const next = !isDark;
-    setIsDark(next);
-    document.documentElement.classList.toggle("dark", next);
-    localStorage.setItem("membermd_theme", next ? "dark" : "light");
-  };
 
   const handleSettingsClick = () => {
     closeAll();
