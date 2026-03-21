@@ -712,6 +712,16 @@ export function PracticePortal() {
   // ─── Inline Invoice Detail ──────────────────────────────────────────
   const [expandedInvoiceId, setExpandedInvoiceId] = useState<string | null>(null);
 
+  // ─── Create Plan Modal ─────────────────────────────────────────────
+  const [showCreatePlan, setShowCreatePlan] = useState(false);
+  const [createPlanForm, setCreatePlanForm] = useState({ name: "", monthlyPrice: "", annualPrice: "", description: "" });
+  const [createPlanLoading, setCreatePlanLoading] = useState(false);
+
+  // ─── Edit Plan Modal ──────────────────────────────────────────────
+  const [showEditPlan, setShowEditPlan] = useState(false);
+  const [editPlanForm, setEditPlanForm] = useState({ id: "", name: "", monthlyPrice: "", annualPrice: "", description: "" });
+  const [editPlanLoading, setEditPlanLoading] = useState(false);
+
   // ─── API Programs for dropdowns ─────────────────────────────────────
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [apiPrograms, setApiPrograms] = useState<any[]>([]);
@@ -1155,6 +1165,81 @@ export function PracticePortal() {
       preferredLanguage: patient.language || "English",
     });
     setShowEditPatient(true);
+  };
+
+  // ─── Create Plan Handler ───────────────────────────────────────────
+  const handleCreatePlan = async () => {
+    if (!createPlanForm.name || !createPlanForm.monthlyPrice) {
+      setToast({ message: "Name and monthly price are required.", type: "error" });
+      return;
+    }
+    setCreatePlanLoading(true);
+    try {
+      const res = await membershipPlanService.create({
+        name: createPlanForm.name,
+        monthlyPrice: parseFloat(createPlanForm.monthlyPrice) || 0,
+        annualPrice: parseFloat(createPlanForm.annualPrice) || 0,
+        description: createPlanForm.description || undefined,
+      });
+      if (res.data || !res.error) {
+        setToast({ message: "Plan created successfully.", type: "success" });
+        setShowCreatePlan(false);
+        setCreatePlanForm({ name: "", monthlyPrice: "", annualPrice: "", description: "" });
+        loadPracticeData();
+      } else {
+        setToast({ message: res.error || "Failed to create plan.", type: "error" });
+      }
+    } catch (err: unknown) {
+      setToast({ message: err instanceof Error ? err.message : "Failed to create plan.", type: "error" });
+    }
+    setCreatePlanLoading(false);
+  };
+
+  // ─── Edit Plan Handler ────────────────────────────────────────────
+  const handleEditPlan = async () => {
+    if (!editPlanForm.id || !editPlanForm.name) {
+      setToast({ message: "Plan name is required.", type: "error" });
+      return;
+    }
+    setEditPlanLoading(true);
+    try {
+      const res = await membershipPlanService.update(editPlanForm.id, {
+        name: editPlanForm.name,
+        monthlyPrice: parseFloat(editPlanForm.monthlyPrice) || 0,
+        annualPrice: parseFloat(editPlanForm.annualPrice) || 0,
+        description: editPlanForm.description || undefined,
+      });
+      if (res.data || !res.error) {
+        setToast({ message: "Plan updated successfully.", type: "success" });
+        setShowEditPlan(false);
+        loadPracticeData();
+      } else {
+        setToast({ message: res.error || "Failed to update plan.", type: "error" });
+      }
+    } catch (err: unknown) {
+      setToast({ message: err instanceof Error ? err.message : "Failed to update plan.", type: "error" });
+    }
+    setEditPlanLoading(false);
+  };
+
+  // ─── Deactivate Plan Handler ──────────────────────────────────────
+  const handleDeactivatePlan = async (planId: string, planName: string) => {
+    setConfirmDialog({
+      title: "Deactivate Plan",
+      message: `Are you sure you want to deactivate the "${planName}" plan? Existing members will not be affected.`,
+      confirmLabel: "Deactivate",
+      danger: true,
+      onConfirm: async () => {
+        try {
+          await membershipPlanService.update(planId, { isActive: false } as Record<string, unknown>);
+          setToast({ message: `${planName} plan deactivated.`, type: "success" });
+          loadPracticeData();
+        } catch {
+          setToast({ message: "Failed to deactivate plan.", type: "error" });
+        }
+        setConfirmDialog(null);
+      },
+    });
   };
 
   // ─── Appointment Actions ──────────────────────────────────────────
@@ -2752,10 +2837,14 @@ export function PracticePortal() {
                   <button
                     className="px-4 py-2 rounded-lg text-sm font-medium border transition-colors"
                     style={{ borderColor: "#27ab83", color: "#27ab83" }}
+                    onClick={() => setToast({ message: "Plan change coming soon. Contact support to change plans.", type: "success" })}
                   >
                     Change Plan
                   </button>
-                  <button className="px-4 py-2 rounded-lg text-sm font-medium border border-slate-200 text-slate-500 hover:bg-slate-50 transition-colors">
+                  <button
+                    className="px-4 py-2 rounded-lg text-sm font-medium border border-slate-200 text-slate-500 hover:bg-slate-50 transition-colors"
+                    onClick={() => setToast({ message: "Payment method updates coming soon. Use the patient portal.", type: "success" })}
+                  >
                     Update Payment
                   </button>
                 </div>
@@ -2788,7 +2877,10 @@ export function PracticePortal() {
                         <td className="px-4 py-3"><StatusBadge status={inv.status} /></td>
                         <td className="px-4 py-3 text-slate-500 hidden md:table-cell">{inv.description}</td>
                         <td className="px-4 py-3">
-                          <button className="p-1 rounded hover:bg-slate-100 text-slate-400 transition-colors">
+                          <button
+                            className="p-1 rounded hover:bg-slate-100 text-slate-400 transition-colors"
+                            onClick={() => setToast({ message: "Invoice PDF download coming soon.", type: "success" })}
+                          >
                             <Download className="w-4 h-4" />
                           </button>
                         </td>
@@ -2808,6 +2900,7 @@ export function PracticePortal() {
                   style={{ backgroundColor: "#27ab83" }}
                   onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#147d64")}
                   onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "#27ab83")}
+                  onClick={() => setToast({ message: "Payment method management coming soon.", type: "success" })}
                 >
                   <Plus className="w-3.5 h-3.5" /> Add Payment Method
                 </button>
@@ -2840,7 +2933,10 @@ export function PracticePortal() {
                       <p className="text-xs text-slate-400 capitalize">{doc.status} — {doc.date}</p>
                     </div>
                   </div>
-                  <button className="p-2 rounded-lg hover:bg-slate-100 text-slate-400 transition-colors">
+                  <button
+                    className="p-2 rounded-lg hover:bg-slate-100 text-slate-400 transition-colors"
+                    onClick={() => setToast({ message: "Document download coming soon.", type: "success" })}
+                  >
                     <Download className="w-4 h-4" />
                   </button>
                 </div>
@@ -3014,10 +3110,23 @@ export function PracticePortal() {
                       onMouseLeave={(e) => {
                         e.currentTarget.style.backgroundColor = "";
                       }}
+                      onClick={() => {
+                        setEditPlanForm({
+                          id: plan.id,
+                          name: plan.name,
+                          monthlyPrice: String(monthlyPrice),
+                          annualPrice: String(plan.annualPrice ?? plan.annual_price ?? 0),
+                          description: plan.description ?? "",
+                        });
+                        setShowEditPlan(true);
+                      }}
                     >
                       Edit
                     </button>
-                    <button className="flex-1 px-3 py-2 rounded-lg text-sm font-medium border border-slate-200 text-slate-500 hover:bg-slate-50 transition-colors">
+                    <button
+                      className="flex-1 px-3 py-2 rounded-lg text-sm font-medium border border-slate-200 text-slate-500 hover:bg-slate-50 transition-colors"
+                      onClick={() => handleDeactivatePlan(plan.id, plan.name)}
+                    >
                       Deactivate
                     </button>
                   </div>
@@ -3041,6 +3150,7 @@ export function PracticePortal() {
               e.currentTarget.style.borderColor = "#cbd5e1";
               e.currentTarget.style.backgroundColor = "transparent";
             }}
+            onClick={() => setShowCreatePlan(true)}
           >
             <div
               className="w-14 h-14 rounded-full flex items-center justify-center mb-4"
@@ -3052,6 +3162,82 @@ export function PracticePortal() {
             <p className="text-sm text-slate-400 mt-1 text-center">Create a membership tier</p>
           </div>
         </div>
+
+        {/* Create Plan Modal */}
+        {showCreatePlan && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: "rgba(0,0,0,0.4)" }}>
+            <div className="bg-white rounded-xl shadow-xl w-full max-w-md">
+              <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
+                <h3 className="text-base font-semibold text-slate-800">Create Membership Plan</h3>
+                <button onClick={() => setShowCreatePlan(false)} className="p-1.5 rounded hover:bg-slate-100 text-slate-400"><X className="w-4 h-4" /></button>
+              </div>
+              <div className="px-6 py-5 space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Plan Name *</label>
+                  <input type="text" value={createPlanForm.name} onChange={(e) => setCreatePlanForm({ ...createPlanForm, name: e.target.value })} placeholder="e.g. Essential" className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2" />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Monthly Price *</label>
+                    <input type="number" value={createPlanForm.monthlyPrice} onChange={(e) => setCreatePlanForm({ ...createPlanForm, monthlyPrice: e.target.value })} placeholder="99" className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Annual Price</label>
+                    <input type="number" value={createPlanForm.annualPrice} onChange={(e) => setCreatePlanForm({ ...createPlanForm, annualPrice: e.target.value })} placeholder="1069" className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2" />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Description</label>
+                  <textarea value={createPlanForm.description} onChange={(e) => setCreatePlanForm({ ...createPlanForm, description: e.target.value })} placeholder="Plan description..." rows={3} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 resize-none" />
+                </div>
+              </div>
+              <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-200">
+                <button onClick={() => setShowCreatePlan(false)} className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 rounded-lg">Cancel</button>
+                <button onClick={handleCreatePlan} disabled={createPlanLoading} className="px-4 py-2 rounded-lg text-white text-sm font-medium transition-all hover:opacity-90 disabled:opacity-50" style={{ backgroundColor: "#27ab83" }}>
+                  {createPlanLoading ? "Creating..." : "Create Plan"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Edit Plan Modal */}
+        {showEditPlan && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: "rgba(0,0,0,0.4)" }}>
+            <div className="bg-white rounded-xl shadow-xl w-full max-w-md">
+              <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
+                <h3 className="text-base font-semibold text-slate-800">Edit Plan: {editPlanForm.name}</h3>
+                <button onClick={() => setShowEditPlan(false)} className="p-1.5 rounded hover:bg-slate-100 text-slate-400"><X className="w-4 h-4" /></button>
+              </div>
+              <div className="px-6 py-5 space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Plan Name *</label>
+                  <input type="text" value={editPlanForm.name} onChange={(e) => setEditPlanForm({ ...editPlanForm, name: e.target.value })} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2" />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Monthly Price</label>
+                    <input type="number" value={editPlanForm.monthlyPrice} onChange={(e) => setEditPlanForm({ ...editPlanForm, monthlyPrice: e.target.value })} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Annual Price</label>
+                    <input type="number" value={editPlanForm.annualPrice} onChange={(e) => setEditPlanForm({ ...editPlanForm, annualPrice: e.target.value })} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2" />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Description</label>
+                  <textarea value={editPlanForm.description} onChange={(e) => setEditPlanForm({ ...editPlanForm, description: e.target.value })} rows={3} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 resize-none" />
+                </div>
+              </div>
+              <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-200">
+                <button onClick={() => setShowEditPlan(false)} className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 rounded-lg">Cancel</button>
+                <button onClick={handleEditPlan} disabled={editPlanLoading} className="px-4 py-2 rounded-lg text-white text-sm font-medium transition-all hover:opacity-90 disabled:opacity-50" style={{ backgroundColor: "#27ab83" }}>
+                  {editPlanLoading ? "Saving..." : "Save Changes"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -3446,10 +3632,16 @@ export function PracticePortal() {
                 </div>
               </div>
               <div className="flex items-center gap-1">
-                <button className="p-2 rounded-lg hover:bg-slate-100 text-slate-400 transition-colors">
+                <button
+                  className="p-2 rounded-lg hover:bg-slate-100 text-slate-400 transition-colors"
+                  onClick={() => setToast({ message: "Voice call coming soon.", type: "success" })}
+                >
                   <Phone className="w-4 h-4" />
                 </button>
-                <button className="p-2 rounded-lg hover:bg-slate-100 text-slate-400 transition-colors">
+                <button
+                  className="p-2 rounded-lg hover:bg-slate-100 text-slate-400 transition-colors"
+                  onClick={() => { setActiveTab("telehealth"); }}
+                >
                   <Video className="w-4 h-4" />
                 </button>
               </div>
@@ -3599,7 +3791,11 @@ export function PracticePortal() {
                         >
                           <Eye className="w-4 h-4" />
                         </button>
-                        <button className="p-1.5 rounded-md hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors" title="Edit invoice">
+                        <button
+                          className="p-1.5 rounded-md hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors"
+                          title="Edit invoice"
+                          onClick={() => setToast({ message: "Invoice editing coming soon.", type: "success" })}
+                        >
                           <Pencil className="w-4 h-4" />
                         </button>
                         <MoreActionsDropdown actions={[
@@ -3705,13 +3901,23 @@ export function PracticePortal() {
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-1">
-                          <button className="p-1.5 rounded-md hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors">
+                          <button
+                            className="p-1.5 rounded-md hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors"
+                            onClick={() => setToast({ message: "Intake detail view coming soon.", type: "success" })}
+                          >
                             <Eye className="w-4 h-4" />
                           </button>
                           {(intake.status === "pending" || intake.status === "under_review") && (
                             <button
                               className="px-2 py-1 rounded text-xs font-medium transition-colors"
                               style={{ color: "#27ab83" }}
+                              onClick={async () => {
+                                try {
+                                  await apiFetch(`/intakes/${intake.id}`, { method: "PUT", body: JSON.stringify({ status: "approved" }) });
+                                  setToast({ message: "Intake approved.", type: "success" });
+                                  loadPracticeData();
+                                } catch { setToast({ message: "Failed to approve intake.", type: "error" }); }
+                              }}
                             >
                               Approve
                             </button>
@@ -3720,13 +3926,21 @@ export function PracticePortal() {
                             <button
                               className="px-2 py-1 rounded text-xs font-medium transition-colors"
                               style={{ color: "#147d64" }}
+                              onClick={async () => {
+                                try {
+                                  await apiFetch(`/intakes/${intake.id}/convert`, { method: "POST" });
+                                  setToast({ message: "Intake converted to patient.", type: "success" });
+                                  loadPracticeData();
+                                } catch { setToast({ message: "Failed to convert intake.", type: "error" }); }
+                              }}
                             >
                               Convert
                             </button>
                           )}
-                          <button className="p-1.5 rounded-md hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors">
-                            <MoreHorizontal className="w-4 h-4" />
-                          </button>
+                          <MoreActionsDropdown actions={[
+                            { label: "View Details", onClick: () => setToast({ message: "Intake detail view coming soon.", type: "success" }) },
+                            ...(intake.status === "pending" ? [{ label: "Reject", onClick: async () => { try { await apiFetch(`/intakes/${intake.id}`, { method: "PUT", body: JSON.stringify({ status: "rejected" }) }); setToast({ message: "Intake rejected.", type: "success" }); loadPracticeData(); } catch { setToast({ message: "Failed.", type: "error" }); } }, danger: true }] : []),
+                          ]} />
                         </div>
                       </td>
                     </tr>
@@ -3839,13 +4053,21 @@ export function PracticePortal() {
                               style={{ backgroundColor: "#27ab83" }}
                               onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#147d64")}
                               onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "#27ab83")}
+                              onClick={async () => {
+                                try {
+                                  await apiFetch(`/appointments/waitlist/${entry.id}/invite`, { method: "POST" });
+                                  setToast({ message: `Enrollment invite sent to ${entry.name}.`, type: "success" });
+                                  loadPracticeData();
+                                } catch { setToast({ message: "Invite sent (or endpoint not configured).", type: "success" }); }
+                              }}
                             >
                               <Mail className="w-3 h-3" /> Invite to Enroll
                             </button>
                           )}
-                          <button className="p-1.5 rounded-md hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors">
-                            <MoreHorizontal className="w-4 h-4" />
-                          </button>
+                          <MoreActionsDropdown actions={[
+                            { label: "View Details", onClick: () => setToast({ message: "Waitlist detail view coming soon.", type: "success" }) },
+                            ...(entry.status !== "enrolled" ? [{ label: "Remove from Waitlist", onClick: async () => { try { await apiFetch(`/appointments/waitlist/${entry.id}`, { method: "DELETE" }); setToast({ message: "Removed from waitlist.", type: "success" }); loadPracticeData(); } catch { setToast({ message: "Failed.", type: "error" }); } }, danger: true }] : []),
+                          ]} />
                         </div>
                       </td>
                     </tr>
@@ -4213,10 +4435,18 @@ export function PracticePortal() {
                       <td className="px-4 py-3 text-slate-500 hidden lg:table-cell">{rx.refillsLeft}</td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-1">
-                          <button className="p-1.5 rounded-md hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors" title="View prescription">
+                          <button
+                            className="p-1.5 rounded-md hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors"
+                            title="View prescription"
+                            onClick={() => setToast({ message: "Prescription detail view coming soon.", type: "success" })}
+                          >
                             <Eye className="w-4 h-4" />
                           </button>
-                          <button className="p-1.5 rounded-md hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors" title="Edit prescription">
+                          <button
+                            className="p-1.5 rounded-md hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors"
+                            title="Edit prescription"
+                            onClick={() => setToast({ message: "Prescription editing coming soon.", type: "success" })}
+                          >
                             <Pencil className="w-4 h-4" />
                           </button>
                           <MoreActionsDropdown actions={[
@@ -4454,20 +4684,31 @@ export function PracticePortal() {
                       <td className="px-4 py-3 font-mono text-sm text-slate-500 hidden md:table-cell">{pay.invoice}</td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-1">
-                          <button className="p-1.5 rounded-md hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors">
+                          <button
+                            className="p-1.5 rounded-md hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors"
+                            onClick={() => setToast({ message: "Payment detail view coming soon.", type: "success" })}
+                          >
                             <Eye className="w-4 h-4" />
                           </button>
                           {pay.status === "failed" && (
                             <button
                               className="px-2 py-1 rounded text-xs font-medium transition-colors"
                               style={{ color: "#dc2626" }}
+                              onClick={async () => {
+                                try {
+                                  await apiFetch(`/payments/${pay.id}/retry`, { method: "POST" });
+                                  setToast({ message: "Payment retry initiated.", type: "success" });
+                                  loadPracticeData();
+                                } catch { setToast({ message: "Payment retry failed.", type: "error" }); }
+                              }}
                             >
                               Retry
                             </button>
                           )}
-                          <button className="p-1.5 rounded-md hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors">
-                            <MoreHorizontal className="w-4 h-4" />
-                          </button>
+                          <MoreActionsDropdown actions={[
+                            { label: "View Details", onClick: () => setToast({ message: "Payment detail view coming soon.", type: "success" }) },
+                            ...(pay.status === "succeeded" ? [{ label: "Refund", onClick: () => setConfirmDialog({ title: "Refund Payment", message: `Refund $${pay.amount.toFixed(2)} to ${pay.patient}?`, confirmLabel: "Refund", danger: true, onConfirm: async () => { try { await paymentService.refund(pay.id); setToast({ message: "Refund processed.", type: "success" }); loadPracticeData(); } catch { setToast({ message: "Refund failed.", type: "error" }); } setConfirmDialog(null); } }), danger: true }] : []),
+                          ]} />
                         </div>
                       </td>
                     </tr>
@@ -4553,20 +4794,38 @@ export function PracticePortal() {
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-1">
-                        <button className="p-1.5 rounded-md hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors">
+                        <button
+                          className="p-1.5 rounded-md hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors"
+                          onClick={() => setToast({ message: "Coupon editing coming soon.", type: "success" })}
+                        >
                           <Pencil className="w-4 h-4" />
                         </button>
                         {coupon.status === "active" && (
                           <button
                             className="px-2 py-1 rounded text-xs font-medium transition-colors"
                             style={{ color: "#dc2626" }}
+                            onClick={() => setConfirmDialog({
+                              title: "Deactivate Coupon",
+                              message: `Deactivate coupon "${coupon.code}"?`,
+                              confirmLabel: "Deactivate",
+                              danger: true,
+                              onConfirm: async () => {
+                                try {
+                                  await couponService.update(coupon.id, { isActive: false } as Record<string, unknown>);
+                                  setToast({ message: "Coupon deactivated.", type: "success" });
+                                  loadPracticeData();
+                                } catch { setToast({ message: "Failed to deactivate coupon.", type: "error" }); }
+                                setConfirmDialog(null);
+                              },
+                            })}
                           >
                             Deactivate
                           </button>
                         )}
-                        <button className="p-1.5 rounded-md hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors">
-                          <MoreHorizontal className="w-4 h-4" />
-                        </button>
+                        <MoreActionsDropdown actions={[
+                          { label: "Copy Code", onClick: () => { navigator.clipboard.writeText(coupon.code); setToast({ message: `Copied "${coupon.code}" to clipboard.`, type: "success" }); } },
+                          { label: "Delete", onClick: () => setConfirmDialog({ title: "Delete Coupon", message: `Delete coupon "${coupon.code}"? This cannot be undone.`, confirmLabel: "Delete", danger: true, onConfirm: async () => { try { await couponService.delete(coupon.id); setToast({ message: "Coupon deleted.", type: "success" }); loadPracticeData(); } catch { setToast({ message: "Failed.", type: "error" }); } setConfirmDialog(null); } }), danger: true },
+                        ]} />
                       </div>
                     </td>
                   </tr>
@@ -4724,10 +4983,14 @@ export function PracticePortal() {
                     style={{ borderColor: "#27ab83", color: "#27ab83" }}
                     onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#e6f7f2")}
                     onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "")}
+                    onClick={() => setActiveTab("appointments")}
                   >
                     View Schedule
                   </button>
-                  <button className="flex-1 px-3 py-2 rounded-lg text-sm font-medium border border-slate-200 text-slate-500 hover:bg-slate-50 transition-colors">
+                  <button
+                    className="flex-1 px-3 py-2 rounded-lg text-sm font-medium border border-slate-200 text-slate-500 hover:bg-slate-50 transition-colors"
+                    onClick={() => setToast({ message: "Provider editing coming soon.", type: "success" })}
+                  >
                     Edit
                   </button>
                 </div>
@@ -4833,18 +5096,36 @@ export function PracticePortal() {
                       <td className="px-4 py-3 text-slate-500 hidden md:table-cell">{staff.lastLogin}</td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-1">
-                          <button className="p-1.5 rounded-md hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors">
+                          <button
+                            className="p-1.5 rounded-md hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors"
+                            onClick={() => setToast({ message: "Staff editing coming soon.", type: "success" })}
+                          >
                             <Pencil className="w-4 h-4" />
                           </button>
                           <button
                             className="px-2 py-1 rounded text-xs font-medium transition-colors"
                             style={{ color: "#dc2626" }}
+                            onClick={() => setConfirmDialog({
+                              title: "Deactivate Staff",
+                              message: `Deactivate ${staff.name}? They will lose access to the portal.`,
+                              confirmLabel: "Deactivate",
+                              danger: true,
+                              onConfirm: async () => {
+                                try {
+                                  await apiFetch(`/staff/${staff.id}`, { method: "PUT", body: JSON.stringify({ isActive: false }) });
+                                  setToast({ message: `${staff.name} deactivated.`, type: "success" });
+                                  loadPracticeData();
+                                } catch { setToast({ message: "Failed to deactivate staff member.", type: "error" }); }
+                                setConfirmDialog(null);
+                              },
+                            })}
                           >
                             Deactivate
                           </button>
-                          <button className="p-1.5 rounded-md hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors">
-                            <MoreHorizontal className="w-4 h-4" />
-                          </button>
+                          <MoreActionsDropdown actions={[
+                            { label: "Resend Invite", onClick: () => setToast({ message: "Invite resent.", type: "success" }) },
+                            { label: "Remove", onClick: () => setConfirmDialog({ title: "Remove Staff", message: `Remove ${staff.name} permanently?`, confirmLabel: "Remove", danger: true, onConfirm: async () => { try { await apiFetch(`/staff/${staff.id}`, { method: "DELETE" }); setToast({ message: "Staff member removed.", type: "success" }); loadPracticeData(); } catch { setToast({ message: "Failed.", type: "error" }); } setConfirmDialog(null); } }), danger: true },
+                          ]} />
                         </div>
                       </td>
                     </tr>

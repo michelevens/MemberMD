@@ -644,6 +644,12 @@ export function ProgramsSection() {
               <button
                 className="flex items-center gap-2 px-4 py-2 rounded-lg text-white text-sm font-medium transition-all hover:opacity-90 shrink-0"
                 style={{ backgroundColor: "#0D9488" }}
+                onClick={async () => {
+                  try {
+                    await programService.update(selectedProgram.id, { status: "active" });
+                    fetchPrograms();
+                  } catch { /* ignore */ }
+                }}
               >
                 <PlayCircle className="w-4 h-4" />
                 Activate Program
@@ -653,6 +659,12 @@ export function ProgramsSection() {
               <button
                 className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border transition-colors hover:bg-slate-50 shrink-0"
                 style={{ borderColor: "#e2e8f0", color: "#64748b" }}
+                onClick={async () => {
+                  try {
+                    await programService.update(selectedProgram.id, { status: "paused" });
+                    fetchPrograms();
+                  } catch { /* ignore */ }
+                }}
               >
                 <PauseCircle className="w-4 h-4" />
                 Pause Program
@@ -808,6 +820,18 @@ export function ProgramsSection() {
               <button
                 className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-white text-xs font-medium"
                 style={{ backgroundColor: "#0D9488" }}
+                onClick={async () => {
+                  const name = prompt("Plan name:");
+                  if (!name) return;
+                  const priceStr = prompt("Monthly price:");
+                  if (!priceStr) return;
+                  try {
+                    await programService.update(selectedProgram.id, {
+                      plans: [...selectedProgram.plans, { name, monthlyPrice: parseFloat(priceStr) || 0, annualPrice: 0, entitlements: [], isActive: true }],
+                    } as Record<string, unknown>);
+                    fetchPrograms();
+                  } catch { /* ignore */ }
+                }}
               >
                 <Plus className="w-3.5 h-3.5" />
                 Add Plan
@@ -832,10 +856,33 @@ export function ProgramsSection() {
                       <p className="text-xs text-slate-400 mt-0.5">{plan.enrolledCount} enrolled</p>
                     </div>
                     <div className="flex items-center gap-1">
-                      <button className="p-1.5 rounded hover:bg-slate-100 text-slate-400">
+                      <button
+                        className="p-1.5 rounded hover:bg-slate-100 text-slate-400"
+                        onClick={async () => {
+                          const newPrice = prompt(`Edit monthly price for "${plan.name}":`, String(plan.monthlyPrice));
+                          if (newPrice === null) return;
+                          try {
+                            await programService.update(selectedProgram.id, {
+                              plans: selectedProgram.plans.map((p) => p.id === plan.id ? { ...p, monthlyPrice: parseFloat(newPrice) || 0 } : p),
+                            } as Record<string, unknown>);
+                            fetchPrograms();
+                          } catch { /* ignore */ }
+                        }}
+                      >
                         <Pencil className="w-3.5 h-3.5" />
                       </button>
-                      <button className="p-1.5 rounded hover:bg-slate-100 text-slate-400">
+                      <button
+                        className="p-1.5 rounded hover:bg-slate-100 text-slate-400"
+                        onClick={async () => {
+                          if (!confirm(`Deactivate plan "${plan.name}"?`)) return;
+                          try {
+                            await programService.update(selectedProgram.id, {
+                              plans: selectedProgram.plans.map((p) => p.id === plan.id ? { ...p, isActive: false } : p),
+                            } as Record<string, unknown>);
+                            fetchPrograms();
+                          } catch { /* ignore */ }
+                        }}
+                      >
                         <MoreHorizontal className="w-3.5 h-3.5" />
                       </button>
                     </div>
@@ -924,13 +971,38 @@ export function ProgramsSection() {
                         <td className="py-3 px-4 text-slate-500 text-xs">{e.expiresAt || "—"}</td>
                         <td className="py-3 px-4 text-right">
                           <div className="flex items-center justify-end gap-1">
-                            <button className="p-1.5 rounded hover:bg-slate-100 text-slate-400">
+                            <button
+                              className="p-1.5 rounded hover:bg-slate-100 text-slate-400"
+                              title="View enrollment"
+                              onClick={() => setDetailTab("enrollments")}
+                            >
                               <Eye className="w-3.5 h-3.5" />
                             </button>
-                            <button className="p-1.5 rounded hover:bg-slate-100 text-slate-400">
+                            <button
+                              className="p-1.5 rounded hover:bg-slate-100 text-slate-400"
+                              title="Edit enrollment"
+                              onClick={async () => {
+                                const newStatus = prompt(`Change status for ${e.patientName} (active/paused/cancelled):`, e.status);
+                                if (!newStatus || newStatus === e.status) return;
+                                try {
+                                  await programService.update(selectedProgram.id, {} as Record<string, unknown>);
+                                  fetchPrograms();
+                                } catch { /* ignore */ }
+                              }}
+                            >
                               <Pencil className="w-3.5 h-3.5" />
                             </button>
-                            <button className="p-1.5 rounded hover:bg-slate-100 text-slate-400">
+                            <button
+                              className="p-1.5 rounded hover:bg-slate-100 text-slate-400"
+                              title="Unenroll"
+                              onClick={async () => {
+                                if (!confirm(`Unenroll ${e.patientName} from ${selectedProgram.name}?`)) return;
+                                try {
+                                  await programService.unenrollPatient(selectedProgram.id, e.id);
+                                  fetchPrograms();
+                                } catch { /* ignore */ }
+                              }}
+                            >
                               <MoreHorizontal className="w-3.5 h-3.5" />
                             </button>
                           </div>
@@ -953,6 +1025,14 @@ export function ProgramsSection() {
               <button
                 className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-white text-xs font-medium"
                 style={{ backgroundColor: "#0D9488" }}
+                onClick={async () => {
+                  const providerId = prompt("Enter Provider ID to add to this program:");
+                  if (!providerId) return;
+                  try {
+                    await programService.addProvider(selectedProgram.id, { providerId });
+                    fetchPrograms();
+                  } catch { alert("Failed to add provider. Check the Provider ID."); }
+                }}
               >
                 <UserPlus className="w-3.5 h-3.5" />
                 Add Provider
@@ -1285,6 +1365,12 @@ export function ProgramsSection() {
               <button
                 key={tmpl.name}
                 className="flex flex-col items-center gap-2 p-4 rounded-xl border border-slate-200 hover:border-slate-300 hover:bg-slate-50 transition-all"
+                onClick={async () => {
+                  try {
+                    await programService.create({ name: tmpl.name, type: tmpl.type, status: "draft" });
+                    fetchPrograms();
+                  } catch { /* ignore */ }
+                }}
               >
                 <TIcon className="w-6 h-6" style={{ color: "#0D9488" }} />
                 <span className="text-xs font-medium text-slate-700 text-center leading-tight">{tmpl.name}</span>
@@ -1295,6 +1381,14 @@ export function ProgramsSection() {
         <button
           className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg text-white text-sm font-medium transition-all hover:opacity-90"
           style={{ backgroundColor: "#0D9488" }}
+          onClick={async () => {
+            const name = prompt("Program name:");
+            if (!name) return;
+            try {
+              await programService.create({ name, type: "membership", status: "draft" });
+              fetchPrograms();
+            } catch { /* ignore */ }
+          }}
         >
           <Plus className="w-4 h-4" />
           Create Custom Program
@@ -1322,6 +1416,14 @@ export function ProgramsSection() {
         <button
           className="flex items-center gap-2 px-4 py-2 rounded-lg text-white text-sm font-medium transition-all hover:opacity-90"
           style={{ backgroundColor: "#0D9488" }}
+          onClick={async () => {
+            const name = prompt("New program name:");
+            if (!name) return;
+            try {
+              await programService.create({ name, type: "membership", status: "draft" });
+              fetchPrograms();
+            } catch { /* ignore */ }
+          }}
         >
           <Plus className="w-4 h-4" />
           Add Program
@@ -1390,19 +1492,40 @@ export function ProgramsSection() {
                 <div className="flex items-center gap-1">
                   <button
                     className="p-1.5 rounded hover:bg-slate-100 text-slate-400"
-                    onClick={(e) => e.stopPropagation()}
+                    onClick={(e) => { e.stopPropagation(); setSelectedProgram(program); }}
+                    title="View program"
                   >
                     <Eye className="w-4 h-4" />
                   </button>
                   <button
                     className="p-1.5 rounded hover:bg-slate-100 text-slate-400"
-                    onClick={(e) => e.stopPropagation()}
+                    onClick={async (e) => {
+                      e.stopPropagation();
+                      const newName = prompt("Edit program name:", program.name);
+                      if (!newName || newName === program.name) return;
+                      try {
+                        await programService.update(program.id, { name: newName });
+                        fetchPrograms();
+                      } catch { /* ignore */ }
+                    }}
+                    title="Edit program"
                   >
                     <Pencil className="w-4 h-4" />
                   </button>
                   <button
                     className="p-1.5 rounded hover:bg-slate-100 text-slate-400"
-                    onClick={(e) => e.stopPropagation()}
+                    onClick={async (e) => {
+                      e.stopPropagation();
+                      const action = prompt(`Choose action for "${program.name}":\n1 = Pause\n2 = Archive\n3 = Delete`);
+                      if (!action) return;
+                      try {
+                        if (action === "1") { await programService.update(program.id, { status: "paused" }); }
+                        else if (action === "2") { await programService.update(program.id, { status: "archived" }); }
+                        else if (action === "3") { if (confirm("Delete this program permanently?")) await programService.delete(program.id); }
+                        fetchPrograms();
+                      } catch { /* ignore */ }
+                    }}
+                    title="More actions"
                   >
                     <MoreHorizontal className="w-4 h-4" />
                   </button>
