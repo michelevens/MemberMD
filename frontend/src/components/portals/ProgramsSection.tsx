@@ -627,6 +627,86 @@ export function ProgramsSection() {
     return matchesSearch && matchesStatus;
   });
 
+  // ─── Enroll Patient Dialog (defined before early returns so it always renders) ───
+  const enrollProgram = programs.find((p) => p.id === enrollProgramId);
+  const enrollDialogJsx = enrollDialogOpen && enrollProgram && (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: "rgba(0,0,0,0.4)" }}>
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-lg">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
+          <h3 className="text-base font-semibold text-slate-800">Enroll Patient in {enrollProgram.name}</h3>
+          <button onClick={() => setEnrollDialogOpen(false)} className="p-1.5 rounded hover:bg-slate-100 text-slate-400"><X className="w-4 h-4" /></button>
+        </div>
+        <div className="px-6 py-5 space-y-4">
+          {enrollSuccess ? (
+            <div className="text-center py-6">
+              <CheckCircle2 className="w-12 h-12 mx-auto mb-3" style={{ color: "#27ab83" }} />
+              <p className="text-sm font-medium text-slate-800">Patient enrolled successfully!</p>
+            </div>
+          ) : (
+            <>
+              {enrollError && <div className="p-3 rounded-lg text-sm" style={{ backgroundColor: "#fef2f2", color: "#dc2626" }}>{enrollError}</div>}
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Patient</label>
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                  <input type="text" placeholder="Search patients by name..." value={enrollPatientSearch}
+                    onChange={(e) => { setEnrollPatientSearch(e.target.value); setEnrollSelectedPatientId(null); }}
+                    className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:border-transparent" />
+                </div>
+                {patientsLoading && <div className="flex items-center gap-2 mt-2 text-xs text-slate-400"><Loader2 className="w-3 h-3 animate-spin" />Searching...</div>}
+                {enrollPatients.length > 0 && !enrollSelectedPatientId && (
+                  <div className="mt-1 border border-slate-200 rounded-lg max-h-40 overflow-y-auto">
+                    {enrollPatients.map((pt) => (
+                      <button key={pt.id} onClick={() => { setEnrollSelectedPatientId(pt.id); setEnrollPatientSearch(`${pt.firstName} ${pt.lastName}`); }}
+                        className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50 border-b border-slate-100 last:border-b-0">{pt.firstName} {pt.lastName}</button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              {enrollProgram.plans.length > 0 && (
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Plan</label>
+                  <select value={enrollSelectedPlanId || ""} onChange={(e) => setEnrollSelectedPlanId(e.target.value || null)}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2">
+                    <option value="">Select a plan (optional)</option>
+                    {enrollProgram.plans.filter((pl) => pl.isActive).map((pl) => (
+                      <option key={pl.id} value={pl.id}>{pl.name}{pl.monthlyPrice > 0 ? ` — ${formatCurrency(pl.monthlyPrice)}/mo` : ""}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Funding Source</label>
+                <select value={enrollFundingSource} onChange={(e) => setEnrollFundingSource(e.target.value)}
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2">
+                  <option value="self_pay">Self-Pay</option><option value="employer">Employer</option>
+                  <option value="insurance">Insurance</option><option value="grant">Grant</option><option value="sponsor">Sponsor</option>
+                </select>
+              </div>
+              {enrollFundingSource === "sponsor" && (
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Sponsor Name</label>
+                  <input type="text" value={enrollSponsorName} onChange={(e) => setEnrollSponsorName(e.target.value)}
+                    placeholder="Enter sponsor name" className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:border-transparent" />
+                </div>
+              )}
+            </>
+          )}
+        </div>
+        {!enrollSuccess && (
+          <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-200">
+            <button onClick={() => setEnrollDialogOpen(false)} className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 rounded-lg">Cancel</button>
+            <button onClick={handleEnrollPatient} disabled={!enrollSelectedPatientId || enrollSubmitting}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg text-white text-sm font-medium transition-all hover:opacity-90 disabled:opacity-50"
+              style={{ backgroundColor: "#0D9488" }}>
+              {enrollSubmitting && <Loader2 className="w-4 h-4 animate-spin" />}Enroll Patient
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
   // ─── Detail View ────────────────────────────────────────────────────────
 
   if (selectedProgram) {
@@ -1260,6 +1340,9 @@ export function ProgramsSection() {
           </div>
         )}
 
+        {/* Enroll Patient Dialog (inside detail view) */}
+        {enrollDialogJsx}
+
         {/* Add Provider to Program Modal (inside detail view) */}
         {addProviderToProgram && addProviderProgramId && (
           <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: "rgba(0,0,0,0.5)" }}>
@@ -1355,152 +1438,9 @@ export function ProgramsSection() {
     );
   }
 
-  // ─── Enroll Patient Dialog ─────────────────────────────────────────────────
+  // ─── (Enroll Patient Dialog moved above early returns) ─────────────────────
 
-  const enrollProgram = programs.find((p) => p.id === enrollProgramId);
-
-  const enrollDialog = enrollDialogOpen && enrollProgram && (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: "rgba(0,0,0,0.4)" }}>
-      <div className="bg-white rounded-xl shadow-xl w-full max-w-lg">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
-          <h3 className="text-base font-semibold text-slate-800">
-            Enroll Patient in {enrollProgram.name}
-          </h3>
-          <button
-            onClick={() => setEnrollDialogOpen(false)}
-            className="p-1.5 rounded hover:bg-slate-100 text-slate-400"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-        <div className="px-6 py-5 space-y-4">
-          {enrollSuccess ? (
-            <div className="text-center py-6">
-              <CheckCircle2 className="w-12 h-12 mx-auto mb-3" style={{ color: "#27ab83" }} />
-              <p className="text-sm font-medium text-slate-800">Patient enrolled successfully!</p>
-            </div>
-          ) : (
-            <>
-              {enrollError && (
-                <div className="p-3 rounded-lg text-sm" style={{ backgroundColor: "#fef2f2", color: "#dc2626" }}>
-                  {enrollError}
-                </div>
-              )}
-
-              {/* Patient search */}
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Patient</label>
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                  <input
-                    type="text"
-                    placeholder="Search patients by name..."
-                    value={enrollPatientSearch}
-                    onChange={(e) => {
-                      setEnrollPatientSearch(e.target.value);
-                      setEnrollSelectedPatientId(null);
-                    }}
-                    className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:border-transparent"
-                  />
-                </div>
-                {patientsLoading && (
-                  <div className="flex items-center gap-2 mt-2 text-xs text-slate-400">
-                    <Loader2 className="w-3 h-3 animate-spin" />
-                    Searching...
-                  </div>
-                )}
-                {enrollPatients.length > 0 && !enrollSelectedPatientId && (
-                  <div className="mt-1 border border-slate-200 rounded-lg max-h-40 overflow-y-auto">
-                    {enrollPatients.map((pt) => (
-                      <button
-                        key={pt.id}
-                        onClick={() => {
-                          setEnrollSelectedPatientId(pt.id);
-                          setEnrollPatientSearch(`${pt.firstName} ${pt.lastName}`);
-                        }}
-                        className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50 border-b border-slate-100 last:border-b-0"
-                      >
-                        {pt.firstName} {pt.lastName}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {/* Plan selection */}
-              {enrollProgram.plans.length > 0 && (
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Plan</label>
-                  <select
-                    value={enrollSelectedPlanId || ""}
-                    onChange={(e) => setEnrollSelectedPlanId(e.target.value || null)}
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2"
-                  >
-                    <option value="">Select a plan (optional)</option>
-                    {enrollProgram.plans.filter((pl) => pl.isActive).map((pl) => (
-                      <option key={pl.id} value={pl.id}>
-                        {pl.name}{pl.monthlyPrice > 0 ? ` — ${formatCurrency(pl.monthlyPrice)}/mo` : ""}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
-
-              {/* Funding source */}
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Funding Source</label>
-                <select
-                  value={enrollFundingSource}
-                  onChange={(e) => setEnrollFundingSource(e.target.value)}
-                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2"
-                >
-                  <option value="self_pay">Self-Pay</option>
-                  <option value="employer">Employer</option>
-                  <option value="insurance">Insurance</option>
-                  <option value="grant">Grant</option>
-                  <option value="sponsor">Sponsor</option>
-                </select>
-              </div>
-
-              {/* Sponsor name (conditional) */}
-              {enrollFundingSource === "sponsor" && (
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Sponsor Name</label>
-                  <input
-                    type="text"
-                    value={enrollSponsorName}
-                    onChange={(e) => setEnrollSponsorName(e.target.value)}
-                    placeholder="Enter sponsor name"
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:border-transparent"
-                  />
-                </div>
-              )}
-            </>
-          )}
-        </div>
-        {!enrollSuccess && (
-          <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-200">
-            <button
-              onClick={() => setEnrollDialogOpen(false)}
-              className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 rounded-lg"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={handleEnrollPatient}
-              disabled={!enrollSelectedPatientId || enrollSubmitting}
-              className="flex items-center gap-2 px-4 py-2 rounded-lg text-white text-sm font-medium transition-all hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
-              style={{ backgroundColor: "#0D9488" }}
-            >
-              {enrollSubmitting && <Loader2 className="w-4 h-4 animate-spin" />}
-              Enroll Patient
-            </button>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-
+  // ─── Empty State ──────────────────────────────────────────────────────────
   // ─── Empty State ──────────────────────────────────────────────────────────
 
   if (programs.length === 0) {
@@ -1566,7 +1506,7 @@ export function ProgramsSection() {
 
   return (
     <>
-    {enrollDialog}
+    {enrollDialogJsx}
     <div className="space-y-6">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
