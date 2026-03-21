@@ -731,10 +731,10 @@ export function PracticePortal() {
       screeningService.list(),
       paymentService.list(),
       couponService.list(),
-      apiFetch<unknown[]>("/staff"),
-      notificationService.list(),
-      apiFetch<unknown[]>("/intakes"),
-      apiFetch<unknown[]>("/appointments/waitlist"),
+      apiFetch<unknown[]>("/staff").catch(() => ({ data: [] })),
+      notificationService.list().catch(() => ({ data: [] })),
+      apiFetch<unknown[]>("/intakes").catch(() => ({ data: [] })),
+      apiFetch<unknown[]>("/appointments/waitlist").catch(() => ({ data: [] })),
     ]);
     // Dashboard stats
     if (statsRes.status === "fulfilled" && statsRes.value.data && typeof statsRes.value.data === "object") {
