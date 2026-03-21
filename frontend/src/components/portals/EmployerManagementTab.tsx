@@ -131,6 +131,10 @@ export function EmployerManagementTab() {
   const [expandedDetail, setExpandedDetail] = useState<{ employer: Employer; contracts: EmployerContract[]; invoices: EmployerInvoice[] } | null>(null);
   const [showAddEmployer, setShowAddEmployer] = useState(false);
 
+  // Plans for contract dropdown
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [plans, setPlans] = useState<any[]>([]);
+
   // Contracts state
   const [contracts, setContracts] = useState<EmployerContract[]>([]);
   const [showNewContract, setShowNewContract] = useState(false);
@@ -143,7 +147,7 @@ export function EmployerManagementTab() {
   const [newEmployer, setNewEmployer] = useState({ name: "", contactName: "", contactEmail: "", contactPhone: "", address: "" });
 
   // New contract form
-  const [newContract, setNewContract] = useState({ employerId: "", planName: "", pepmRate: "", effectiveDate: "", endDate: "" });
+  const [newContract, setNewContract] = useState({ employerId: "", membershipPlanId: "", pepmRate: "", effectiveDate: "", endDate: "" });
 
   // ─── Data Loading ────────────────────────────────────────────────────────
 
@@ -162,11 +166,16 @@ export function EmployerManagementTab() {
   const loadContracts = useCallback(async () => {
     setLoading(true);
     setError(null);
-    const res = await apiFetch<EmployerContract[]>("/employer-contracts");
-    if (res.error) {
-      setError(res.error);
-    } else {
-      setContracts(Array.isArray(res.data) ? res.data : (res.data as any)?.data || []);
+    const [contractsRes, plansRes] = await Promise.allSettled([
+      apiFetch<EmployerContract[]>("/employer-contracts"),
+      apiFetch<unknown[]>("/membership-plans"),
+    ]);
+    if (contractsRes.status === "fulfilled") {
+      if (contractsRes.value.error) setError(contractsRes.value.error);
+      else setContracts(Array.isArray(contractsRes.value.data) ? contractsRes.value.data : (contractsRes.value.data as any)?.data || []);
+    }
+    if (plansRes.status === "fulfilled" && plansRes.value.data) {
+      setPlans(Array.isArray(plansRes.value.data) ? plansRes.value.data : (plansRes.value.data as any)?.data || []);
     }
     setLoading(false);
   }, []);
@@ -237,7 +246,7 @@ export function EmployerManagementTab() {
       setError(res.error);
     } else {
       setShowNewContract(false);
-      setNewContract({ employerId: "", planName: "", pepmRate: "", effectiveDate: "", endDate: "" });
+      setNewContract({ employerId: "", membershipPlanId: "", pepmRate: "", effectiveDate: "", endDate: "" });
       loadContracts();
     }
   };
@@ -611,14 +620,17 @@ export function EmployerManagementTab() {
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Plan Name</label>
-                <input
-                  type="text"
-                  value={newContract.planName}
-                  onChange={(e) => setNewContract({ ...newContract, planName: e.target.value })}
+                <label className="block text-sm font-medium text-slate-700 mb-1">Membership Plan</label>
+                <select
+                  value={newContract.membershipPlanId}
+                  onChange={(e) => setNewContract({ ...newContract, membershipPlanId: e.target.value })}
                   className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                  placeholder="e.g. Employer Essential"
-                />
+                >
+                  <option value="">Select plan...</option>
+                  {plans.map((p) => (
+                    <option key={p.id} value={p.id}>{p.name} — ${p.monthlyPrice || p.monthly_price || 0}/mo</option>
+                  ))}
+                </select>
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">PEPM Rate ($)</label>
@@ -660,7 +672,7 @@ export function EmployerManagementTab() {
                 </button>
                 <button
                   onClick={handleNewContract}
-                  disabled={!newContract.employerId || !newContract.planName || !newContract.pepmRate}
+                  disabled={!newContract.employerId || !newContract.membershipPlanId || !newContract.pepmRate}
                   className="px-4 py-2 rounded-lg text-sm font-medium text-white disabled:opacity-50"
                   style={{ backgroundColor: "#27ab83" }}
                 >
