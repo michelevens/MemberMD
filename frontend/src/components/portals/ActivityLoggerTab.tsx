@@ -165,9 +165,15 @@ export function ActivityLoggerTab() {
       setPatientResults([]);
       return;
     }
-    const res = await apiFetch<PatientSearchResult[]>(`/patients/search?q=${encodeURIComponent(query)}`);
+    const res = await apiFetch<unknown>(`/patients?search=${encodeURIComponent(query)}`);
     if (!res.error && res.data) {
-      setPatientResults(res.data);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const list = Array.isArray(res.data) ? res.data : (res.data as any)?.data || [];
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      setPatientResults(list.map((p: any) => ({
+        id: p.id,
+        name: `${p.firstName || p.first_name || ""} ${p.lastName || p.last_name || ""}`.trim(),
+      })));
     }
   }, []);
 
