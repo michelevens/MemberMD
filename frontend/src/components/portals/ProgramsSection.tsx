@@ -470,6 +470,10 @@ export function ProgramsSection() {
 
   // ─── Add Plan Dialog State ─────────────────────────────────────────────────
   const [addPlanDialogOpen, setAddPlanDialogOpen] = useState(false);
+  const [addPlanMode, setAddPlanMode] = useState<"select" | "create">("select");
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [availablePlansForLink, setAvailablePlansForLink] = useState<any[]>([]);
+  const [selectedPlanToLink, setSelectedPlanToLink] = useState<string | null>(null);
   const [addPlanName, setAddPlanName] = useState("");
   const [addPlanMonthlyPrice, setAddPlanMonthlyPrice] = useState("");
   const [addPlanAnnualPrice, setAddPlanAnnualPrice] = useState("");
@@ -717,6 +721,37 @@ export function ProgramsSection() {
   }, [selectedProgram?.id, fetchProgramPlans]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ─── Handle creating a real MembershipPlan for a program ─────────────────
+  const fetchAvailablePlansForLink = useCallback(async () => {
+    setAvailablePlansLoading(true);
+    try {
+      const res = await apiFetch<unknown[]>("/membership-plans");
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const list = Array.isArray(res.data) ? res.data : (res.data as any)?.data || [];
+      // Show plans not already linked to this program
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      setAvailablePlansForLink(list.filter((p: any) => !p.programId && !p.program_id));
+    } catch { setAvailablePlansForLink([]); }
+    setAvailablePlansLoading(false);
+  }, []);
+
+  const handleLinkExistingPlan = useCallback(async (programId: string) => {
+    if (!selectedPlanToLink) return;
+    setAddPlanSubmitting(true);
+    try {
+      await apiFetch(`/membership-plans/${selectedPlanToLink}`, {
+        method: "PUT",
+        body: JSON.stringify({ programId }),
+      });
+      setToast({ message: "Plan linked to program.", type: "success" });
+      setAddPlanDialogOpen(false);
+      setSelectedPlanToLink(null);
+      fetchProgramPlans(programId);
+    } catch {
+      setToast({ message: "Failed to link plan.", type: "error" });
+    }
+    setAddPlanSubmitting(false);
+  }, [selectedPlanToLink, fetchProgramPlans, setToast]);
+
   const handleAddPlanToProgram = useCallback(async (programId: string) => {
     if (!addPlanName.trim()) return;
     setAddPlanSubmitting(true);
@@ -1151,11 +1186,14 @@ export function ProgramsSection() {
                 className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-white text-xs font-medium"
                 style={{ backgroundColor: "#0D9488" }}
                 onClick={() => {
+                  setAddPlanMode("select");
+                  setSelectedPlanToLink(null);
                   setAddPlanName("");
                   setAddPlanMonthlyPrice("");
                   setAddPlanAnnualPrice("");
                   setAddPlanDescription("");
                   setAddPlanDialogOpen(true);
+                  fetchAvailablePlansForLink();
                 }}
               >
                 <Plus className="w-3.5 h-3.5" />
@@ -1264,7 +1302,7 @@ export function ProgramsSection() {
                 <p className="text-xs text-slate-400 mt-1">Add a membership plan to this program</p>
               </div>
             )}
-            {/* Add Plan Dialog */}
+            {/* Add Plan Dialog — Select existing or Create new */}
             {addPlanDialogOpen && (
               <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: "rgba(0,0,0,0.4)" }}>
                 <div className="bg-white rounded-xl shadow-xl w-full max-w-lg">
@@ -1272,7 +1310,67 @@ export function ProgramsSection() {
                     <h3 className="text-base font-semibold text-slate-800">Add Plan to {selectedProgram.name}</h3>
                     <button onClick={() => setAddPlanDialogOpen(false)} className="p-1.5 rounded hover:bg-slate-100 text-slate-400"><X className="w-4 h-4" /></button>
                   </div>
+
+                  {/* Mode toggle */}
+                  <div className="px-6 pt-4 flex gap-2">
+                    <button
+                      className="flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-colors"
+                      style={{ backgroundColor: addPlanMode === "select" ? "#e6f7f2" : "#f8fafc", color: addPlanMode === "select" ? "#147d64" : "#64748b" }}
+                      onClick={() => setAddPlanMode("select")}
+                    >
+                      Link Existing Plan
+                    </button>
+                    <button
+                      className="flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-colors"
+                      style={{ backgroundColor: addPlanMode === "create" ? "#e6f7f2" : "#f8fafc", color: addPlanMode === "create" ? "#147d64" : "#64748b" }}
+                      onClick={() => setAddPlanMode("create")}
+                    >
+                      Create New Plan
+                    </button>
+                  </div>
+
                   <div className="px-6 py-5 space-y-4">
+                    {addPlanMode === "select" ? (
+                      <>
+                        <p className="text-xs text-slate-500">Select an existing membership plan to add to this program:</p>
+                        {availablePlansLoading && (
+                          <div className="flex items-center justify-center py-6">
+                            <Loader2 className="w-5 h-5 animate-spin text-slate-400" />
+                          </div>
+                        )}
+                        {!availablePlansLoading && availablePlansForLink.length === 0 && (
+                          <div className="text-center py-6">
+                            <p className="text-sm text-slate-400">No unlinked plans available.</p>
+                            <button className="text-xs mt-2 underline" style={{ color: "#0D9488" }} onClick={() => setAddPlanMode("create")}>Create a new plan instead</button>
+                          </div>
+                        )}
+                        {!availablePlansLoading && availablePlansForLink.length > 0 && (
+                          <div className="space-y-2 max-h-60 overflow-y-auto">
+                            {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+                            {availablePlansForLink.map((plan: any) => (
+                              <div
+                                key={plan.id}
+                                className="flex items-center justify-between p-3 rounded-lg cursor-pointer transition-colors"
+                                style={{
+                                  backgroundColor: selectedPlanToLink === plan.id ? "#e6f7f2" : "#f8fafc",
+                                  border: selectedPlanToLink === plan.id ? "2px solid #27ab83" : "2px solid transparent",
+                                }}
+                                onClick={() => setSelectedPlanToLink(plan.id)}
+                              >
+                                <div>
+                                  <p className="text-sm font-medium text-slate-800">{plan.name}</p>
+                                  <p className="text-xs text-slate-500">{plan.description || "No description"}</p>
+                                </div>
+                                <div className="text-right">
+                                  <p className="text-sm font-bold" style={{ color: "#147d64" }}>${plan.monthlyPrice || plan.monthly_price || 0}/mo</p>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                    <>
                     <div>
                       <label className="block text-sm font-medium text-slate-700 mb-1">Plan Name</label>
                       <input
@@ -1320,18 +1418,32 @@ export function ProgramsSection() {
                         className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:border-transparent resize-none"
                       />
                     </div>
+                    </>
+                    )}
                   </div>
                   <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-200">
                     <button onClick={() => setAddPlanDialogOpen(false)} className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 rounded-lg">Cancel</button>
-                    <button
-                      onClick={() => handleAddPlanToProgram(selectedProgram.id)}
-                      disabled={!addPlanName.trim() || addPlanSubmitting}
-                      className="flex items-center gap-2 px-4 py-2 rounded-lg text-white text-sm font-medium transition-all hover:opacity-90 disabled:opacity-50"
-                      style={{ backgroundColor: "#0D9488" }}
-                    >
-                      {addPlanSubmitting && <Loader2 className="w-4 h-4 animate-spin" />}
-                      Create Plan
-                    </button>
+                    {addPlanMode === "select" ? (
+                      <button
+                        onClick={() => handleLinkExistingPlan(selectedProgram.id)}
+                        disabled={!selectedPlanToLink || addPlanSubmitting}
+                        className="flex items-center gap-2 px-4 py-2 rounded-lg text-white text-sm font-medium transition-all hover:opacity-90 disabled:opacity-50"
+                        style={{ backgroundColor: "#0D9488" }}
+                      >
+                        {addPlanSubmitting && <Loader2 className="w-4 h-4 animate-spin" />}
+                        Link Plan
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => handleAddPlanToProgram(selectedProgram.id)}
+                        disabled={!addPlanName.trim() || addPlanSubmitting}
+                        className="flex items-center gap-2 px-4 py-2 rounded-lg text-white text-sm font-medium transition-all hover:opacity-90 disabled:opacity-50"
+                        style={{ backgroundColor: "#0D9488" }}
+                      >
+                        {addPlanSubmitting && <Loader2 className="w-4 h-4 animate-spin" />}
+                        Create Plan
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
