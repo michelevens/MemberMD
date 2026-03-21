@@ -4652,8 +4652,12 @@ export function PracticePortal() {
 
     const panelStatusConfig: Record<string, { bg: string; text: string }> = {
       Open: { bg: "#ecf9ec", text: "#2f8132" },
+      open: { bg: "#ecf9ec", text: "#2f8132" },
       Closed: { bg: "#fef2f2", text: "#dc2626" },
+      closed: { bg: "#fef2f2", text: "#dc2626" },
       Waitlist: { bg: "#fffbeb", text: "#d97706" },
+      waitlist: { bg: "#fffbeb", text: "#d97706" },
+      limited: { bg: "#fffbeb", text: "#d97706" },
     };
 
     return (
@@ -4665,7 +4669,7 @@ export function PracticePortal() {
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
           {providers.map((prov) => {
             const panelPct = Math.round((prov.panelCount / prov.panelMax) * 100);
-            const psc = panelStatusConfig[prov.panelStatus];
+            const psc = panelStatusConfig[prov.panelStatus] || { bg: "#f1f5f9", text: "#64748b" };
             return (
               <div key={prov.id} className="glass rounded-2xl p-6 hover-lift">
                 {/* Avatar + Name */}
