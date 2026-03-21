@@ -5,7 +5,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../contexts/AuthContext";
-import { dashboardService, membershipPlanService, messageService, patientService, appointmentService, encounterService, prescriptionService, invoiceService, programService, telehealthService, screeningService, couponService, providerService } from "../../lib/api";
+import { dashboardService, membershipPlanService, messageService, patientService, appointmentService, encounterService, prescriptionService, invoiceService, programService, telehealthService, screeningService, couponService, providerService, paymentService, notificationService, apiFetch } from "../../lib/api";
 import { HeaderToolbar } from "../shared/HeaderToolbar";
 import { UserSettingsDropdown } from "../shared/UserSettingsDropdown";
 import { PracticeSettings } from "../settings/PracticeSettings";
@@ -632,6 +632,20 @@ export function PracticePortal() {
   const [apiPrescriptions, setApiPrescriptions] = useState<any[] | null>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [apiInvoices, setApiInvoices] = useState<any[] | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [apiScreenings, setApiScreenings] = useState<any[]>([]);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [apiPayments, setApiPayments] = useState<any[]>([]);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [apiCoupons, setApiCoupons] = useState<any[]>([]);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [apiStaff, setApiStaff] = useState<any[]>([]);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [apiNotifications, setApiNotifications] = useState<any[]>([]);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [apiIntakes, setApiIntakes] = useState<any[]>([]);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [apiWaitlist, setApiWaitlist] = useState<any[]>([]);
   const [dataLoading, setDataLoading] = useState(false);
   const [showAddPatient, setShowAddPatient] = useState(false);
   const [addPatientForm, setAddPatientForm] = useState<{ firstName: string; lastName: string; email: string; phone: string; dateOfBirth: string; gender: "male" | "female" | "other" | "prefer_not_to_say" }>({ firstName: "", lastName: "", email: "", phone: "", dateOfBirth: "", gender: "male" });
@@ -704,7 +718,7 @@ export function PracticePortal() {
 
   const loadPracticeData = useCallback(async () => {
     setDataLoading(true);
-    const [statsRes, plansRes, threadsRes, patientsRes, appointmentsRes, encountersRes, prescriptionsRes, invoicesRes, programsRes] = await Promise.allSettled([
+    const [statsRes, plansRes, threadsRes, patientsRes, appointmentsRes, encountersRes, prescriptionsRes, invoicesRes, programsRes, screeningsRes, paymentsRes, couponsRes, staffRes, notificationsRes, intakesRes, waitlistRes] = await Promise.allSettled([
       dashboardService.getPracticeStats(),
       membershipPlanService.list(),
       messageService.list(),
@@ -714,6 +728,13 @@ export function PracticePortal() {
       prescriptionService.list(),
       invoiceService.list(),
       programService.list(),
+      screeningService.list(),
+      paymentService.list(),
+      couponService.list(),
+      apiFetch<unknown[]>("/staff"),
+      notificationService.list(),
+      apiFetch<unknown[]>("/intakes"),
+      apiFetch<unknown[]>("/appointments/waitlist"),
     ]);
     // Dashboard stats
     if (statsRes.status === "fulfilled" && statsRes.value.data && typeof statsRes.value.data === "object") {
@@ -820,6 +841,110 @@ export function PracticePortal() {
     // Programs
     if (programsRes.status === "fulfilled" && programsRes.value.data && Array.isArray(programsRes.value.data)) {
       setApiPrograms(programsRes.value.data);
+    }
+    // Screenings (API returns paginated)
+    if (screeningsRes.status === "fulfilled" && screeningsRes.value.data) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const scrList = Array.isArray(screeningsRes.value.data) ? screeningsRes.value.data : (screeningsRes.value.data as any).data || [];
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      setApiScreenings(scrList.map((s: any) => ({
+        id: s.id,
+        date: s.administeredAt ? new Date(s.administeredAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : s.date || "",
+        patient: s.patient ? [s.patient.firstName, s.patient.lastName].filter(Boolean).join(" ") : s.patientName || "",
+        instrument: s.instrumentId || s.instrument || s.templateName || "",
+        score: s.totalScore ?? s.score ?? 0,
+        severity: s.severity || s.riskLevel || "Mild",
+        administeredBy: s.administeredBy?.name || s.administeredByName || s.providerName || "",
+      })));
+    }
+    // Payments (API returns paginated)
+    if (paymentsRes.status === "fulfilled" && paymentsRes.value.data) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const payList = Array.isArray(paymentsRes.value.data) ? paymentsRes.value.data : (paymentsRes.value.data as any).data || [];
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      setApiPayments(payList.map((p: any) => ({
+        id: p.id,
+        date: p.paidAt ? new Date(p.paidAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : p.date || "",
+        patient: p.patient ? [p.patient.firstName, p.patient.lastName].filter(Boolean).join(" ") : p.patientName || "",
+        amount: p.amount ?? 0,
+        method: p.paymentMethod || p.method || "card",
+        status: p.status || "succeeded",
+        invoice: p.invoiceNumber || p.invoice?.invoiceNumber || p.invoiceId || "",
+      })));
+    }
+    // Coupons (API returns paginated)
+    if (couponsRes.status === "fulfilled" && couponsRes.value.data) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const cpnList = Array.isArray(couponsRes.value.data) ? couponsRes.value.data : (couponsRes.value.data as any).data || [];
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      setApiCoupons(cpnList.map((c: any) => ({
+        id: c.id,
+        code: c.code || "",
+        description: c.description || "",
+        discountType: c.discountType || c.discount_type || "percent",
+        discountValue: c.discountValue ?? c.discount_value ?? 0,
+        usesCount: c.usesCount ?? c.uses_count ?? 0,
+        usesMax: c.maxUses ?? c.max_uses ?? null,
+        validUntil: c.validUntil ? new Date(c.validUntil).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : c.valid_until || "",
+        status: c.status || (c.isActive === false ? "expired" : "active"),
+      })));
+    }
+    // Staff (API returns paginated)
+    if (staffRes.status === "fulfilled" && staffRes.value.data) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const stfList = Array.isArray(staffRes.value.data) ? staffRes.value.data : (staffRes.value.data as any).data || [];
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      setApiStaff(stfList.map((s: any) => ({
+        id: s.id,
+        name: [s.firstName, s.lastName].filter(Boolean).join(" ") || s.name || "",
+        email: s.email || "",
+        role: s.role || s.jobTitle || "Staff",
+        status: s.isActive === false ? "inactive" : "active",
+        lastLogin: s.lastLoginAt ? new Date(s.lastLoginAt).toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" }) : s.lastLogin || "",
+      })));
+    }
+    // Notifications (API returns paginated)
+    if (notificationsRes.status === "fulfilled" && notificationsRes.value.data) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const notifList = Array.isArray(notificationsRes.value.data) ? notificationsRes.value.data : (notificationsRes.value.data as any).data || [];
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      setApiNotifications(notifList.map((n: any) => ({
+        id: n.id,
+        title: n.title || n.subject || "",
+        description: n.body || n.description || n.message || "",
+        time: n.createdAt ? new Date(n.createdAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : n.time || "",
+        category: n.category || n.type || "system",
+        read: n.readAt != null || n.read === true,
+      })));
+    }
+    // Intakes (API returns paginated)
+    if (intakesRes.status === "fulfilled" && intakesRes.value.data) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const intList = Array.isArray(intakesRes.value.data) ? intakesRes.value.data : (intakesRes.value.data as any).data || [];
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      setApiIntakes(intList.map((i: any) => ({
+        id: i.id,
+        code: i.submissionCode || i.code || `INT-${i.id}`,
+        name: i.patient ? [i.patient.firstName, i.patient.lastName].filter(Boolean).join(" ") : i.patientName || i.name || "",
+        dateSubmitted: i.submittedAt ? new Date(i.submittedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : i.dateSubmitted || "",
+        status: i.status || "pending",
+      })));
+    }
+    // Waitlist (API returns paginated)
+    if (waitlistRes.status === "fulfilled" && waitlistRes.value.data) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const wlList = Array.isArray(waitlistRes.value.data) ? waitlistRes.value.data : (waitlistRes.value.data as any).data || [];
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      setApiWaitlist(wlList.map((w: any) => ({
+        id: w.id,
+        name: w.patient ? [w.patient.firstName, w.patient.lastName].filter(Boolean).join(" ") : w.patientName || w.name || "",
+        email: w.email || w.patient?.email || "",
+        phone: w.phone || w.patient?.phone || "",
+        desiredPlan: w.desiredPlan || w.plan?.name || w.planName || "",
+        requestedDate: w.requestedAt ? new Date(w.requestedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : w.requestedDate || "",
+        priority: w.priority || "medium",
+        status: w.status || "waiting",
+      })));
     }
     setDataLoading(false);
   }, []);
@@ -3501,14 +3626,15 @@ export function PracticePortal() {
   // ─── Intakes Tab ────────────────────────────────────────────────────────
 
   function renderIntakes() {
-    const mockIntakes = isDemoMode ? [
+    const mockIntakesDemo = [
       { id: "INT-001", code: "INT-2026-001", name: "Robert Davis", dateSubmitted: "Mar 18, 2026", status: "pending" as const },
       { id: "INT-002", code: "INT-2026-002", name: "Amanda Brooks", dateSubmitted: "Mar 17, 2026", status: "under_review" as const },
       { id: "INT-003", code: "INT-2026-003", name: "Marcus Williams", dateSubmitted: "Mar 16, 2026", status: "approved" as const },
       { id: "INT-004", code: "INT-2026-004", name: "Patricia Nguyen", dateSubmitted: "Mar 15, 2026", status: "converted" as const },
       { id: "INT-005", code: "INT-2026-005", name: "Daniel Foster", dateSubmitted: "Mar 14, 2026", status: "approved" as const },
       { id: "INT-006", code: "INT-2026-006", name: "Karen Mitchell", dateSubmitted: "Mar 13, 2026", status: "rejected" as const },
-    ] : [];
+    ];
+    const mockIntakes = apiIntakes.length > 0 ? apiIntakes : (isDemoMode ? mockIntakesDemo : []);
 
     const intakeStatusConfig: Record<string, { bg: string; text: string; dot: string }> = {
       pending: { bg: "#fffbeb", text: "#d97706", dot: "#f59e0b" },
@@ -3528,19 +3654,19 @@ export function PracticePortal() {
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <div className="glass rounded-lg p-4">
             <p className="text-xs text-slate-500 mb-1">Total</p>
-            <p className="text-2xl font-bold text-slate-800">{isDemoMode ? 15 : mockIntakes.length}</p>
+            <p className="text-2xl font-bold text-slate-800">{mockIntakes.length || (isDemoMode ? 15 : 0)}</p>
           </div>
           <div className="glass rounded-lg p-4">
             <p className="text-xs text-slate-500 mb-1">Pending</p>
-            <p className="text-2xl font-bold" style={{ color: "#d97706" }}>{isDemoMode ? 4 : mockIntakes.filter(i => i.status === "pending").length}</p>
+            <p className="text-2xl font-bold" style={{ color: "#d97706" }}>{mockIntakes.filter(i => i.status === "pending").length}</p>
           </div>
           <div className="glass rounded-lg p-4">
             <p className="text-xs text-slate-500 mb-1">Approved</p>
-            <p className="text-2xl font-bold" style={{ color: "#2f8132" }}>{isDemoMode ? 8 : mockIntakes.filter(i => i.status === "approved").length}</p>
+            <p className="text-2xl font-bold" style={{ color: "#2f8132" }}>{mockIntakes.filter(i => i.status === "approved").length}</p>
           </div>
           <div className="glass rounded-lg p-4">
             <p className="text-xs text-slate-500 mb-1">Converted</p>
-            <p className="text-2xl font-bold" style={{ color: "#147d64" }}>{isDemoMode ? 3 : mockIntakes.filter(i => i.status === "converted").length}</p>
+            <p className="text-2xl font-bold" style={{ color: "#147d64" }}>{mockIntakes.filter(i => i.status === "converted").length}</p>
           </div>
         </div>
 
@@ -3617,12 +3743,13 @@ export function PracticePortal() {
   // ─── Waitlist Tab ─────────────────────────────────────────────────────────
 
   function renderWaitlist() {
-    const mockWaitlist = isDemoMode ? [
+    const mockWaitlistDemo = [
       { id: "w1", name: "Steven Park", email: "steven.p@email.com", phone: "(555) 111-2233", desiredPlan: "Complete", requestedDate: "Mar 10, 2026", priority: "high" as const, status: "waiting" as const },
       { id: "w2", name: "Monica Reyes", email: "monica.r@email.com", phone: "(555) 222-3344", desiredPlan: "Premium", requestedDate: "Mar 12, 2026", priority: "medium" as const, status: "contacted" as const },
       { id: "w3", name: "Alan Cooper", email: "alan.c@email.com", phone: "(555) 333-4455", desiredPlan: "Essential", requestedDate: "Mar 14, 2026", priority: "low" as const, status: "waiting" as const },
       { id: "w4", name: "Diane Tran", email: "diane.t@email.com", phone: "(555) 444-5566", desiredPlan: "Complete", requestedDate: "Mar 16, 2026", priority: "high" as const, status: "enrolled" as const },
-    ] : [];
+    ];
+    const mockWaitlist = apiWaitlist.length > 0 ? apiWaitlist : (isDemoMode ? mockWaitlistDemo : []);
 
     const priorityConfig: Record<string, { bg: string; text: string }> = {
       high: { bg: "#fef2f2", text: "#dc2626" },
@@ -4132,14 +4259,15 @@ export function PracticePortal() {
       ADHD: { bg: "#e6f7f2", text: "#147d64" },
     };
 
-    const mockRecentScreenings = isDemoMode ? [
+    const mockRecentScreeningsDemo = [
       { id: "s1", date: "Mar 18, 2026", patient: "James Wilson", instrument: "PHQ-9", score: 7, severity: "Mild", administeredBy: "Dr. Michel" },
       { id: "s2", date: "Mar 18, 2026", patient: "James Wilson", instrument: "GAD-7", score: 6, severity: "Mild", administeredBy: "Dr. Michel" },
       { id: "s3", date: "Mar 17, 2026", patient: "Sarah Mitchell", instrument: "PHQ-9", score: 12, severity: "Moderate", administeredBy: "Dr. Michel" },
       { id: "s4", date: "Mar 16, 2026", patient: "Carlos Mendez", instrument: "GAD-7", score: 15, severity: "Severe", administeredBy: "Dr. Michel" },
       { id: "s5", date: "Mar 15, 2026", patient: "Emily Chen", instrument: "PHQ-9", score: 4, severity: "Minimal", administeredBy: "NP Johnson" },
       { id: "s6", date: "Mar 14, 2026", patient: "Robert Kim", instrument: "ASRS", score: 14, severity: "Moderate", administeredBy: "Dr. Michel" },
-    ] : [];
+    ];
+    const mockRecentScreenings = apiScreenings.length > 0 ? apiScreenings : (isDemoMode ? mockRecentScreeningsDemo : []);
 
     const severityBadge = (sev: string) => {
       const config: Record<string, { bg: string; text: string }> = {
@@ -4243,7 +4371,7 @@ export function PracticePortal() {
   // ─── Payments Tab ─────────────────────────────────────────────────────────
 
   function renderPayments() {
-    const mockPayments = isDemoMode ? [
+    const mockPaymentsDemo = [
       { id: "pay1", date: "Mar 18, 2026", patient: "Sarah Mitchell", amount: 199.00, method: "card" as const, status: "succeeded" as const, invoice: "INV-1042" },
       { id: "pay2", date: "Mar 18, 2026", patient: "James Rivera", amount: 299.00, method: "card" as const, status: "succeeded" as const, invoice: "INV-1041" },
       { id: "pay3", date: "Mar 17, 2026", patient: "Emily Chen", amount: 99.00, method: "bank" as const, status: "succeeded" as const, invoice: "INV-1040" },
@@ -4254,7 +4382,8 @@ export function PracticePortal() {
       { id: "pay8", date: "Mar 15, 2026", patient: "Carlos Mendez", amount: 299.00, method: "card" as const, status: "succeeded" as const, invoice: "INV-1033" },
       { id: "pay9", date: "Mar 14, 2026", patient: "Angela Foster", amount: 99.00, method: "card" as const, status: "refunded" as const, invoice: "INV-1036" },
       { id: "pay10", date: "Mar 14, 2026", patient: "David Nguyen", amount: 99.00, method: "card" as const, status: "pending" as const, invoice: "INV-1035" },
-    ] : [];
+    ];
+    const mockPayments = apiPayments.length > 0 ? apiPayments : (isDemoMode ? mockPaymentsDemo : []);
 
     const payStatusConfig: Record<string, { bg: string; text: string; dot: string }> = {
       succeeded: { bg: "#ecf9ec", text: "#2f8132", dot: "#3f9142" },
@@ -4273,15 +4402,15 @@ export function PracticePortal() {
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
           <div className="glass rounded-lg p-4">
             <p className="text-xs text-slate-500 mb-1">This Month</p>
-            <p className="text-2xl font-bold" style={{ color: "#2f8132" }}>{isDemoMode ? "$8,400" : `$${mockPayments.filter(p => p.status === "succeeded").reduce((s, p) => s + p.amount, 0).toLocaleString()}`}</p>
+            <p className="text-2xl font-bold" style={{ color: "#2f8132" }}>${mockPayments.filter(p => p.status === "succeeded").reduce((s: number, p: { amount: number }) => s + p.amount, 0).toLocaleString()}</p>
           </div>
           <div className="glass rounded-lg p-4">
             <p className="text-xs text-slate-500 mb-1">Outstanding</p>
-            <p className="text-2xl font-bold" style={{ color: "#d97706" }}>{isDemoMode ? "$450" : `$${mockPayments.filter(p => p.status === "pending").reduce((s, p) => s + p.amount, 0).toLocaleString()}`}</p>
+            <p className="text-2xl font-bold" style={{ color: "#d97706" }}>${mockPayments.filter(p => p.status === "pending").reduce((s: number, p: { amount: number }) => s + p.amount, 0).toLocaleString()}</p>
           </div>
           <div className="glass rounded-lg p-4">
             <p className="text-xs text-slate-500 mb-1">Refunded</p>
-            <p className="text-2xl font-bold text-slate-500">{isDemoMode ? "$99" : `$${mockPayments.filter(p => p.status === "refunded").reduce((s, p) => s + p.amount, 0).toLocaleString()}`}</p>
+            <p className="text-2xl font-bold text-slate-500">${mockPayments.filter(p => p.status === "refunded").reduce((s: number, p: { amount: number }) => s + p.amount, 0).toLocaleString()}</p>
           </div>
         </div>
 
@@ -4355,12 +4484,13 @@ export function PracticePortal() {
   // ─── Coupons Tab ──────────────────────────────────────────────────────────
 
   function renderCoupons() {
-    const mockCoupons = isDemoMode ? [
+    const mockCouponsDemo = [
       { id: "c1", code: "WELCOME20", description: "20% off first month", discountType: "percent" as const, discountValue: 20, usesCount: 8, usesMax: 50, validUntil: "Jun 30, 2026", status: "active" as const },
       { id: "c2", code: "ANNUAL10", description: "10% off annual plan", discountType: "percent" as const, discountValue: 10, usesCount: 3, usesMax: null as number | null, validUntil: "Dec 31, 2026", status: "active" as const },
       { id: "c3", code: "FRIEND50", description: "$50 off", discountType: "amount" as const, discountValue: 50, usesCount: 12, usesMax: 20, validUntil: "Sep 30, 2026", status: "active" as const },
       { id: "c4", code: "SUMMER2025", description: "1 month free", discountType: "free_months" as const, discountValue: 1, usesCount: 15, usesMax: 15, validUntil: "Aug 31, 2025", status: "expired" as const },
-    ] : [];
+    ];
+    const mockCoupons = apiCoupons.length > 0 ? apiCoupons : (isDemoMode ? mockCouponsDemo : []);
 
     const formatDiscount = (coupon: typeof mockCoupons[0]) => {
       if (coupon.discountType === "percent") return `${coupon.discountValue}% off`;
@@ -4636,11 +4766,12 @@ export function PracticePortal() {
   // ─── Staff Tab ────────────────────────────────────────────────────────────
 
   function renderStaff() {
-    const mockStaff = isDemoMode ? [
+    const mockStaffDemo = [
       { id: "st1", name: "Maria Garcia", email: "front.desk@example.com", role: "Front Desk", status: "active" as const, lastLogin: "Mar 18, 2026 9:15 AM" },
       { id: "st2", name: "Jessica Lee", email: "billing@example.com", role: "Billing Coordinator", status: "active" as const, lastLogin: "Mar 18, 2026 8:30 AM" },
       { id: "st3", name: "Tom Brown", email: "admin@example.com", role: "Office Manager", status: "active" as const, lastLogin: "Mar 17, 2026 5:00 PM" },
-    ] : [];
+    ];
+    const mockStaff = apiStaff.length > 0 ? apiStaff : (isDemoMode ? mockStaffDemo : []);
 
     const roleConfig: Record<string, { bg: string; text: string }> = {
       "Front Desk": { bg: "#e6f7f2", text: "#147d64" },
@@ -4726,7 +4857,7 @@ export function PracticePortal() {
   // ─── Notifications Tab ────────────────────────────────────────────────────
 
   function renderNotifications() {
-    const mockNotifications = isDemoMode ? [
+    const mockNotificationsDemo = [
       { id: "n1", title: "New member enrolled", description: "Sarah K. joined Complete Plan", time: "15 min ago", category: "members" as const, read: false },
       { id: "n2", title: "Appointment cancelled", description: "James W. cancelled Mar 25 visit", time: "1 hour ago", category: "appointments" as const, read: false },
       { id: "n3", title: "Payment received", description: "$199.00 from Lisa M.", time: "2 hours ago", category: "billing" as const, read: false },
@@ -4737,7 +4868,8 @@ export function PracticePortal() {
       { id: "n8", title: "Member paused", description: "David R. paused membership", time: "2 days ago", category: "members" as const, read: true },
       { id: "n9", title: "Provider schedule updated", description: "Dr. Chen updated hours", time: "2 days ago", category: "system" as const, read: true },
       { id: "n10", title: "System maintenance completed", description: "All systems operational", time: "3 days ago", category: "system" as const, read: true },
-    ] : [];
+    ];
+    const mockNotifications = apiNotifications.length > 0 ? apiNotifications : (isDemoMode ? mockNotificationsDemo : []);
 
     const filterTabs: { id: typeof notificationFilter; label: string }[] = [
       { id: "all", label: "All" },
