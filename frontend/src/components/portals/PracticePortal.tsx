@@ -2724,7 +2724,7 @@ export function PracticePortal() {
                 style={{ backgroundColor: "#27ab83" }}
                 onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#147d64")}
                 onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "#27ab83")}
-                onClick={() => alert("Coming soon")}
+                onClick={() => setToast({ message: "Coming soon", type: "success" })}
               >
                 <Plus className="w-3.5 h-3.5" /> Administer Screening
               </button>

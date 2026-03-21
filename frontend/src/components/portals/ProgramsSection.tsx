@@ -26,6 +26,9 @@ import {
   PauseCircle,
   X,
   Loader2,
+  Check,
+  XCircle,
+  AlertTriangle,
 } from "lucide-react";
 import { programService, patientService } from "../../lib/api";
 
@@ -385,6 +388,26 @@ export function ProgramsSection() {
   const [selectedProgram, setSelectedProgram] = useState<MockProgram | null>(null);
   const [detailTab, setDetailTab] = useState<"overview" | "plans" | "enrollments" | "providers" | "settings">("overview");
   const [statusFilter, setStatusFilter] = useState<string>("All");
+
+  // ─── In-app modals (replace native browser dialogs) ────────────────────────
+  const [promptModal, setPromptModalRaw] = useState<{
+    title: string;
+    label: string;
+    defaultValue: string;
+    onSubmit: (value: string) => void;
+  } | null>(null);
+  const [promptInputValue, setPromptInputValue] = useState("");
+  const setPromptModal = useCallback((modal: typeof promptModal) => {
+    setPromptInputValue(modal?.defaultValue ?? "");
+    setPromptModalRaw(modal);
+  }, []);
+  const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
+  useEffect(() => { if (toast) { const t = setTimeout(() => setToast(null), 4000); return () => clearTimeout(t); } }, [toast]);
+  const [confirmDialog, setConfirmDialog] = useState<{ title: string; message: string; onConfirm: () => void; confirmLabel?: string; danger?: boolean } | null>(null);
+  const [actionMenuModal, setActionMenuModal] = useState<{
+    title: string;
+    actions: { label: string; onClick: () => void; danger?: boolean }[];
+  } | null>(null);
 
   // ─── API State ──────────────────────────────────────────────────────────────
   const [apiPrograms, setApiPrograms] = useState<MockProgram[]>([]);
@@ -820,17 +843,29 @@ export function ProgramsSection() {
               <button
                 className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-white text-xs font-medium"
                 style={{ backgroundColor: "#0D9488" }}
-                onClick={async () => {
-                  const name = prompt("Plan name:");
-                  if (!name) return;
-                  const priceStr = prompt("Monthly price:");
-                  if (!priceStr) return;
-                  try {
-                    await programService.update(selectedProgram.id, {
-                      plans: [...selectedProgram.plans, { name, monthlyPrice: parseFloat(priceStr) || 0, annualPrice: 0, entitlements: [], isActive: true }],
-                    } as Record<string, unknown>);
-                    fetchPrograms();
-                  } catch { /* ignore */ }
+                onClick={() => {
+                  setPromptModal({
+                    title: "Add Plan",
+                    label: "Plan name",
+                    defaultValue: "",
+                    onSubmit: (name) => {
+                      if (!name) return;
+                      setPromptModal({
+                        title: "Add Plan",
+                        label: "Monthly price",
+                        defaultValue: "",
+                        onSubmit: async (priceStr) => {
+                          if (!priceStr) return;
+                          try {
+                            await programService.update(selectedProgram.id, {
+                              plans: [...selectedProgram.plans, { name, monthlyPrice: parseFloat(priceStr) || 0, annualPrice: 0, entitlements: [], isActive: true }],
+                            } as Record<string, unknown>);
+                            fetchPrograms();
+                          } catch { /* ignore */ }
+                        },
+                      });
+                    },
+                  });
                 }}
               >
                 <Plus className="w-3.5 h-3.5" />
@@ -858,29 +893,42 @@ export function ProgramsSection() {
                     <div className="flex items-center gap-1">
                       <button
                         className="p-1.5 rounded hover:bg-slate-100 text-slate-400"
-                        onClick={async () => {
-                          const newPrice = prompt(`Edit monthly price for "${plan.name}":`, String(plan.monthlyPrice));
-                          if (newPrice === null) return;
-                          try {
-                            await programService.update(selectedProgram.id, {
-                              plans: selectedProgram.plans.map((p) => p.id === plan.id ? { ...p, monthlyPrice: parseFloat(newPrice) || 0 } : p),
-                            } as Record<string, unknown>);
-                            fetchPrograms();
-                          } catch { /* ignore */ }
+                        onClick={() => {
+                          setPromptModal({
+                            title: "Edit Plan",
+                            label: `Monthly price for "${plan.name}"`,
+                            defaultValue: String(plan.monthlyPrice),
+                            onSubmit: async (newPrice) => {
+                              try {
+                                await programService.update(selectedProgram.id, {
+                                  plans: selectedProgram.plans.map((p) => p.id === plan.id ? { ...p, monthlyPrice: parseFloat(newPrice) || 0 } : p),
+                                } as Record<string, unknown>);
+                                fetchPrograms();
+                              } catch { /* ignore */ }
+                            },
+                          });
                         }}
                       >
                         <Pencil className="w-3.5 h-3.5" />
                       </button>
                       <button
                         className="p-1.5 rounded hover:bg-slate-100 text-slate-400"
-                        onClick={async () => {
-                          if (!confirm(`Deactivate plan "${plan.name}"?`)) return;
-                          try {
-                            await programService.update(selectedProgram.id, {
-                              plans: selectedProgram.plans.map((p) => p.id === plan.id ? { ...p, isActive: false } : p),
-                            } as Record<string, unknown>);
-                            fetchPrograms();
-                          } catch { /* ignore */ }
+                        onClick={() => {
+                          setConfirmDialog({
+                            title: "Deactivate Plan",
+                            message: `Are you sure you want to deactivate "${plan.name}"?`,
+                            confirmLabel: "Deactivate",
+                            danger: true,
+                            onConfirm: async () => {
+                              setConfirmDialog(null);
+                              try {
+                                await programService.update(selectedProgram.id, {
+                                  plans: selectedProgram.plans.map((p) => p.id === plan.id ? { ...p, isActive: false } : p),
+                                } as Record<string, unknown>);
+                                fetchPrograms();
+                              } catch { /* ignore */ }
+                            },
+                          });
                         }}
                       >
                         <MoreHorizontal className="w-3.5 h-3.5" />
@@ -981,13 +1029,19 @@ export function ProgramsSection() {
                             <button
                               className="p-1.5 rounded hover:bg-slate-100 text-slate-400"
                               title="Edit enrollment"
-                              onClick={async () => {
-                                const newStatus = prompt(`Change status for ${e.patientName} (active/paused/cancelled):`, e.status);
-                                if (!newStatus || newStatus === e.status) return;
-                                try {
-                                  await programService.update(selectedProgram.id, {} as Record<string, unknown>);
-                                  fetchPrograms();
-                                } catch { /* ignore */ }
+                              onClick={() => {
+                                setPromptModal({
+                                  title: "Change Enrollment Status",
+                                  label: `Status for ${e.patientName} (active/paused/cancelled)`,
+                                  defaultValue: e.status,
+                                  onSubmit: async (newStatus) => {
+                                    if (!newStatus || newStatus === e.status) return;
+                                    try {
+                                      await programService.update(selectedProgram.id, {} as Record<string, unknown>);
+                                      fetchPrograms();
+                                    } catch { /* ignore */ }
+                                  },
+                                });
                               }}
                             >
                               <Pencil className="w-3.5 h-3.5" />
@@ -995,12 +1049,20 @@ export function ProgramsSection() {
                             <button
                               className="p-1.5 rounded hover:bg-slate-100 text-slate-400"
                               title="Unenroll"
-                              onClick={async () => {
-                                if (!confirm(`Unenroll ${e.patientName} from ${selectedProgram.name}?`)) return;
-                                try {
-                                  await programService.unenrollPatient(selectedProgram.id, e.id);
-                                  fetchPrograms();
-                                } catch { /* ignore */ }
+                              onClick={() => {
+                                setConfirmDialog({
+                                  title: "Unenroll Patient",
+                                  message: `Unenroll ${e.patientName} from ${selectedProgram.name}?`,
+                                  confirmLabel: "Unenroll",
+                                  danger: true,
+                                  onConfirm: async () => {
+                                    setConfirmDialog(null);
+                                    try {
+                                      await programService.unenrollPatient(selectedProgram.id, e.id);
+                                      fetchPrograms();
+                                    } catch { /* ignore */ }
+                                  },
+                                });
                               }}
                             >
                               <MoreHorizontal className="w-3.5 h-3.5" />
@@ -1025,13 +1087,19 @@ export function ProgramsSection() {
               <button
                 className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-white text-xs font-medium"
                 style={{ backgroundColor: "#0D9488" }}
-                onClick={async () => {
-                  const providerId = prompt("Enter Provider ID to add to this program:");
-                  if (!providerId) return;
-                  try {
-                    await programService.addProvider(selectedProgram.id, { providerId });
-                    fetchPrograms();
-                  } catch { alert("Failed to add provider. Check the Provider ID."); }
+                onClick={() => {
+                  setPromptModal({
+                    title: "Add Provider",
+                    label: "Enter Provider ID to add to this program",
+                    defaultValue: "",
+                    onSubmit: async (providerId) => {
+                      if (!providerId) return;
+                      try {
+                        await programService.addProvider(selectedProgram.id, { providerId });
+                        fetchPrograms();
+                      } catch { setToast({ message: "Failed to add provider. Check the Provider ID.", type: "error" }); }
+                    },
+                  });
                 }}
               >
                 <UserPlus className="w-3.5 h-3.5" />
@@ -1381,13 +1449,19 @@ export function ProgramsSection() {
         <button
           className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg text-white text-sm font-medium transition-all hover:opacity-90"
           style={{ backgroundColor: "#0D9488" }}
-          onClick={async () => {
-            const name = prompt("Program name:");
-            if (!name) return;
-            try {
-              await programService.create({ name, type: "membership", status: "draft" });
-              fetchPrograms();
-            } catch { /* ignore */ }
+          onClick={() => {
+            setPromptModal({
+              title: "Create Program",
+              label: "Program name",
+              defaultValue: "",
+              onSubmit: async (name) => {
+                if (!name) return;
+                try {
+                  await programService.create({ name, type: "membership", status: "draft" });
+                  fetchPrograms();
+                } catch { /* ignore */ }
+              },
+            });
           }}
         >
           <Plus className="w-4 h-4" />
@@ -1416,13 +1490,19 @@ export function ProgramsSection() {
         <button
           className="flex items-center gap-2 px-4 py-2 rounded-lg text-white text-sm font-medium transition-all hover:opacity-90"
           style={{ backgroundColor: "#0D9488" }}
-          onClick={async () => {
-            const name = prompt("New program name:");
-            if (!name) return;
-            try {
-              await programService.create({ name, type: "membership", status: "draft" });
-              fetchPrograms();
-            } catch { /* ignore */ }
+          onClick={() => {
+            setPromptModal({
+              title: "Add Program",
+              label: "Program name",
+              defaultValue: "",
+              onSubmit: async (name) => {
+                if (!name) return;
+                try {
+                  await programService.create({ name, type: "membership", status: "draft" });
+                  fetchPrograms();
+                } catch { /* ignore */ }
+              },
+            });
           }}
         >
           <Plus className="w-4 h-4" />
@@ -1499,14 +1579,20 @@ export function ProgramsSection() {
                   </button>
                   <button
                     className="p-1.5 rounded hover:bg-slate-100 text-slate-400"
-                    onClick={async (e) => {
+                    onClick={(e) => {
                       e.stopPropagation();
-                      const newName = prompt("Edit program name:", program.name);
-                      if (!newName || newName === program.name) return;
-                      try {
-                        await programService.update(program.id, { name: newName });
-                        fetchPrograms();
-                      } catch { /* ignore */ }
+                      setPromptModal({
+                        title: "Edit Program",
+                        label: "Program name",
+                        defaultValue: program.name,
+                        onSubmit: async (newName) => {
+                          if (!newName || newName === program.name) return;
+                          try {
+                            await programService.update(program.id, { name: newName });
+                            fetchPrograms();
+                          } catch { /* ignore */ }
+                        },
+                      });
                     }}
                     title="Edit program"
                   >
@@ -1514,16 +1600,44 @@ export function ProgramsSection() {
                   </button>
                   <button
                     className="p-1.5 rounded hover:bg-slate-100 text-slate-400"
-                    onClick={async (e) => {
+                    onClick={(e) => {
                       e.stopPropagation();
-                      const action = prompt(`Choose action for "${program.name}":\n1 = Pause\n2 = Archive\n3 = Delete`);
-                      if (!action) return;
-                      try {
-                        if (action === "1") { await programService.update(program.id, { status: "paused" }); }
-                        else if (action === "2") { await programService.update(program.id, { status: "archived" }); }
-                        else if (action === "3") { if (confirm("Delete this program permanently?")) await programService.delete(program.id); }
-                        fetchPrograms();
-                      } catch { /* ignore */ }
+                      setActionMenuModal({
+                        title: `Actions for "${program.name}"`,
+                        actions: [
+                          {
+                            label: "Pause Program",
+                            onClick: async () => {
+                              setActionMenuModal(null);
+                              try { await programService.update(program.id, { status: "paused" }); fetchPrograms(); } catch { /* ignore */ }
+                            },
+                          },
+                          {
+                            label: "Archive Program",
+                            onClick: async () => {
+                              setActionMenuModal(null);
+                              try { await programService.update(program.id, { status: "archived" }); fetchPrograms(); } catch { /* ignore */ }
+                            },
+                          },
+                          {
+                            label: "Delete Program",
+                            danger: true,
+                            onClick: () => {
+                              setActionMenuModal(null);
+                              setConfirmDialog({
+                                title: "Delete Program",
+                                message: "Delete this program permanently?",
+                                confirmLabel: "Delete",
+                                danger: true,
+                                onConfirm: async () => {
+                                  setConfirmDialog(null);
+                                  try { await programService.delete(program.id); fetchPrograms(); } catch { /* ignore */ }
+                                },
+                              });
+                            },
+                          },
+                        ],
+                      });
                     }}
                     title="More actions"
                   >
@@ -1580,6 +1694,122 @@ export function ProgramsSection() {
         </div>
       )}
     </div>
+
+    {/* ─── Toast ──────────────────────────────────────────────────────────── */}
+    {toast && (
+      <div
+        className="fixed top-4 right-4 z-50 flex items-center gap-3 px-4 py-3 rounded-xl shadow-lg text-sm font-medium text-white"
+        style={{ backgroundColor: toast.type === "success" ? "#27ab83" : "#dc2626", minWidth: "280px" }}
+      >
+        {toast.type === "success" ? <Check className="w-4 h-4 shrink-0" /> : <XCircle className="w-4 h-4 shrink-0" />}
+        <span className="flex-1">{toast.message}</span>
+        <button onClick={() => setToast(null)} className="p-0.5 rounded shrink-0" style={{ backgroundColor: "rgba(255,255,255,0.2)" }}>
+          <X className="w-3.5 h-3.5" />
+        </button>
+      </div>
+    )}
+
+    {/* ─── Confirm Dialog ─────────────────────────────────────────────────── */}
+    {confirmDialog && (
+      <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: "rgba(0,0,0,0.5)" }}>
+        <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm mx-4 p-6">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="w-10 h-10 rounded-full flex items-center justify-center" style={{ backgroundColor: confirmDialog.danger ? "#fef2f2" : "#fffbeb" }}>
+              <AlertTriangle className="w-5 h-5" style={{ color: confirmDialog.danger ? "#dc2626" : "#d97706" }} />
+            </div>
+            <h3 className="text-lg font-semibold text-slate-800">{confirmDialog.title}</h3>
+          </div>
+          <p className="text-sm text-slate-600 mb-6">{confirmDialog.message}</p>
+          <div className="flex justify-end gap-3">
+            <button onClick={() => setConfirmDialog(null)} className="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100 transition-colors">Cancel</button>
+            <button
+              onClick={confirmDialog.onConfirm}
+              className="px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors"
+              style={{ backgroundColor: confirmDialog.danger ? "#dc2626" : "#27ab83" }}
+            >
+              {confirmDialog.confirmLabel || "Confirm"}
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+
+    {/* ─── Prompt Modal ───────────────────────────────────────────────────── */}
+    {promptModal && (
+      <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: "rgba(0,0,0,0.5)" }}>
+        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
+          <div className="p-6" style={{ background: "linear-gradient(135deg, #1B2B4D, #243b53)" }}>
+            <h3 className="text-lg font-bold text-white">{promptModal.title}</h3>
+          </div>
+          <div className="p-6">
+            <label className="block text-sm font-medium text-slate-700 mb-1">{promptModal.label}</label>
+            <input
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
+              defaultValue={promptModal.defaultValue}
+              autoFocus
+              onChange={(e) => setPromptInputValue(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  promptModal.onSubmit(promptInputValue || promptModal.defaultValue);
+                  setPromptModal(null);
+                }
+              }}
+              key={promptModal.title + promptModal.label}
+            />
+          </div>
+          <div className="px-6 pb-6 flex justify-end gap-3">
+            <button
+              onClick={() => setPromptModal(null)}
+              className="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={() => {
+                promptModal.onSubmit(promptInputValue || promptModal.defaultValue);
+                setPromptModal(null);
+              }}
+              className="px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors"
+              style={{ backgroundColor: "#0D9488" }}
+            >
+              Confirm
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+
+    {/* ─── Action Menu Modal ──────────────────────────────────────────────── */}
+    {actionMenuModal && (
+      <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: "rgba(0,0,0,0.5)" }}>
+        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-4 overflow-hidden">
+          <div className="p-6" style={{ background: "linear-gradient(135deg, #1B2B4D, #243b53)" }}>
+            <h3 className="text-lg font-bold text-white">{actionMenuModal.title}</h3>
+          </div>
+          <div className="p-4 space-y-2">
+            {actionMenuModal.actions.map((action, i) => (
+              <button
+                key={i}
+                onClick={action.onClick}
+                className="w-full text-left px-4 py-3 rounded-lg text-sm font-medium transition-colors hover:bg-slate-50"
+                style={{ color: action.danger ? "#dc2626" : "#1B2B4D" }}
+              >
+                {action.label}
+              </button>
+            ))}
+          </div>
+          <div className="px-6 pb-6 flex justify-end">
+            <button
+              onClick={() => setActionMenuModal(null)}
+              className="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100 transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+
     </>
   );
 }
