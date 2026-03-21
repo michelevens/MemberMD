@@ -811,7 +811,10 @@ export function PracticePortal() {
     if (patientsRes.status === "fulfilled" && patientsRes.value.data) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const patientList = Array.isArray(patientsRes.value.data) ? patientsRes.value.data : (patientsRes.value.data as any).data || [];
-      setApiPatients(patientList.map((p: any) => ({
+      if (patientList.length > 0) console.log("[MemberMD] First patient raw data:", JSON.stringify(patientList[0]).slice(0, 500));
+      setApiPatients(patientList.map((p: any) => {
+        if (p.activeMembership) console.log("[MemberMD] Patient membership:", p.firstName, "plan:", p.activeMembership?.plan?.name, "memberNumber:", p.activeMembership?.memberNumber);
+        return {
         id: p.id,
         name: [p.firstName, p.lastName].filter(Boolean).join(" ") || p.name || "",
         preferredName: p.preferredName || undefined,
@@ -832,7 +835,8 @@ export function PracticePortal() {
         visitsUsed: p.activeMembership?.visitsUsed ?? 0,
         visitsTotal: p.activeMembership?.visitsTotal ?? 0,
         provider: p.primaryProvider?.name || p.providerName || "",
-      })));
+      };
+      }));
     }
     // Appointments (API returns paginated)
     if (appointmentsRes.status === "fulfilled" && appointmentsRes.value.data) {
