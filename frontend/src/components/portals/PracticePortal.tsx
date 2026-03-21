@@ -1180,8 +1180,10 @@ export function PracticePortal() {
       const res = await apiFetch<unknown>(`/entitlement-usage/patient/${membershipId}`);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const raw = res.data as any;
+      console.log("[MemberMD] Utilization raw response:", JSON.stringify(raw).slice(0, 500));
       // API returns { entitlements: [...], totalSavings, plan, ... }
       const list = raw?.entitlements || (Array.isArray(raw) ? raw : raw?.data || []);
+      console.log("[MemberMD] Utilization items count:", list.length, "first item:", list[0] ? JSON.stringify(list[0]).slice(0, 200) : "none");
       setPatientUtilization(list);
     } catch {
       setPatientUtilization([]);
