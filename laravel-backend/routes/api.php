@@ -49,6 +49,9 @@ use App\Http\Controllers\Api\WidgetConfigController;
 use App\Http\Controllers\Api\PublicWidgetController;
 use App\Http\Controllers\Api\EngagementController;
 use App\Http\Controllers\Api\OutcomeController;
+use App\Http\Controllers\Api\EntitlementTypeController;
+use App\Http\Controllers\Api\PlanEntitlementController;
+use App\Http\Controllers\Api\EntitlementUsageController;
 use App\Http\Controllers\Api\Admin\MasterProgramController;
 use Illuminate\Support\Facades\Route;
 
@@ -450,4 +453,29 @@ Route::middleware(['auth:sanctum', 'phi.log'])->group(function () {
         Route::get('/reports', [OutcomeController::class, 'listReports']);
         Route::get('/reports/{id}', [OutcomeController::class, 'showReport']);
     });
+
+    // ===== Entitlement Types =====
+    Route::apiResource('entitlement-types', EntitlementTypeController::class);
+
+    // ===== Plan Entitlements =====
+    Route::prefix('membership-plans/{planId}/entitlements')->group(function () {
+        Route::get('/', [PlanEntitlementController::class, 'index']);
+        Route::post('/', [PlanEntitlementController::class, 'store']);
+        Route::put('/{id}', [PlanEntitlementController::class, 'update']);
+        Route::delete('/{id}', [PlanEntitlementController::class, 'destroy']);
+    });
+
+    // ===== Entitlement Usage Tracking =====
+    Route::prefix('entitlement-usage')->group(function () {
+        Route::post('/record', [EntitlementUsageController::class, 'record']);
+        Route::get('/patient/{membershipId}', [EntitlementUsageController::class, 'patientUtilization']);
+        Route::get('/plan/{planId}', [EntitlementUsageController::class, 'planUtilization']);
+        Route::get('/practice', [EntitlementUsageController::class, 'practiceUtilization']);
+    });
+
+    // ===== Membership Enrollment Actions =====
+    Route::post('memberships/{id}/pause', [MembershipController::class, 'pause']);
+    Route::post('memberships/{id}/resume', [MembershipController::class, 'resume']);
+    Route::post('memberships/{id}/cancel', [MembershipController::class, 'cancel']);
+    Route::post('memberships/{id}/change-plan', [MembershipController::class, 'changePlan']);
 });

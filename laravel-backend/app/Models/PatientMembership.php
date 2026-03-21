@@ -50,4 +50,5 @@ class PatientMembership extends Model
     public function entitlements(): HasMany { return $this->hasMany(PatientEntitlement::class, 'membership_id'); }
     public function dunningEvents(): HasMany { return $this->hasMany(DunningEvent::class, 'membership_id'); }
     public function invoices(): HasMany { return $this->hasMany(Invoice::class, 'membership_id'); }
+    public function usageRecords(): HasMany { return $this->hasMany(EntitlementUsage::class, 'patient_membership_id'); }
 }

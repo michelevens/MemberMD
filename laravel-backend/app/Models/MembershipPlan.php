@@ -52,4 +52,5 @@ class MembershipPlan extends Model
 
     public function memberships(): HasMany { return $this->hasMany(PatientMembership::class, 'plan_id'); }
     public function addons(): HasMany { return $this->hasMany(PlanAddon::class, 'plan_id'); }
+    public function planEntitlements(): HasMany { return $this->hasMany(PlanEntitlement::class, 'plan_id'); }
 }
