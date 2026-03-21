@@ -30,7 +30,7 @@ import {
   XCircle,
   AlertTriangle,
 } from "lucide-react";
-import { programService, patientService } from "../../lib/api";
+import { programService, patientService, providerService } from "../../lib/api";
 
 const isDemoMode = import.meta.env.VITE_DEMO_MODE !== "false";
 
@@ -408,6 +408,16 @@ export function ProgramsSection() {
     title: string;
     actions: { label: string; onClick: () => void; danger?: boolean }[];
   } | null>(null);
+
+  // ─── Add Provider to Program Dialog State ───────────────────────────────────
+  const [addProviderToProgram, setAddProviderToProgram] = useState(false);
+  const [addProviderProgramId, setAddProviderProgramId] = useState<string | null>(null);
+  const [providerSearchQuery, setProviderSearchQuery] = useState("");
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [providerSearchResults, setProviderSearchResults] = useState<any[]>([]);
+  const [selectedProviderId, setSelectedProviderId] = useState<string | null>(null);
+  const [providerSearchLoading, setProviderSearchLoading] = useState(false);
+  const [addProviderSubmitting, setAddProviderSubmitting] = useState(false);
 
   // ─── API State ──────────────────────────────────────────────────────────────
   const [apiPrograms, setApiPrograms] = useState<MockProgram[]>([]);
@@ -1088,18 +1098,19 @@ export function ProgramsSection() {
                 className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-white text-xs font-medium"
                 style={{ backgroundColor: "#0D9488" }}
                 onClick={() => {
-                  setPromptModal({
-                    title: "Add Provider",
-                    label: "Enter Provider ID to add to this program",
-                    defaultValue: "",
-                    onSubmit: async (providerId) => {
-                      if (!providerId) return;
-                      try {
-                        await programService.addProvider(selectedProgram.id, { providerId });
-                        fetchPrograms();
-                      } catch { setToast({ message: "Failed to add provider. Check the Provider ID.", type: "error" }); }
-                    },
-                  });
+                  setProviderSearchQuery("");
+                  setProviderSearchResults([]);
+                  setSelectedProviderId(null);
+                  setAddProviderProgramId(selectedProgram.id);
+                  setAddProviderToProgram(true);
+                  // Pre-load providers
+                  setProviderSearchLoading(true);
+                  providerService.list().then((res) => {
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    const list = Array.isArray(res.data) ? res.data : (res.data as any)?.data || [];
+                    setProviderSearchResults(list);
+                    setProviderSearchLoading(false);
+                  }).catch(() => setProviderSearchLoading(false));
                 }}
               >
                 <UserPlus className="w-3.5 h-3.5" />
@@ -1804,6 +1815,102 @@ export function ProgramsSection() {
               className="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100 transition-colors"
             >
               Cancel
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+
+    {/* ─── Add Provider to Program Modal ─────────────────────────────────── */}
+    {addProviderToProgram && addProviderProgramId && (
+      <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: "rgba(0,0,0,0.5)" }}>
+        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
+          <div className="p-6" style={{ background: "linear-gradient(135deg, #1B2B4D, #243b53)" }}>
+            <h3 className="text-lg font-bold text-white">Add Provider to Program</h3>
+            <p className="text-sm text-slate-300 mt-1">Search and select a provider to add.</p>
+          </div>
+          <div className="p-6 space-y-4">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+              <input
+                className="w-full pl-10 pr-4 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
+                placeholder="Search providers by name..."
+                value={providerSearchQuery}
+                autoFocus
+                onChange={(e) => setProviderSearchQuery(e.target.value)}
+              />
+            </div>
+            <div className="max-h-60 overflow-y-auto border border-slate-200 rounded-lg">
+              {providerSearchLoading && (
+                <div className="flex items-center justify-center py-6">
+                  <Loader2 className="w-5 h-5 animate-spin text-slate-400" />
+                  <span className="ml-2 text-sm text-slate-500">Loading providers...</span>
+                </div>
+              )}
+              {!providerSearchLoading && providerSearchResults.length === 0 && (
+                <div className="text-center py-6 text-sm text-slate-400">No providers found.</div>
+              )}
+              {!providerSearchLoading && providerSearchResults
+                .filter((p) => {
+                  if (!providerSearchQuery) return true;
+                  const name = [p.firstName || p.first_name, p.lastName || p.last_name].filter(Boolean).join(" ").toLowerCase();
+                  return name.includes(providerSearchQuery.toLowerCase());
+                })
+                .map((p) => {
+                  const name = [p.firstName || p.first_name, p.lastName || p.last_name].filter(Boolean).join(" ") || p.name || "Unknown";
+                  const specialty = (Array.isArray(p.specialties) ? p.specialties[0] : p.specialty) || "";
+                  const isSelected = selectedProviderId === p.id;
+                  return (
+                    <button
+                      key={p.id}
+                      className="w-full text-left px-4 py-3 flex items-center gap-3 transition-colors border-b border-slate-100 last:border-0"
+                      style={{ backgroundColor: isSelected ? "#e6f7f2" : "transparent" }}
+                      onClick={() => setSelectedProviderId(isSelected ? null : p.id)}
+                    >
+                      <div
+                        className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-white shrink-0"
+                        style={{ backgroundColor: "#334e68" }}
+                      >
+                        {name.split(" ").map((n: string) => n[0]).join("").toUpperCase().slice(0, 2)}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium text-slate-800 truncate">{name}{p.credentials ? `, ${p.credentials}` : ""}</p>
+                        {specialty && <p className="text-xs text-slate-500">{specialty}</p>}
+                      </div>
+                      {isSelected && <Check className="w-4 h-4 shrink-0" style={{ color: "#0D9488" }} />}
+                    </button>
+                  );
+                })}
+            </div>
+          </div>
+          <div className="px-6 pb-6 flex items-center justify-end gap-3">
+            <button
+              className="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100 transition-colors"
+              onClick={() => { setAddProviderToProgram(false); setSelectedProviderId(null); }}
+            >
+              Cancel
+            </button>
+            <button
+              className="px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors disabled:opacity-50"
+              style={{ backgroundColor: "#0D9488" }}
+              disabled={!selectedProviderId || addProviderSubmitting}
+              onClick={async () => {
+                if (!selectedProviderId) return;
+                setAddProviderSubmitting(true);
+                try {
+                  if (!addProviderProgramId) return;
+                  await programService.addProvider(addProviderProgramId, { providerId: selectedProviderId });
+                  setToast({ message: "Provider added to program.", type: "success" });
+                  setAddProviderToProgram(false);
+                  setSelectedProviderId(null);
+                  fetchPrograms();
+                } catch {
+                  setToast({ message: "Failed to add provider.", type: "error" });
+                }
+                setAddProviderSubmitting(false);
+              }}
+            >
+              {addProviderSubmitting ? "Adding..." : "Add Provider"}
             </button>
           </div>
         </div>

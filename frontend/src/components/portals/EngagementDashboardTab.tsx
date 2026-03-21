@@ -104,7 +104,7 @@ export function EngagementDashboardTab() {
     setRulesLoading(true);
     const res = await apiFetch<EngagementRule[]>("/engagement/rules");
     if (res.data) {
-      setRules(res.data);
+      setRules(Array.isArray(res.data) ? res.data : (res.data as any)?.data || []);
     }
     setRulesLoading(false);
   }, []);

@@ -137,7 +137,7 @@ export function CommunicationsTab() {
     if (res.error) {
       setError(res.error);
     } else {
-      setTimeline(res.data || []);
+      setTimeline(Array.isArray(res.data) ? res.data : (res.data as any)?.data || []);
     }
     setTimelineLoading(false);
   }, []);

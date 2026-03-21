@@ -154,7 +154,7 @@ export function EmployerManagementTab() {
     if (res.error) {
       setError(res.error);
     } else {
-      setEmployers(res.data || []);
+      setEmployers(Array.isArray(res.data) ? res.data : (res.data as any)?.data || []);
     }
     setLoading(false);
   }, []);
@@ -166,7 +166,7 @@ export function EmployerManagementTab() {
     if (res.error) {
       setError(res.error);
     } else {
-      setContracts(res.data || []);
+      setContracts(Array.isArray(res.data) ? res.data : (res.data as any)?.data || []);
     }
     setLoading(false);
   }, []);
@@ -178,7 +178,7 @@ export function EmployerManagementTab() {
     if (res.error) {
       setError(res.error);
     } else {
-      setInvoices(res.data || []);
+      setInvoices(Array.isArray(res.data) ? res.data : (res.data as any)?.data || []);
     }
     setLoading(false);
   }, []);
@@ -203,10 +203,12 @@ export function EmployerManagementTab() {
       apiFetch<EmployerContract[]>("/employer-contracts"),
       apiFetch<EmployerInvoice[]>("/employer-billing/invoices"),
     ]);
+    const contractsList = Array.isArray(contractsRes.data) ? contractsRes.data : (contractsRes.data as any)?.data || [];
+    const invoicesList = Array.isArray(invoicesRes.data) ? invoicesRes.data : (invoicesRes.data as any)?.data || [];
     setExpandedDetail({
       employer: detailRes.data || employer,
-      contracts: (contractsRes.data || []).filter((c) => c.employerId === employer.id),
-      invoices: (invoicesRes.data || []).filter((i) => i.employerId === employer.id),
+      contracts: contractsList.filter((c: EmployerContract) => c.employerId === employer.id),
+      invoices: invoicesList.filter((i: EmployerInvoice) => i.employerId === employer.id),
     });
   };
 

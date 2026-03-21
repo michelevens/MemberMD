@@ -135,7 +135,7 @@ export function LabOrdersTab() {
     if (res.error) {
       setError(res.error);
     } else if (res.data) {
-      setOrders(res.data);
+      setOrders(Array.isArray(res.data) ? res.data : (res.data as any)?.data || []);
     }
     setLoading(false);
   }, [statusFilter, searchQuery, patientFilter]);
@@ -143,7 +143,7 @@ export function LabOrdersTab() {
   const fetchPanels = useCallback(async () => {
     const res = await apiFetch<CommonPanel[]>("/lab-orders/common-panels");
     if (res.data) {
-      setCommonPanels(res.data);
+      setCommonPanels(Array.isArray(res.data) ? res.data : (res.data as any)?.data || []);
     }
   }, []);
 

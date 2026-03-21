@@ -198,8 +198,10 @@ export function ReferralManagementTab() {
     ]);
 
     setStats(statsRes.data || MOCK_STATS);
-    setReferrals(refRes.data || MOCK_REFERRALS);
-    setSpecialists(specRes.data || MOCK_SPECIALISTS);
+    const refList = Array.isArray(refRes.data) ? refRes.data : (refRes.data as any)?.data || [];
+    setReferrals(refList.length > 0 ? refList : MOCK_REFERRALS);
+    const specList = Array.isArray(specRes.data) ? specRes.data : (specRes.data as any)?.data || [];
+    setSpecialists(specList.length > 0 ? specList : MOCK_SPECIALISTS);
 
     if (statsRes.error && refRes.error && specRes.error) {
       // All failed — silently use mock data

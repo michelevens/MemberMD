@@ -179,9 +179,11 @@ export function InventoryTab() {
     if (itemsRes.error) {
       setError(itemsRes.error);
     } else {
-      setItems(itemsRes.data || []);
+      const list = Array.isArray(itemsRes.data) ? itemsRes.data : (itemsRes.data as any)?.data || [];
+      setItems(list);
     }
-    setLowStockItems(lowStockRes.data || []);
+    const lowList = Array.isArray(lowStockRes.data) ? lowStockRes.data : (lowStockRes.data as any)?.data || [];
+    setLowStockItems(lowList);
     setLoading(false);
   }, []);
 

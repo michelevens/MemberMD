@@ -367,7 +367,7 @@ export function DunningDashboardTab() {
 
     // Use mock data as fallback
     setDashboard(dashRes.data || MOCK_DASHBOARD);
-    const loadedPolicies = polRes.data || MOCK_POLICIES;
+    const loadedPolicies = Array.isArray(polRes.data) ? polRes.data : (polRes.data as any)?.data || MOCK_POLICIES;
     setPolicies(loadedPolicies);
 
     // The dashboard endpoint returns active dunning patients too

@@ -704,6 +704,12 @@ export function PracticePortal() {
   const [providerForm, setProviderForm] = useState({ firstName: "", lastName: "", credentials: "", specialty: "", npiNumber: "", email: "", phone: "", telehealth: false });
   const [addProviderLoading, setAddProviderLoading] = useState(false);
 
+  // ─── Edit Provider Modal ──────────────────────────────────────────────
+  const [showEditProvider, setShowEditProvider] = useState(false);
+  const [editProviderId, setEditProviderId] = useState<string | null>(null);
+  const [editProviderForm, setEditProviderForm] = useState({ firstName: "", lastName: "", credentials: "", specialty: "", npiNumber: "", email: "", phone: "", telehealth: false });
+  const [editProviderLoading, setEditProviderLoading] = useState(false);
+
   // ─── Invite Staff Modal ───────────────────────────────────────────────
   const [showInviteStaff, setShowInviteStaff] = useState(false);
   const [staffForm, setStaffForm] = useState({ name: "", email: "", role: "Front Desk" });
@@ -1433,6 +1439,40 @@ export function PracticePortal() {
       setToast({ message: err instanceof Error ? err.message : "Failed to add provider.", type: "error" });
     }
     setAddProviderLoading(false);
+  };
+
+  // ─── Edit Provider Handler ─────────────────────────────────────────────
+  const handleEditProvider = async () => {
+    if (!editProviderId || !editProviderForm.firstName || !editProviderForm.lastName) {
+      setToast({ message: "First and last name are required.", type: "error" });
+      return;
+    }
+    setEditProviderLoading(true);
+    try {
+      const res = await providerService.update(editProviderId, {
+        firstName: editProviderForm.firstName,
+        lastName: editProviderForm.lastName,
+        credentials: editProviderForm.credentials || undefined,
+        specialty: editProviderForm.specialty || undefined,
+        npiNumber: editProviderForm.npiNumber || undefined,
+        email: editProviderForm.email || undefined,
+        phone: editProviderForm.phone || undefined,
+        telehealth: editProviderForm.telehealth,
+      } as Record<string, unknown>);
+      if (res.data || !res.error) {
+        setToast({ message: "Provider updated successfully.", type: "success" });
+        setShowEditProvider(false);
+        setEditProviderId(null);
+        setEditProviderForm({ firstName: "", lastName: "", credentials: "", specialty: "", npiNumber: "", email: "", phone: "", telehealth: false });
+        setProvidersLoaded(false);
+        loadPracticeData();
+      } else {
+        setToast({ message: res.error || "Failed to update provider.", type: "error" });
+      }
+    } catch (err: unknown) {
+      setToast({ message: err instanceof Error ? err.message : "Failed to update provider.", type: "error" });
+    }
+    setEditProviderLoading(false);
   };
 
   // ─── Invite Staff Handler ─────────────────────────────────────────────
@@ -4989,7 +5029,21 @@ export function PracticePortal() {
                   </button>
                   <button
                     className="flex-1 px-3 py-2 rounded-lg text-sm font-medium border border-slate-200 text-slate-500 hover:bg-slate-50 transition-colors"
-                    onClick={() => setToast({ message: "Provider editing coming soon.", type: "success" })}
+                    onClick={() => {
+                      const nameParts = prov.name.split(" ");
+                      setEditProviderId(prov.id);
+                      setEditProviderForm({
+                        firstName: nameParts[0] || "",
+                        lastName: nameParts.slice(1).join(" ") || "",
+                        credentials: prov.credentials || "",
+                        specialty: prov.specialty || "",
+                        npiNumber: "",
+                        email: "",
+                        phone: "",
+                        telehealth: prov.telehealth || false,
+                      });
+                      setShowEditProvider(true);
+                    }}
                   >
                     Edit
                   </button>
@@ -6024,6 +6078,71 @@ export function PracticePortal() {
                 disabled={addProviderLoading}
               >
                 {addProviderLoading ? "Adding..." : "Add Provider"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─── Edit Provider Modal ─────────────────────────────────────────── */}
+      {showEditProvider && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: "rgba(0,0,0,0.5)" }}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden">
+            <div className="p-6" style={{ background: "linear-gradient(135deg, #1B2B4D, #243b53)" }}>
+              <h3 className="text-xl font-bold text-white">Edit Provider</h3>
+              <p className="text-sm text-slate-300 mt-1">Update provider information.</p>
+            </div>
+            <div className="p-6 space-y-4 max-h-96 overflow-y-auto">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">First Name *</label>
+                  <input className="w-full border rounded-lg px-3 py-2 text-sm" value={editProviderForm.firstName} onChange={e => setEditProviderForm(f => ({ ...f, firstName: e.target.value }))} placeholder="First name" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Last Name *</label>
+                  <input className="w-full border rounded-lg px-3 py-2 text-sm" value={editProviderForm.lastName} onChange={e => setEditProviderForm(f => ({ ...f, lastName: e.target.value }))} placeholder="Last name" />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Credentials</label>
+                  <input className="w-full border rounded-lg px-3 py-2 text-sm" value={editProviderForm.credentials} onChange={e => setEditProviderForm(f => ({ ...f, credentials: e.target.value }))} placeholder="e.g. MD, DNP, NP" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Specialty</label>
+                  <input className="w-full border rounded-lg px-3 py-2 text-sm" value={editProviderForm.specialty} onChange={e => setEditProviderForm(f => ({ ...f, specialty: e.target.value }))} placeholder="e.g. Family Medicine" />
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">NPI Number</label>
+                <input className="w-full border rounded-lg px-3 py-2 text-sm" value={editProviderForm.npiNumber} onChange={e => setEditProviderForm(f => ({ ...f, npiNumber: e.target.value }))} placeholder="10-digit NPI" />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Email</label>
+                  <input type="email" className="w-full border rounded-lg px-3 py-2 text-sm" value={editProviderForm.email} onChange={e => setEditProviderForm(f => ({ ...f, email: e.target.value }))} placeholder="provider@example.com" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Phone</label>
+                  <input type="tel" className="w-full border rounded-lg px-3 py-2 text-sm" value={editProviderForm.phone} onChange={e => setEditProviderForm(f => ({ ...f, phone: e.target.value }))} placeholder="(407) 555-1234" />
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" checked={editProviderForm.telehealth} onChange={e => setEditProviderForm(f => ({ ...f, telehealth: e.target.checked }))} className="accent-teal-600" />
+                  <span className="text-sm text-slate-700">Telehealth enabled</span>
+                </label>
+              </div>
+            </div>
+            <div className="px-6 pb-6 flex items-center justify-end gap-3">
+              <button className="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100 transition-colors" onClick={() => { setShowEditProvider(false); setEditProviderId(null); }}>Cancel</button>
+              <button
+                className="px-6 py-2 rounded-lg text-sm font-medium text-white transition-colors"
+                style={{ backgroundColor: "#27ab83" }}
+                onClick={handleEditProvider}
+                disabled={editProviderLoading}
+              >
+                {editProviderLoading ? "Saving..." : "Save Changes"}
               </button>
             </div>
           </div>
