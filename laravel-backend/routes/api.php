@@ -55,6 +55,7 @@ use App\Http\Controllers\Api\EntitlementUsageController;
 use App\Http\Controllers\Api\ActivityLogController;
 use App\Http\Controllers\Api\ALaCartePriceController;
 use App\Http\Controllers\Api\VisitPackController;
+use App\Http\Controllers\Api\ClinicalLookupController;
 use App\Http\Controllers\Api\Admin\MasterProgramController;
 use Illuminate\Support\Facades\Route;
 
@@ -503,5 +504,16 @@ Route::middleware(['auth:sanctum', 'phi.log'])->group(function () {
         Route::post('/', [VisitPackController::class, 'store']);
         Route::post('/purchase', [VisitPackController::class, 'purchase']);
         Route::get('/patient/{patientId}', [VisitPackController::class, 'patientCredits']);
+    });
+
+    // ===== Clinical Lookups (External API Integrations) =====
+    Route::prefix('clinical-lookup')->group(function () {
+        Route::get('/drugs', [ClinicalLookupController::class, 'searchDrugs']);
+        Route::get('/drug-interactions', [ClinicalLookupController::class, 'drugInteractions']);
+        Route::get('/drug-info', [ClinicalLookupController::class, 'drugInfo']);
+        Route::get('/icd10', [ClinicalLookupController::class, 'searchICD10']);
+        Route::get('/cpt', [ClinicalLookupController::class, 'searchCPT']);
+        Route::get('/loinc', [ClinicalLookupController::class, 'searchLOINC']);
+        Route::get('/fda-labels', [ClinicalLookupController::class, 'searchFDALabels']);
     });
 });
