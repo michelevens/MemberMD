@@ -153,7 +153,7 @@ class ProgramController extends Controller
 
         $validated = $request->validate([
             'patient_id' => 'required|uuid|exists:patients,id',
-            'plan_id' => 'nullable|uuid|exists:program_plans,id',
+            'plan_id' => 'nullable|uuid|exists:membership_plans,id',
             'membership_id' => 'nullable|uuid|exists:patient_memberships,id',
             'funding_source' => 'nullable|string|in:self_pay,employer,insurance,grant,sponsor',
             'sponsor_name' => 'nullable|string|max:255',
