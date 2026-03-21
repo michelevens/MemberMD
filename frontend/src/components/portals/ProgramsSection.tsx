@@ -1256,53 +1256,8 @@ export function ProgramsSection() {
                 ))}
               </div>
             )}
-            {!programPlansLoading && programPlans.length === 0 && selectedProgram.plans.length > 0 && (
-              /* Fallback to embedded plans (legacy data) */
-              <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
-                {selectedProgram.plans.map((plan) => (
-                  <div key={plan.id} className="glass rounded-xl p-5">
-                    <div className="flex items-start justify-between mb-3">
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <h4 className="font-semibold text-slate-800">{plan.name}</h4>
-                          {plan.badge && (
-                            <span
-                              className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium"
-                              style={{ backgroundColor: "#fffbeb", color: "#d97706" }}
-                            >
-                              {plan.badge}
-                            </span>
-                          )}
-                        </div>
-                        <p className="text-xs text-slate-400 mt-0.5">{plan.enrolledCount} enrolled</p>
-                      </div>
-                    </div>
-                    <div className="mb-3">
-                      {plan.monthlyPrice > 0 ? (
-                        <div className="flex items-baseline gap-1">
-                          <span className="text-2xl font-bold text-slate-800">{formatCurrency(plan.monthlyPrice)}</span>
-                          <span className="text-xs text-slate-400">/month</span>
-                        </div>
-                      ) : (
-                        <span className="text-sm font-medium text-slate-500">Billed to payer</span>
-                      )}
-                      {plan.annualPrice > 0 && (
-                        <p className="text-xs text-slate-400 mt-0.5">{formatCurrency(plan.annualPrice)}/year</p>
-                      )}
-                    </div>
-                    <ul className="space-y-1.5">
-                      {plan.entitlements.map((e, i) => (
-                        <li key={i} className="flex items-start gap-1.5 text-xs text-slate-600">
-                          <CheckCircle2 className="w-3.5 h-3.5 mt-0.5 shrink-0" style={{ color: "#27ab83" }} />
-                          {e}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                ))}
-              </div>
-            )}
-            {!programPlansLoading && programPlans.length === 0 && selectedProgram.plans.length === 0 && (
+            {/* Legacy embedded plans removed — using real MembershipPlans only */}
+            {!programPlansLoading && programPlans.length === 0 && (
               <div className="text-center py-12">
                 <Layers className="w-8 h-8 text-slate-300 mx-auto mb-2" />
                 <p className="text-sm text-slate-500">No plans configured</p>

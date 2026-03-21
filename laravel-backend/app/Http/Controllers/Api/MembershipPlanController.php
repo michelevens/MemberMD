@@ -111,6 +111,7 @@ class MembershipPlanController extends Controller
             'features_list' => 'nullable|array',
             'sort_order' => 'nullable|integer',
             'is_active' => 'sometimes|boolean',
+            'program_id' => 'nullable|uuid|exists:programs,id',
             'stripe_monthly_price_id' => 'nullable|string|max:255',
             'stripe_annual_price_id' => 'nullable|string|max:255',
         ]);
