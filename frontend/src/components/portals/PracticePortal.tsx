@@ -22,6 +22,8 @@ import { LabOrdersTab } from "./LabOrdersTab";
 import { EmployerManagementTab } from "./EmployerManagementTab";
 import { InventoryTab } from "./InventoryTab";
 import { CommunicationsTab } from "./CommunicationsTab";
+import { ActivityLoggerTab } from "./ActivityLoggerTab";
+import { ALaCarteTab } from "./ALaCarteTab";
 import {
   LayoutDashboard,
   Users,
@@ -113,7 +115,9 @@ type TabId =
   | "lab-orders"
   | "employers"
   | "inventory"
-  | "communications";
+  | "communications"
+  | "activity-log"
+  | "a-la-carte";
 
 interface NavItem {
   id: TabId;
@@ -182,6 +186,8 @@ const NAV_SECTIONS: NavSection[] = [
       { id: "inventory", label: "Inventory", icon: Package },
       { id: "engagement", label: "Patient Engagement", icon: HeartPulse },
       { id: "communications", label: "Communications", icon: Radio },
+      { id: "activity-log", label: "Activity Log", icon: ClipboardList },
+      { id: "a-la-carte", label: "\u00C0 La Carte", icon: DollarSign },
     ],
   },
   {
@@ -6730,6 +6736,10 @@ export function PracticePortal() {
         return <InventoryTab />;
       case "communications":
         return <CommunicationsTab />;
+      case "activity-log":
+        return <ActivityLoggerTab />;
+      case "a-la-carte":
+        return <ALaCarteTab />;
       case "practice-settings":
         return <PracticeSettings />;
       case "branding":
