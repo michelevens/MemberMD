@@ -1259,6 +1259,86 @@ export function ProgramsSection() {
             </div>
           </div>
         )}
+
+        {/* Add Provider to Program Modal (inside detail view) */}
+        {addProviderToProgram && addProviderProgramId && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: "rgba(0,0,0,0.5)" }}>
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
+              <div className="p-6" style={{ background: "linear-gradient(135deg, #1B2B4D, #243b53)" }}>
+                <h3 className="text-lg font-bold text-white">Add Provider to Program</h3>
+                <p className="text-sm text-slate-300 mt-1">Search and select a provider to add.</p>
+              </div>
+              <div className="p-6 space-y-4">
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                  <input
+                    className="w-full pl-10 pr-4 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none"
+                    placeholder="Search providers by name..."
+                    value={providerSearchQuery}
+                    onChange={(e) => setProviderSearchQuery(e.target.value)}
+                  />
+                </div>
+                {providerSearchLoading && <div className="text-center py-4"><Loader2 className="w-5 h-5 animate-spin mx-auto text-slate-400" /></div>}
+                <div className="max-h-60 overflow-y-auto space-y-2">
+                  {providerSearchResults
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    .filter((p: any) => {
+                      if (!providerSearchQuery) return true;
+                      const name = `${p.firstName || p.first_name || ""} ${p.lastName || p.last_name || ""}`.toLowerCase();
+                      return name.includes(providerSearchQuery.toLowerCase());
+                    })
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    .map((p: any) => {
+                      const name = `${p.firstName || p.first_name || ""} ${p.lastName || p.last_name || ""}`.trim();
+                      const initials = name.split(" ").map((n: string) => n[0]).join("").toUpperCase() || "??";
+                      return (
+                        <div
+                          key={p.id}
+                          className="flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-colors"
+                          style={{
+                            backgroundColor: selectedProviderId === p.id ? "#e6f7f2" : "transparent",
+                            border: selectedProviderId === p.id ? "2px solid #27ab83" : "2px solid #e2e8f0",
+                          }}
+                          onClick={() => setSelectedProviderId(p.id)}
+                        >
+                          <div className="w-10 h-10 rounded-full flex items-center justify-center text-white text-sm font-bold" style={{ backgroundColor: "#334e68" }}>{initials}</div>
+                          <div>
+                            <p className="text-sm font-medium text-slate-800">{name}</p>
+                            <p className="text-xs text-slate-500">{p.credentials || p.specialty || ""}</p>
+                          </div>
+                        </div>
+                      );
+                    })}
+                </div>
+              </div>
+              <div className="px-6 pb-6 flex justify-end gap-3">
+                <button className="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100"
+                  onClick={() => { setAddProviderToProgram(false); setSelectedProviderId(null); }}>Cancel</button>
+                <button
+                  className="px-6 py-2 rounded-lg text-sm font-medium text-white"
+                  style={{ backgroundColor: selectedProviderId ? "#27ab83" : "#94a3b8" }}
+                  disabled={!selectedProviderId || addProviderSubmitting}
+                  onClick={async () => {
+                    if (!selectedProviderId || !addProviderProgramId) return;
+                    setAddProviderSubmitting(true);
+                    try {
+                      await programService.addProvider(addProviderProgramId, { providerId: selectedProviderId });
+                      setToast({ message: "Provider added to program.", type: "success" });
+                      setAddProviderToProgram(false);
+                      setSelectedProviderId(null);
+                      fetchPrograms();
+                    } catch {
+                      setToast({ message: "Failed to add provider.", type: "error" });
+                    }
+                    setAddProviderSubmitting(false);
+                  }}
+                >
+                  {addProviderSubmitting ? "Adding..." : "Add Provider"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
