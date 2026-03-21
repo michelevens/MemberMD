@@ -777,6 +777,31 @@ export function PracticePortal() {
   const [patientUtilization, setPatientUtilization] = useState<any[] | null>(null);
   const [utilizationLoading, setUtilizationLoading] = useState(false);
 
+  // ─── Patient Activity Log (patient detail) ────────────────────────────
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [patientActivities, setPatientActivities] = useState<any[]>([]);
+  const [patientActivitiesLoading, setPatientActivitiesLoading] = useState(false);
+  const [patientActivitiesPage, setPatientActivitiesPage] = useState(1);
+  const [patientActivitiesTotalPages, setPatientActivitiesTotalPages] = useState(1);
+
+  // ─── Roster Cancel Membership Dialog ───────────────────────────────────
+  const [rosterCancelDialog, setRosterCancelDialog] = useState<{ patientId: string; patientName: string; membershipId: string } | null>(null);
+  const [rosterCancelReason, setRosterCancelReason] = useState("");
+  const [rosterCancelLoading, setRosterCancelLoading] = useState(false);
+
+  // ─── Roster Enroll/Change Plan Dialog ──────────────────────────────────
+  const [rosterPlanDialog, setRosterPlanDialog] = useState<{ patientId: string; patientName: string; membershipId?: string; mode: "enroll" | "change" } | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [rosterAvailablePlans, setRosterAvailablePlans] = useState<any[]>([]);
+  const [rosterAvailablePlansLoading, setRosterAvailablePlansLoading] = useState(false);
+  const [rosterSelectedPlanId, setRosterSelectedPlanId] = useState<string | null>(null);
+  const [rosterPlanActionLoading, setRosterPlanActionLoading] = useState(false);
+
+  // ─── Quick Activity Log Form (patient detail) ─────────────────────────
+  const [showQuickActivityLog, setShowQuickActivityLog] = useState(false);
+  const [quickActivityForm, setQuickActivityForm] = useState({ activityType: "", durationMinutes: "15", notes: "" });
+  const [quickActivityLoading, setQuickActivityLoading] = useState(false);
+
   // ─── API Programs for dropdowns ─────────────────────────────────────
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [apiPrograms, setApiPrograms] = useState<any[]>([]);
@@ -1190,6 +1215,117 @@ export function PracticePortal() {
     }
     setUtilizationLoading(false);
   }, []);
+
+  // ─── Fetch patient activities ──────────────────────────────────────────
+  const fetchPatientActivities = useCallback(async (patientId: string, page = 1) => {
+    setPatientActivitiesLoading(true);
+    try {
+      const res = await apiFetch<unknown>(`/activity-log/patient/${patientId}?page=${page}&per_page=20`);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const raw = res.data as any;
+      const list = Array.isArray(raw) ? raw : raw?.data || raw?.items || [];
+      const totalPages = raw?.totalPages ?? raw?.total_pages ?? raw?.meta?.totalPages ?? 1;
+      setPatientActivities(list);
+      setPatientActivitiesPage(page);
+      setPatientActivitiesTotalPages(totalPages);
+    } catch {
+      setPatientActivities([]);
+    }
+    setPatientActivitiesLoading(false);
+  }, []);
+
+  // ─── Pause membership (roster action) ──────────────────────────────────
+  const handlePauseMembership = useCallback(async (membershipId: string, patientName: string) => {
+    try {
+      await apiFetch(`/memberships/${membershipId}/pause`, { method: "POST" });
+      setToast({ message: `${patientName}'s membership paused.`, type: "success" });
+      loadPracticeData();
+    } catch {
+      setToast({ message: "Failed to pause membership.", type: "error" });
+    }
+  }, [loadPracticeData, setToast]);
+
+  // ─── Cancel membership (roster action) ─────────────────────────────────
+  const handleRosterCancelMembership = useCallback(async () => {
+    if (!rosterCancelDialog || !rosterCancelReason.trim()) return;
+    setRosterCancelLoading(true);
+    try {
+      await apiFetch(`/memberships/${rosterCancelDialog.membershipId}/cancel`, {
+        method: "POST",
+        body: JSON.stringify({ reason: rosterCancelReason }),
+      });
+      setToast({ message: `${rosterCancelDialog.patientName}'s membership cancelled.`, type: "success" });
+      setRosterCancelDialog(null);
+      setRosterCancelReason("");
+      loadPracticeData();
+    } catch {
+      setToast({ message: "Failed to cancel membership.", type: "error" });
+    }
+    setRosterCancelLoading(false);
+  }, [rosterCancelDialog, rosterCancelReason, loadPracticeData, setToast]);
+
+  // ─── Fetch plans for roster plan dialog ────────────────────────────────
+  const fetchRosterPlans = useCallback(async () => {
+    setRosterAvailablePlansLoading(true);
+    try {
+      const res = await membershipPlanService.list();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const list = Array.isArray(res.data) ? res.data : (res.data as any)?.data || [];
+      setRosterAvailablePlans(list);
+    } catch { /* ignore */ }
+    setRosterAvailablePlansLoading(false);
+  }, []);
+
+  // ─── Enroll or change plan (roster action) ─────────────────────────────
+  const handleRosterPlanAction = useCallback(async () => {
+    if (!rosterPlanDialog || !rosterSelectedPlanId) return;
+    setRosterPlanActionLoading(true);
+    try {
+      if (rosterPlanDialog.mode === "change" && rosterPlanDialog.membershipId) {
+        await apiFetch(`/memberships/${rosterPlanDialog.membershipId}/change-plan`, {
+          method: "POST",
+          body: JSON.stringify({ planId: rosterSelectedPlanId }),
+        });
+        setToast({ message: "Plan changed successfully.", type: "success" });
+      } else {
+        await apiFetch("/memberships", {
+          method: "POST",
+          body: JSON.stringify({ patientId: rosterPlanDialog.patientId, planId: rosterSelectedPlanId }),
+        });
+        setToast({ message: "Patient enrolled in plan.", type: "success" });
+      }
+      setRosterPlanDialog(null);
+      setRosterSelectedPlanId(null);
+      loadPracticeData();
+    } catch {
+      setToast({ message: rosterPlanDialog.mode === "change" ? "Failed to change plan." : "Failed to enroll patient.", type: "error" });
+    }
+    setRosterPlanActionLoading(false);
+  }, [rosterPlanDialog, rosterSelectedPlanId, loadPracticeData, setToast]);
+
+  // ─── Quick activity log submit ─────────────────────────────────────────
+  const handleQuickActivityLog = useCallback(async (patientId: string) => {
+    if (!quickActivityForm.activityType) return;
+    setQuickActivityLoading(true);
+    try {
+      await apiFetch("/activity-log", {
+        method: "POST",
+        body: JSON.stringify({
+          patientId,
+          activityType: quickActivityForm.activityType,
+          durationMinutes: parseInt(quickActivityForm.durationMinutes) || 15,
+          notes: quickActivityForm.notes || undefined,
+        }),
+      });
+      setToast({ message: "Activity logged.", type: "success" });
+      setShowQuickActivityLog(false);
+      setQuickActivityForm({ activityType: "", durationMinutes: "15", notes: "" });
+      fetchPatientActivities(patientId);
+    } catch {
+      setToast({ message: "Failed to log activity.", type: "error" });
+    }
+    setQuickActivityLoading(false);
+  }, [quickActivityForm, fetchPatientActivities, setToast]);
 
   const handleAddPatient = async () => {
     if (!addPatientForm.firstName || !addPatientForm.lastName || !addPatientForm.dateOfBirth) {
@@ -2237,9 +2373,20 @@ export function PracticePortal() {
                           <Pencil className="w-4 h-4" />
                         </button>
                         <MoreActionsDropdown actions={[
-                          { label: "Schedule Appointment", onClick: () => { setBookApptForm(f => ({ ...f, patientId: patient.id })); setShowBookAppointment(true); } },
+                          { label: "View Details", onClick: () => { setSelectedPatient(patient); setPatientDetailTab("demographics"); } },
+                          { label: "Book Appointment", onClick: () => { setBookApptForm(f => ({ ...f, patientId: patient.id })); setShowBookAppointment(true); } },
+                          { label: "Send Message", onClick: () => { setSelectedPatient(patient); setPatientDetailTab("messages"); } },
+                          { label: "Log Activity", onClick: () => { setActiveTab("activity-log"); } },
                           { label: "Create Encounter", onClick: () => { setEncounterForm(f => ({ ...f, patientId: patient.id })); setShowNewEncounter(true); } },
-                          { label: "Enroll in Program", onClick: () => { setActiveTab("programs"); } },
+                          ...(patient.status === "active" && patient.membershipId
+                            ? [
+                                { label: "Change Plan", onClick: () => { setRosterPlanDialog({ patientId: patient.id, patientName: patient.name, membershipId: patient.membershipId, mode: "change" as const }); fetchRosterPlans(); setRosterSelectedPlanId(null); } },
+                                { label: "Pause Membership", onClick: () => { setConfirmDialog({ title: "Pause Membership", message: `Pause ${patient.name}'s membership? They will retain their plan but benefits will be suspended.`, confirmLabel: "Pause", onConfirm: async () => { if (patient.membershipId) { await handlePauseMembership(patient.membershipId, patient.name); } setConfirmDialog(null); } }); } },
+                                { label: "Cancel Membership", onClick: () => { if (patient.membershipId) { setRosterCancelDialog({ patientId: patient.id, patientName: patient.name, membershipId: patient.membershipId }); setRosterCancelReason(""); } }, danger: true },
+                              ]
+                            : [
+                                { label: "Enroll in Plan", onClick: () => { setRosterPlanDialog({ patientId: patient.id, patientName: patient.name, mode: "enroll" as const }); fetchRosterPlans(); setRosterSelectedPlanId(null); } },
+                              ]),
                           { label: "Deactivate", onClick: () => { setConfirmDialog({ title: "Deactivate Patient", message: `Are you sure you want to deactivate ${patient.name}?`, confirmLabel: "Deactivate", danger: true, onConfirm: async () => { try { await patientService.update(patient.id, { status: "inactive" }); setToast({ message: "Patient deactivated.", type: "success" }); loadPracticeData(); } catch { setToast({ message: "Failed to deactivate.", type: "error" }); } setConfirmDialog(null); } }); }, danger: true },
                         ]} />
                       </div>
@@ -2418,7 +2565,7 @@ export function PracticePortal() {
         {/* ── Header ──────────────────────────────────────────────────── */}
         <div className="flex flex-col sm:flex-row items-start gap-4">
           <button
-            onClick={() => { setSelectedPatient(null); setPatientUtilization(null); }}
+            onClick={() => { setSelectedPatient(null); setPatientUtilization(null); setPatientActivities([]); setShowQuickActivityLog(false); }}
             className="p-2 rounded-lg hover:bg-slate-100 text-slate-500 transition-colors shrink-0"
           >
             <ArrowLeft className="w-5 h-5" />
@@ -2664,6 +2811,181 @@ export function PracticePortal() {
                       </div>
                     );
                   })()}
+                </div>
+              )}
+            </div>
+          );
+        })()}
+
+        {/* ── Activity Log Section ──────────────────────────────────── */}
+        {(() => {
+          // Auto-fetch activities when patient detail is viewed
+          if (pt && patientActivities.length === 0 && !patientActivitiesLoading) {
+            setTimeout(() => fetchPatientActivities(pt.id), 0);
+          }
+
+          const ACTIVITY_TYPE_CONFIG: Record<string, { label: string; category: string }> = {
+            phone_call: { label: "Phone Call", category: "communication" },
+            text_message: { label: "Text Message", category: "communication" },
+            after_hours_call: { label: "After Hours Call", category: "communication" },
+            home_visit: { label: "Home Visit", category: "clinical" },
+            care_coordination: { label: "Care Coordination", category: "clinical" },
+            referral_call: { label: "Referral Call", category: "clinical" },
+            education: { label: "Education", category: "clinical" },
+            medication_dispensed: { label: "Medication Dispensed", category: "clinical" },
+            ccm_time: { label: "CCM Time", category: "chronic" },
+            rpm_review: { label: "RPM Review", category: "chronic" },
+            other: { label: "Other", category: "other" },
+          };
+          const CAT_COLORS: Record<string, { bg: string; text: string }> = {
+            communication: { bg: "#e0ecff", text: "#1e40af" },
+            clinical: { bg: "#e6f7f2", text: "#147d64" },
+            chronic: { bg: "#f3e8ff", text: "#7c3aed" },
+            other: { bg: "#f1f5f9", text: "#64748b" },
+          };
+
+          return (
+            <div className="glass rounded-xl p-5">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="font-semibold text-slate-800 flex items-center gap-2">
+                  <ClipboardList className="w-4 h-4" style={{ color: "#27ab83" }} />
+                  Activity Log
+                </h3>
+                <button
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-white transition-colors"
+                  style={{ backgroundColor: "#27ab83" }}
+                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#147d64")}
+                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "#27ab83")}
+                  onClick={() => { setShowQuickActivityLog(true); setQuickActivityForm({ activityType: "", durationMinutes: "15", notes: "" }); }}
+                >
+                  <Plus className="w-3 h-3" /> Log Activity
+                </button>
+              </div>
+
+              {patientActivitiesLoading && (
+                <div className="flex items-center justify-center py-6">
+                  <div className="w-5 h-5 border-2 rounded-full animate-spin" style={{ borderColor: "#e2e8f0", borderTopColor: "#27ab83" }} />
+                  <span className="ml-2 text-sm text-slate-400">Loading activities...</span>
+                </div>
+              )}
+
+              {!patientActivitiesLoading && patientActivities.length === 0 && (
+                <p className="text-sm text-slate-400 text-center py-4">No activities logged yet.</p>
+              )}
+
+              {!patientActivitiesLoading && patientActivities.length > 0 && (
+                <div className="space-y-2">
+                  {patientActivities.map((activity, idx) => {
+                    const typeKey = activity.activityType || activity.activity_type || "other";
+                    const config = ACTIVITY_TYPE_CONFIG[typeKey] || ACTIVITY_TYPE_CONFIG.other;
+                    const catColors = CAT_COLORS[config.category] || CAT_COLORS.other;
+                    const date = activity.createdAt || activity.created_at || activity.date || "";
+                    const duration = activity.durationMinutes || activity.duration_minutes || 0;
+                    const notes = activity.notes || "";
+                    const entitlementDeducted = activity.entitlementDeducted ?? activity.entitlement_deducted ?? null;
+
+                    return (
+                      <div key={activity.id || idx} className="flex items-start gap-3 p-3 rounded-lg" style={{ backgroundColor: "rgba(16,42,67,0.02)" }}>
+                        <div className="shrink-0 mt-0.5">
+                          <span
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium"
+                            style={{ backgroundColor: catColors.bg, color: catColors.text }}
+                          >
+                            {config.label}
+                          </span>
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          {notes && <p className="text-sm text-slate-700">{notes}</p>}
+                          <div className="flex items-center gap-3 mt-1 text-xs text-slate-400">
+                            {date && <span>{new Date(date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })} {new Date(date).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}</span>}
+                            {duration > 0 && <span>{duration} min</span>}
+                            {entitlementDeducted && <span className="px-1.5 py-0.5 rounded text-xs font-medium" style={{ backgroundColor: "#fffbeb", color: "#d97706" }}>Entitlement deducted</span>}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Pagination */}
+              {patientActivitiesTotalPages > 1 && (
+                <div className="flex items-center justify-center gap-2 mt-3 pt-3 border-t border-slate-100">
+                  <button
+                    disabled={patientActivitiesPage <= 1}
+                    onClick={() => fetchPatientActivities(pt.id, patientActivitiesPage - 1)}
+                    className="px-3 py-1 rounded text-xs font-medium disabled:opacity-40"
+                    style={{ color: "#334e68" }}
+                  >
+                    Previous
+                  </button>
+                  <span className="text-xs text-slate-400">Page {patientActivitiesPage} of {patientActivitiesTotalPages}</span>
+                  <button
+                    disabled={patientActivitiesPage >= patientActivitiesTotalPages}
+                    onClick={() => fetchPatientActivities(pt.id, patientActivitiesPage + 1)}
+                    className="px-3 py-1 rounded text-xs font-medium disabled:opacity-40"
+                    style={{ color: "#334e68" }}
+                  >
+                    Next
+                  </button>
+                </div>
+              )}
+
+              {/* Quick Activity Log Form */}
+              {showQuickActivityLog && (
+                <div className="mt-4 p-4 rounded-lg border border-slate-200" style={{ backgroundColor: "#fafbfc" }}>
+                  <h4 className="text-sm font-semibold text-slate-700 mb-3">Log Activity for {pt.name}</h4>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
+                      <label className="block text-xs text-slate-500 mb-1">Activity Type *</label>
+                      <select
+                        value={quickActivityForm.activityType}
+                        onChange={(e) => setQuickActivityForm(f => ({ ...f, activityType: e.target.value }))}
+                        className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none bg-white"
+                      >
+                        <option value="">Select type...</option>
+                        {Object.entries(ACTIVITY_TYPE_CONFIG).map(([val, cfg]) => (
+                          <option key={val} value={val}>{cfg.label}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs text-slate-500 mb-1">Duration (min)</label>
+                      <input
+                        type="number"
+                        value={quickActivityForm.durationMinutes}
+                        onChange={(e) => setQuickActivityForm(f => ({ ...f, durationMinutes: e.target.value }))}
+                        className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none bg-white"
+                        min="1"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-slate-500 mb-1">Notes</label>
+                      <input
+                        type="text"
+                        value={quickActivityForm.notes}
+                        onChange={(e) => setQuickActivityForm(f => ({ ...f, notes: e.target.value }))}
+                        className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none bg-white"
+                        placeholder="Optional notes..."
+                      />
+                    </div>
+                  </div>
+                  <div className="flex justify-end gap-2 mt-3">
+                    <button
+                      onClick={() => setShowQuickActivityLog(false)}
+                      className="px-3 py-1.5 rounded-lg text-xs font-medium text-slate-500 hover:bg-slate-100 transition-colors"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={() => handleQuickActivityLog(pt.id)}
+                      disabled={!quickActivityForm.activityType || quickActivityLoading}
+                      className="px-3 py-1.5 rounded-lg text-xs font-medium text-white transition-colors disabled:opacity-50"
+                      style={{ backgroundColor: "#27ab83" }}
+                    >
+                      {quickActivityLoading ? "Saving..." : "Save Activity"}
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
@@ -6842,6 +7164,114 @@ export function PracticePortal() {
           onConfirm={confirmDialog.onConfirm}
           onCancel={() => setConfirmDialog(null)}
         />
+      )}
+
+      {/* ─── Roster Cancel Membership Modal ────────────────────────────── */}
+      {rosterCancelDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: "rgba(0,0,0,0.5)" }}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
+            <div className="p-6" style={{ background: "linear-gradient(135deg, #dc2626, #ef4444)" }}>
+              <h3 className="text-lg font-bold text-white">Cancel Membership</h3>
+              <p className="text-sm text-red-100 mt-1">Cancel {rosterCancelDialog.patientName}&apos;s membership</p>
+            </div>
+            <div className="p-6">
+              <label className="block text-sm font-medium text-slate-700 mb-1">Cancellation Reason *</label>
+              <textarea
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none resize-none"
+                rows={3}
+                placeholder="Enter reason for cancellation..."
+                value={rosterCancelReason}
+                onChange={(e) => setRosterCancelReason(e.target.value)}
+                autoFocus
+              />
+            </div>
+            <div className="px-6 pb-6 flex justify-end gap-3">
+              <button
+                onClick={() => { setRosterCancelDialog(null); setRosterCancelReason(""); }}
+                className="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100 transition-colors"
+              >
+                Go Back
+              </button>
+              <button
+                onClick={handleRosterCancelMembership}
+                disabled={!rosterCancelReason.trim() || rosterCancelLoading}
+                className="px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors disabled:opacity-50"
+                style={{ backgroundColor: "#dc2626" }}
+              >
+                {rosterCancelLoading ? "Cancelling..." : "Cancel Membership"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─── Roster Enroll / Change Plan Modal ───────────────────────────── */}
+      {rosterPlanDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: "rgba(0,0,0,0.5)" }}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
+            <div className="p-6" style={{ background: "linear-gradient(135deg, #1B2B4D, #243b53)" }}>
+              <h3 className="text-lg font-bold text-white">{rosterPlanDialog.mode === "change" ? "Change Plan" : "Enroll in Plan"}</h3>
+              <p className="text-sm text-slate-300 mt-1">
+                {rosterPlanDialog.mode === "change" ? `Select a new plan for ${rosterPlanDialog.patientName}` : `Choose a plan for ${rosterPlanDialog.patientName}`}
+              </p>
+            </div>
+            <div className="p-6">
+              {rosterAvailablePlansLoading && (
+                <div className="flex items-center justify-center py-6">
+                  <div className="w-5 h-5 border-2 rounded-full animate-spin" style={{ borderColor: "#e2e8f0", borderTopColor: "#27ab83" }} />
+                  <span className="ml-2 text-sm text-slate-500">Loading plans...</span>
+                </div>
+              )}
+              {!rosterAvailablePlansLoading && rosterAvailablePlans.length === 0 && (
+                <p className="text-sm text-slate-400 text-center py-4">No plans available.</p>
+              )}
+              {!rosterAvailablePlansLoading && rosterAvailablePlans.length > 0 && (
+                <div className="space-y-2 max-h-60 overflow-y-auto">
+                  {rosterAvailablePlans.map((plan) => {
+                    const isSelected = rosterSelectedPlanId === plan.id;
+                    const planName = plan.name || "Unnamed Plan";
+                    const price = plan.monthlyPrice ?? plan.monthly_price ?? 0;
+                    return (
+                      <button
+                        key={plan.id}
+                        className="w-full text-left px-4 py-3 rounded-lg border transition-colors flex items-center justify-between"
+                        style={{
+                          borderColor: isSelected ? "#0D9488" : "#e2e8f0",
+                          backgroundColor: isSelected ? "#e6f7f2" : "transparent",
+                        }}
+                        onClick={() => setRosterSelectedPlanId(isSelected ? null : plan.id)}
+                      >
+                        <div>
+                          <p className="text-sm font-medium text-slate-800">{planName}</p>
+                          <p className="text-xs text-slate-500">${price}/month</p>
+                        </div>
+                        {isSelected && <Check className="w-4 h-4 shrink-0" style={{ color: "#0D9488" }} />}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+            <div className="px-6 pb-6 flex justify-end gap-3">
+              <button
+                onClick={() => { setRosterPlanDialog(null); setRosterSelectedPlanId(null); }}
+                className="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleRosterPlanAction}
+                disabled={!rosterSelectedPlanId || rosterPlanActionLoading}
+                className="px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors disabled:opacity-50"
+                style={{ backgroundColor: "#0D9488" }}
+              >
+                {rosterPlanActionLoading
+                  ? (rosterPlanDialog.mode === "change" ? "Changing..." : "Enrolling...")
+                  : (rosterPlanDialog.mode === "change" ? "Change Plan" : "Enroll")}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* ─── Add Patient Modal ──────────────────────────────────────────── */}
