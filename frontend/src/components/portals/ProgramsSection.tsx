@@ -549,13 +549,15 @@ export function ProgramsSection() {
       setPatientsLoading(true);
       try {
         const res = await patientService.list({ search: enrollPatientSearch });
-        if (res.data && Array.isArray(res.data)) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const ptList = res.data ? (Array.isArray(res.data) ? res.data : (res.data as any).data || []) : [];
+        if (ptList.length > 0) {
           setEnrollPatients(
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            res.data.map((pt: any) => ({
+            ptList.map((pt: any) => ({
               id: pt.id,
-              firstName: pt.firstName || "",
-              lastName: pt.lastName || "",
+              firstName: pt.firstName || pt.first_name || "",
+              lastName: pt.lastName || pt.last_name || "",
             }))
           );
         }
