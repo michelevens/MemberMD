@@ -15,7 +15,7 @@ class MembershipPlan extends Model
     use HasFactory, HasUuids, BelongsToTenant, Auditable;
 
     protected $fillable = [
-        'tenant_id', 'name', 'description', 'badge_text',
+        'tenant_id', 'program_id', 'name', 'description', 'badge_text',
         'monthly_price', 'annual_price',
         'stripe_monthly_price_id', 'stripe_annual_price_id',
         'visits_per_month', 'telehealth_included', 'messaging_included',
@@ -50,6 +50,7 @@ class MembershipPlan extends Model
         'is_active' => 'boolean',
     ];
 
+    public function program(): BelongsTo { return $this->belongsTo(Program::class); }
     public function memberships(): HasMany { return $this->hasMany(PatientMembership::class, 'plan_id'); }
     public function addons(): HasMany { return $this->hasMany(PlanAddon::class, 'plan_id'); }
     public function planEntitlements(): HasMany { return $this->hasMany(PlanEntitlement::class, 'plan_id'); }

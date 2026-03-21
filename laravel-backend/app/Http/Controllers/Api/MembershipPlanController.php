@@ -20,6 +20,11 @@ class MembershipPlanController extends Controller
             $query->where('is_active', true);
         }
 
+        // Optional filter by program
+        if ($request->has('program_id')) {
+            $query->where('program_id', $request->program_id);
+        }
+
         $plans = $query->orderBy('sort_order', 'asc')
             ->orderBy('monthly_price', 'asc')
             ->get();
@@ -32,7 +37,7 @@ class MembershipPlanController extends Controller
         $user = $request->user();
         $plan = MembershipPlan::where('tenant_id', $user->tenant_id)
             ->withCount('memberships')
-            ->with('addons')
+            ->with(['addons', 'program'])
             ->findOrFail($id);
 
         return response()->json(['data' => $plan]);
@@ -65,6 +70,7 @@ class MembershipPlanController extends Controller
             'min_commitment_months' => 'nullable|integer|min:0',
             'features_list' => 'nullable|array',
             'sort_order' => 'nullable|integer',
+            'program_id' => 'nullable|uuid|exists:programs,id',
         ]);
 
         $validated['tenant_id'] = $user->tenant_id;

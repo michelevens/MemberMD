@@ -83,6 +83,7 @@ class ProgramController extends Controller
     {
         $program = Program::with([
             'plans',
+            'membershipPlans.planEntitlements.entitlementType',
             'eligibilityRules',
             'enrollments.patient',
             'enrollments.plan',
@@ -90,6 +91,11 @@ class ProgramController extends Controller
             'providers',
             'fundingSources',
         ])->findOrFail($program);
+
+        // Attach memberships count to each membership plan
+        $program->membershipPlans->each(function ($plan) {
+            $plan->loadCount('memberships');
+        });
 
         return response()->json(['data' => $program]);
     }
@@ -262,6 +268,23 @@ class ProgramController extends Controller
         $pp->update(['is_active' => false]);
 
         return response()->json(['message' => 'Provider removed from program.']);
+    }
+
+    /**
+     * Get membership plans belonging to a program.
+     */
+    public function plans(string $program): JsonResponse
+    {
+        $program = Program::findOrFail($program);
+
+        $plans = $program->membershipPlans()
+            ->withCount('memberships')
+            ->with('planEntitlements.entitlementType')
+            ->orderBy('sort_order')
+            ->orderBy('monthly_price')
+            ->get();
+
+        return response()->json(['data' => $plans]);
     }
 
     /**

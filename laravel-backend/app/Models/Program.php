@@ -38,6 +38,7 @@ class Program extends Model
     ];
 
     public function plans(): HasMany { return $this->hasMany(ProgramPlan::class); }
+    public function membershipPlans(): HasMany { return $this->hasMany(MembershipPlan::class); }
     public function eligibilityRules(): HasMany { return $this->hasMany(ProgramEligibilityRule::class); }
     public function enrollments(): HasMany { return $this->hasMany(ProgramEnrollment::class); }
     public function programProviders(): HasMany { return $this->hasMany(ProgramProvider::class); }

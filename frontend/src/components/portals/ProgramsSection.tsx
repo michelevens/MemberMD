@@ -86,6 +86,23 @@ interface MockProgramPlan {
   isActive: boolean;
 }
 
+interface RealMembershipPlan {
+  id: string;
+  name: string;
+  description: string | null;
+  monthlyPrice: number;
+  annualPrice: number | null;
+  membershipsCount: number;
+  planEntitlements: Array<{
+    id: string;
+    entitlementType: { id: string; name: string; slug: string } | null;
+    limitValue: number | null;
+  }>;
+  badgeText: string | null;
+  isActive: boolean;
+  programId: string | null;
+}
+
 interface MockEnrollment {
   id: string;
   patientName: string;
@@ -447,6 +464,18 @@ export function ProgramsSection() {
   const [availablePlansLoading, setAvailablePlansLoading] = useState(false);
   const [enrollmentActionLoading, setEnrollmentActionLoading] = useState<string | null>(null);
 
+  // ─── Program Plans (real MembershipPlan records) ──────────────────────────
+  const [programPlans, setProgramPlans] = useState<RealMembershipPlan[]>([]);
+  const [programPlansLoading, setProgramPlansLoading] = useState(false);
+
+  // ─── Add Plan Dialog State ─────────────────────────────────────────────────
+  const [addPlanDialogOpen, setAddPlanDialogOpen] = useState(false);
+  const [addPlanName, setAddPlanName] = useState("");
+  const [addPlanMonthlyPrice, setAddPlanMonthlyPrice] = useState("");
+  const [addPlanAnnualPrice, setAddPlanAnnualPrice] = useState("");
+  const [addPlanDescription, setAddPlanDescription] = useState("");
+  const [addPlanSubmitting, setAddPlanSubmitting] = useState(false);
+
   // ─── Map API response to MockProgram shape ─────────────────────────────────
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const mapApiProgram = useCallback((p: any): MockProgram => ({
@@ -463,16 +492,37 @@ export function ProgramsSection() {
     maxEnrollment: p.maxEnrollment ?? null,
     providerCount: p.providers?.length ?? p.programProviders?.length ?? 0,
     monthlyRevenue: 0,
-    plans: (p.plans || []).map((pl: Record<string, unknown>) => ({
-      id: pl.id || "",
-      name: pl.name || "",
-      monthlyPrice: Number(pl.monthlyPrice) || 0,
-      annualPrice: Number(pl.annualPrice) || 0,
-      entitlements: Array.isArray(pl.entitlements) ? pl.entitlements : [],
-      badge: pl.badge ?? null,
-      enrolledCount: Number(pl.enrolledCount) || 0,
-      isActive: pl.isActive !== false,
-    })),
+    plans: (() => {
+      // Prefer real membershipPlans if available, fall back to embedded plans
+      const realPlans = p.membershipPlans || p.membership_plans;
+      if (Array.isArray(realPlans) && realPlans.length > 0) {
+        return realPlans.map((pl: Record<string, unknown>) => ({
+          id: (pl.id as string) || "",
+          name: (pl.name as string) || "",
+          monthlyPrice: Number(pl.monthlyPrice ?? pl.monthly_price) || 0,
+          annualPrice: Number(pl.annualPrice ?? pl.annual_price) || 0,
+          entitlements: Array.isArray(pl.planEntitlements ?? pl.plan_entitlements)
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            ? ((pl.planEntitlements ?? pl.plan_entitlements) as any[]).map((e: any) =>
+                e.entitlementType?.name || e.entitlement_type?.name || "Entitlement"
+              )
+            : [],
+          badge: (pl.badgeText ?? pl.badge_text ?? null) as string | null,
+          enrolledCount: Number(pl.membershipsCount ?? pl.memberships_count) || 0,
+          isActive: pl.isActive !== false && pl.is_active !== false,
+        }));
+      }
+      return (p.plans || []).map((pl: Record<string, unknown>) => ({
+        id: pl.id || "",
+        name: pl.name || "",
+        monthlyPrice: Number(pl.monthlyPrice) || 0,
+        annualPrice: Number(pl.annualPrice) || 0,
+        entitlements: Array.isArray(pl.entitlements) ? pl.entitlements : [],
+        badge: pl.badge ?? null,
+        enrolledCount: Number(pl.enrolledCount) || 0,
+        isActive: pl.isActive !== false,
+      }));
+    })(),
     enrollments: (p.enrollments || []).map((e: Record<string, unknown>) => ({
       id: e.id || "",
       patientName: e.patient
@@ -619,6 +669,85 @@ export function ProgramsSection() {
     setAvailablePlansLoading(false);
   }, []);
 
+  // ─── Fetch real membership plans for a program ────────────────────────────
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const mapApiPlanToReal = useCallback((pl: any): RealMembershipPlan => ({
+    id: pl.id || "",
+    name: pl.name || "",
+    description: pl.description || null,
+    monthlyPrice: Number(pl.monthlyPrice ?? pl.monthly_price) || 0,
+    annualPrice: Number(pl.annualPrice ?? pl.annual_price) || null,
+    membershipsCount: Number(pl.membershipsCount ?? pl.memberships_count) || 0,
+    planEntitlements: (pl.planEntitlements ?? pl.plan_entitlements ?? []).map(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (e: any) => ({
+        id: e.id || "",
+        entitlementType: e.entitlementType ?? e.entitlement_type ?? null,
+        limitValue: e.limitValue ?? e.limit_value ?? null,
+      })
+    ),
+    badgeText: pl.badgeText ?? pl.badge_text ?? null,
+    isActive: pl.isActive !== false && pl.is_active !== false,
+    programId: pl.programId ?? pl.program_id ?? null,
+  }), []);
+
+  const fetchProgramPlans = useCallback(async (programId: string) => {
+    setProgramPlansLoading(true);
+    try {
+      const res = await apiFetch<unknown>(`/programs/${programId}/plans`);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const raw = res.data as any;
+      const list = Array.isArray(raw) ? raw : (raw?.data || []);
+      if (Array.isArray(list)) {
+        setProgramPlans(list.map(mapApiPlanToReal));
+      }
+    } catch {
+      // Fall back to empty - plans tab will show "no plans"
+      setProgramPlans([]);
+    } finally {
+      setProgramPlansLoading(false);
+    }
+  }, [mapApiPlanToReal]);
+
+  // ─── Fetch program plans when program detail opens or plans tab selected ──
+  useEffect(() => {
+    if (selectedProgram) {
+      fetchProgramPlans(selectedProgram.id);
+    }
+  }, [selectedProgram?.id, fetchProgramPlans]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ─── Handle creating a real MembershipPlan for a program ─────────────────
+  const handleAddPlanToProgram = useCallback(async (programId: string) => {
+    if (!addPlanName.trim()) return;
+    setAddPlanSubmitting(true);
+    try {
+      await apiFetch("/membership-plans", {
+        method: "POST",
+        body: JSON.stringify({
+          name: addPlanName.trim(),
+          monthlyPrice: parseFloat(addPlanMonthlyPrice) || 0,
+          annualPrice: parseFloat(addPlanAnnualPrice) || 0,
+          description: addPlanDescription.trim() || null,
+          programId: programId,
+          visitsPerMonth: 0,
+        }),
+      });
+      setToast({ message: "Plan created successfully.", type: "success" });
+      setAddPlanDialogOpen(false);
+      setAddPlanName("");
+      setAddPlanMonthlyPrice("");
+      setAddPlanAnnualPrice("");
+      setAddPlanDescription("");
+      // Refresh plans
+      fetchProgramPlans(programId);
+      fetchPrograms();
+    } catch {
+      setToast({ message: "Failed to create plan.", type: "error" });
+    } finally {
+      setAddPlanSubmitting(false);
+    }
+  }, [addPlanName, addPlanMonthlyPrice, addPlanAnnualPrice, addPlanDescription, fetchProgramPlans, fetchPrograms]);
+
   // ─── Search patients for enroll dialog ─────────────────────────────────────
   useEffect(() => {
     if (!enrollDialogOpen || enrollPatientSearch.length < 2) {
@@ -696,7 +825,8 @@ export function ProgramsSection() {
     setEnrollPatientSearch("");
     setEnrollFundingSource("self_pay");
     setEnrollSponsorName("");
-  }, []);
+    fetchProgramPlans(programId);
+  }, [fetchProgramPlans]);
 
   // ─── Resolved program list (API with mock fallback) ────────────────────────
   const programs: MockProgram[] = apiPrograms.length > 0 ? apiPrograms : (isDemoMode ? MOCK_PROGRAMS : []);
@@ -745,15 +875,20 @@ export function ProgramsSection() {
                   </div>
                 )}
               </div>
-              {enrollProgram.plans.length > 0 && (
+              {(programPlans.length > 0 || enrollProgram.plans.length > 0) && (
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Plan</label>
                   <select value={enrollSelectedPlanId || ""} onChange={(e) => setEnrollSelectedPlanId(e.target.value || null)}
                     className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2">
                     <option value="">Select a plan (optional)</option>
-                    {enrollProgram.plans.filter((pl) => pl.isActive).map((pl) => (
-                      <option key={pl.id} value={pl.id}>{pl.name}{pl.monthlyPrice > 0 ? ` — ${formatCurrency(pl.monthlyPrice)}/mo` : ""}</option>
-                    ))}
+                    {programPlans.length > 0
+                      ? programPlans.filter((pl) => pl.isActive).map((pl) => (
+                          <option key={pl.id} value={pl.id}>{pl.name}{pl.monthlyPrice > 0 ? ` — ${formatCurrency(pl.monthlyPrice)}/mo` : ""}</option>
+                        ))
+                      : enrollProgram.plans.filter((pl) => pl.isActive).map((pl) => (
+                          <option key={pl.id} value={pl.id}>{pl.name}{pl.monthlyPrice > 0 ? ` — ${formatCurrency(pl.monthlyPrice)}/mo` : ""}</option>
+                        ))
+                    }
                   </select>
                 </div>
               )}
@@ -953,7 +1088,7 @@ export function ProgramsSection() {
                 </div>
                 <div>
                   <p className="text-slate-400 text-xs mb-0.5">Plans</p>
-                  <p className="font-medium text-slate-700">{selectedProgram.plans.length} active plans</p>
+                  <p className="font-medium text-slate-700">{programPlans.length > 0 ? programPlans.length : selectedProgram.plans.length} active plans</p>
                 </div>
                 <div>
                   <p className="text-slate-400 text-xs mb-0.5">Funding</p>
@@ -1010,127 +1145,242 @@ export function ProgramsSection() {
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="text-base font-semibold text-slate-800">
-                Plans ({selectedProgram.plans.length})
+                Plans ({programPlans.length > 0 ? programPlans.length : selectedProgram.plans.length})
               </h3>
               <button
                 className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-white text-xs font-medium"
                 style={{ backgroundColor: "#0D9488" }}
                 onClick={() => {
-                  setPromptModal({
-                    title: "Add Plan",
-                    label: "Plan name",
-                    defaultValue: "",
-                    onSubmit: (name) => {
-                      if (!name) return;
-                      setPromptModal({
-                        title: "Add Plan",
-                        label: "Monthly price",
-                        defaultValue: "",
-                        onSubmit: async (priceStr) => {
-                          if (!priceStr) return;
-                          try {
-                            await programService.update(selectedProgram.id, {
-                              plans: [...selectedProgram.plans, { name, monthlyPrice: parseFloat(priceStr) || 0, annualPrice: 0, entitlements: [], isActive: true }],
-                            } as Record<string, unknown>);
-                            fetchPrograms();
-                          } catch { /* ignore */ }
-                        },
-                      });
-                    },
-                  });
+                  setAddPlanName("");
+                  setAddPlanMonthlyPrice("");
+                  setAddPlanAnnualPrice("");
+                  setAddPlanDescription("");
+                  setAddPlanDialogOpen(true);
                 }}
               >
                 <Plus className="w-3.5 h-3.5" />
                 Add Plan
               </button>
             </div>
-            <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
-              {selectedProgram.plans.map((plan) => (
-                <div key={plan.id} className="glass rounded-xl p-5">
-                  <div className="flex items-start justify-between mb-3">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <h4 className="font-semibold text-slate-800">{plan.name}</h4>
-                        {plan.badge && (
-                          <span
-                            className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium"
-                            style={{ backgroundColor: "#fffbeb", color: "#d97706" }}
-                          >
-                            {plan.badge}
-                          </span>
+            {programPlansLoading && (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="w-6 h-6 animate-spin text-slate-400" />
+              </div>
+            )}
+            {!programPlansLoading && programPlans.length > 0 && (
+              <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
+                {programPlans.map((plan) => (
+                  <div key={plan.id} className="glass rounded-xl p-5 cursor-pointer hover:shadow-md transition-shadow">
+                    <div className="flex items-start justify-between mb-3">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h4 className="font-semibold text-slate-800">{plan.name}</h4>
+                          {plan.badgeText && (
+                            <span
+                              className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium"
+                              style={{ backgroundColor: "#fffbeb", color: "#d97706" }}
+                            >
+                              {plan.badgeText}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-slate-400 mt-0.5">{plan.membershipsCount} members</p>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <button
+                          className="p-1.5 rounded hover:bg-slate-100 text-slate-400"
+                          onClick={() => {
+                            setConfirmDialog({
+                              title: "Deactivate Plan",
+                              message: `Are you sure you want to deactivate "${plan.name}"?`,
+                              confirmLabel: "Deactivate",
+                              danger: true,
+                              onConfirm: async () => {
+                                setConfirmDialog(null);
+                                try {
+                                  await apiFetch(`/membership-plans/${plan.id}`, {
+                                    method: "DELETE",
+                                  });
+                                  fetchProgramPlans(selectedProgram.id);
+                                  fetchPrograms();
+                                } catch { /* ignore */ }
+                              },
+                            });
+                          }}
+                        >
+                          <MoreHorizontal className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                    <div className="mb-3">
+                      {plan.monthlyPrice > 0 ? (
+                        <div className="flex items-baseline gap-1">
+                          <span className="text-2xl font-bold text-slate-800">{formatCurrency(plan.monthlyPrice)}</span>
+                          <span className="text-xs text-slate-400">/month</span>
+                        </div>
+                      ) : (
+                        <span className="text-sm font-medium text-slate-500">Billed to payer</span>
+                      )}
+                      {plan.annualPrice && plan.annualPrice > 0 && (
+                        <p className="text-xs text-slate-400 mt-0.5">{formatCurrency(plan.annualPrice)}/year</p>
+                      )}
+                    </div>
+                    {plan.description && (
+                      <p className="text-xs text-slate-500 mb-3 line-clamp-2">{plan.description}</p>
+                    )}
+                    <div className="flex items-center gap-3 text-xs text-slate-500 mb-3">
+                      <span className="flex items-center gap-1">
+                        <Users className="w-3 h-3" />
+                        {plan.membershipsCount} members
+                      </span>
+                      <span className="flex items-center gap-1">
+                        <Layers className="w-3 h-3" />
+                        {plan.planEntitlements.length} entitlements
+                      </span>
+                    </div>
+                    {plan.planEntitlements.length > 0 && (
+                      <ul className="space-y-1.5">
+                        {plan.planEntitlements.slice(0, 5).map((e) => (
+                          <li key={e.id} className="flex items-start gap-1.5 text-xs text-slate-600">
+                            <CheckCircle2 className="w-3.5 h-3.5 mt-0.5 shrink-0" style={{ color: "#27ab83" }} />
+                            {e.entitlementType?.name || "Entitlement"}
+                            {e.limitValue ? ` (${e.limitValue})` : ""}
+                          </li>
+                        ))}
+                        {plan.planEntitlements.length > 5 && (
+                          <li className="text-xs text-slate-400">+{plan.planEntitlements.length - 5} more</li>
                         )}
-                      </div>
-                      <p className="text-xs text-slate-400 mt-0.5">{plan.enrolledCount} enrolled</p>
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <button
-                        className="p-1.5 rounded hover:bg-slate-100 text-slate-400"
-                        onClick={() => {
-                          setPromptModal({
-                            title: "Edit Plan",
-                            label: `Monthly price for "${plan.name}"`,
-                            defaultValue: String(plan.monthlyPrice),
-                            onSubmit: async (newPrice) => {
-                              try {
-                                await programService.update(selectedProgram.id, {
-                                  plans: selectedProgram.plans.map((p) => p.id === plan.id ? { ...p, monthlyPrice: parseFloat(newPrice) || 0 } : p),
-                                } as Record<string, unknown>);
-                                fetchPrograms();
-                              } catch { /* ignore */ }
-                            },
-                          });
-                        }}
-                      >
-                        <Pencil className="w-3.5 h-3.5" />
-                      </button>
-                      <button
-                        className="p-1.5 rounded hover:bg-slate-100 text-slate-400"
-                        onClick={() => {
-                          setConfirmDialog({
-                            title: "Deactivate Plan",
-                            message: `Are you sure you want to deactivate "${plan.name}"?`,
-                            confirmLabel: "Deactivate",
-                            danger: true,
-                            onConfirm: async () => {
-                              setConfirmDialog(null);
-                              try {
-                                await programService.update(selectedProgram.id, {
-                                  plans: selectedProgram.plans.map((p) => p.id === plan.id ? { ...p, isActive: false } : p),
-                                } as Record<string, unknown>);
-                                fetchPrograms();
-                              } catch { /* ignore */ }
-                            },
-                          });
-                        }}
-                      >
-                        <MoreHorizontal className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </div>
-                  <div className="mb-3">
-                    {plan.monthlyPrice > 0 ? (
-                      <div className="flex items-baseline gap-1">
-                        <span className="text-2xl font-bold text-slate-800">{formatCurrency(plan.monthlyPrice)}</span>
-                        <span className="text-xs text-slate-400">/month</span>
-                      </div>
-                    ) : (
-                      <span className="text-sm font-medium text-slate-500">Billed to payer</span>
-                    )}
-                    {plan.annualPrice > 0 && (
-                      <p className="text-xs text-slate-400 mt-0.5">{formatCurrency(plan.annualPrice)}/year</p>
+                      </ul>
                     )}
                   </div>
-                  <ul className="space-y-1.5">
-                    {plan.entitlements.map((e, i) => (
-                      <li key={i} className="flex items-start gap-1.5 text-xs text-slate-600">
-                        <CheckCircle2 className="w-3.5 h-3.5 mt-0.5 shrink-0" style={{ color: "#27ab83" }} />
-                        {e}
-                      </li>
-                    ))}
-                  </ul>
+                ))}
+              </div>
+            )}
+            {!programPlansLoading && programPlans.length === 0 && selectedProgram.plans.length > 0 && (
+              /* Fallback to embedded plans (legacy data) */
+              <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
+                {selectedProgram.plans.map((plan) => (
+                  <div key={plan.id} className="glass rounded-xl p-5">
+                    <div className="flex items-start justify-between mb-3">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h4 className="font-semibold text-slate-800">{plan.name}</h4>
+                          {plan.badge && (
+                            <span
+                              className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium"
+                              style={{ backgroundColor: "#fffbeb", color: "#d97706" }}
+                            >
+                              {plan.badge}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-slate-400 mt-0.5">{plan.enrolledCount} enrolled</p>
+                      </div>
+                    </div>
+                    <div className="mb-3">
+                      {plan.monthlyPrice > 0 ? (
+                        <div className="flex items-baseline gap-1">
+                          <span className="text-2xl font-bold text-slate-800">{formatCurrency(plan.monthlyPrice)}</span>
+                          <span className="text-xs text-slate-400">/month</span>
+                        </div>
+                      ) : (
+                        <span className="text-sm font-medium text-slate-500">Billed to payer</span>
+                      )}
+                      {plan.annualPrice > 0 && (
+                        <p className="text-xs text-slate-400 mt-0.5">{formatCurrency(plan.annualPrice)}/year</p>
+                      )}
+                    </div>
+                    <ul className="space-y-1.5">
+                      {plan.entitlements.map((e, i) => (
+                        <li key={i} className="flex items-start gap-1.5 text-xs text-slate-600">
+                          <CheckCircle2 className="w-3.5 h-3.5 mt-0.5 shrink-0" style={{ color: "#27ab83" }} />
+                          {e}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ))}
+              </div>
+            )}
+            {!programPlansLoading && programPlans.length === 0 && selectedProgram.plans.length === 0 && (
+              <div className="text-center py-12">
+                <Layers className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                <p className="text-sm text-slate-500">No plans configured</p>
+                <p className="text-xs text-slate-400 mt-1">Add a membership plan to this program</p>
+              </div>
+            )}
+            {/* Add Plan Dialog */}
+            {addPlanDialogOpen && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: "rgba(0,0,0,0.4)" }}>
+                <div className="bg-white rounded-xl shadow-xl w-full max-w-lg">
+                  <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
+                    <h3 className="text-base font-semibold text-slate-800">Add Plan to {selectedProgram.name}</h3>
+                    <button onClick={() => setAddPlanDialogOpen(false)} className="p-1.5 rounded hover:bg-slate-100 text-slate-400"><X className="w-4 h-4" /></button>
+                  </div>
+                  <div className="px-6 py-5 space-y-4">
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-1">Plan Name</label>
+                      <input
+                        type="text"
+                        value={addPlanName}
+                        onChange={(e) => setAddPlanName(e.target.value)}
+                        placeholder="e.g. Essential, Premium"
+                        className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:border-transparent"
+                        autoFocus
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-sm font-medium text-slate-700 mb-1">Monthly Price ($)</label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={addPlanMonthlyPrice}
+                          onChange={(e) => setAddPlanMonthlyPrice(e.target.value)}
+                          placeholder="0.00"
+                          className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:border-transparent"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-slate-700 mb-1">Annual Price ($)</label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={addPlanAnnualPrice}
+                          onChange={(e) => setAddPlanAnnualPrice(e.target.value)}
+                          placeholder="0.00"
+                          className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:border-transparent"
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-1">Description</label>
+                      <textarea
+                        value={addPlanDescription}
+                        onChange={(e) => setAddPlanDescription(e.target.value)}
+                        placeholder="Brief plan description..."
+                        rows={3}
+                        className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:border-transparent resize-none"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-200">
+                    <button onClick={() => setAddPlanDialogOpen(false)} className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 rounded-lg">Cancel</button>
+                    <button
+                      onClick={() => handleAddPlanToProgram(selectedProgram.id)}
+                      disabled={!addPlanName.trim() || addPlanSubmitting}
+                      className="flex items-center gap-2 px-4 py-2 rounded-lg text-white text-sm font-medium transition-all hover:opacity-90 disabled:opacity-50"
+                      style={{ backgroundColor: "#0D9488" }}
+                    >
+                      {addPlanSubmitting && <Loader2 className="w-4 h-4 animate-spin" />}
+                      Create Plan
+                    </button>
+                  </div>
                 </div>
-              ))}
-            </div>
+              </div>
+            )}
           </div>
         )}
 

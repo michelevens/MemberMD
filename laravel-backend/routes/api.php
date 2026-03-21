@@ -249,6 +249,7 @@ Route::middleware(['auth:sanctum', 'phi.log'])->group(function () {
         Route::get('/', [ProgramController::class, 'index']);
         Route::post('/', [ProgramController::class, 'store']);
         Route::get('/{program}', [ProgramController::class, 'show']);
+        Route::get('/{program}/plans', [ProgramController::class, 'plans']);
         Route::put('/{program}', [ProgramController::class, 'update']);
         Route::delete('/{program}', [ProgramController::class, 'destroy']);
         Route::post('/{program}/enroll', [ProgramController::class, 'enrollPatient']);
