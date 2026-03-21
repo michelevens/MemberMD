@@ -287,6 +287,7 @@ interface MockPatient {
   lastVisit: string;
   nextApt: string;
   memberId?: string;
+  membershipId?: string;
   memberSince?: string;
   dob?: string;
   gender?: string;
@@ -826,6 +827,7 @@ export function PracticePortal() {
         lastVisit: p.lastVisitAt || "N/A",
         nextApt: p.nextAppointmentAt || "N/A",
         memberId: p.activeMembership?.memberNumber || p.memberId || "",
+        membershipId: p.activeMembership?.id || "",
         memberSince: p.createdAt || "",
         dob: p.dateOfBirth || p.dob || "",
         gender: p.gender || "",
@@ -1169,9 +1171,11 @@ export function PracticePortal() {
     setUtilizationLoading(true);
     setPatientUtilization(null);
     try {
-      const res = await apiFetch<unknown[]>(`/entitlement-usage/patient/${membershipId}`);
+      const res = await apiFetch<unknown>(`/entitlement-usage/patient/${membershipId}`);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const list = Array.isArray(res.data) ? res.data : (res.data as any)?.data || [];
+      const raw = res.data as any;
+      // API returns { entitlements: [...], totalSavings, plan, ... }
+      const list = raw?.entitlements || (Array.isArray(raw) ? raw : raw?.data || []);
       setPatientUtilization(list);
     } catch {
       setPatientUtilization([]);
@@ -2558,12 +2562,22 @@ export function PracticePortal() {
 
         {/* ── Benefits & Utilization Card ──────────────────────────────── */}
         {(() => {
-          // Determine membershipId: use patient ID as proxy or from programEnrollments
-          const membershipId = pt.memberId || pt.id;
+          // Use the actual membership UUID for the utilization API call
+          const membershipId = pt.membershipId || "";
+          if (!membershipId) {
+            return (
+              <div className="glass rounded-xl p-5">
+                <h3 className="font-semibold text-slate-800 mb-3 flex items-center gap-2">
+                  <Activity className="w-4 h-4" style={{ color: "#27ab83" }} />
+                  Benefits & Utilization
+                </h3>
+                <p className="text-sm text-slate-400 text-center py-4">No active membership. Enroll patient in a plan to track benefits.</p>
+              </div>
+            );
+          }
           // Auto-fetch utilization when patient is viewed
-          const shouldFetch = patientUtilization === null && !utilizationLoading;
+          const shouldFetch = membershipId && patientUtilization === null && !utilizationLoading;
           if (shouldFetch) {
-            // Trigger fetch (non-blocking side-effect pattern)
             setTimeout(() => fetchPatientUtilization(membershipId), 0);
           }
 
@@ -2595,10 +2609,11 @@ export function PracticePortal() {
               {!utilizationLoading && usageItems.length > 0 && (
                 <div className="space-y-3">
                   {usageItems.map((item, idx) => {
-                    const name = item.entitlementTypeName || item.entitlementType?.name || item.typeName || item.name || "Benefit";
-                    const used = item.usedQuantity ?? item.used ?? 0;
-                    const allowed = item.allowedQuantity ?? item.allowed ?? item.total ?? null;
-                    const isUnlimited = allowed === null || allowed === -1;
+                    const name = item.entitlementType?.name || item.entitlementTypeName || item.typeName || item.name || "Benefit";
+                    const used = item.used ?? item.usedQuantity ?? 0;
+                    const rawAllowed = item.allowed ?? item.allowedQuantity ?? item.total ?? null;
+                    const allowed = rawAllowed === "unlimited" ? null : rawAllowed;
+                    const isUnlimited = allowed === null || allowed === -1 || rawAllowed === "unlimited";
                     const pctRaw = isUnlimited ? 30 : (allowed > 0 ? (used / allowed) * 100 : 0);
                     const pct = Math.min(pctRaw, 100);
                     const colors = getUsageColor(used, allowed);
