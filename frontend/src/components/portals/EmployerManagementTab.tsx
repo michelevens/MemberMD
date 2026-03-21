@@ -147,7 +147,7 @@ export function EmployerManagementTab() {
   const [newEmployer, setNewEmployer] = useState({ name: "", contactName: "", contactEmail: "", contactPhone: "", address: "" });
 
   // New contract form
-  const [newContract, setNewContract] = useState({ employerId: "", membershipPlanId: "", pepmRate: "", effectiveDate: "", endDate: "" });
+  const [newContract, setNewContract] = useState({ employerId: "", membershipPlanId: "", pepmRate: "", effectiveDate: "", expirationDate: "" });
 
   // ─── Data Loading ────────────────────────────────────────────────────────
 
@@ -246,7 +246,7 @@ export function EmployerManagementTab() {
       setError(res.error);
     } else {
       setShowNewContract(false);
-      setNewContract({ employerId: "", membershipPlanId: "", pepmRate: "", effectiveDate: "", endDate: "" });
+      setNewContract({ employerId: "", membershipPlanId: "", pepmRate: "", effectiveDate: "", expirationDate: "" });
       loadContracts();
     }
   };
@@ -657,8 +657,8 @@ export function EmployerManagementTab() {
                   <label className="block text-sm font-medium text-slate-700 mb-1">End Date</label>
                   <input
                     type="date"
-                    value={newContract.endDate}
-                    onChange={(e) => setNewContract({ ...newContract, endDate: e.target.value })}
+                    value={newContract.expirationDate}
+                    onChange={(e) => setNewContract({ ...newContract, expirationDate: e.target.value })}
                     className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
                   />
                 </div>
