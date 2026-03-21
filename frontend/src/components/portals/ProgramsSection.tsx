@@ -1,7 +1,7 @@
 // ===== Programs Section (Practice Portal) =====
 // Practice-level program management: view, configure, and manage program enrollments
 
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
   ArrowLeft,
   Heart,
@@ -24,7 +24,30 @@ import {
   BarChart3,
   PlayCircle,
   PauseCircle,
+  X,
+  Loader2,
 } from "lucide-react";
+import { programService, patientService } from "../../lib/api";
+
+const isDemoMode = import.meta.env.VITE_DEMO_MODE !== "false";
+
+// ─── Icon Mapping (API returns string name, UI needs component) ─────────────
+
+const ICON_MAP: Record<string, React.ElementType> = {
+  heart: Heart,
+  activity: Activity,
+  brain: Brain,
+  zap: Zap,
+  crown: Crown,
+  shield: Shield,
+  stethoscope: Stethoscope,
+  users: Users,
+};
+
+function resolveIcon(iconName?: string | null): React.ElementType {
+  if (!iconName) return Layers;
+  return ICON_MAP[iconName.toLowerCase()] || Layers;
+}
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -363,7 +386,207 @@ export function ProgramsSection() {
   const [detailTab, setDetailTab] = useState<"overview" | "plans" | "enrollments" | "providers" | "settings">("overview");
   const [statusFilter, setStatusFilter] = useState<string>("All");
 
-  const filteredPrograms = MOCK_PROGRAMS.filter((p) => {
+  // ─── API State ──────────────────────────────────────────────────────────────
+  const [apiPrograms, setApiPrograms] = useState<MockProgram[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  // ─── Enroll Dialog State ────────────────────────────────────────────────────
+  const [enrollDialogOpen, setEnrollDialogOpen] = useState(false);
+  const [enrollProgramId, setEnrollProgramId] = useState<string | null>(null);
+  const [enrollPatientSearch, setEnrollPatientSearch] = useState("");
+  const [enrollPatients, setEnrollPatients] = useState<Array<{ id: string; firstName: string; lastName: string }>>([]);
+  const [enrollSelectedPatientId, setEnrollSelectedPatientId] = useState<string | null>(null);
+  const [enrollSelectedPlanId, setEnrollSelectedPlanId] = useState<string | null>(null);
+  const [enrollFundingSource, setEnrollFundingSource] = useState<string>("self_pay");
+  const [enrollSponsorName, setEnrollSponsorName] = useState("");
+  const [enrollSubmitting, setEnrollSubmitting] = useState(false);
+  const [enrollError, setEnrollError] = useState<string | null>(null);
+  const [enrollSuccess, setEnrollSuccess] = useState(false);
+  const [patientsLoading, setPatientsLoading] = useState(false);
+
+  // ─── Map API response to MockProgram shape ─────────────────────────────────
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const mapApiProgram = useCallback((p: any): MockProgram => ({
+    id: p.id,
+    name: p.name || "",
+    code: p.code || "",
+    type: p.type || "membership",
+    description: p.description || "",
+    icon: resolveIcon(p.icon),
+    status: p.status || "draft",
+    durationType: p.durationType || "ongoing",
+    durationMonths: p.durationMonths ?? null,
+    currentEnrollment: p.currentEnrollment ?? 0,
+    maxEnrollment: p.maxEnrollment ?? null,
+    providerCount: p.providers?.length ?? p.programProviders?.length ?? 0,
+    monthlyRevenue: 0,
+    plans: (p.plans || []).map((pl: Record<string, unknown>) => ({
+      id: pl.id || "",
+      name: pl.name || "",
+      monthlyPrice: Number(pl.monthlyPrice) || 0,
+      annualPrice: Number(pl.annualPrice) || 0,
+      entitlements: Array.isArray(pl.entitlements) ? pl.entitlements : [],
+      badge: pl.badge ?? null,
+      enrolledCount: Number(pl.enrolledCount) || 0,
+      isActive: pl.isActive !== false,
+    })),
+    enrollments: (p.enrollments || []).map((e: Record<string, unknown>) => ({
+      id: e.id || "",
+      patientName: e.patient
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        ? `${(e.patient as any).firstName || ""} ${(e.patient as any).lastName || ""}`.trim()
+        : "Unknown",
+      planName: e.plan
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        ? (e.plan as any).name || "—"
+        : "—",
+      status: (e.status as MockEnrollment["status"]) || "active",
+      fundingSource: (e.fundingSource as string) || "—",
+      sponsorName: (e.sponsorName as string) || null,
+      enrolledAt: e.enrolledAt ? new Date(e.enrolledAt as string).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—",
+      expiresAt: e.expiresAt ? new Date(e.expiresAt as string).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : null,
+    })),
+    providers: (p.providers || p.programProviders || []).map((pv: Record<string, unknown>) => ({
+      id: pv.id || "",
+      name: pv.name || (pv.provider ? `${(pv.provider as Record<string, unknown>).firstName || ""} ${(pv.provider as Record<string, unknown>).lastName || ""}`.trim() : "Unknown"),
+      credentials: (pv.credentials as string) || "",
+      role: (pv.role as string) || (pv.pivot ? (pv.pivot as Record<string, unknown>).role as string : "") || "Provider",
+      panelCapacity: Number(pv.panelCapacity ?? (pv.pivot ? (pv.pivot as Record<string, unknown>).panelCapacity : 0)) || 50,
+      panelCurrent: Number(pv.panelCurrent) || 0,
+      isActive: pv.isActive !== false && (pv.pivot ? (pv.pivot as Record<string, unknown>).isActive !== false : true),
+    })),
+    eligibilityRules: (p.eligibilityRules || []).map((r: Record<string, unknown>) => ({
+      ruleType: (r.ruleType as string) || "",
+      description: (r.description as string) || "",
+      isRequired: r.isRequired === true,
+    })),
+    fundingSources: (p.fundingSources || []).map((f: Record<string, unknown>) => ({
+      sourceType: (f.sourceType as string) || "",
+      name: (f.name as string) || "",
+      cptCode: (f.cptCode as string) || null,
+      billingFrequency: (f.billingFrequency as string) || "",
+      isPrimary: f.isPrimary === true,
+    })),
+  }), []);
+
+  // ─── Fetch programs from API ───────────────────────────────────────────────
+  const fetchPrograms = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await programService.list();
+      if (res.data && Array.isArray(res.data)) {
+        // Fetch details with relations for each program
+        const detailed = await Promise.all(
+          res.data.map(async (p) => {
+            try {
+              const detail = await programService.get(p.id);
+              return detail.data ? mapApiProgram(detail.data) : mapApiProgram(p);
+            } catch {
+              return mapApiProgram(p);
+            }
+          })
+        );
+        setApiPrograms(detailed);
+      } else if (res.data && !Array.isArray(res.data)) {
+        // Handle paginated response wrapped in data key
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const items = (res.data as any).data || (res.data as any);
+        if (Array.isArray(items)) {
+          setApiPrograms(items.map(mapApiProgram));
+        }
+      }
+    } catch {
+      // Silently fall back to mock data
+    } finally {
+      setLoading(false);
+    }
+  }, [mapApiProgram]);
+
+  useEffect(() => {
+    fetchPrograms();
+  }, [fetchPrograms]);
+
+  // ─── Search patients for enroll dialog ─────────────────────────────────────
+  useEffect(() => {
+    if (!enrollDialogOpen || enrollPatientSearch.length < 2) {
+      setEnrollPatients([]);
+      return;
+    }
+    const timeout = setTimeout(async () => {
+      setPatientsLoading(true);
+      try {
+        const res = await patientService.list({ search: enrollPatientSearch });
+        if (res.data && Array.isArray(res.data)) {
+          setEnrollPatients(
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            res.data.map((pt: any) => ({
+              id: pt.id,
+              firstName: pt.firstName || "",
+              lastName: pt.lastName || "",
+            }))
+          );
+        }
+      } catch {
+        // Ignore
+      } finally {
+        setPatientsLoading(false);
+      }
+    }, 400);
+    return () => clearTimeout(timeout);
+  }, [enrollPatientSearch, enrollDialogOpen]);
+
+  // ─── Handle enroll patient ─────────────────────────────────────────────────
+  const handleEnrollPatient = useCallback(async () => {
+    if (!enrollProgramId || !enrollSelectedPatientId) return;
+    setEnrollSubmitting(true);
+    setEnrollError(null);
+    try {
+      const res = await programService.enrollPatient(enrollProgramId, {
+        patientId: enrollSelectedPatientId,
+        planId: enrollSelectedPlanId || undefined,
+        fundingSource: enrollFundingSource,
+        sponsorName: enrollFundingSource === "sponsor" ? enrollSponsorName : undefined,
+      });
+      if (res.error) {
+        setEnrollError(res.error);
+      } else {
+        setEnrollSuccess(true);
+        // Refresh programs
+        fetchPrograms();
+        // Close dialog after brief success display
+        setTimeout(() => {
+          setEnrollDialogOpen(false);
+          setEnrollSuccess(false);
+          setEnrollSelectedPatientId(null);
+          setEnrollSelectedPlanId(null);
+          setEnrollPatientSearch("");
+          setEnrollFundingSource("self_pay");
+          setEnrollSponsorName("");
+        }, 1500);
+      }
+    } catch {
+      setEnrollError("Failed to enroll patient. Please try again.");
+    } finally {
+      setEnrollSubmitting(false);
+    }
+  }, [enrollProgramId, enrollSelectedPatientId, enrollSelectedPlanId, enrollFundingSource, enrollSponsorName, fetchPrograms]);
+
+  const openEnrollDialog = useCallback((programId: string) => {
+    setEnrollProgramId(programId);
+    setEnrollDialogOpen(true);
+    setEnrollError(null);
+    setEnrollSuccess(false);
+    setEnrollSelectedPatientId(null);
+    setEnrollSelectedPlanId(null);
+    setEnrollPatientSearch("");
+    setEnrollFundingSource("self_pay");
+    setEnrollSponsorName("");
+  }, []);
+
+  // ─── Resolved program list (API with mock fallback) ────────────────────────
+  const programs: MockProgram[] = apiPrograms.length > 0 ? apiPrograms : (isDemoMode ? MOCK_PROGRAMS : []);
+
+  const filteredPrograms = programs.filter((p) => {
     const matchesSearch =
       p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       p.code.toLowerCase().includes(searchQuery.toLowerCase());
@@ -653,6 +876,7 @@ export function ProgramsSection() {
               <button
                 className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-white text-xs font-medium"
                 style={{ backgroundColor: "#0D9488" }}
+                onClick={() => openEnrollDialog(selectedProgram.id)}
               >
                 <UserPlus className="w-3.5 h-3.5" />
                 Enroll Patient
@@ -882,7 +1106,165 @@ export function ProgramsSection() {
 
   // ─── Empty State ──────────────────────────────────────────────────────────
 
-  if (MOCK_PROGRAMS.length === 0) {
+  // ─── Loading State ──────────────────────────────────────────────────────────
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-16">
+        <Loader2 className="w-8 h-8 animate-spin text-slate-400" />
+      </div>
+    );
+  }
+
+  // ─── Enroll Patient Dialog ─────────────────────────────────────────────────
+
+  const enrollProgram = programs.find((p) => p.id === enrollProgramId);
+
+  const enrollDialog = enrollDialogOpen && enrollProgram && (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: "rgba(0,0,0,0.4)" }}>
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-lg">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
+          <h3 className="text-base font-semibold text-slate-800">
+            Enroll Patient in {enrollProgram.name}
+          </h3>
+          <button
+            onClick={() => setEnrollDialogOpen(false)}
+            className="p-1.5 rounded hover:bg-slate-100 text-slate-400"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+        <div className="px-6 py-5 space-y-4">
+          {enrollSuccess ? (
+            <div className="text-center py-6">
+              <CheckCircle2 className="w-12 h-12 mx-auto mb-3" style={{ color: "#27ab83" }} />
+              <p className="text-sm font-medium text-slate-800">Patient enrolled successfully!</p>
+            </div>
+          ) : (
+            <>
+              {enrollError && (
+                <div className="p-3 rounded-lg text-sm" style={{ backgroundColor: "#fef2f2", color: "#dc2626" }}>
+                  {enrollError}
+                </div>
+              )}
+
+              {/* Patient search */}
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Patient</label>
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                  <input
+                    type="text"
+                    placeholder="Search patients by name..."
+                    value={enrollPatientSearch}
+                    onChange={(e) => {
+                      setEnrollPatientSearch(e.target.value);
+                      setEnrollSelectedPatientId(null);
+                    }}
+                    className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:border-transparent"
+                  />
+                </div>
+                {patientsLoading && (
+                  <div className="flex items-center gap-2 mt-2 text-xs text-slate-400">
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                    Searching...
+                  </div>
+                )}
+                {enrollPatients.length > 0 && !enrollSelectedPatientId && (
+                  <div className="mt-1 border border-slate-200 rounded-lg max-h-40 overflow-y-auto">
+                    {enrollPatients.map((pt) => (
+                      <button
+                        key={pt.id}
+                        onClick={() => {
+                          setEnrollSelectedPatientId(pt.id);
+                          setEnrollPatientSearch(`${pt.firstName} ${pt.lastName}`);
+                        }}
+                        className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50 border-b border-slate-100 last:border-b-0"
+                      >
+                        {pt.firstName} {pt.lastName}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Plan selection */}
+              {enrollProgram.plans.length > 0 && (
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Plan</label>
+                  <select
+                    value={enrollSelectedPlanId || ""}
+                    onChange={(e) => setEnrollSelectedPlanId(e.target.value || null)}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2"
+                  >
+                    <option value="">Select a plan (optional)</option>
+                    {enrollProgram.plans.filter((pl) => pl.isActive).map((pl) => (
+                      <option key={pl.id} value={pl.id}>
+                        {pl.name}{pl.monthlyPrice > 0 ? ` — ${formatCurrency(pl.monthlyPrice)}/mo` : ""}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {/* Funding source */}
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Funding Source</label>
+                <select
+                  value={enrollFundingSource}
+                  onChange={(e) => setEnrollFundingSource(e.target.value)}
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2"
+                >
+                  <option value="self_pay">Self-Pay</option>
+                  <option value="employer">Employer</option>
+                  <option value="insurance">Insurance</option>
+                  <option value="grant">Grant</option>
+                  <option value="sponsor">Sponsor</option>
+                </select>
+              </div>
+
+              {/* Sponsor name (conditional) */}
+              {enrollFundingSource === "sponsor" && (
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Sponsor Name</label>
+                  <input
+                    type="text"
+                    value={enrollSponsorName}
+                    onChange={(e) => setEnrollSponsorName(e.target.value)}
+                    placeholder="Enter sponsor name"
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:border-transparent"
+                  />
+                </div>
+              )}
+            </>
+          )}
+        </div>
+        {!enrollSuccess && (
+          <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-200">
+            <button
+              onClick={() => setEnrollDialogOpen(false)}
+              className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 rounded-lg"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleEnrollPatient}
+              disabled={!enrollSelectedPatientId || enrollSubmitting}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg text-white text-sm font-medium transition-all hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
+              style={{ backgroundColor: "#0D9488" }}
+            >
+              {enrollSubmitting && <Loader2 className="w-4 h-4 animate-spin" />}
+              Enroll Patient
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
+  // ─── Empty State ──────────────────────────────────────────────────────────
+
+  if (programs.length === 0) {
     return (
       <div className="text-center py-16">
         <div
@@ -924,6 +1306,8 @@ export function ProgramsSection() {
   // ─── List View ────────────────────────────────────────────────────────────
 
   return (
+    <>
+    {enrollDialog}
     <div className="space-y-6">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -932,7 +1316,7 @@ export function ProgramsSection() {
             My Programs
           </h3>
           <p className="text-sm text-slate-500 mt-0.5">
-            {MOCK_PROGRAMS.length} programs | {MOCK_PROGRAMS.reduce((s, p) => s + p.currentEnrollment, 0)} total enrollments
+            {programs.length} programs | {programs.reduce((s, p) => s + p.currentEnrollment, 0)} total enrollments
           </p>
         </div>
         <button
@@ -1073,5 +1457,6 @@ export function ProgramsSection() {
         </div>
       )}
     </div>
+    </>
   );
 }
