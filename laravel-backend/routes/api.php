@@ -52,6 +52,9 @@ use App\Http\Controllers\Api\OutcomeController;
 use App\Http\Controllers\Api\EntitlementTypeController;
 use App\Http\Controllers\Api\PlanEntitlementController;
 use App\Http\Controllers\Api\EntitlementUsageController;
+use App\Http\Controllers\Api\ActivityLogController;
+use App\Http\Controllers\Api\ALaCartePriceController;
+use App\Http\Controllers\Api\VisitPackController;
 use App\Http\Controllers\Api\Admin\MasterProgramController;
 use Illuminate\Support\Facades\Route;
 
@@ -479,4 +482,26 @@ Route::middleware(['auth:sanctum', 'phi.log'])->group(function () {
     Route::post('memberships/{id}/resume', [MembershipController::class, 'resume']);
     Route::post('memberships/{id}/cancel', [MembershipController::class, 'cancel']);
     Route::post('memberships/{id}/change-plan', [MembershipController::class, 'changePlan']);
+
+    // ===== Activity Logger =====
+    Route::prefix('activity-log')->group(function () {
+        Route::get('/types', [ActivityLogController::class, 'types']);
+        Route::post('/', [ActivityLogController::class, 'log']);
+        Route::get('/patient/{patientId}', [ActivityLogController::class, 'recent']);
+    });
+
+    // ===== A La Carte Pricing =====
+    Route::prefix('a-la-carte')->group(function () {
+        Route::get('/prices', [ALaCartePriceController::class, 'index']);
+        Route::post('/prices', [ALaCartePriceController::class, 'store']);
+        Route::post('/checkout', [ALaCartePriceController::class, 'checkout']);
+    });
+
+    // ===== Visit Packs =====
+    Route::prefix('visit-packs')->group(function () {
+        Route::get('/', [VisitPackController::class, 'index']);
+        Route::post('/', [VisitPackController::class, 'store']);
+        Route::post('/purchase', [VisitPackController::class, 'purchase']);
+        Route::get('/patient/{patientId}', [VisitPackController::class, 'patientCredits']);
+    });
 });

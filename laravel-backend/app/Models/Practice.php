@@ -20,7 +20,7 @@ class Practice extends Model
         'tenant_code', 'owner_email',
         'stripe_account_id', 'stripe_customer_id',
         'subscription_plan', 'subscription_status',
-        'settings', 'branding',
+        'settings', 'utilization_settings', 'branding',
         'panel_capacity', 'is_active',
         'timezone', 'ip_whitelist', 'password_policy',
         'session_timeout_minutes', 'enforce_mfa',
@@ -29,6 +29,7 @@ class Practice extends Model
     protected $casts = [
         'selected_programs' => 'array',
         'settings' => 'array',
+        'utilization_settings' => 'array',
         'branding' => 'array',
         'panel_capacity' => 'integer',
         'is_active' => 'boolean',
