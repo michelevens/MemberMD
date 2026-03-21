@@ -1033,8 +1033,8 @@ export function PracticePortal() {
         tempId: e.id || `existing_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
         entitlementTypeId: e.entitlementTypeId || e.entitlement_type_id || "",
         typeName: e.entitlementType?.name || e.typeName || e.type_name || "Unknown",
-        quantity: e.quantity ?? e.allowedQuantity ?? 0,
-        unlimited: e.unlimited ?? (e.allowedQuantity === null || e.allowedQuantity === -1),
+        quantity: e.quantityLimit ?? e.quantity ?? e.allowedQuantity ?? 0,
+        unlimited: e.isUnlimited ?? e.unlimited ?? (e.quantityLimit === null),
         period: e.period || "monthly",
         overagePolicy: e.overagePolicy || e.overage_policy || "block",
       }));
@@ -3628,7 +3628,7 @@ export function PracticePortal() {
                     const name = (ent.entitlementType as Record<string, unknown>)?.name || ent.typeName || ent.type_name || "Benefit";
                     const cat = (ent.entitlementType as Record<string, unknown>)?.category || ent.category || "";
                     const catColor = getCategoryColor(cat as string);
-                    const qty = ent.unlimited ? "\u221E" : String(ent.quantity ?? ent.allowedQuantity ?? 0);
+                    const qty = (ent.isUnlimited || ent.unlimited) ? "\u221E" : String(ent.quantityLimit ?? ent.quantity ?? ent.allowedQuantity ?? 0);
                     return (
                       <li key={i} className="flex items-center gap-3 text-sm text-slate-600">
                         <Check className="w-4 h-4 shrink-0" style={{ color: gradient.accent }} />
@@ -3730,7 +3730,7 @@ export function PracticePortal() {
                       {ents.map((ent: any) => {
                         const entId = ent.id;
                         const name = ent.entitlementType?.name || ent.typeName || ent.type_name || "Benefit";
-                        const qty = ent.unlimited ? "Unlimited" : String(ent.quantity ?? ent.allowedQuantity ?? 0);
+                        const qty = (ent.isUnlimited || ent.unlimited) ? "Unlimited" : String(ent.quantityLimit ?? ent.quantity ?? ent.allowedQuantity ?? 0);
                         const period = ent.period || "monthly";
                         const overage = ent.overagePolicy || ent.overage_policy || "block";
                         const cashValue = ent.cashValue ?? ent.cash_value ?? null;
@@ -3829,9 +3829,9 @@ export function PracticePortal() {
                                 onClick={() => {
                                   setPlanDetailEditingEntitlement(entId);
                                   setPlanDetailEditForm({
-                                    quantity: ent.quantity ?? ent.allowedQuantity ?? 1,
-                                    unlimited: ent.unlimited ?? false,
-                                    period: ent.period || "monthly",
+                                    quantity: ent.quantityLimit ?? ent.quantity ?? ent.allowedQuantity ?? 1,
+                                    unlimited: ent.isUnlimited ?? ent.unlimited ?? false,
+                                    period: ent.periodType || ent.period || "per_month",
                                     overagePolicy: ent.overagePolicy || ent.overage_policy || "block",
                                   });
                                 }}
