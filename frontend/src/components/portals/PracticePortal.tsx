@@ -1058,9 +1058,9 @@ export function PracticePortal() {
           method: "POST",
           body: JSON.stringify({
             entitlementTypeId: ent.entitlementTypeId,
-            quantity: ent.unlimited ? null : ent.quantity,
-            unlimited: ent.unlimited,
-            period: ent.period,
+            quantityLimit: ent.unlimited ? null : ent.quantity,
+            isUnlimited: ent.unlimited,
+            periodType: ent.period === "monthly" ? "per_month" : ent.period === "quarterly" ? "per_quarter" : ent.period === "yearly" ? "per_year" : ent.period,
             overagePolicy: ent.overagePolicy,
           }),
         }).catch(() => {});
@@ -1132,9 +1132,9 @@ export function PracticePortal() {
         method: "POST",
         body: JSON.stringify({
           entitlementTypeId,
-          quantity: 1,
-          unlimited: false,
-          period: "monthly",
+          quantityLimit: 1,
+          isUnlimited: false,
+          periodType: "per_month",
           overagePolicy: "block",
         }),
       });
@@ -3785,9 +3785,9 @@ export function PracticePortal() {
                                     className="px-2.5 py-1 rounded text-xs font-medium text-white transition-colors"
                                     style={{ backgroundColor: "#27ab83" }}
                                     onClick={() => handleUpdatePlanDetailEntitlement(plan.id, entId, {
-                                      quantity: planDetailEditForm.unlimited ? null : planDetailEditForm.quantity,
-                                      unlimited: planDetailEditForm.unlimited,
-                                      period: planDetailEditForm.period,
+                                      quantityLimit: planDetailEditForm.unlimited ? null : planDetailEditForm.quantity,
+                                      isUnlimited: planDetailEditForm.unlimited,
+                                      periodType: planDetailEditForm.period === "monthly" ? "per_month" : planDetailEditForm.period === "quarterly" ? "per_quarter" : planDetailEditForm.period === "yearly" ? "per_year" : planDetailEditForm.period,
                                       overagePolicy: planDetailEditForm.overagePolicy,
                                     })}
                                   >
