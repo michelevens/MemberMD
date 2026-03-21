@@ -1214,6 +1214,7 @@ export function PracticePortal() {
         setToast({ message: "Provider added successfully.", type: "success" });
         setShowAddProvider(false);
         setProviderForm({ firstName: "", lastName: "", credentials: "", specialty: "", npiNumber: "", email: "", phone: "", telehealth: false });
+        setProvidersLoaded(false);
         loadPracticeData();
       } else {
         setToast({ message: res.error || "Failed to add provider.", type: "error" });
@@ -4450,6 +4451,36 @@ export function PracticePortal() {
 
   // ─── Providers Tab ────────────────────────────────────────────────────────
 
+  // ─── Providers data (loaded from API) ───────────────────────────────
+  const [apiProviders, setApiProviders] = useState<{ id: string; name: string; credentials: string; specialty: string; panelCount: number; panelMax: number; panelStatus: string; telehealth: boolean; initials: string }[]>([]);
+  const [providersLoaded, setProvidersLoaded] = useState(false);
+
+  useEffect(() => {
+    if (providersLoaded) return;
+    (async () => {
+      try {
+        const res = await providerService.list();
+        if (res.data) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const list = Array.isArray(res.data) ? res.data : (res.data as any).data || [];
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          setApiProviders(list.map((p: any) => ({
+            id: p.id,
+            name: [p.firstName || p.first_name, p.lastName || p.last_name].filter(Boolean).join(" ") || p.name || "",
+            credentials: p.credentials || "",
+            specialty: (Array.isArray(p.specialties) ? p.specialties[0] : p.specialty) || "",
+            panelCount: p.panelCount ?? p.panel_count ?? 0,
+            panelMax: p.panelCapacity ?? p.panel_capacity ?? 500,
+            panelStatus: p.panelStatus ?? p.panel_status ?? "open",
+            telehealth: p.telehealthEnabled ?? p.telehealth_enabled ?? false,
+            initials: ([p.firstName || p.first_name, p.lastName || p.last_name].filter(Boolean).map((n: string) => n[0]).join("")).toUpperCase() || "??",
+          })));
+        }
+      } catch { /* ignore */ }
+      setProvidersLoaded(true);
+    })();
+  }, [providersLoaded]);
+
   function renderProviders() {
     const mockProviders = isDemoMode ? [
       {
@@ -4487,6 +4518,8 @@ export function PracticePortal() {
       },
     ] : [];
 
+    const providers = apiProviders.length > 0 ? apiProviders : mockProviders;
+
     const panelStatusConfig: Record<string, { bg: string; text: string }> = {
       Open: { bg: "#ecf9ec", text: "#2f8132" },
       Closed: { bg: "#fef2f2", text: "#dc2626" },
@@ -4500,7 +4533,7 @@ export function PracticePortal() {
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-          {mockProviders.map((prov) => {
+          {providers.map((prov) => {
             const panelPct = Math.round((prov.panelCount / prov.panelMax) * 100);
             const psc = panelStatusConfig[prov.panelStatus];
             return (
