@@ -61,11 +61,15 @@ class ProviderController extends Controller
 
         $validated = $request->validated();
 
+        // Auto-generate password if not provided
+        $tempPassword = $validated['password'] ?? bin2hex(random_bytes(6)) . 'A1!';
+        $passwordWasGenerated = empty($validated['password']);
+
         // Create user account for the provider
         $providerUser = User::create([
             'tenant_id' => $user->tenant_id,
             'email' => $validated['email'],
-            'password' => Hash::make($validated['password']),
+            'password' => Hash::make($tempPassword),
             'first_name' => $validated['first_name'],
             'last_name' => $validated['last_name'],
             'name' => trim($validated['first_name'] . ' ' . $validated['last_name']),
@@ -78,9 +82,14 @@ class ProviderController extends Controller
         $provider = Provider::create([
             'tenant_id' => $user->tenant_id,
             'user_id' => $providerUser->id,
+            'first_name' => $validated['first_name'],
+            'last_name' => $validated['last_name'],
+            'email' => $validated['email'],
+            'phone' => $validated['phone'] ?? null,
             'title' => $validated['title'] ?? null,
             'credentials' => $validated['credentials'] ?? null,
             'bio' => $validated['bio'] ?? null,
+            'specialty' => is_array($validated['specialties'] ?? null) ? ($validated['specialties'][0] ?? null) : null,
             'specialties' => $validated['specialties'] ?? null,
             'languages' => $validated['languages'] ?? null,
             'npi' => $validated['npi'] ?? null,
@@ -88,10 +97,33 @@ class ProviderController extends Controller
             'license_state' => $validated['license_state'] ?? null,
             'panel_capacity' => $validated['panel_capacity'] ?? 500,
             'panel_status' => $validated['panel_status'] ?? 'open',
+            'status' => 'active',
             'accepts_new_patients' => $validated['accepts_new_patients'] ?? true,
             'telehealth_enabled' => $validated['telehealth_enabled'] ?? false,
             'consultation_fee' => $validated['consultation_fee'] ?? null,
         ]);
+
+        // Send welcome email with temporary password
+        if ($passwordWasGenerated) {
+            try {
+                $practiceName = \App\Models\Practice::find($user->tenant_id)?->name ?? 'Your Practice';
+                \Illuminate\Support\Facades\Mail::raw(
+                    "Welcome to MemberMD!\n\n" .
+                    "You've been added as a provider at {$practiceName}.\n\n" .
+                    "Login: {$validated['email']}\n" .
+                    "Temporary Password: {$tempPassword}\n\n" .
+                    "Please change your password after your first login.\n\n" .
+                    "Get started at https://app.membermd.io\n\n" .
+                    "— The MemberMD Team",
+                    function ($message) use ($validated, $practiceName) {
+                        $message->to($validated['email'])
+                            ->subject("You've been invited to {$practiceName} on MemberMD");
+                    }
+                );
+            } catch (\Throwable $e) {
+                \Illuminate\Support\Facades\Log::warning('Provider welcome email failed: ' . $e->getMessage());
+            }
+        }
 
         return response()->json([
             'data' => $provider->load('user')

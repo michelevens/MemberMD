@@ -17,7 +17,7 @@ class StoreProviderRequest extends FormRequest
             'email' => 'required|email|unique:users,email',
             'first_name' => 'required|string|max:100',
             'last_name' => 'required|string|max:100',
-            'password' => ['required', 'string', 'min:12', 'regex:/[A-Z]/', 'regex:/[a-z]/', 'regex:/[0-9]/', 'regex:/[^A-Za-z0-9]/'],
+            'password' => ['nullable', 'string', 'min:12', 'regex:/[A-Z]/', 'regex:/[a-z]/', 'regex:/[0-9]/', 'regex:/[^A-Za-z0-9]/'],
             'phone' => 'nullable|string|max:20',
             'title' => 'nullable|string|max:50',
             'credentials' => 'nullable|string|max:50',
