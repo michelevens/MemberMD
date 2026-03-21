@@ -5,7 +5,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../contexts/AuthContext";
-import { dashboardService, membershipPlanService, messageService, patientService, appointmentService, encounterService, prescriptionService, invoiceService, programService, telehealthService } from "../../lib/api";
+import { dashboardService, membershipPlanService, messageService, patientService, appointmentService, encounterService, prescriptionService, invoiceService, programService, telehealthService, screeningService, couponService, providerService } from "../../lib/api";
 import { HeaderToolbar } from "../shared/HeaderToolbar";
 import { UserSettingsDropdown } from "../shared/UserSettingsDropdown";
 import { PracticeSettings } from "../settings/PracticeSettings";
@@ -675,6 +675,26 @@ export function PracticePortal() {
   const [editPatientForm, setEditPatientForm] = useState<{ id: string; firstName: string; lastName: string; email: string; phone: string; dateOfBirth: string; gender: string; addressLine1: string; city: string; state: string; zip: string; preferredLanguage: string }>({ id: "", firstName: "", lastName: "", email: "", phone: "", dateOfBirth: "", gender: "male", addressLine1: "", city: "", state: "", zip: "", preferredLanguage: "English" });
   const [editPatientLoading, setEditPatientLoading] = useState(false);
 
+  // ─── Administer Screening Modal ──────────────────────────────────────
+  const [showNewScreening, setShowNewScreening] = useState(false);
+  const [screeningForm, setScreeningForm] = useState({ patientId: "", instrumentId: "phq9", score: "", notes: "" });
+  const [screeningLoading, setScreeningLoading] = useState(false);
+
+  // ─── Create Coupon Modal ──────────────────────────────────────────────
+  const [showNewCoupon, setShowNewCoupon] = useState(false);
+  const [couponForm, setCouponForm] = useState({ code: "", description: "", discountType: "percent" as "percent" | "amount" | "free_months", discountValue: "", maxUses: "", validUntil: "" });
+  const [couponLoading, setCouponLoading] = useState(false);
+
+  // ─── Add Provider Modal ───────────────────────────────────────────────
+  const [showAddProvider, setShowAddProvider] = useState(false);
+  const [providerForm, setProviderForm] = useState({ firstName: "", lastName: "", credentials: "", specialty: "", npiNumber: "", email: "", phone: "", telehealth: false });
+  const [addProviderLoading, setAddProviderLoading] = useState(false);
+
+  // ─── Invite Staff Modal ───────────────────────────────────────────────
+  const [showInviteStaff, setShowInviteStaff] = useState(false);
+  const [staffForm, setStaffForm] = useState({ name: "", email: "", role: "Front Desk" });
+  const [inviteStaffLoading, setInviteStaffLoading] = useState(false);
+
   // ─── Inline Invoice Detail ──────────────────────────────────────────
   const [expandedInvoiceId, setExpandedInvoiceId] = useState<string | null>(null);
 
@@ -708,10 +728,11 @@ export function PracticePortal() {
     if (threadsRes.status === "fulfilled" && threadsRes.value.data && Array.isArray(threadsRes.value.data)) {
       setApiThreads(threadsRes.value.data);
     }
-    // Patients
-    if (patientsRes.status === "fulfilled" && patientsRes.value.data && Array.isArray(patientsRes.value.data)) {
+    // Patients (API returns paginated: {current_page, data: [...], ...})
+    if (patientsRes.status === "fulfilled" && patientsRes.value.data) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      setApiPatients(patientsRes.value.data.map((p: any) => ({
+      const patientList = Array.isArray(patientsRes.value.data) ? patientsRes.value.data : (patientsRes.value.data as any).data || [];
+      setApiPatients(patientList.map((p: any) => ({
         id: p.id,
         name: [p.firstName, p.lastName].filter(Boolean).join(" ") || p.name || "",
         preferredName: p.preferredName || undefined,
@@ -734,10 +755,11 @@ export function PracticePortal() {
         provider: p.primaryProvider?.name || p.providerName || "",
       })));
     }
-    // Appointments
-    if (appointmentsRes.status === "fulfilled" && appointmentsRes.value.data && Array.isArray(appointmentsRes.value.data)) {
+    // Appointments (API returns paginated)
+    if (appointmentsRes.status === "fulfilled" && appointmentsRes.value.data) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      setApiAppointments(appointmentsRes.value.data.map((a: any) => ({
+      const apptList = Array.isArray(appointmentsRes.value.data) ? appointmentsRes.value.data : (appointmentsRes.value.data as any).data || [];
+      setApiAppointments(apptList.map((a: any) => ({
         id: a.id,
         time: a.scheduledAt ? new Date(a.scheduledAt).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true }) : a.time || "",
         patient: a.patient ? [a.patient.firstName, a.patient.lastName].filter(Boolean).join(" ") : a.patientName || "",
@@ -751,10 +773,11 @@ export function PracticePortal() {
         sessionId: a.telehealthSessionId || a.sessionId || "",
       })));
     }
-    // Encounters
-    if (encountersRes.status === "fulfilled" && encountersRes.value.data && Array.isArray(encountersRes.value.data)) {
+    // Encounters (API returns paginated)
+    if (encountersRes.status === "fulfilled" && encountersRes.value.data) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      setApiEncounters(encountersRes.value.data.map((e: any) => ({
+      const encList = Array.isArray(encountersRes.value.data) ? encountersRes.value.data : (encountersRes.value.data as any).data || [];
+      setApiEncounters(encList.map((e: any) => ({
         id: e.id,
         date: e.encounterDate ? new Date(e.encounterDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : e.date || "",
         patient: e.patient ? [e.patient.firstName, e.patient.lastName].filter(Boolean).join(" ") : e.patientName || "",
@@ -766,10 +789,11 @@ export function PracticePortal() {
         status: e.status || "draft",
       })));
     }
-    // Prescriptions
-    if (prescriptionsRes.status === "fulfilled" && prescriptionsRes.value.data && Array.isArray(prescriptionsRes.value.data)) {
+    // Prescriptions (API returns paginated)
+    if (prescriptionsRes.status === "fulfilled" && prescriptionsRes.value.data) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      setApiPrescriptions(prescriptionsRes.value.data.map((rx: any) => ({
+      const rxList = Array.isArray(prescriptionsRes.value.data) ? prescriptionsRes.value.data : (prescriptionsRes.value.data as any).data || [];
+      setApiPrescriptions(rxList.map((rx: any) => ({
         id: rx.id,
         patient: rx.patient ? [rx.patient.firstName, rx.patient.lastName].filter(Boolean).join(" ") : rx.patientName || "",
         medication: rx.medicationName || rx.medication || "",
@@ -780,10 +804,11 @@ export function PracticePortal() {
         refillsLeft: rx.refillsRemaining ?? rx.refillsLeft ?? 0,
       })));
     }
-    // Invoices
-    if (invoicesRes.status === "fulfilled" && invoicesRes.value.data && Array.isArray(invoicesRes.value.data)) {
+    // Invoices (API returns paginated)
+    if (invoicesRes.status === "fulfilled" && invoicesRes.value.data) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      setApiInvoices(invoicesRes.value.data.map((inv: any) => ({
+      const invList = Array.isArray(invoicesRes.value.data) ? invoicesRes.value.data : (invoicesRes.value.data as any).data || [];
+      setApiInvoices(invList.map((inv: any) => ({
         id: inv.invoiceNumber || inv.id || "",
         patient: inv.patient ? [inv.patient.firstName, inv.patient.lastName].filter(Boolean).join(" ") : inv.patientName || "",
         amount: inv.totalAmount ?? inv.amount ?? 0,
@@ -1106,6 +1131,125 @@ export function PracticePortal() {
       setToast({ message: err instanceof Error ? err.message : "eFax failed.", type: "error" });
     }
     setEfaxLoading(false);
+  };
+
+  // ─── Administer Screening Handler ──────────────────────────────────
+  const handleCreateScreening = async () => {
+    if (!screeningForm.patientId || !screeningForm.instrumentId) {
+      setToast({ message: "Patient and instrument are required.", type: "error" });
+      return;
+    }
+    setScreeningLoading(true);
+    try {
+      const res = await screeningService.create({
+        patientId: screeningForm.patientId,
+        templateId: screeningForm.instrumentId,
+        score: screeningForm.score ? parseInt(screeningForm.score) : undefined,
+        notes: screeningForm.notes || undefined,
+        completedAt: new Date().toISOString(),
+      } as Record<string, unknown>);
+      if (res.data || !res.error) {
+        setToast({ message: "Screening administered successfully.", type: "success" });
+        setShowNewScreening(false);
+        setScreeningForm({ patientId: "", instrumentId: "phq9", score: "", notes: "" });
+        loadPracticeData();
+      } else {
+        setToast({ message: res.error || "Failed to administer screening.", type: "error" });
+      }
+    } catch (err: unknown) {
+      setToast({ message: err instanceof Error ? err.message : "Failed to administer screening.", type: "error" });
+    }
+    setScreeningLoading(false);
+  };
+
+  // ─── Create Coupon Handler ────────────────────────────────────────────
+  const handleCreateCoupon = async () => {
+    if (!couponForm.code || !couponForm.discountValue) {
+      setToast({ message: "Coupon code and discount value are required.", type: "error" });
+      return;
+    }
+    setCouponLoading(true);
+    try {
+      const res = await couponService.create({
+        code: couponForm.code.toUpperCase(),
+        description: couponForm.description || undefined,
+        discountType: couponForm.discountType,
+        discountValue: parseFloat(couponForm.discountValue),
+        maxUses: couponForm.maxUses ? parseInt(couponForm.maxUses) : undefined,
+        validUntil: couponForm.validUntil || undefined,
+      } as Record<string, unknown>);
+      if (res.data || !res.error) {
+        setToast({ message: "Coupon created successfully.", type: "success" });
+        setShowNewCoupon(false);
+        setCouponForm({ code: "", description: "", discountType: "percent", discountValue: "", maxUses: "", validUntil: "" });
+        loadPracticeData();
+      } else {
+        setToast({ message: res.error || "Failed to create coupon.", type: "error" });
+      }
+    } catch (err: unknown) {
+      setToast({ message: err instanceof Error ? err.message : "Failed to create coupon.", type: "error" });
+    }
+    setCouponLoading(false);
+  };
+
+  // ─── Add Provider Handler ─────────────────────────────────────────────
+  const handleAddProvider = async () => {
+    if (!providerForm.firstName || !providerForm.lastName) {
+      setToast({ message: "First and last name are required.", type: "error" });
+      return;
+    }
+    setAddProviderLoading(true);
+    try {
+      const res = await providerService.create({
+        firstName: providerForm.firstName,
+        lastName: providerForm.lastName,
+        credentials: providerForm.credentials || undefined,
+        specialty: providerForm.specialty || undefined,
+        npiNumber: providerForm.npiNumber || undefined,
+        email: providerForm.email || undefined,
+        phone: providerForm.phone || undefined,
+        telehealth: providerForm.telehealth,
+      } as Record<string, unknown>);
+      if (res.data || !res.error) {
+        setToast({ message: "Provider added successfully.", type: "success" });
+        setShowAddProvider(false);
+        setProviderForm({ firstName: "", lastName: "", credentials: "", specialty: "", npiNumber: "", email: "", phone: "", telehealth: false });
+        loadPracticeData();
+      } else {
+        setToast({ message: res.error || "Failed to add provider.", type: "error" });
+      }
+    } catch (err: unknown) {
+      setToast({ message: err instanceof Error ? err.message : "Failed to add provider.", type: "error" });
+    }
+    setAddProviderLoading(false);
+  };
+
+  // ─── Invite Staff Handler ─────────────────────────────────────────────
+  const handleInviteStaff = async () => {
+    if (!staffForm.name || !staffForm.email) {
+      setToast({ message: "Name and email are required.", type: "error" });
+      return;
+    }
+    setInviteStaffLoading(true);
+    try {
+      const res = await providerService.create({
+        firstName: staffForm.name.split(" ")[0] || staffForm.name,
+        lastName: staffForm.name.split(" ").slice(1).join(" ") || "",
+        email: staffForm.email,
+        role: staffForm.role,
+      } as Record<string, unknown>);
+      if (res.data || !res.error) {
+        setToast({ message: "Staff invitation sent successfully.", type: "success" });
+        setShowInviteStaff(false);
+        setStaffForm({ name: "", email: "", role: "Front Desk" });
+        loadPracticeData();
+      } else {
+        setToast({ message: res.error || "Failed to invite staff.", type: "error" });
+      }
+    } catch (err: unknown) {
+      setToast({ message: err instanceof Error ? err.message : "Failed to invite staff.", type: "error" });
+    }
+    setInviteStaffLoading(false);
   };
 
   const handleDownloadRxPdf = useCallback((rxId: string) => {
@@ -4016,7 +4160,7 @@ export function PracticePortal() {
             style={{ backgroundColor: "#27ab83" }}
             onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#147d64")}
             onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "#27ab83")}
-            onClick={() => setToast({ message: "Screening administration coming soon.", type: "success" })}
+            onClick={() => setShowNewScreening(true)}
           >
             <Plus className="w-4 h-4" />
             Administer Screening
@@ -4232,6 +4376,7 @@ export function PracticePortal() {
             style={{ backgroundColor: "#27ab83" }}
             onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#147d64")}
             onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "#27ab83")}
+            onClick={() => setShowNewCoupon(true)}
           >
             <Plus className="w-4 h-4" />
             Create Coupon
@@ -4439,6 +4584,7 @@ export function PracticePortal() {
               e.currentTarget.style.borderColor = "#cbd5e1";
               e.currentTarget.style.backgroundColor = "transparent";
             }}
+            onClick={() => setShowAddProvider(true)}
           >
             <div
               className="w-14 h-14 rounded-full flex items-center justify-center mb-4"
@@ -4478,6 +4624,7 @@ export function PracticePortal() {
             style={{ backgroundColor: "#27ab83" }}
             onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#147d64")}
             onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "#27ab83")}
+            onClick={() => setShowInviteStaff(true)}
           >
             <UserPlus className="w-4 h-4" />
             Invite Staff
@@ -5257,6 +5404,219 @@ export function PracticePortal() {
                 disabled={editPatientLoading}
               >
                 {editPatientLoading ? "Saving..." : "Save Changes"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─── Administer Screening Modal ──────────────────────────────────── */}
+      {showNewScreening && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: "rgba(0,0,0,0.5)" }}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden">
+            <div className="p-6" style={{ background: "linear-gradient(135deg, #1B2B4D, #243b53)" }}>
+              <h3 className="text-xl font-bold text-white">Administer Screening</h3>
+              <p className="text-sm text-slate-300 mt-1">Select a patient and instrument to administer a screening.</p>
+            </div>
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Patient *</label>
+                <select className="w-full border rounded-lg px-3 py-2 text-sm" value={screeningForm.patientId} onChange={e => setScreeningForm(f => ({ ...f, patientId: e.target.value }))}>
+                  <option value="">Select patient...</option>
+                  {(apiPatients || (isDemoMode ? MOCK_PATIENTS : [])).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Instrument *</label>
+                <select className="w-full border rounded-lg px-3 py-2 text-sm" value={screeningForm.instrumentId} onChange={e => setScreeningForm(f => ({ ...f, instrumentId: e.target.value }))}>
+                  <option value="phq9">PHQ-9 (Depression)</option>
+                  <option value="gad7">GAD-7 (Anxiety)</option>
+                  <option value="asrs">ASRS (ADHD)</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Score</label>
+                <input type="number" className="w-full border rounded-lg px-3 py-2 text-sm" value={screeningForm.score} onChange={e => setScreeningForm(f => ({ ...f, score: e.target.value }))} placeholder="Enter total score" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Notes</label>
+                <textarea className="w-full border rounded-lg px-3 py-2 text-sm" rows={2} value={screeningForm.notes} onChange={e => setScreeningForm(f => ({ ...f, notes: e.target.value }))} placeholder="Optional clinical notes..." />
+              </div>
+            </div>
+            <div className="px-6 pb-6 flex items-center justify-end gap-3">
+              <button className="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100 transition-colors" onClick={() => setShowNewScreening(false)}>Cancel</button>
+              <button
+                className="px-6 py-2 rounded-lg text-sm font-medium text-white transition-colors"
+                style={{ backgroundColor: "#27ab83" }}
+                onClick={handleCreateScreening}
+                disabled={screeningLoading}
+              >
+                {screeningLoading ? "Saving..." : "Save Screening"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─── Create Coupon Modal ─────────────────────────────────────────── */}
+      {showNewCoupon && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: "rgba(0,0,0,0.5)" }}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden">
+            <div className="p-6" style={{ background: "linear-gradient(135deg, #1B2B4D, #243b53)" }}>
+              <h3 className="text-xl font-bold text-white">Create Coupon</h3>
+              <p className="text-sm text-slate-300 mt-1">Create a discount coupon for membership plans.</p>
+            </div>
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Coupon Code *</label>
+                <input className="w-full border rounded-lg px-3 py-2 text-sm font-mono uppercase" value={couponForm.code} onChange={e => setCouponForm(f => ({ ...f, code: e.target.value }))} placeholder="e.g. WELCOME20" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Description</label>
+                <input className="w-full border rounded-lg px-3 py-2 text-sm" value={couponForm.description} onChange={e => setCouponForm(f => ({ ...f, description: e.target.value }))} placeholder="e.g. 20% off first month" />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Discount Type *</label>
+                  <select className="w-full border rounded-lg px-3 py-2 text-sm" value={couponForm.discountType} onChange={e => setCouponForm(f => ({ ...f, discountType: e.target.value as "percent" | "amount" | "free_months" }))}>
+                    <option value="percent">Percentage Off</option>
+                    <option value="amount">Fixed Amount Off</option>
+                    <option value="free_months">Free Month(s)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Discount Value *</label>
+                  <input type="number" className="w-full border rounded-lg px-3 py-2 text-sm" value={couponForm.discountValue} onChange={e => setCouponForm(f => ({ ...f, discountValue: e.target.value }))} placeholder={couponForm.discountType === "percent" ? "e.g. 20" : couponForm.discountType === "amount" ? "e.g. 50" : "e.g. 1"} />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Max Uses</label>
+                  <input type="number" className="w-full border rounded-lg px-3 py-2 text-sm" value={couponForm.maxUses} onChange={e => setCouponForm(f => ({ ...f, maxUses: e.target.value }))} placeholder="Unlimited" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Valid Until</label>
+                  <input type="date" className="w-full border rounded-lg px-3 py-2 text-sm" value={couponForm.validUntil} onChange={e => setCouponForm(f => ({ ...f, validUntil: e.target.value }))} />
+                </div>
+              </div>
+            </div>
+            <div className="px-6 pb-6 flex items-center justify-end gap-3">
+              <button className="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100 transition-colors" onClick={() => setShowNewCoupon(false)}>Cancel</button>
+              <button
+                className="px-6 py-2 rounded-lg text-sm font-medium text-white transition-colors"
+                style={{ backgroundColor: "#27ab83" }}
+                onClick={handleCreateCoupon}
+                disabled={couponLoading}
+              >
+                {couponLoading ? "Creating..." : "Create Coupon"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─── Add Provider Modal ──────────────────────────────────────────── */}
+      {showAddProvider && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: "rgba(0,0,0,0.5)" }}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden">
+            <div className="p-6" style={{ background: "linear-gradient(135deg, #1B2B4D, #243b53)" }}>
+              <h3 className="text-xl font-bold text-white">Add Provider</h3>
+              <p className="text-sm text-slate-300 mt-1">Onboard a new clinician to your practice.</p>
+            </div>
+            <div className="p-6 space-y-4 max-h-96 overflow-y-auto">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">First Name *</label>
+                  <input className="w-full border rounded-lg px-3 py-2 text-sm" value={providerForm.firstName} onChange={e => setProviderForm(f => ({ ...f, firstName: e.target.value }))} placeholder="First name" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Last Name *</label>
+                  <input className="w-full border rounded-lg px-3 py-2 text-sm" value={providerForm.lastName} onChange={e => setProviderForm(f => ({ ...f, lastName: e.target.value }))} placeholder="Last name" />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Credentials</label>
+                  <input className="w-full border rounded-lg px-3 py-2 text-sm" value={providerForm.credentials} onChange={e => setProviderForm(f => ({ ...f, credentials: e.target.value }))} placeholder="e.g. MD, DNP, NP" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Specialty</label>
+                  <input className="w-full border rounded-lg px-3 py-2 text-sm" value={providerForm.specialty} onChange={e => setProviderForm(f => ({ ...f, specialty: e.target.value }))} placeholder="e.g. Family Medicine" />
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">NPI Number</label>
+                <input className="w-full border rounded-lg px-3 py-2 text-sm" value={providerForm.npiNumber} onChange={e => setProviderForm(f => ({ ...f, npiNumber: e.target.value }))} placeholder="10-digit NPI" />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Email</label>
+                  <input type="email" className="w-full border rounded-lg px-3 py-2 text-sm" value={providerForm.email} onChange={e => setProviderForm(f => ({ ...f, email: e.target.value }))} placeholder="provider@example.com" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Phone</label>
+                  <input type="tel" className="w-full border rounded-lg px-3 py-2 text-sm" value={providerForm.phone} onChange={e => setProviderForm(f => ({ ...f, phone: e.target.value }))} placeholder="(407) 555-1234" />
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" checked={providerForm.telehealth} onChange={e => setProviderForm(f => ({ ...f, telehealth: e.target.checked }))} className="accent-teal-600" />
+                  <span className="text-sm text-slate-700">Telehealth enabled</span>
+                </label>
+              </div>
+            </div>
+            <div className="px-6 pb-6 flex items-center justify-end gap-3">
+              <button className="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100 transition-colors" onClick={() => setShowAddProvider(false)}>Cancel</button>
+              <button
+                className="px-6 py-2 rounded-lg text-sm font-medium text-white transition-colors"
+                style={{ backgroundColor: "#27ab83" }}
+                onClick={handleAddProvider}
+                disabled={addProviderLoading}
+              >
+                {addProviderLoading ? "Adding..." : "Add Provider"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─── Invite Staff Modal ──────────────────────────────────────────── */}
+      {showInviteStaff && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: "rgba(0,0,0,0.5)" }}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden">
+            <div className="p-6" style={{ background: "linear-gradient(135deg, #1B2B4D, #243b53)" }}>
+              <h3 className="text-xl font-bold text-white">Invite Staff</h3>
+              <p className="text-sm text-slate-300 mt-1">Send an invitation to a new team member.</p>
+            </div>
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Full Name *</label>
+                <input className="w-full border rounded-lg px-3 py-2 text-sm" value={staffForm.name} onChange={e => setStaffForm(f => ({ ...f, name: e.target.value }))} placeholder="Maria Garcia" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Email *</label>
+                <input type="email" className="w-full border rounded-lg px-3 py-2 text-sm" value={staffForm.email} onChange={e => setStaffForm(f => ({ ...f, email: e.target.value }))} placeholder="staff@example.com" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Role</label>
+                <select className="w-full border rounded-lg px-3 py-2 text-sm" value={staffForm.role} onChange={e => setStaffForm(f => ({ ...f, role: e.target.value }))}>
+                  <option value="Front Desk">Front Desk</option>
+                  <option value="Billing Coordinator">Billing Coordinator</option>
+                  <option value="Office Manager">Office Manager</option>
+                  <option value="Medical Assistant">Medical Assistant</option>
+                  <option value="Nurse">Nurse</option>
+                </select>
+              </div>
+            </div>
+            <div className="px-6 pb-6 flex items-center justify-end gap-3">
+              <button className="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100 transition-colors" onClick={() => setShowInviteStaff(false)}>Cancel</button>
+              <button
+                className="px-6 py-2 rounded-lg text-sm font-medium text-white transition-colors"
+                style={{ backgroundColor: "#27ab83" }}
+                onClick={handleInviteStaff}
+                disabled={inviteStaffLoading}
+              >
+                {inviteStaffLoading ? "Sending..." : "Send Invitation"}
               </button>
             </div>
           </div>
