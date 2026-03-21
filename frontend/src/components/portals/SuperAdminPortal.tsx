@@ -933,13 +933,15 @@ function TierBadge({ tier }: { tier: "starter" | "professional" | "enterprise" }
 // ─── Main Component ──────────────────────────────────────────────────────────
 
 export function SuperAdminPortal() {
+  const isDemoMode = import.meta.env.VITE_DEMO_MODE !== "false";
+
   const [activeTab, setActiveTab] = useState<TabId>("dashboard");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [practiceSearch, setPracticeSearch] = useState("");
   const [apiPractices, setApiPractices] = useState<MockPractice[] | null>(null);
   const [apiStats, setApiStats] = useState<Record<string, number> | null>(null);
   const [selectedPractice, setSelectedPractice] = useState<MockPractice | null>(null);
-  const [pendingPractices, setPendingPractices] = useState<MockPendingPractice[]>(MOCK_PENDING_PRACTICES);
+  const [pendingPractices, setPendingPractices] = useState<MockPendingPractice[]>(isDemoMode ? MOCK_PENDING_PRACTICES : []);
   const [approvalMessage, setApprovalMessage] = useState<string | null>(null);
   const [expandedScreening, setExpandedScreening] = useState<string | null>(null);
   const [expandedConsent, setExpandedConsent] = useState<string | null>(null);
@@ -1082,7 +1084,7 @@ export function SuperAdminPortal() {
 
   useEffect(() => { loadData(); }, [loadData]);
 
-  const practices = useMemo(() => apiPractices || MOCK_PRACTICES, [apiPractices]);
+  const practices = useMemo(() => apiPractices || (isDemoMode ? MOCK_PRACTICES : []), [apiPractices, isDemoMode]);
 
   // ─── Computed stats ──────────────────────────────────────────────────────
 
@@ -1327,7 +1329,7 @@ export function SuperAdminPortal() {
                 Manage Specialties
               </p>
               <p className="text-xs text-slate-500">
-                {(apiSpecialties || MOCK_SPECIALTIES).length} active specialties
+                {(apiSpecialties || (isDemoMode ? MOCK_SPECIALTIES : [])).length} active specialties
               </p>
             </div>
             <ChevronRight className="w-4 h-4 text-slate-400 shrink-0" />
@@ -1348,7 +1350,7 @@ export function SuperAdminPortal() {
                 Audit Logs
               </p>
               <p className="text-xs text-slate-500">
-                {(apiAuditLogs || MOCK_AUDIT_LOGS).length} recent events
+                {(apiAuditLogs || (isDemoMode ? MOCK_AUDIT_LOGS : [])).length} recent events
               </p>
             </div>
             <ChevronRight className="w-4 h-4 text-slate-400 shrink-0" />
@@ -1405,6 +1407,13 @@ export function SuperAdminPortal() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
+                  {recentPractices.length === 0 && (
+                    <tr>
+                      <td colSpan={6} className="px-6 py-12 text-center text-sm text-slate-400">
+                        No practices registered yet
+                      </td>
+                    </tr>
+                  )}
                   {recentPractices.map((practice) => (
                     <tr
                       key={practice.id}
@@ -1592,6 +1601,13 @@ export function SuperAdminPortal() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
+                {filteredPractices.length === 0 && (
+                  <tr>
+                    <td colSpan={7} className="px-6 py-12 text-center text-sm text-slate-400">
+                      No practices registered yet
+                    </td>
+                  </tr>
+                )}
                 {filteredPractices.map((practice) => (
                   <tr
                     key={practice.id}
@@ -1685,7 +1701,7 @@ export function SuperAdminPortal() {
   // ─── Specialties Tab ─────────────────────────────────────────────────────
 
   function renderSpecialties() {
-    const specialtiesData = apiSpecialties || MOCK_SPECIALTIES;
+    const specialtiesData = apiSpecialties || (isDemoMode ? MOCK_SPECIALTIES : []);
     const categories = [...new Set(specialtiesData.map((s) => s.category))];
 
     return (
@@ -1699,6 +1715,12 @@ export function SuperAdminPortal() {
           </p>
         </div>
 
+        {specialtiesData.length === 0 && (
+          <div className="glass rounded-xl p-12 text-center">
+            <Stethoscope className="w-10 h-10 text-slate-300 mx-auto mb-3" />
+            <p className="text-sm text-slate-400">No specialties configured yet</p>
+          </div>
+        )}
         {categories.map((category) => (
           <div key={category}>
             <h3
@@ -1837,7 +1859,14 @@ export function SuperAdminPortal() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {MOCK_PLAN_TEMPLATES.map((template) => (
+                {(isDemoMode ? MOCK_PLAN_TEMPLATES : []).length === 0 && (
+                  <tr>
+                    <td colSpan={8} className="px-6 py-12 text-center text-sm text-slate-400">
+                      No plan templates configured yet
+                    </td>
+                  </tr>
+                )}
+                {(isDemoMode ? MOCK_PLAN_TEMPLATES : []).map((template) => (
                   <tr
                     key={template.id}
                     className="hover:bg-slate-50/50 transition-colors"
@@ -1955,7 +1984,14 @@ export function SuperAdminPortal() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {(apiAuditLogs || MOCK_AUDIT_LOGS).map((log) => {
+                {(apiAuditLogs || (isDemoMode ? MOCK_AUDIT_LOGS : [])).length === 0 && (
+                  <tr>
+                    <td colSpan={5} className="px-6 py-12 text-center text-sm text-slate-400">
+                      No audit events recorded yet
+                    </td>
+                  </tr>
+                )}
+                {(apiAuditLogs || (isDemoMode ? MOCK_AUDIT_LOGS : [])).map((log) => {
                   const actionColor = log.action.includes("suspended")
                     ? "#dc2626"
                     : log.action.includes("approved") ||
@@ -2061,6 +2097,13 @@ export function SuperAdminPortal() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
+                  {pendingPractices.length === 0 && (
+                    <tr>
+                      <td colSpan={5} className="px-6 py-12 text-center text-sm text-slate-400">
+                        No pending practice approvals
+                      </td>
+                    </tr>
+                  )}
                   {pendingPractices.map((practice) => (
                     <tr key={practice.id} className="hover:bg-slate-50/50 transition-colors">
                       <td className="px-6 py-4">
@@ -2483,7 +2526,7 @@ export function SuperAdminPortal() {
   // ─── Screening Library Tab ────────────────────────────────────────────────
 
   function renderScreeningLibrary() {
-    const screeningsData = apiScreenings || MOCK_SCREENINGS;
+    const screeningsData = apiScreenings || (isDemoMode ? MOCK_SCREENINGS : []);
     const categories = ["All", ...new Set(screeningsData.map((s) => s.category))];
     const filtered = screeningCategoryFilter === "All"
       ? screeningsData
@@ -2520,6 +2563,12 @@ export function SuperAdminPortal() {
         </div>
 
         {/* Grid */}
+        {filtered.length === 0 && (
+          <div className="glass rounded-xl p-12 text-center">
+            <ClipboardCheck className="w-10 h-10 text-slate-300 mx-auto mb-3" />
+            <p className="text-sm text-slate-400">No screening instruments available</p>
+          </div>
+        )}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           {filtered.map((instrument) => {
             const isExpanded = expandedScreening === instrument.id;
@@ -2643,7 +2692,7 @@ export function SuperAdminPortal() {
   // ─── Consent Templates Tab ──────────────────────────────────────────────────
 
   function renderConsentTemplates() {
-    const consentsData = apiConsents || MOCK_CONSENTS;
+    const consentsData = apiConsents || (isDemoMode ? MOCK_CONSENTS : []);
     const filtered = consentFilter === "All"
       ? consentsData
       : consentFilter === "Required"
@@ -2706,6 +2755,13 @@ export function SuperAdminPortal() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
+                {filtered.length === 0 && (
+                  <tr>
+                    <td colSpan={8} className="px-6 py-12 text-center text-sm text-slate-400">
+                      No consent templates configured yet
+                    </td>
+                  </tr>
+                )}
                 {filtered.map((consent) => {
                   const isExpanded = expandedConsent === consent.id;
                   const tc = typeColors[consent.type] || { bg: "#f1f5f9", color: "#475569" };
@@ -2777,7 +2833,7 @@ export function SuperAdminPortal() {
 
           {/* Expanded consent preview */}
           {expandedConsent && (() => {
-            const consent = (apiConsents || MOCK_CONSENTS).find((c: { id: string }) => c.id === expandedConsent);
+            const consent = (apiConsents || (isDemoMode ? MOCK_CONSENTS : [])).find((c: { id: string }) => c.id === expandedConsent);
             if (!consent) return null;
             return (
               <div className="px-6 py-4 border-t border-slate-200" style={{ backgroundColor: "#f8fafc" }}>
@@ -2807,10 +2863,11 @@ export function SuperAdminPortal() {
   // ─── Note Templates Tab ─────────────────────────────────────────────────────
 
   function renderNoteTemplates() {
-    const specialties = ["All", ...new Set(MOCK_NOTE_TEMPLATES.map((t) => t.specialty))];
+    const noteTemplatesData = isDemoMode ? MOCK_NOTE_TEMPLATES : [];
+    const specialties = ["All", ...new Set(noteTemplatesData.map((t) => t.specialty))];
     const filtered = noteSpecialtyFilter === "All"
-      ? MOCK_NOTE_TEMPLATES
-      : MOCK_NOTE_TEMPLATES.filter((t) => t.specialty === noteSpecialtyFilter);
+      ? noteTemplatesData
+      : noteTemplatesData.filter((t) => t.specialty === noteSpecialtyFilter);
 
     const sectionKeyColors: Record<string, { bg: string; color: string; border: string }> = {
       S: { bg: "#e0f2fe", color: "#0369a1", border: "#38bdf8" },
@@ -2858,6 +2915,12 @@ export function SuperAdminPortal() {
         </div>
 
         {/* Grid */}
+        {filtered.length === 0 && (
+          <div className="glass rounded-xl p-12 text-center">
+            <StickyNote className="w-10 h-10 text-slate-300 mx-auto mb-3" />
+            <p className="text-sm text-slate-400">No note templates configured yet</p>
+          </div>
+        )}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           {filtered.map((template) => {
             const ntc = noteTypeColors[template.noteType] || { bg: "#f1f5f9", color: "#475569" };

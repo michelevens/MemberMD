@@ -205,6 +205,9 @@ const NAV_SECTIONS: NavSection[] = [
   },
 ];
 
+// ─── Demo Mode ──────────────────────────────────────────────────────────────
+const isDemoMode = import.meta.env.VITE_DEMO_MODE !== "false";
+
 // ─── Mock Data ──────────────────────────────────────────────────────────────
 
 const MOCK_PLANS = [
@@ -599,7 +602,7 @@ export function PracticePortal() {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<TabId>("dashboard");
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [selectedThread, setSelectedThread] = useState(MOCK_THREADS[0].id);
+  const [selectedThread, setSelectedThread] = useState(isDemoMode ? MOCK_THREADS[0].id : "");
   const [searchQuery, setSearchQuery] = useState("");
   const [messageInput, setMessageInput] = useState("");
   const [selectedPatient, setSelectedPatient] = useState<MockPatient | null>(null);
@@ -1156,7 +1159,7 @@ export function PracticePortal() {
 
   // ─── Memoized Data ──────────────────────────────────────────────────────
 
-  const patients = useMemo(() => apiPatients || MOCK_PATIENTS, [apiPatients]);
+  const patients = useMemo(() => apiPatients || (isDemoMode ? MOCK_PATIENTS : []), [apiPatients]);
 
   const filteredPatients = useMemo(
     () =>
@@ -1169,14 +1172,14 @@ export function PracticePortal() {
     [patients, searchQuery]
   );
 
-  const appointments = useMemo(() => apiAppointments || MOCK_APPOINTMENTS, [apiAppointments]);
+  const appointments = useMemo(() => apiAppointments || (isDemoMode ? MOCK_APPOINTMENTS : []), [apiAppointments]);
 
   const telehealthAppointments = useMemo(
     () => appointments.filter((a: typeof MOCK_APPOINTMENTS[0]) => a.isTelehealth),
     [appointments]
   );
 
-  const invoices = useMemo(() => apiInvoices || MOCK_INVOICES, [apiInvoices]);
+  const invoices = useMemo(() => apiInvoices || (isDemoMode ? MOCK_INVOICES : []), [apiInvoices]);
 
   const invoiceSummary = useMemo(() => ({
     total: invoices.reduce((s: number, i: { amount: number }) => s + i.amount, 0),
@@ -1186,7 +1189,7 @@ export function PracticePortal() {
   }), [invoices]);
 
   const prescriptionCounts = useMemo(() => {
-    if (!apiPrescriptions) return { active: 45, sent: 0, refillRequested: 3, discontinued: 12 };
+    if (!apiPrescriptions) return isDemoMode ? { active: 45, sent: 0, refillRequested: 3, discontinued: 12 } : { active: 0, sent: 0, refillRequested: 0, discontinued: 0 };
     return {
       active: apiPrescriptions.filter((rx: { status: string }) => rx.status === "active").length,
       sent: apiPrescriptions.filter((rx: { status: string }) => rx.status === "sent").length,
@@ -1301,7 +1304,7 @@ export function PracticePortal() {
   ];
 
   function renderDashboard() {
-    const totalMRR = 39328;
+    const totalMRR = apiDashStats?.totalMrr ?? (isDemoMode ? 39328 : 0);
 
     return (
       <div className="space-y-6">
@@ -1312,29 +1315,29 @@ export function PracticePortal() {
             <StatCard
               icon={Heart}
               label="Membership"
-              value={apiDashStats?.mrr ? `$${Number(apiDashStats.mrr).toLocaleString()}/mo` : "$23,800/mo"}
-              trend="120 DPC members"
+              value={apiDashStats?.mrr ? `$${Number(apiDashStats.mrr).toLocaleString()}/mo` : isDemoMode ? "$23,800/mo" : "$0/mo"}
+              trend={apiDashStats?.mrr ? `${apiDashStats.dpcMembers ?? 0} DPC members` : isDemoMode ? "120 DPC members" : "No members yet"}
               trendColor="#147d64"
             />
             <StatCard
               icon={FileText}
               label="Insurance Claims"
-              value="$5,528/mo"
-              trend="CCM + RPM"
+              value={apiDashStats?.insuranceClaims ? `$${Number(apiDashStats.insuranceClaims).toLocaleString()}/mo` : isDemoMode ? "$5,528/mo" : "$0/mo"}
+              trend={isDemoMode && !apiDashStats ? "CCM + RPM" : "CCM + RPM"}
               trendColor="#334e68"
             />
             <StatCard
               icon={UsersRound}
               label="Employer Contracts"
-              value="$10,000/mo"
-              trend="2 contracts"
+              value={apiDashStats?.employerContracts ? `$${Number(apiDashStats.employerContracts).toLocaleString()}/mo` : isDemoMode ? "$10,000/mo" : "$0/mo"}
+              trend={apiDashStats?.employerContractCount ? `${apiDashStats.employerContractCount} contracts` : isDemoMode ? "2 contracts" : "No contracts"}
               trendColor="#d97706"
             />
             <StatCard
               icon={DollarSign}
               label="Total MRR"
               value={`$${totalMRR.toLocaleString()}`}
-              trend="+12% MoM"
+              trend={isDemoMode && !apiDashStats ? "+12% MoM" : ""}
             />
           </div>
         </div>
@@ -1344,27 +1347,27 @@ export function PracticePortal() {
           <StatCard
             icon={Layers}
             label="Active Programs"
-            value={apiDashStats?.activePrograms?.toString() ?? "4"}
-            trend="All performing"
+            value={apiDashStats?.activePrograms?.toString() ?? (isDemoMode ? "4" : "0")}
+            trend={isDemoMode && !apiDashStats ? "All performing" : ""}
           />
           <StatCard
             icon={Users}
             label="Total Enrolled"
-            value={apiDashStats?.activeMembers?.toString() ?? apiDashStats?.active_members?.toString() ?? "700"}
-            trend="+15 this month"
+            value={apiDashStats?.activeMembers?.toString() ?? apiDashStats?.active_members?.toString() ?? (isDemoMode ? "700" : "0")}
+            trend={isDemoMode && !apiDashStats ? "+15 this month" : ""}
           />
           <StatCard
             icon={Calendar}
             label="Appointments Today"
-            value={apiDashStats?.appointmentsToday?.toString() ?? apiDashStats?.appointments_today?.toString() ?? "8"}
-            trend="3 telehealth"
+            value={apiDashStats?.appointmentsToday?.toString() ?? apiDashStats?.appointments_today?.toString() ?? (isDemoMode ? "8" : "0")}
+            trend={isDemoMode && !apiDashStats ? "3 telehealth" : ""}
             trendColor="#334e68"
           />
           <StatCard
             icon={ClipboardList}
             label="Pending Intakes"
-            value={apiDashStats?.pendingIntakes?.toString() ?? apiDashStats?.pending_intakes?.toString() ?? "4"}
-            trend="2 new today"
+            value={apiDashStats?.pendingIntakes?.toString() ?? apiDashStats?.pending_intakes?.toString() ?? (isDemoMode ? "4" : "0")}
+            trend={isDemoMode && !apiDashStats ? "2 new today" : ""}
             trendColor="#d97706"
           />
         </div>
@@ -1373,7 +1376,10 @@ export function PracticePortal() {
         <div>
           <h3 className="text-lg font-semibold text-slate-800 mb-4">Program Performance</h3>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            {MOCK_PROGRAM_STATS.map((prog) => (
+            {!isDemoMode && MOCK_PROGRAM_STATS.length > 0 && (isDemoMode ? MOCK_PROGRAM_STATS : []).length === 0 && (
+              <div className="col-span-full py-8 text-center text-slate-400 text-sm">No program data available yet. Configure programs in the Programs tab.</div>
+            )}
+            {(isDemoMode ? MOCK_PROGRAM_STATS : []).map((prog) => (
               <div key={prog.name} className="glass rounded-xl p-5 hover-lift">
                 <div className="flex items-center gap-3 mb-3">
                   <div
@@ -1425,7 +1431,7 @@ export function PracticePortal() {
                     </tr>
                   </thead>
                   <tbody>
-                    {(apiAppointments || MOCK_DASHBOARD_APPOINTMENTS).slice(0, 5).map((apt) => (
+                    {(apiAppointments || (isDemoMode ? MOCK_DASHBOARD_APPOINTMENTS : [])).slice(0, 5).map((apt) => (
                       <tr
                         key={apt.id}
                         className="border-t border-slate-100 hover:bg-slate-50 transition-colors"
@@ -1473,6 +1479,9 @@ export function PracticePortal() {
                   </tbody>
                 </table>
               </div>
+              {(apiAppointments || (isDemoMode ? MOCK_DASHBOARD_APPOINTMENTS : [])).length === 0 && (
+                <div className="py-8 text-center text-slate-400 text-sm">No upcoming appointments.</div>
+              )}
             </div>
           </div>
 
@@ -1480,7 +1489,7 @@ export function PracticePortal() {
           <div>
             <h3 className="text-lg font-semibold text-slate-800 mb-4">Recent Activity</h3>
             <div className="glass rounded-xl p-4 space-y-3">
-              {MOCK_ACTIVITY.map((item) => (
+              {(isDemoMode ? MOCK_ACTIVITY : []).map((item) => (
                 <div key={item.id} className="flex items-start gap-3">
                   <div
                     className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 mt-0.5"
@@ -1494,6 +1503,9 @@ export function PracticePortal() {
                   </div>
                 </div>
               ))}
+              {!isDemoMode && (
+                <div className="py-4 text-center text-slate-400 text-sm">No recent activity.</div>
+              )}
             </div>
           </div>
         </div>
@@ -1610,7 +1622,7 @@ export function PracticePortal() {
           {filtered.length === 0 && (
             <div className="py-12 text-center text-slate-400">
               <Users className="w-10 h-10 mx-auto mb-2 opacity-40" />
-              <p>No patients found matching "{searchQuery}"</p>
+              <p>{patients.length === 0 && !searchQuery ? "No patients yet. Click \"Add Patient\" to get started." : `No patients found matching "${searchQuery}"`}</p>
             </div>
           )}
         </div>
@@ -1630,7 +1642,7 @@ export function PracticePortal() {
     ];
 
     // Mock encounters for this patient
-    const mockEncounters = [
+    const mockEncountersData = [
       {
         id: "enc1", date: "Mar 12, 2026", type: "Med Management", provider: "Dr. Nageley Michel",
         chiefComplaint: "Follow-up for depression and anxiety management",
@@ -1659,23 +1671,24 @@ export function PracticePortal() {
         plan: "1. Start Sertraline 50mg daily x 1 week, then increase to 100mg daily. 2. Start Trazodone 50mg QHS for insomnia. 3. Hydroxyzine 25mg PRN for acute anxiety (max 3x/day). 4. Psychotherapy referral — CBT. 5. Lab work: CBC, CMP, TSH, lipid panel. 6. Follow-up in 3 weeks to assess tolerance and response.",
       },
     ];
+    const mockEncounters = isDemoMode ? mockEncountersData : [];
 
     // Mock screening scores
-    const phq9Scores = [
+    const phq9Scores = isDemoMode ? [
       { date: "Jan 20, 2026", score: 18, severity: "Moderately Severe" },
       { date: "Feb 12, 2026", score: 14, severity: "Moderate" },
       { date: "Mar 12, 2026", score: 9, severity: "Mild" },
       { date: "Apr 9, 2026", score: 7, severity: "Mild" },
-    ];
-    const gad7Scores = [
+    ] : [];
+    const gad7Scores = isDemoMode ? [
       { date: "Jan 20, 2026", score: 15, severity: "Severe" },
       { date: "Feb 12, 2026", score: 12, severity: "Moderate" },
       { date: "Mar 12, 2026", score: 8, severity: "Mild" },
       { date: "Apr 9, 2026", score: 6, severity: "Mild" },
-    ];
+    ] : [];
 
     // Mock patient appointments
-    const mockPtAppointments = {
+    const mockPtAppointments = isDemoMode ? {
       upcoming: [
         { id: "pa1", date: "Mar 25, 2026", time: "2:00 PM", type: "Med Management", provider: "Dr. Nageley Michel", telehealth: true },
       ],
@@ -1687,36 +1700,36 @@ export function PracticePortal() {
         { id: "pa6", date: "Mar 5, 2026", type: "Lab Review", provider: "NP Johnson", duration: "15 min", status: "completed" as const, notes: true },
         { id: "pa7", date: "Jan 28, 2026", type: "Lab Work", provider: "NP Johnson", duration: "15 min", status: "completed" as const, notes: false },
       ],
-    };
+    } : { upcoming: [] as { id: string; date: string; time: string; type: string; provider: string; telehealth: boolean }[], past: [] as { id: string; date: string; type: string; provider: string; duration: string; status: "completed" | "cancelled"; notes: boolean }[] };
 
     // Mock invoices for this patient
-    const mockPtInvoices = [
+    const mockPtInvoices = isDemoMode ? [
       { id: "INV-1050", date: "Mar 15, 2026", amount: 199.00, status: "paid" as const, description: "Complete Plan — March 2026" },
       { id: "INV-1038", date: "Feb 15, 2026", amount: 199.00, status: "paid" as const, description: "Complete Plan — February 2026" },
       { id: "INV-1025", date: "Jan 15, 2026", amount: 199.00, status: "paid" as const, description: "Complete Plan — January 2026" },
       { id: "INV-1026", date: "Jan 20, 2026", amount: 75.00, status: "paid" as const, description: "Initial Evaluation Copay" },
       { id: "INV-1030", date: "Jan 28, 2026", amount: 25.00, status: "paid" as const, description: "Lab Work — CBC Panel" },
       { id: "INV-1045", date: "Mar 10, 2026", amount: 15.00, status: "open" as const, description: "Lab Results Review" },
-    ];
+    ] : [];
 
     // Mock documents
-    const mockDocuments = [
+    const mockDocuments = isDemoMode ? [
       { id: "d1", name: "Intake Form", type: "PDF", date: "Jan 15, 2026", status: "uploaded" },
       { id: "d2", name: "HIPAA Consent", type: "PDF", date: "Jan 15, 2026", status: "signed" },
       { id: "d3", name: "Treatment Consent", type: "PDF", date: "Jan 15, 2026", status: "signed" },
       { id: "d4", name: "Lab Results — CBC Panel", type: "PDF", date: "Jan 30, 2026", status: "uploaded" },
       { id: "d5", name: "Provider Letter", type: "PDF", date: "Mar 15, 2026", status: "generated" },
-    ];
+    ] : [];
 
     // Mock messages for this patient
-    const mockPtMessages = [
+    const mockPtMessages = isDemoMode ? [
       { id: "pm1", sender: "James Wilson", text: "Hi Dr. Michel, I wanted to let you know the melatonin is working much better than the trazodone for sleep. No more morning grogginess.", time: "Mar 14, 2026 9:15 AM", isPatient: true },
       { id: "pm2", sender: "Dr. Michel", text: "Great to hear, James! That's exactly what we were hoping for. How's your mood been overall this past week?", time: "Mar 14, 2026 10:30 AM", isPatient: false },
       { id: "pm3", sender: "James Wilson", text: "Definitely better. I've been more productive at work and my wife noticed I'm more engaged at home. Still some anxious days but the hydroxyzine helps.", time: "Mar 14, 2026 11:00 AM", isPatient: true },
       { id: "pm4", sender: "Dr. Michel", text: "That's wonderful progress. We'll review everything in detail at your appointment on the 25th. Keep up with the therapy sessions too.", time: "Mar 14, 2026 2:00 PM", isPatient: false },
       { id: "pm5", sender: "James Wilson", text: "Will do. Thanks, Dr. Michel!", time: "Mar 14, 2026 2:15 PM", isPatient: true },
       { id: "pm6", sender: "James Wilson", text: "Quick question — is it okay to take the hydroxyzine and melatonin on the same night?", time: "Mar 17, 2026 8:00 PM", isPatient: true },
-    ];
+    ] : [];
 
     // PHQ-9 questions for screening detail
     const phq9Questions = [
@@ -2287,6 +2300,9 @@ export function PracticePortal() {
         {patientDetailTab === "encounters" && (
           <div className="space-y-4">
             <h3 className="font-semibold text-slate-800">Visit Notes (SOAP)</h3>
+            {mockEncounters.length === 0 && (
+              <div className="py-8 text-center text-slate-400 text-sm">No encounter notes for this patient yet.</div>
+            )}
             {mockEncounters.map((enc) => {
               const isExpanded = expandedEncounters.includes(enc.id);
               const typeBg: Record<string, { bg: string; text: string }> = {
@@ -2410,7 +2426,7 @@ export function PracticePortal() {
             </div>
 
             {/* Most Recent PHQ-9 Detail */}
-            <div className="glass rounded-xl p-6">
+            {phq9Scores.length > 0 && <div className="glass rounded-xl p-6">
               <h4 className="font-semibold text-slate-700 mb-1">Most Recent PHQ-9 Detail</h4>
               <p className="text-xs text-slate-400 mb-4">Administered {phq9Scores[phq9Scores.length - 1].date} — Score: {phq9Scores[phq9Scores.length - 1].score}/27</p>
               <div className="space-y-3">
@@ -2438,7 +2454,10 @@ export function PracticePortal() {
                   </div>
                 ))}
               </div>
-            </div>
+            </div>}
+            {phq9Scores.length === 0 && gad7Scores.length === 0 && (
+              <div className="py-8 text-center text-slate-400 text-sm">No screening data available for this patient.</div>
+            )}
           </div>
         )}
 
@@ -2636,7 +2655,13 @@ export function PracticePortal() {
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
-          {(apiPlans || MOCK_PLANS).map((plan) => {
+          {(apiPlans || (isDemoMode ? MOCK_PLANS : [])).length === 0 && (
+            <div className="col-span-full py-12 text-center text-slate-400">
+              <CreditCard className="w-10 h-10 mx-auto mb-2 opacity-40" />
+              <p>No membership plans configured yet.</p>
+            </div>
+          )}
+          {(apiPlans || (isDemoMode ? MOCK_PLANS : [])).map((plan) => {
             const Icon = planIcons[plan.name] || Heart;
             const gradient = planGradients[plan.name] || planGradients.Essential;
             const memberCount = plan.memberCount ?? plan.member_count ?? 0;
@@ -3131,9 +3156,21 @@ export function PracticePortal() {
   };
 
   function renderMessages() {
-    const threads = apiThreads || MOCK_THREADS;
+    const threads = apiThreads || (isDemoMode ? MOCK_THREADS : []);
     const activeThread = threads.find((t: typeof MOCK_THREADS[0]) => t.id === selectedThread) || threads[0];
     const displayMessages = apiMessages || activeThread?.messages || [];
+
+    if (threads.length === 0) {
+      return (
+        <div className="space-y-4">
+          <h2 className="text-xl font-bold text-slate-800">Messages</h2>
+          <div className="glass rounded-xl p-12 text-center text-slate-400">
+            <MessageSquare className="w-10 h-10 mx-auto mb-2 opacity-40" />
+            <p>No messages yet. Conversations with patients will appear here.</p>
+          </div>
+        </div>
+      );
+    }
 
     return (
       <div className="space-y-4">
@@ -3386,14 +3423,14 @@ export function PracticePortal() {
   // ─── Intakes Tab ────────────────────────────────────────────────────────
 
   function renderIntakes() {
-    const mockIntakes = [
+    const mockIntakes = isDemoMode ? [
       { id: "INT-001", code: "INT-2026-001", name: "Robert Davis", dateSubmitted: "Mar 18, 2026", status: "pending" as const },
       { id: "INT-002", code: "INT-2026-002", name: "Amanda Brooks", dateSubmitted: "Mar 17, 2026", status: "under_review" as const },
       { id: "INT-003", code: "INT-2026-003", name: "Marcus Williams", dateSubmitted: "Mar 16, 2026", status: "approved" as const },
       { id: "INT-004", code: "INT-2026-004", name: "Patricia Nguyen", dateSubmitted: "Mar 15, 2026", status: "converted" as const },
       { id: "INT-005", code: "INT-2026-005", name: "Daniel Foster", dateSubmitted: "Mar 14, 2026", status: "approved" as const },
       { id: "INT-006", code: "INT-2026-006", name: "Karen Mitchell", dateSubmitted: "Mar 13, 2026", status: "rejected" as const },
-    ];
+    ] : [];
 
     const intakeStatusConfig: Record<string, { bg: string; text: string; dot: string }> = {
       pending: { bg: "#fffbeb", text: "#d97706", dot: "#f59e0b" },
@@ -3413,19 +3450,19 @@ export function PracticePortal() {
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <div className="glass rounded-lg p-4">
             <p className="text-xs text-slate-500 mb-1">Total</p>
-            <p className="text-2xl font-bold text-slate-800">15</p>
+            <p className="text-2xl font-bold text-slate-800">{isDemoMode ? 15 : mockIntakes.length}</p>
           </div>
           <div className="glass rounded-lg p-4">
             <p className="text-xs text-slate-500 mb-1">Pending</p>
-            <p className="text-2xl font-bold" style={{ color: "#d97706" }}>4</p>
+            <p className="text-2xl font-bold" style={{ color: "#d97706" }}>{isDemoMode ? 4 : mockIntakes.filter(i => i.status === "pending").length}</p>
           </div>
           <div className="glass rounded-lg p-4">
             <p className="text-xs text-slate-500 mb-1">Approved</p>
-            <p className="text-2xl font-bold" style={{ color: "#2f8132" }}>8</p>
+            <p className="text-2xl font-bold" style={{ color: "#2f8132" }}>{isDemoMode ? 8 : mockIntakes.filter(i => i.status === "approved").length}</p>
           </div>
           <div className="glass rounded-lg p-4">
             <p className="text-xs text-slate-500 mb-1">Converted</p>
-            <p className="text-2xl font-bold" style={{ color: "#147d64" }}>3</p>
+            <p className="text-2xl font-bold" style={{ color: "#147d64" }}>{isDemoMode ? 3 : mockIntakes.filter(i => i.status === "converted").length}</p>
           </div>
         </div>
 
@@ -3443,6 +3480,9 @@ export function PracticePortal() {
                 </tr>
               </thead>
               <tbody>
+                {mockIntakes.length === 0 && (
+                  <tr><td colSpan={5} className="py-8 text-center text-slate-400 text-sm">No intake submissions yet.</td></tr>
+                )}
                 {mockIntakes.map((intake) => {
                   const sc = intakeStatusConfig[intake.status] || intakeStatusConfig.pending;
                   return (
@@ -3499,12 +3539,12 @@ export function PracticePortal() {
   // ─── Waitlist Tab ─────────────────────────────────────────────────────────
 
   function renderWaitlist() {
-    const mockWaitlist = [
+    const mockWaitlist = isDemoMode ? [
       { id: "w1", name: "Steven Park", email: "steven.p@email.com", phone: "(555) 111-2233", desiredPlan: "Complete", requestedDate: "Mar 10, 2026", priority: "high" as const, status: "waiting" as const },
       { id: "w2", name: "Monica Reyes", email: "monica.r@email.com", phone: "(555) 222-3344", desiredPlan: "Premium", requestedDate: "Mar 12, 2026", priority: "medium" as const, status: "contacted" as const },
       { id: "w3", name: "Alan Cooper", email: "alan.c@email.com", phone: "(555) 333-4455", desiredPlan: "Essential", requestedDate: "Mar 14, 2026", priority: "low" as const, status: "waiting" as const },
       { id: "w4", name: "Diane Tran", email: "diane.t@email.com", phone: "(555) 444-5566", desiredPlan: "Complete", requestedDate: "Mar 16, 2026", priority: "high" as const, status: "enrolled" as const },
-    ];
+    ] : [];
 
     const priorityConfig: Record<string, { bg: string; text: string }> = {
       high: { bg: "#fef2f2", text: "#dc2626" },
@@ -3562,6 +3602,9 @@ export function PracticePortal() {
                 </tr>
               </thead>
               <tbody>
+                {mockWaitlist.length === 0 && (
+                  <tr><td colSpan={8} className="py-8 text-center text-slate-400 text-sm">No one on the waitlist.</td></tr>
+                )}
                 {mockWaitlist.map((entry) => {
                   const pc = priorityConfig[entry.priority];
                   const wsc = waitlistStatusConfig[entry.status];
@@ -3614,7 +3657,7 @@ export function PracticePortal() {
   // ─── Encounters Tab ───────────────────────────────────────────────────────
 
   function renderEncounters() {
-    const mockPracticeEncounters = [
+    const mockPracticeEncounters = isDemoMode ? [
       { id: "e1", date: "Mar 18, 2026", patient: "James Wilson", provider: "Dr. Michel", type: "Follow-Up", program: "DPC Membership", noteTemplate: "SOAP", duration: "30 min", status: "signed" as const },
       { id: "e2", date: "Mar 18, 2026", patient: "Sarah Mitchell", provider: "Dr. Michel", type: "Med Mgmt", program: "DPC Membership", noteTemplate: "SOAP", duration: "20 min", status: "draft" as const },
       { id: "e3", date: "Mar 17, 2026", patient: "Maria Garcia", provider: "Dr. Michel", type: "Care Coord", program: "CCM", noteTemplate: "CCM", duration: "20 min", status: "signed" as const },
@@ -3623,7 +3666,7 @@ export function PracticePortal() {
       { id: "e6", date: "Mar 15, 2026", patient: "Lisa Patel", provider: "NP Johnson", type: "Med Mgmt", program: "DPC Membership", noteTemplate: "SOAP", duration: "20 min", status: "signed" as const },
       { id: "e7", date: "Mar 14, 2026", patient: "Rachel Adams", provider: "Dr. Michel", type: "Wellness Check", program: "Employer Wellness", noteTemplate: "SOAP", duration: "30 min", status: "signed" as const },
       { id: "e8", date: "Mar 13, 2026", patient: "Thomas Lee", provider: "Dr. Michel", type: "Initial", program: "DPC Membership", noteTemplate: "SOAP", duration: "60 min", status: "draft" as const },
-    ];
+    ] : [];
 
     const encounterTypeConfig: Record<string, { bg: string; text: string }> = {
       Initial: { bg: "#e6f7f2", text: "#147d64" },
@@ -3704,6 +3747,9 @@ export function PracticePortal() {
                 </tr>
               </thead>
               <tbody>
+                {(apiEncounters || mockPracticeEncounters).length === 0 && (
+                  <tr><td colSpan={9} className="py-8 text-center text-slate-400 text-sm">No encounters yet. Click "New Encounter" to document a visit.</td></tr>
+                )}
                 {(apiEncounters || mockPracticeEncounters).map((enc) => {
                   const tc = encounterTypeConfig[enc.type] || encounterTypeConfig["Follow-Up"];
                   const esc = encounterStatusConfig[enc.status];
@@ -3834,12 +3880,12 @@ export function PracticePortal() {
   // ─── Prescriptions Tab ────────────────────────────────────────────────────
 
   function renderPrescriptions() {
-    const mockRefillRequests = [
+    const mockRefillRequests = isDemoMode ? [
       { id: "ref1", patient: "James Wilson", medication: "Sertraline", dosage: "100mg", requestedDate: "Mar 18, 2026" },
       { id: "ref2", patient: "Carlos Mendez", medication: "Metformin", dosage: "500mg", requestedDate: "Mar 17, 2026" },
-    ];
+    ] : [];
 
-    const mockPrescriptions = [
+    const mockPrescriptions = isDemoMode ? [
       { id: "rx1", patient: "James Wilson", medication: "Sertraline", dosage: "100mg", frequency: "Daily", prescriber: "Dr. Michel", status: "active" as const, refillsLeft: 5 },
       { id: "rx2", patient: "James Wilson", medication: "Bupropion XL", dosage: "150mg", frequency: "Daily", prescriber: "Dr. Michel", status: "active" as const, refillsLeft: 4 },
       { id: "rx3", patient: "Sarah Mitchell", medication: "Lisinopril", dosage: "10mg", frequency: "Daily", prescriber: "Dr. Michel", status: "active" as const, refillsLeft: 3 },
@@ -3848,7 +3894,7 @@ export function PracticePortal() {
       { id: "rx6", patient: "Robert Kim", medication: "Omeprazole", dosage: "20mg", frequency: "Daily", prescriber: "Dr. Michel", status: "active" as const, refillsLeft: 2 },
       { id: "rx7", patient: "Lisa Patel", medication: "Levothyroxine", dosage: "50mcg", frequency: "Daily", prescriber: "NP Johnson", status: "discontinued" as const, refillsLeft: 0 },
       { id: "rx8", patient: "James Wilson", medication: "Trazodone", dosage: "50mg", frequency: "Bedtime", prescriber: "Dr. Michel", status: "discontinued" as const, refillsLeft: 0 },
-    ];
+    ] : [];
 
     const rxStatusConfig: Record<string, { bg: string; text: string; dot: string }> = {
       active: { bg: "#ecf9ec", text: "#2f8132", dot: "#3f9142" },
@@ -3884,7 +3930,7 @@ export function PracticePortal() {
         </div>
 
         {/* Pending Refill Requests */}
-        {(!apiPrescriptions && mockRefillRequests.length > 0) && (
+        {(!apiPrescriptions && isDemoMode && mockRefillRequests.length > 0) && (
           <div>
             <h3 className="text-sm font-semibold text-slate-800 mb-3">Pending Refill Requests</h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -3941,6 +3987,9 @@ export function PracticePortal() {
                 </tr>
               </thead>
               <tbody>
+                {(apiPrescriptions || mockPrescriptions).length === 0 && (
+                  <tr><td colSpan={8} className="py-8 text-center text-slate-400 text-sm">No prescriptions yet. Click "New Prescription" to prescribe a medication.</td></tr>
+                )}
                 {(apiPrescriptions || mockPrescriptions).map((rx) => {
                   const rsc = rxStatusConfig[rx.status];
                   return (
@@ -4005,14 +4054,14 @@ export function PracticePortal() {
       ADHD: { bg: "#e6f7f2", text: "#147d64" },
     };
 
-    const mockRecentScreenings = [
+    const mockRecentScreenings = isDemoMode ? [
       { id: "s1", date: "Mar 18, 2026", patient: "James Wilson", instrument: "PHQ-9", score: 7, severity: "Mild", administeredBy: "Dr. Michel" },
       { id: "s2", date: "Mar 18, 2026", patient: "James Wilson", instrument: "GAD-7", score: 6, severity: "Mild", administeredBy: "Dr. Michel" },
       { id: "s3", date: "Mar 17, 2026", patient: "Sarah Mitchell", instrument: "PHQ-9", score: 12, severity: "Moderate", administeredBy: "Dr. Michel" },
       { id: "s4", date: "Mar 16, 2026", patient: "Carlos Mendez", instrument: "GAD-7", score: 15, severity: "Severe", administeredBy: "Dr. Michel" },
       { id: "s5", date: "Mar 15, 2026", patient: "Emily Chen", instrument: "PHQ-9", score: 4, severity: "Minimal", administeredBy: "NP Johnson" },
       { id: "s6", date: "Mar 14, 2026", patient: "Robert Kim", instrument: "ASRS", score: 14, severity: "Moderate", administeredBy: "Dr. Michel" },
-    ];
+    ] : [];
 
     const severityBadge = (sev: string) => {
       const config: Record<string, { bg: string; text: string }> = {
@@ -4080,6 +4129,9 @@ export function PracticePortal() {
                   </tr>
                 </thead>
                 <tbody>
+                  {mockRecentScreenings.length === 0 && (
+                    <tr><td colSpan={6} className="py-8 text-center text-slate-400 text-sm">No screenings administered yet.</td></tr>
+                  )}
                   {mockRecentScreenings.map((scr) => {
                     const sb = severityBadge(scr.severity);
                     return (
@@ -4113,7 +4165,7 @@ export function PracticePortal() {
   // ─── Payments Tab ─────────────────────────────────────────────────────────
 
   function renderPayments() {
-    const mockPayments = [
+    const mockPayments = isDemoMode ? [
       { id: "pay1", date: "Mar 18, 2026", patient: "Sarah Mitchell", amount: 199.00, method: "card" as const, status: "succeeded" as const, invoice: "INV-1042" },
       { id: "pay2", date: "Mar 18, 2026", patient: "James Rivera", amount: 299.00, method: "card" as const, status: "succeeded" as const, invoice: "INV-1041" },
       { id: "pay3", date: "Mar 17, 2026", patient: "Emily Chen", amount: 99.00, method: "bank" as const, status: "succeeded" as const, invoice: "INV-1040" },
@@ -4124,7 +4176,7 @@ export function PracticePortal() {
       { id: "pay8", date: "Mar 15, 2026", patient: "Carlos Mendez", amount: 299.00, method: "card" as const, status: "succeeded" as const, invoice: "INV-1033" },
       { id: "pay9", date: "Mar 14, 2026", patient: "Angela Foster", amount: 99.00, method: "card" as const, status: "refunded" as const, invoice: "INV-1036" },
       { id: "pay10", date: "Mar 14, 2026", patient: "David Nguyen", amount: 99.00, method: "card" as const, status: "pending" as const, invoice: "INV-1035" },
-    ];
+    ] : [];
 
     const payStatusConfig: Record<string, { bg: string; text: string; dot: string }> = {
       succeeded: { bg: "#ecf9ec", text: "#2f8132", dot: "#3f9142" },
@@ -4143,15 +4195,15 @@ export function PracticePortal() {
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
           <div className="glass rounded-lg p-4">
             <p className="text-xs text-slate-500 mb-1">This Month</p>
-            <p className="text-2xl font-bold" style={{ color: "#2f8132" }}>$8,400</p>
+            <p className="text-2xl font-bold" style={{ color: "#2f8132" }}>{isDemoMode ? "$8,400" : `$${mockPayments.filter(p => p.status === "succeeded").reduce((s, p) => s + p.amount, 0).toLocaleString()}`}</p>
           </div>
           <div className="glass rounded-lg p-4">
             <p className="text-xs text-slate-500 mb-1">Outstanding</p>
-            <p className="text-2xl font-bold" style={{ color: "#d97706" }}>$450</p>
+            <p className="text-2xl font-bold" style={{ color: "#d97706" }}>{isDemoMode ? "$450" : `$${mockPayments.filter(p => p.status === "pending").reduce((s, p) => s + p.amount, 0).toLocaleString()}`}</p>
           </div>
           <div className="glass rounded-lg p-4">
             <p className="text-xs text-slate-500 mb-1">Refunded</p>
-            <p className="text-2xl font-bold text-slate-500">$99</p>
+            <p className="text-2xl font-bold text-slate-500">{isDemoMode ? "$99" : `$${mockPayments.filter(p => p.status === "refunded").reduce((s, p) => s + p.amount, 0).toLocaleString()}`}</p>
           </div>
         </div>
 
@@ -4171,6 +4223,9 @@ export function PracticePortal() {
                 </tr>
               </thead>
               <tbody>
+                {mockPayments.length === 0 && (
+                  <tr><td colSpan={7} className="py-8 text-center text-slate-400 text-sm">No payments recorded yet.</td></tr>
+                )}
                 {mockPayments.map((pay) => {
                   const psc = payStatusConfig[pay.status];
                   return (
@@ -4222,12 +4277,12 @@ export function PracticePortal() {
   // ─── Coupons Tab ──────────────────────────────────────────────────────────
 
   function renderCoupons() {
-    const mockCoupons = [
+    const mockCoupons = isDemoMode ? [
       { id: "c1", code: "WELCOME20", description: "20% off first month", discountType: "percent" as const, discountValue: 20, usesCount: 8, usesMax: 50, validUntil: "Jun 30, 2026", status: "active" as const },
-      { id: "c2", code: "ANNUAL10", description: "10% off annual plan", discountType: "percent" as const, discountValue: 10, usesCount: 3, usesMax: null, validUntil: "Dec 31, 2026", status: "active" as const },
+      { id: "c2", code: "ANNUAL10", description: "10% off annual plan", discountType: "percent" as const, discountValue: 10, usesCount: 3, usesMax: null as number | null, validUntil: "Dec 31, 2026", status: "active" as const },
       { id: "c3", code: "FRIEND50", description: "$50 off", discountType: "amount" as const, discountValue: 50, usesCount: 12, usesMax: 20, validUntil: "Sep 30, 2026", status: "active" as const },
       { id: "c4", code: "SUMMER2025", description: "1 month free", discountType: "free_months" as const, discountValue: 1, usesCount: 15, usesMax: 15, validUntil: "Aug 31, 2025", status: "expired" as const },
-    ];
+    ] : [];
 
     const formatDiscount = (coupon: typeof mockCoupons[0]) => {
       if (coupon.discountType === "percent") return `${coupon.discountValue}% off`;
@@ -4266,6 +4321,9 @@ export function PracticePortal() {
                 </tr>
               </thead>
               <tbody>
+                {mockCoupons.length === 0 && (
+                  <tr><td colSpan={7} className="py-8 text-center text-slate-400 text-sm">No coupons created yet. Click "Create Coupon" to add one.</td></tr>
+                )}
                 {mockCoupons.map((coupon) => (
                   <tr key={coupon.id} className="border-t border-slate-100 hover:bg-slate-50 transition-colors">
                     <td className="px-4 py-3">
@@ -4315,7 +4373,7 @@ export function PracticePortal() {
   // ─── Providers Tab ────────────────────────────────────────────────────────
 
   function renderProviders() {
-    const mockProviders = [
+    const mockProviders = isDemoMode ? [
       {
         id: "prov1",
         name: "Nageley Michel",
@@ -4349,7 +4407,7 @@ export function PracticePortal() {
         telehealth: false,
         initials: "DC",
       },
-    ];
+    ] : [];
 
     const panelStatusConfig: Record<string, { bg: string; text: string }> = {
       Open: { bg: "#ecf9ec", text: "#2f8132" },
@@ -4466,11 +4524,11 @@ export function PracticePortal() {
   // ─── Staff Tab ────────────────────────────────────────────────────────────
 
   function renderStaff() {
-    const mockStaff = [
+    const mockStaff = isDemoMode ? [
       { id: "st1", name: "Maria Garcia", email: "front.desk@example.com", role: "Front Desk", status: "active" as const, lastLogin: "Mar 18, 2026 9:15 AM" },
       { id: "st2", name: "Jessica Lee", email: "billing@example.com", role: "Billing Coordinator", status: "active" as const, lastLogin: "Mar 18, 2026 8:30 AM" },
       { id: "st3", name: "Tom Brown", email: "admin@example.com", role: "Office Manager", status: "active" as const, lastLogin: "Mar 17, 2026 5:00 PM" },
-    ];
+    ] : [];
 
     const roleConfig: Record<string, { bg: string; text: string }> = {
       "Front Desk": { bg: "#e6f7f2", text: "#147d64" },
@@ -4507,6 +4565,9 @@ export function PracticePortal() {
                 </tr>
               </thead>
               <tbody>
+                {mockStaff.length === 0 && (
+                  <tr><td colSpan={6} className="py-8 text-center text-slate-400 text-sm">No staff members yet. Click "Invite Staff" to add team members.</td></tr>
+                )}
                 {mockStaff.map((staff) => {
                   const rc = roleConfig[staff.role] || roleConfig["Office Manager"];
                   return (
@@ -4552,7 +4613,7 @@ export function PracticePortal() {
   // ─── Notifications Tab ────────────────────────────────────────────────────
 
   function renderNotifications() {
-    const mockNotifications = [
+    const mockNotifications = isDemoMode ? [
       { id: "n1", title: "New member enrolled", description: "Sarah K. joined Complete Plan", time: "15 min ago", category: "members" as const, read: false },
       { id: "n2", title: "Appointment cancelled", description: "James W. cancelled Mar 25 visit", time: "1 hour ago", category: "appointments" as const, read: false },
       { id: "n3", title: "Payment received", description: "$199.00 from Lisa M.", time: "2 hours ago", category: "billing" as const, read: false },
@@ -4563,7 +4624,7 @@ export function PracticePortal() {
       { id: "n8", title: "Member paused", description: "David R. paused membership", time: "2 days ago", category: "members" as const, read: true },
       { id: "n9", title: "Provider schedule updated", description: "Dr. Chen updated hours", time: "2 days ago", category: "system" as const, read: true },
       { id: "n10", title: "System maintenance completed", description: "All systems operational", time: "3 days ago", category: "system" as const, read: true },
-    ];
+    ] : [];
 
     const filterTabs: { id: typeof notificationFilter; label: string }[] = [
       { id: "all", label: "All" },
@@ -4841,7 +4902,7 @@ export function PracticePortal() {
                 <label className="block text-sm font-medium text-slate-700 mb-1">Patient *</label>
                 <select className="w-full border rounded-lg px-3 py-2 text-sm" value={bookApptForm.patientId} onChange={e => setBookApptForm(f => ({ ...f, patientId: e.target.value }))}>
                   <option value="">Select patient...</option>
-                  {(apiPatients || MOCK_PATIENTS).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                  {(apiPatients || (isDemoMode ? MOCK_PATIENTS : [])).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                 </select>
               </div>
               <div className="grid grid-cols-2 gap-4">
@@ -4882,7 +4943,7 @@ export function PracticePortal() {
                 <select className="w-full border rounded-lg px-3 py-2 text-sm" value={bookApptForm.programId} onChange={e => setBookApptForm(f => ({ ...f, programId: e.target.value }))}>
                   <option value="">No program</option>
                   {apiPrograms.map((p: { id: string; name: string }) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                  {apiPrograms.length === 0 && <>
+                  {apiPrograms.length === 0 && isDemoMode && <>
                     <option value="dpc">DPC Membership</option>
                     <option value="ccm">CCM</option>
                     <option value="rpm">RPM</option>
@@ -4928,7 +4989,7 @@ export function PracticePortal() {
                 <label className="block text-sm font-medium text-slate-700 mb-1">Patient *</label>
                 <select className="w-full border rounded-lg px-3 py-2 text-sm" value={encounterForm.patientId} onChange={e => setEncounterForm(f => ({ ...f, patientId: e.target.value }))}>
                   <option value="">Select patient...</option>
-                  {(apiPatients || MOCK_PATIENTS).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                  {(apiPatients || (isDemoMode ? MOCK_PATIENTS : [])).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                 </select>
               </div>
               <div className="grid grid-cols-2 gap-4">
@@ -4954,7 +5015,7 @@ export function PracticePortal() {
                 <select className="w-full border rounded-lg px-3 py-2 text-sm" value={encounterForm.programId} onChange={e => setEncounterForm(f => ({ ...f, programId: e.target.value }))}>
                   <option value="">No program</option>
                   {apiPrograms.map((p: { id: string; name: string }) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                  {apiPrograms.length === 0 && <>
+                  {apiPrograms.length === 0 && isDemoMode && <>
                     <option value="dpc">DPC Membership</option>
                     <option value="ccm">CCM</option>
                     <option value="rpm">RPM</option>
@@ -4990,7 +5051,7 @@ export function PracticePortal() {
                 <label className="block text-sm font-medium text-slate-700 mb-1">Patient *</label>
                 <select className="w-full border rounded-lg px-3 py-2 text-sm" value={rxForm.patientId} onChange={e => setRxForm(f => ({ ...f, patientId: e.target.value }))}>
                   <option value="">Select patient...</option>
-                  {(apiPatients || MOCK_PATIENTS).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                  {(apiPatients || (isDemoMode ? MOCK_PATIENTS : [])).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                 </select>
               </div>
               <div>
