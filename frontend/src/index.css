@@ -144,6 +144,52 @@ body {
   animation: float 3s ease-in-out infinite;
 }
 
+/* ─── Modal Animations ─── */
+@keyframes modal-overlay-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes modal-content-in {
+  from { opacity: 0; transform: scale(0.95) translateY(10px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+.animate-modal-in {
+  animation: modal-overlay-in 0.2s ease-out;
+}
+.animate-modal-content {
+  animation: modal-content-in 0.25s ease-out;
+}
+
+/* ─── Skeleton Shimmer ─── */
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.animate-pulse {
+  background-image: linear-gradient(90deg, transparent 25%, rgba(255,255,255,0.5) 50%, transparent 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+}
+
+/* ─── Fade In Up (for cards/sections entering view) ─── */
+@keyframes fade-in-up {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-fade-in-up {
+  animation: fade-in-up 0.35s ease-out;
+}
+
+/* ─── Count Up Animation (for stat numbers) ─── */
+@keyframes count-pop {
+  0% { transform: scale(0.8); opacity: 0; }
+  60% { transform: scale(1.05); }
+  100% { transform: scale(1); opacity: 1; }
+}
+.animate-count-pop {
+  animation: count-pop 0.4s ease-out;
+}
+
 /* ─── Gradient Text ─── */
 .gradient-text {
   background: linear-gradient(135deg, var(--color-navy-500), var(--color-teal-500));

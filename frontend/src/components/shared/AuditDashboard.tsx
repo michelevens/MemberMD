@@ -18,36 +18,7 @@ import {
   Activity,
 } from "lucide-react";
 
-// ─── Colors ──────────────────────────────────────────────────────────────────
-
-const C = {
-  navy900: "#102a43",
-  navy800: "#243b53",
-  navy700: "#334e68",
-  teal500: "#27ab83",
-  teal600: "#147d64",
-  teal50: "#e6fffa",
-  slate50: "#f8fafc",
-  slate100: "#f1f5f9",
-  slate200: "#e2e8f0",
-  slate300: "#cbd5e1",
-  slate400: "#94a3b8",
-  slate500: "#64748b",
-  slate600: "#475569",
-  slate700: "#334155",
-  white: "#ffffff",
-  red50: "#fef2f2",
-  red500: "#ef4444",
-  red600: "#dc2626",
-  green50: "#ecfdf5",
-  green500: "#22c55e",
-  green600: "#16a34a",
-  amber50: "#fffbeb",
-  amber500: "#f59e0b",
-  amber600: "#d97706",
-  blue50: "#eff6ff",
-  blue500: "#3b82f6",
-};
+import { colors as C } from "../ui/design-system";
 
 // ─── Mock Data ───────────────────────────────────────────────────────────────
 
