@@ -12,6 +12,7 @@ use App\Models\TelehealthSession;
 use App\Services\AvailabilityService;
 use App\Services\CalendarService;
 use App\Services\DailyService;
+use App\Services\ReminderGenerationService;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -153,6 +154,14 @@ class AppointmentController extends Controller
                 // Daily.co not configured — don't block appointment creation
                 \Log::warning('Auto-create telehealth session failed: ' . $e->getMessage());
             }
+        }
+
+        // Auto-create appointment reminders
+        try {
+            $reminderService = app(ReminderGenerationService::class);
+            $reminderService->createDefaultReminders($appointment);
+        } catch (\Throwable $e) {
+            \Log::warning('Auto-create appointment reminders failed: ' . $e->getMessage());
         }
 
         return response()->json([

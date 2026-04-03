@@ -56,6 +56,7 @@ use App\Http\Controllers\Api\ActivityLogController;
 use App\Http\Controllers\Api\ALaCartePriceController;
 use App\Http\Controllers\Api\VisitPackController;
 use App\Http\Controllers\Api\ClinicalLookupController;
+use App\Http\Controllers\Api\ProviderAnalyticsController;
 use App\Http\Controllers\Api\Admin\MasterProgramController;
 use Illuminate\Support\Facades\Route;
 
@@ -303,6 +304,25 @@ Route::middleware(['auth:sanctum', 'phi.log'])->group(function () {
         Route::post('/', [BroadcastController::class, 'store']);
         Route::post('/{id}/send', [BroadcastController::class, 'send']);
     });
+    // ===== Patient Engagement =====
+    Route::prefix('engagement')->group(function () {
+        Route::get('/campaigns', [EngagementController::class, 'campaigns']);
+        Route::post('/campaigns', [EngagementController::class, 'createCampaign']);
+        Route::put('/campaigns/{id}', [EngagementController::class, 'updateCampaign']);
+        Route::delete('/campaigns/{id}', [EngagementController::class, 'deleteCampaign']);
+        Route::get('/at-risk-patients', [EngagementController::class, 'atRiskPatients']);
+        Route::get('/patient/{patientId}/score', [EngagementController::class, 'getPatientScore']);
+        Route::get('/patient/{patientId}/logs', [EngagementController::class, 'getPatientActivityLogs']);
+        Route::get('/analytics-summary', [EngagementController::class, 'analyticsSummary']);
+    });
+
+    // ===== Provider Analytics =====
+    Route::prefix('analytics')->group(function () {
+        Route::get('/providers/{providerId}/revenue', [ProviderAnalyticsController::class, 'providerRevenue']);
+        Route::get('/providers/{providerId}/patient-panel', [ProviderAnalyticsController::class, 'providerPatientPanel']);
+        Route::get('/providers-summary', [ProviderAnalyticsController::class, 'practiceProvidersSummary']);
+        Route::get('/performance-comparison', [ProviderAnalyticsController::class, 'performanceComparison']);
+    });
 
     // ===== Incidents / Safety Events =====
     Route::apiResource('incidents', IncidentController::class);
@@ -438,15 +458,6 @@ Route::middleware(['auth:sanctum', 'phi.log'])->group(function () {
         Route::post('/', [WidgetConfigController::class, 'store']);
         Route::get('/submissions', [WidgetConfigController::class, 'submissions']);
         Route::put('/submissions/{id}/status', [WidgetConfigController::class, 'updateSubmissionStatus']);
-    });
-
-    // ===== Patient Engagement Scoring =====
-    Route::prefix('engagement')->group(function () {
-        Route::get('/dashboard', [EngagementController::class, 'dashboard']);
-        Route::get('/patient/{patientId}', [EngagementController::class, 'patientScore']);
-        Route::get('/rules', [EngagementController::class, 'rules']);
-        Route::post('/rules', [EngagementController::class, 'storeRule']);
-        Route::delete('/rules/{id}', [EngagementController::class, 'deleteRule']);
     });
 
     // ===== Outcome Tracking & Value Reporting =====

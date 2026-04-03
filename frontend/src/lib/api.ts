@@ -33,6 +33,13 @@ import type {
   SecurityEvent,
   ComplianceDashboardData,
   HipaaChecklistItem,
+  EngagementCampaign,
+  PatientEngagementScore,
+  EngagementAnalyticsSummary,
+  ProviderRevenueMetrics,
+  ProviderPatientPanel,
+  ProviderSummaryItem,
+  PracticePerformanceMetrics,
 } from "../types";
 
 // ===== API Configuration =====
@@ -1241,5 +1248,65 @@ export const programService = {
   provisionTemplate: async (id: string, practiceId: string): Promise<ApiResponse<Program>> => {
     if (useMockData()) return mockCreate<Program>({ id, isTemplate: false });
     return apiFetch<Program>(`/admin/master-data/programs/${id}/provision`, { method: "POST", body: JSON.stringify({ practiceId }) });
+  },
+};
+
+// ===== Engagement Service =====
+
+export const engagementService = {
+  listCampaigns: async (params?: Record<string, string>): Promise<ApiResponse<EngagementCampaign[]>> => {
+    const query = params ? "?" + new URLSearchParams(params).toString() : "";
+    if (useMockData()) return { data: [] };
+    return apiFetch<EngagementCampaign[]>(`/engagement/campaigns${query}`);
+  },
+  createCampaign: async (data: Partial<EngagementCampaign>): Promise<ApiResponse<EngagementCampaign>> => {
+    if (useMockData()) return mockCreate<EngagementCampaign>(data);
+    return apiFetch<EngagementCampaign>("/engagement/campaigns", { method: "POST", body: JSON.stringify(data) });
+  },
+  updateCampaign: async (id: string, data: Partial<EngagementCampaign>): Promise<ApiResponse<EngagementCampaign>> => {
+    if (useMockData()) return mockUpdate<EngagementCampaign>(data);
+    return apiFetch<EngagementCampaign>(`/engagement/campaigns/${id}`, { method: "PUT", body: JSON.stringify(data) });
+  },
+  deleteCampaign: async (id: string): Promise<ApiResponse<void>> => {
+    if (useMockData()) return mockDelete();
+    return apiFetch<void>(`/engagement/campaigns/${id}`, { method: "DELETE" });
+  },
+  getAtRiskPatients: async (params?: Record<string, string>): Promise<ApiResponse<PatientEngagementScore[]>> => {
+    const query = params ? "?" + new URLSearchParams(params).toString() : "";
+    if (useMockData()) return { data: [] };
+    return apiFetch<PatientEngagementScore[]>(`/engagement/at-risk-patients${query}`);
+  },
+  getPatientScore: async (patientId: string): Promise<ApiResponse<PatientEngagementScore>> => {
+    if (useMockData()) return { data: {} as PatientEngagementScore };
+    return apiFetch<PatientEngagementScore>(`/engagement/patient/${patientId}/score`);
+  },
+  getPatientLogs: async (patientId: string): Promise<ApiResponse<EngagementAnalyticsSummary>> => {
+    if (useMockData()) return { data: {} as EngagementAnalyticsSummary };
+    return apiFetch<EngagementAnalyticsSummary>(`/engagement/patient/${patientId}/logs`);
+  },
+  getAnalyticsSummary: async (): Promise<ApiResponse<EngagementAnalyticsSummary>> => {
+    if (useMockData()) return { data: { totalPatients: 0, atRiskPatients: 0, highEngagement: 0, averageEngagementScore: 0, activeCampaigns: 0, recentLogs: [] } };
+    return apiFetch<EngagementAnalyticsSummary>("/engagement/analytics-summary");
+  },
+};
+
+// ===== Provider Analytics Service =====
+
+export const providerAnalyticsService = {
+  getProviderRevenue: async (providerId: string): Promise<ApiResponse<ProviderRevenueMetrics>> => {
+    if (useMockData()) return { data: {} as ProviderRevenueMetrics };
+    return apiFetch<ProviderRevenueMetrics>(`/analytics/providers/${providerId}/revenue`);
+  },
+  getProviderPanel: async (providerId: string): Promise<ApiResponse<ProviderPatientPanel>> => {
+    if (useMockData()) return { data: {} as ProviderPatientPanel };
+    return apiFetch<ProviderPatientPanel>(`/analytics/providers/${providerId}/patient-panel`);
+  },
+  getProvidersSummary: async (): Promise<ApiResponse<ProviderSummaryItem[]>> => {
+    if (useMockData()) return { data: [] };
+    return apiFetch<ProviderSummaryItem[]>("/analytics/providers-summary");
+  },
+  getPerformanceComparison: async (): Promise<ApiResponse<PracticePerformanceMetrics>> => {
+    if (useMockData()) return { data: { practiceMetrics: { totalUniquePatients: 0, appointmentsCompleted: 0, noShows: 0, cancellations: 0, completionRatePercent: 0, noShowRatePercent: 0 } } };
+    return apiFetch<PracticePerformanceMetrics>("/analytics/performance-comparison");
   },
 };

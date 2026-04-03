@@ -12,6 +12,8 @@ import { PracticeSettings } from "../settings/PracticeSettings";
 import { CalendarView } from "../shared/CalendarView";
 import { AppointmentBookingWidget } from "../widgets/AppointmentBookingWidget";
 import { AuditDashboard } from "../shared/AuditDashboard";
+import { EngagementSection } from "../shared/EngagementSection";
+import { ProviderAnalyticsSection } from "../shared/ProviderAnalyticsSection";
 import { ProgramsSection } from "./ProgramsSection";
 import { RevenueAnalyticsTab } from "./RevenueAnalyticsTab";
 import { DunningDashboardTab } from "./DunningDashboardTab";
@@ -81,6 +83,7 @@ import {
   Package,
   Radio,
   Trash2,
+  Megaphone,
 } from "lucide-react";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -104,6 +107,8 @@ type TabId =
   | "staff"
   | "messages"
   | "notifications"
+  | "engagement"
+  | "analytics"
   | "compliance"
   | "practice-settings"
   | "branding"
@@ -195,6 +200,13 @@ const NAV_SECTIONS: NavSection[] = [
     items: [
       { id: "messages", label: "Messages", icon: MessageSquare },
       { id: "notifications", label: "Notifications", icon: Bell },
+    ],
+  },
+  {
+    title: "Engagement",
+    items: [
+      { id: "engagement", label: "Patient Engagement", icon: Megaphone },
+      { id: "analytics", label: "Provider Analytics", icon: BarChart3 },
     ],
   },
   {
@@ -7040,6 +7052,10 @@ export function PracticePortal() {
         return renderMessages();
       case "notifications":
         return renderNotifications();
+      case "engagement":
+        return <EngagementSection />;
+      case "analytics":
+        return <ProviderAnalyticsSection />;
       case "compliance":
         return <AuditDashboard />;
       case "revenue-analytics":

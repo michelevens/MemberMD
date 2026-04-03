@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use App\Traits\BelongsToTenant;
 use App\Traits\Auditable;
 
@@ -71,6 +72,7 @@ class Patient extends Model
     public function familyMembers(): HasMany { return $this->hasMany(PatientFamilyMember::class, 'primary_patient_id'); }
     public function programEnrollments(): HasMany { return $this->hasMany(ProgramEnrollment::class); }
     public function employer(): BelongsTo { return $this->belongsTo(Employer::class); }
+    public function engagementScore(): HasOne { return $this->hasOne(PatientEngagementScore::class); }
 
     public function getFullNameAttribute(): string
     {

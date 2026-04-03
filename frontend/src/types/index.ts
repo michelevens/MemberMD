@@ -869,3 +869,118 @@ export interface ProgramFundingSource {
   isPrimary: boolean;
   isActive: boolean;
 }
+
+// ─── Engagement & Analytics ──────────────────────────────────────────────────
+
+export type CampaignTriggerType = "no_visit" | "no_message_response" | "low_engagement" | "manual";
+export type CampaignActionType = "send_email" | "send_sms" | "send_message";
+export type CampaignAudienceFilter = "all" | "by_plan" | "by_provider" | "custom";
+export type CampaignStatus = "active" | "inactive" | "paused";
+export type RiskLevel = "low" | "normal" | "high" | "at_risk";
+
+export interface EngagementCampaign {
+  id: string;
+  tenantId: string;
+  name: string;
+  description: string | null;
+  triggerType: CampaignTriggerType;
+  triggerConfig: Record<string, any>;
+  actionType: CampaignActionType;
+  actionConfig: Record<string, any>;
+  audienceFilter: CampaignAudienceFilter;
+  audienceConfig: Record<string, any> | null;
+  status: CampaignStatus;
+  activatedAt: string | null;
+  createdBy: string;
+  creator?: { id: string; firstName: string; lastName: string };
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PatientEngagementScore {
+  id: string;
+  tenantId: string;
+  patientId: string;
+  overallScore: number;
+  visitFrequencyScore: number;
+  messageResponsivenessScore: number;
+  screeningCompletionScore: number;
+  portalLoginScore: number;
+  noShowRateScore: number;
+  lastVisitDaysAgo: number | null;
+  appointmentsThisMonth: number;
+  noShowCount6m: number;
+  riskLevel: RiskLevel;
+  engagementFlags: string[];
+  lastCalculatedAt: string;
+  patient?: Patient & { user?: User };
+}
+
+export interface EngagementLog {
+  id: string;
+  tenantId: string;
+  patientId: string;
+  campaignId: string | null;
+  eventType: string;
+  eventData: Record<string, any>;
+  triggeredAt: string;
+}
+
+export interface EngagementAnalyticsSummary {
+  totalPatients: number;
+  atRiskPatients: number;
+  highEngagement: number;
+  averageEngagementScore: number;
+  activeCampaigns: number;
+  recentLogs: EngagementLog[];
+}
+
+export interface ProviderRevenueMetrics {
+  providerId: string;
+  providerName: string;
+  activeSubscriptions: number;
+  churnedThisMonth: number;
+  mrr: number;
+  revenueThisMonth: number;
+  revenueThisYear: number;
+  outstandingInvoices: number;
+  invoicesPaidMonth: number;
+  appointmentsScheduledMonth: number;
+  appointmentsCompletedMonth: number;
+  noShowsMonth: number;
+  cancellationsMonth: number;
+}
+
+export interface ProviderPatientPanel {
+  providerId: string;
+  providerName: string;
+  totalPatients: number;
+  activeMembers: number;
+  averageAge: number;
+  genderDistribution: { male: number; female: number };
+  engagementMetrics: {
+    engagedPatients: number;
+    atRiskPatients: number;
+    criticalRiskPatients: number;
+    averageEngagementScore: number;
+  };
+}
+
+export interface ProviderSummaryItem {
+  providerId: string;
+  name: string;
+  activeSubscriptions: number;
+  mrr: number;
+  appointmentsThisMonth: number;
+}
+
+export interface PracticePerformanceMetrics {
+  practiceMetrics: {
+    totalUniquePatients: number;
+    appointmentsCompleted: number;
+    noShows: number;
+    cancellations: number;
+    completionRatePercent: number;
+    noShowRatePercent: number;
+  };
+}

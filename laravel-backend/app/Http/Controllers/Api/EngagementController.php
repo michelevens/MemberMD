@@ -3,147 +3,187 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Models\EngagementRule;
-use App\Models\PatientEngagement;
-use App\Services\EngagementScoringService;
+use App\Models\EngagementCampaign;
+use App\Models\PatientEngagementScore;
+use App\Models\EngagementLog;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
 
 class EngagementController extends Controller
 {
     /**
-     * GET /engagement/dashboard
-     * Practice-wide engagement overview.
+     * Get engagement campaigns
      */
-    public function dashboard(Request $request): JsonResponse
+    public function campaigns(Request $request): JsonResponse
     {
         $user = $request->user();
-        abort_if($user->role === 'patient', 403);
+        abort_if(!in_array($user->role, ['superadmin', 'practice_admin']), 403, 'Unauthorized');
 
-        $tenantId = $user->tenant_id;
+        $query = EngagementCampaign::where('tenant_id', $user->tenant_id)
+            ->with('creator:id,first_name,last_name');
 
-        // Aggregation
-        $stats = DB::selectOne("
-            SELECT
-                COUNT(*) AS total_patients,
-                ROUND(AVG(score)::numeric, 1) AS avg_score,
-                COUNT(*) FILTER (WHERE risk_level = 'high') AS high_risk,
-                COUNT(*) FILTER (WHERE risk_level = 'medium') AS medium_risk,
-                COUNT(*) FILTER (WHERE risk_level = 'low') AS low_risk,
-                COUNT(*) FILTER (WHERE days_since_last_visit >= 90) AS no_visit_90d,
-                COUNT(*) FILTER (WHERE days_since_last_visit >= 60 AND days_since_last_visit < 90) AS no_visit_60d,
-                COUNT(*) FILTER (WHERE days_since_last_visit >= 30 AND days_since_last_visit < 60) AS no_visit_30d
-            FROM patient_engagements
-            WHERE tenant_id = ?
-        ", [$tenantId]);
-
-        // At-risk patients (high risk, sorted by score ascending)
-        $atRiskPatients = PatientEngagement::where('tenant_id', $tenantId)
-            ->where('risk_level', 'high')
-            ->with('patient:id,first_name,last_name,phone,email')
-            ->orderBy('score')
-            ->limit(20)
-            ->get();
-
-        return response()->json([
-            'data' => [
-                'total_patients' => (int) ($stats->total_patients ?? 0),
-                'avg_score' => (float) ($stats->avg_score ?? 0),
-                'distribution' => [
-                    'high_risk' => (int) ($stats->high_risk ?? 0),
-                    'medium_risk' => (int) ($stats->medium_risk ?? 0),
-                    'low_risk' => (int) ($stats->low_risk ?? 0),
-                ],
-                'visit_gaps' => [
-                    'no_visit_30d' => (int) ($stats->no_visit_30d ?? 0),
-                    'no_visit_60d' => (int) ($stats->no_visit_60d ?? 0),
-                    'no_visit_90d' => (int) ($stats->no_visit_90d ?? 0),
-                ],
-                'at_risk_patients' => $atRiskPatients,
-            ],
-        ]);
-    }
-
-    /**
-     * GET /engagement/patient/{patientId}
-     * Single patient's engagement details.
-     */
-    public function patientScore(Request $request, string $patientId): JsonResponse
-    {
-        $user = $request->user();
-        abort_if($user->role === 'patient' && $user->patient?->id !== $patientId, 403);
-
-        $engagement = PatientEngagement::where('tenant_id', $user->tenant_id)
-            ->where('patient_id', $patientId)
-            ->with('patient:id,first_name,last_name,phone,email')
-            ->first();
-
-        if (!$engagement) {
-            // Calculate on-the-fly if not yet computed
-            $service = app(EngagementScoringService::class);
-            $engagement = $service->calculateScore($patientId, $user->tenant_id);
-            $engagement->load('patient:id,first_name,last_name,phone,email');
+        if ($request->filled('status')) {
+            $query->where('status', $request->status);
         }
 
-        return response()->json(['data' => $engagement]);
+        $campaigns = $query->orderBy('created_at', 'desc')
+            ->paginate($request->input('per_page', 25));
+
+        return response()->json(['data' => $campaigns]);
     }
 
     /**
-     * GET /engagement/rules
-     * List engagement rules for the practice.
+     * Create engagement campaign
      */
-    public function rules(Request $request): JsonResponse
+    public function createCampaign(Request $request): JsonResponse
     {
         $user = $request->user();
-        abort_if(!in_array($user->role, ['superadmin', 'practice_admin']), 403);
-
-        $rules = EngagementRule::where('tenant_id', $user->tenant_id)
-            ->orderBy('name')
-            ->get();
-
-        return response()->json(['data' => $rules]);
-    }
-
-    /**
-     * POST /engagement/rules
-     * Create or update an engagement rule.
-     */
-    public function storeRule(Request $request): JsonResponse
-    {
-        $user = $request->user();
-        abort_if(!in_array($user->role, ['superadmin', 'practice_admin']), 403);
+        abort_if(!in_array($user->role, ['superadmin', 'practice_admin']), 403, 'Unauthorized');
 
         $validated = $request->validate([
             'name' => 'required|string|max:255',
-            'trigger_condition' => 'required|string|in:no_visit_30d,no_visit_60d,no_visit_90d,missed_screening,low_score,no_show_streak',
-            'action_type' => 'required|string|in:send_message,create_task,notify_provider,send_email',
-            'action_config' => 'nullable|array',
-            'action_config.message_template' => 'nullable|string|max:2000',
-            'action_config.recipient' => 'nullable|string|max:255',
-            'action_config.subject' => 'nullable|string|max:255',
-            'is_active' => 'boolean',
+            'description' => 'nullable|string',
+            'trigger_type' => 'required|string|in:no_visit,no_message_response,low_engagement,manual',
+            'trigger_config' => 'required|array',
+            'action_type' => 'required|string|in:send_email,send_sms,send_message',
+            'action_config' => 'required|array',
+            'audience_filter' => 'required|string|in:all,by_plan,by_provider,custom',
+            'audience_config' => 'nullable|array',
         ]);
 
         $validated['tenant_id'] = $user->tenant_id;
+        $validated['created_by'] = $user->id;
+        $validated['status'] = 'active';
 
-        $rule = EngagementRule::create($validated);
+        $campaign = EngagementCampaign::create($validated);
 
-        return response()->json(['data' => $rule], 201);
+        return response()->json(['data' => $campaign->load('creator:id,first_name,last_name')], 201);
     }
 
     /**
-     * DELETE /engagement/rules/{id}
-     * Remove an engagement rule.
+     * Update engagement campaign
      */
-    public function deleteRule(Request $request, string $id): JsonResponse
+    public function updateCampaign(Request $request, string $id): JsonResponse
     {
         $user = $request->user();
-        abort_if(!in_array($user->role, ['superadmin', 'practice_admin']), 403);
+        abort_if(!in_array($user->role, ['superadmin', 'practice_admin']), 403, 'Unauthorized');
 
-        $rule = EngagementRule::where('tenant_id', $user->tenant_id)->findOrFail($id);
-        $rule->delete();
+        $campaign = EngagementCampaign::where('tenant_id', $user->tenant_id)->findOrFail($id);
 
-        return response()->json(['message' => 'Rule deleted']);
+        $validated = $request->validate([
+            'name' => 'sometimes|string|max:255',
+            'description' => 'nullable|string',
+            'trigger_type' => 'sometimes|string|in:no_visit,no_message_response,low_engagement,manual',
+            'trigger_config' => 'nullable|array',
+            'action_type' => 'sometimes|string|in:send_email,send_sms,send_message',
+            'action_config' => 'nullable|array',
+            'audience_filter' => 'sometimes|string|in:all,by_plan,by_provider,custom',
+            'audience_config' => 'nullable|array',
+            'status' => 'sometimes|string|in:active,inactive,paused',
+        ]);
+
+        $campaign->update($validated);
+
+        return response()->json(['data' => $campaign->fresh()->load('creator:id,first_name,last_name')]);
+    }
+
+    /**
+     * Delete engagement campaign
+     */
+    public function deleteCampaign(Request $request, string $id): JsonResponse
+    {
+        $user = $request->user();
+        abort_if(!in_array($user->role, ['superadmin', 'practice_admin']), 403, 'Unauthorized');
+
+        $campaign = EngagementCampaign::where('tenant_id', $user->tenant_id)->findOrFail($id);
+        $campaign->delete();
+
+        return response()->json(null, 204);
+    }
+
+    /**
+     * Get at-risk patients dashboard
+     */
+    public function atRiskPatients(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        abort_if(!in_array($user->role, ['superadmin', 'practice_admin', 'provider']), 403, 'Unauthorized');
+
+        $query = PatientEngagementScore::where('tenant_id', $user->tenant_id)
+            ->where('risk_level', '!=', 'low')
+            ->with(['patient.user:id,first_name,last_name,email']);
+
+        if ($request->filled('risk_level')) {
+            $query->where('risk_level', $request->risk_level);
+        }
+
+        $patients = $query->orderBy('overall_score', 'asc')
+            ->paginate($request->input('per_page', 25));
+
+        return response()->json(['data' => $patients]);
+    }
+
+    /**
+     * Get patient engagement score
+     */
+    public function getPatientScore(Request $request, string $patientId): JsonResponse
+    {
+        $user = $request->user();
+        $score = PatientEngagementScore::where('tenant_id', $user->tenant_id)
+            ->where('patient_id', $patientId)
+            ->first();
+
+        if (!$score) {
+            return response()->json(['message' => 'No engagement score found'], 404);
+        }
+
+        return response()->json(['data' => $score]);
+    }
+
+    /**
+     * Get engagement activity logs for patient
+     */
+    public function getPatientActivityLogs(Request $request, string $patientId): JsonResponse
+    {
+        $user = $request->user();
+
+        $logs = EngagementLog::where('tenant_id', $user->tenant_id)
+            ->where('patient_id', $patientId)
+            ->orderBy('triggered_at', 'desc')
+            ->paginate($request->input('per_page', 25));
+
+        return response()->json(['data' => $logs]);
+    }
+
+    /**
+     * Get engagement analytics summary
+     */
+    public function analyticsSummary(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        abort_if(!in_array($user->role, ['superadmin', 'practice_admin']), 403, 'Unauthorized');
+
+        $tenantId = $user->tenant_id;
+
+        $stats = [
+            'total_patients' => PatientEngagementScore::where('tenant_id', $tenantId)->count(),
+            'at_risk_patients' => PatientEngagementScore::where('tenant_id', $tenantId)
+                ->whereIn('risk_level', ['high', 'at_risk'])
+                ->count(),
+            'high_engagement' => PatientEngagementScore::where('tenant_id', $tenantId)
+                ->where('risk_level', 'low')
+                ->count(),
+            'average_engagement_score' => PatientEngagementScore::where('tenant_id', $tenantId)
+                ->avg('overall_score'),
+            'active_campaigns' => EngagementCampaign::where('tenant_id', $tenantId)
+                ->where('status', 'active')
+                ->count(),
+            'recent_logs' => EngagementLog::where('tenant_id', $tenantId)
+                ->orderBy('triggered_at', 'desc')
+                ->limit(10)
+                ->get(),
+        ];
+
+        return response()->json(['data' => $stats]);
     }
 }

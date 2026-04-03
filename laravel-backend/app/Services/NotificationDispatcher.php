@@ -3,7 +3,9 @@
 namespace App\Services;
 
 use App\Models\NotificationPreference;
+use App\Models\User;
 use Carbon\Carbon;
+use Illuminate\Support\Facades\Log;
 
 class NotificationDispatcher
 {
@@ -45,6 +47,26 @@ class NotificationDispatcher
         }
 
         return true;
+    }
+
+    /**
+     * Send a notification to a user via Laravel's notification system.
+     */
+    public function sendNotification(User $user, string $notificationClass, array $data = []): void
+    {
+        try {
+            if (!$this->shouldSend($user->id, $data['category'] ?? 'general', 'in_app')) {
+                return;
+            }
+
+            if (class_exists($notificationClass)) {
+                $user->notify(new $notificationClass($data));
+            } else {
+                Log::info("Notification queued: {$notificationClass} for user {$user->id}", $data);
+            }
+        } catch (\Throwable $e) {
+            Log::warning("Failed to send notification to user {$user->id}: " . $e->getMessage());
+        }
     }
 
     /**
