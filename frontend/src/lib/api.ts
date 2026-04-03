@@ -1310,3 +1310,39 @@ export const providerAnalyticsService = {
     return apiFetch<PracticePerformanceMetrics>("/analytics/performance-comparison");
   },
 };
+
+// ===== Enhanced Billing Services =====
+
+export const billingEnhancedService = {
+  // PDF Invoice
+  getInvoicePdfUrl: (invoiceId: string, download?: boolean): string => {
+    const base = `${API_BASE_URL}/invoices/${invoiceId}/pdf`;
+    const params = new URLSearchParams();
+    if (download) params.set("download", "1");
+    const token = getAuthToken();
+    if (token) params.set("token", token);
+    return params.toString() ? `${base}?${params}` : base;
+  },
+
+  // Proration Preview
+  previewPlanChange: async (membershipId: string, planId: string): Promise<ApiResponse<Record<string, unknown>>> => {
+    if (useMockData()) return { data: { oldPlanName: "Essential", newPlanName: "Complete", credit: 33.00, charge: 66.33, net: 33.33, daysRemaining: 10, totalDays: 30, isUpgrade: true, description: "Upgrade from Essential to Complete: prorated charge of $33.33" } };
+    return apiFetch<Record<string, unknown>>(`/memberships/${membershipId}/preview-plan-change`, { method: "POST", body: JSON.stringify({ planId }) });
+  },
+
+  // Smart Retry
+  smartRetry: async (membershipId: string): Promise<ApiResponse<Record<string, unknown>>> => {
+    if (useMockData()) return { data: { success: false, reason: "mock_mode", nextRetryAt: new Date(Date.now() + 86400000).toISOString(), retriesRemaining: 3 } };
+    return apiFetch<Record<string, unknown>>(`/dunning/${membershipId}/smart-retry`, { method: "POST" });
+  },
+  getRetryAnalytics: async (): Promise<ApiResponse<Record<string, unknown>>> => {
+    if (useMockData()) return { data: { totalDunningEvents: 0, recovered: 0, pending: 0, exhaustedRetries: 0, recoveryRatePercent: 0, avgAttemptsToRecover: 0, maxRetries: 4, upcomingRetries: [], retrySchedule: { 1: 1, 2: 3, 3: 7, 4: 14 }, preferredRetryDays: ["Tuesday", "Wednesday", "Thursday"] } };
+    return apiFetch<Record<string, unknown>>("/dunning/retry-analytics");
+  },
+
+  // Retention Offers
+  getRetentionOffers: async (membershipId: string, reason: string): Promise<ApiResponse<Record<string, unknown>>> => {
+    if (useMockData()) return { data: { offers: [{ type: "pause", title: "Pause your membership", description: "Take a break for up to 3 months.", cta: "Pause Instead" }, { type: "downgrade", title: "Switch to Essential", description: "Save $100/month.", cta: "Switch to Essential", planId: "p1", planPrice: 99, monthlySavings: 100 }], currentPlan: { name: "Complete", monthlyPrice: 199 }, reason } };
+    return apiFetch<Record<string, unknown>>(`/memberships/${membershipId}/retention-offers`, { method: "POST", body: JSON.stringify({ reason }) });
+  },
+};

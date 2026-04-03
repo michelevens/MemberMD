@@ -5,7 +5,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../contexts/AuthContext";
-import { dashboardService, membershipPlanService, messageService, patientService, appointmentService, encounterService, prescriptionService, invoiceService, programService, telehealthService, screeningService, couponService, providerService, paymentService, notificationService, apiFetch } from "../../lib/api";
+import { dashboardService, membershipPlanService, messageService, patientService, appointmentService, encounterService, prescriptionService, invoiceService, programService, telehealthService, screeningService, couponService, providerService, paymentService, notificationService, apiFetch, billingEnhancedService } from "../../lib/api";
 import { HeaderToolbar } from "../shared/HeaderToolbar";
 import { UserSettingsDropdown } from "../shared/UserSettingsDropdown";
 import { PracticeSettings } from "../settings/PracticeSettings";
@@ -799,6 +799,10 @@ export function PracticePortal() {
   // ─── Roster Cancel Membership Dialog ───────────────────────────────────
   const [rosterCancelDialog, setRosterCancelDialog] = useState<{ patientId: string; patientName: string; membershipId: string } | null>(null);
   const [rosterCancelReason, setRosterCancelReason] = useState("");
+  const [rosterCancelStep, setRosterCancelStep] = useState<"reason" | "offers" | "confirm">("reason");
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [retentionOffers, setRetentionOffers] = useState<any[]>([]);
+  const [retentionLoading, setRetentionLoading] = useState(false);
   const [rosterCancelLoading, setRosterCancelLoading] = useState(false);
 
   // ─── Roster Enroll/Change Plan Dialog ──────────────────────────────────
@@ -1257,25 +1261,6 @@ export function PracticePortal() {
     }
   }, [loadPracticeData, setToast]);
 
-  // ─── Cancel membership (roster action) ─────────────────────────────────
-  const handleRosterCancelMembership = useCallback(async () => {
-    if (!rosterCancelDialog || !rosterCancelReason.trim()) return;
-    setRosterCancelLoading(true);
-    try {
-      await apiFetch(`/memberships/${rosterCancelDialog.membershipId}/cancel`, {
-        method: "POST",
-        body: JSON.stringify({ reason: rosterCancelReason }),
-      });
-      setToast({ message: `${rosterCancelDialog.patientName}'s membership cancelled.`, type: "success" });
-      setRosterCancelDialog(null);
-      setRosterCancelReason("");
-      loadPracticeData();
-    } catch {
-      setToast({ message: "Failed to cancel membership.", type: "error" });
-    }
-    setRosterCancelLoading(false);
-  }, [rosterCancelDialog, rosterCancelReason, loadPracticeData, setToast]);
-
   // ─── Fetch plans for roster plan dialog ────────────────────────────────
   const fetchRosterPlans = useCallback(async () => {
     setRosterAvailablePlansLoading(true);
@@ -1294,11 +1279,13 @@ export function PracticePortal() {
     setRosterPlanActionLoading(true);
     try {
       if (rosterPlanDialog.mode === "change" && rosterPlanDialog.membershipId) {
-        await apiFetch(`/memberships/${rosterPlanDialog.membershipId}/change-plan`, {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const res: any = await apiFetch(`/memberships/${rosterPlanDialog.membershipId}/change-plan`, {
           method: "POST",
           body: JSON.stringify({ planId: rosterSelectedPlanId }),
         });
-        setToast({ message: "Plan changed successfully.", type: "success" });
+        const msg = res?.message || "Plan changed successfully.";
+        setToast({ message: msg, type: "success" });
       } else {
         await apiFetch("/memberships", {
           method: "POST",
@@ -5538,6 +5525,7 @@ export function PracticePortal() {
                           <Pencil className="w-4 h-4" />
                         </button>
                         <MoreActionsDropdown actions={[
+                          { label: "Download PDF", onClick: () => { const url = billingEnhancedService.getInvoicePdfUrl(inv.id, true); window.open(url, "_blank"); } },
                           ...(inv.status === "open" || inv.status === "overdue" ? [
                             { label: "Send Invoice", onClick: () => handleSendInvoice(inv.id) },
                             { label: "Mark as Paid", onClick: () => handleMarkInvoicePaid(inv.id) },
@@ -7182,40 +7170,165 @@ export function PracticePortal() {
         />
       )}
 
-      {/* ─── Roster Cancel Membership Modal ────────────────────────────── */}
+      {/* ─── Roster Cancel Membership Modal (with Retention Offers) ─────── */}
       {rosterCancelDialog && (
         <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: "rgba(0,0,0,0.5)" }}>
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
-            <div className="p-6" style={{ background: "linear-gradient(135deg, #dc2626, #ef4444)" }}>
-              <h3 className="text-lg font-bold text-white">Cancel Membership</h3>
-              <p className="text-sm text-red-100 mt-1">Cancel {rosterCancelDialog.patientName}&apos;s membership</p>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden">
+            {/* Header */}
+            <div className="p-6" style={{ background: rosterCancelStep === "offers" ? "linear-gradient(135deg, #1B2B4D, #243b53)" : "linear-gradient(135deg, #dc2626, #ef4444)" }}>
+              <h3 className="text-lg font-bold text-white">
+                {rosterCancelStep === "reason" ? "Cancel Membership" : rosterCancelStep === "offers" ? "Before You Go..." : "Confirm Cancellation"}
+              </h3>
+              <p className="text-sm mt-1" style={{ color: rosterCancelStep === "offers" ? "#94a3b8" : "#fecaca" }}>
+                {rosterCancelStep === "reason" ? `Cancel ${rosterCancelDialog.patientName}'s membership` : rosterCancelStep === "offers" ? "We'd love to keep this member. Consider these options:" : `This will cancel ${rosterCancelDialog.patientName}'s membership`}
+              </p>
             </div>
-            <div className="p-6">
-              <label className="block text-sm font-medium text-slate-700 mb-1">Cancellation Reason *</label>
-              <textarea
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none resize-none"
-                rows={3}
-                placeholder="Enter reason for cancellation..."
-                value={rosterCancelReason}
-                onChange={(e) => setRosterCancelReason(e.target.value)}
-                autoFocus
-              />
-            </div>
-            <div className="px-6 pb-6 flex justify-end gap-3">
+
+            {/* Step 1: Reason Selection */}
+            {rosterCancelStep === "reason" && (
+              <div className="p-6">
+                <label className="block text-sm font-medium text-slate-700 mb-2">Why is this member cancelling? *</label>
+                <div className="space-y-2">
+                  {[
+                    { value: "cost", label: "Too expensive" },
+                    { value: "dissatisfied", label: "Dissatisfied with care" },
+                    { value: "moved", label: "Moving / relocated" },
+                    { value: "switching_provider", label: "Switching provider" },
+                    { value: "other", label: "Other reason" },
+                  ].map(opt => (
+                    <label key={opt.value} className="flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors" style={{ borderColor: rosterCancelReason === opt.value ? "#27ab83" : "#e2e8f0", backgroundColor: rosterCancelReason === opt.value ? "#e6fffa" : "white" }}>
+                      <input type="radio" name="cancelReason" value={opt.value} checked={rosterCancelReason === opt.value} onChange={() => setRosterCancelReason(opt.value)} className="accent-teal-600" />
+                      <span className="text-sm" style={{ color: "#334155" }}>{opt.label}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Step 2: Retention Offers */}
+            {rosterCancelStep === "offers" && (
+              <div className="p-6">
+                {retentionLoading ? (
+                  <div className="flex items-center justify-center py-8">
+                    <div className="w-5 h-5 border-2 rounded-full animate-spin" style={{ borderColor: "#e2e8f0", borderTopColor: "#27ab83" }} />
+                    <span className="ml-2 text-sm text-slate-500">Finding options...</span>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {retentionOffers.map((offer: { type: string; title: string; description: string; cta: string; planId?: string; monthlySavings?: number }, i: number) => (
+                      <div key={i} className="rounded-xl border p-4 cursor-pointer transition-all hover:shadow-md" style={{ borderColor: "#e2e8f0" }}
+                        onClick={async () => {
+                          if (offer.type === "pause" && rosterCancelDialog) {
+                            try {
+                              await apiFetch(`/memberships/${rosterCancelDialog.membershipId}/pause`, { method: "POST", body: JSON.stringify({ reason: rosterCancelReason }) });
+                              setToast({ message: `${rosterCancelDialog.patientName}'s membership paused instead of cancelled.`, type: "success" });
+                              setRosterCancelDialog(null); setRosterCancelReason(""); setRosterCancelStep("reason"); loadPracticeData();
+                            } catch { setToast({ message: "Failed to pause membership.", type: "error" }); }
+                          } else if (offer.type === "downgrade" && offer.planId && rosterCancelDialog) {
+                            try {
+                              await apiFetch(`/memberships/${rosterCancelDialog.membershipId}/change-plan`, { method: "POST", body: JSON.stringify({ planId: offer.planId }) });
+                              setToast({ message: `Switched to ${offer.title.replace("Switch to ", "")} — saved $${offer.monthlySavings}/mo.`, type: "success" });
+                              setRosterCancelDialog(null); setRosterCancelReason(""); setRosterCancelStep("reason"); loadPracticeData();
+                            } catch { setToast({ message: "Failed to change plan.", type: "error" }); }
+                          } else if (offer.type === "contact") {
+                            setToast({ message: "Provider callback scheduled.", type: "success" });
+                            setRosterCancelDialog(null); setRosterCancelReason(""); setRosterCancelStep("reason");
+                          }
+                        }}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <h4 className="text-sm font-semibold" style={{ color: "#102a43" }}>{offer.title}</h4>
+                            <p className="text-xs mt-1" style={{ color: "#64748b" }}>{offer.description}</p>
+                          </div>
+                          <span className="text-xs font-medium px-3 py-1.5 rounded-lg whitespace-nowrap" style={{ backgroundColor: "#e6fffa", color: "#147d64" }}>{offer.cta}</span>
+                        </div>
+                      </div>
+                    ))}
+                    {retentionOffers.length === 0 && (
+                      <p className="text-sm text-center py-4" style={{ color: "#94a3b8" }}>No alternative offers available.</p>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Step 3: Final Confirm */}
+            {rosterCancelStep === "confirm" && (
+              <div className="p-6">
+                <div className="rounded-lg p-4 mb-4" style={{ backgroundColor: "#fef2f2", border: "1px solid #fecaca" }}>
+                  <p className="text-sm" style={{ color: "#991b1b" }}>
+                    This action will immediately cancel {rosterCancelDialog.patientName}&apos;s membership. This cannot be undone.
+                  </p>
+                </div>
+                <p className="text-sm" style={{ color: "#64748b" }}>
+                  Reason: <strong style={{ color: "#334155" }}>{rosterCancelReason}</strong>
+                </p>
+              </div>
+            )}
+
+            {/* Footer */}
+            <div className="px-6 pb-6 flex justify-between gap-3">
               <button
-                onClick={() => { setRosterCancelDialog(null); setRosterCancelReason(""); }}
+                onClick={() => {
+                  if (rosterCancelStep === "reason") { setRosterCancelDialog(null); setRosterCancelReason(""); setRosterCancelStep("reason"); }
+                  else if (rosterCancelStep === "offers") setRosterCancelStep("reason");
+                  else setRosterCancelStep("offers");
+                }}
                 className="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100 transition-colors"
               >
-                Go Back
+                {rosterCancelStep === "reason" ? "Never Mind" : "Go Back"}
               </button>
-              <button
-                onClick={handleRosterCancelMembership}
-                disabled={!rosterCancelReason.trim() || rosterCancelLoading}
-                className="px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors disabled:opacity-50"
-                style={{ backgroundColor: "#dc2626" }}
-              >
-                {rosterCancelLoading ? "Cancelling..." : "Cancel Membership"}
-              </button>
+              <div className="flex gap-2">
+                {rosterCancelStep === "reason" && (
+                  <button
+                    onClick={async () => {
+                      setRetentionLoading(true); setRosterCancelStep("offers");
+                      try {
+                        const res = await billingEnhancedService.getRetentionOffers(rosterCancelDialog.membershipId, rosterCancelReason);
+                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                        setRetentionOffers((res.data as any)?.offers || []);
+                      } catch { setRetentionOffers([]); }
+                      setRetentionLoading(false);
+                    }}
+                    disabled={!rosterCancelReason}
+                    className="px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors disabled:opacity-50"
+                    style={{ backgroundColor: "#dc2626" }}
+                  >
+                    Continue
+                  </button>
+                )}
+                {rosterCancelStep === "offers" && (
+                  <button
+                    onClick={() => setRosterCancelStep("confirm")}
+                    className="px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+                    style={{ backgroundColor: "#fef2f2", color: "#dc2626" }}
+                  >
+                    Cancel Anyway
+                  </button>
+                )}
+                {rosterCancelStep === "confirm" && (
+                  <button
+                    onClick={async () => {
+                      setRosterCancelLoading(true);
+                      try {
+                        await apiFetch(`/memberships/${rosterCancelDialog.membershipId}/cancel`, {
+                          method: "POST",
+                          body: JSON.stringify({ reason: rosterCancelReason, retentionOffered: true, retentionDeclined: "all" }),
+                        });
+                        setToast({ message: `${rosterCancelDialog.patientName}'s membership cancelled.`, type: "success" });
+                        setRosterCancelDialog(null); setRosterCancelReason(""); setRosterCancelStep("reason"); loadPracticeData();
+                      } catch { setToast({ message: "Failed to cancel membership.", type: "error" }); }
+                      setRosterCancelLoading(false);
+                    }}
+                    disabled={rosterCancelLoading}
+                    className="px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors disabled:opacity-50"
+                    style={{ backgroundColor: "#dc2626" }}
+                  >
+                    {rosterCancelLoading ? "Cancelling..." : "Confirm Cancellation"}
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         </div>

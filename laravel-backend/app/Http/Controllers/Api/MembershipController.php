@@ -7,6 +7,7 @@ use App\Http\Requests\StoreMembershipRequest;
 use App\Models\PatientMembership;
 use App\Models\PatientEntitlement;
 use App\Models\MembershipPlan;
+use App\Services\ProrationService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -246,7 +247,88 @@ class MembershipController extends Controller
     }
 
     /**
-     * Cancel a membership.
+     * Get retention offers before cancellation.
+     * Returns contextual offers based on the cancellation reason.
+     */
+    public function retentionOffers(Request $request, string $id): JsonResponse
+    {
+        $user = $request->user();
+
+        $membership = PatientMembership::where('tenant_id', $user->tenant_id)
+            ->with('plan')
+            ->findOrFail($id);
+
+        if (in_array($membership->status, ['cancelled'])) {
+            return response()->json(['message' => 'Membership is already cancelled.'], 422);
+        }
+
+        $validated = $request->validate([
+            'reason' => 'required|string|in:moved,cost,dissatisfied,switching_provider,other',
+        ]);
+
+        $offers = [];
+        $currentPlan = $membership->plan;
+
+        // Offer 1: Pause (always available for active memberships)
+        if ($membership->status === 'active') {
+            $offers[] = [
+                'type' => 'pause',
+                'title' => 'Pause your membership',
+                'description' => 'Take a break for up to 3 months. Your plan and benefits will be waiting when you return.',
+                'cta' => 'Pause Instead',
+            ];
+        }
+
+        // Offer 2: Downgrade (if cheaper plans exist) — especially for cost reason
+        if (in_array($validated['reason'], ['cost', 'dissatisfied'])) {
+            $cheaperPlans = MembershipPlan::where('tenant_id', $user->tenant_id)
+                ->where('is_active', true)
+                ->where('id', '!=', $currentPlan->id)
+                ->where('monthly_price', '<', $currentPlan->monthly_price)
+                ->orderBy('monthly_price', 'desc')
+                ->limit(2)
+                ->get();
+
+            foreach ($cheaperPlans as $plan) {
+                $savings = (float) $currentPlan->monthly_price - (float) $plan->monthly_price;
+                $offers[] = [
+                    'type' => 'downgrade',
+                    'title' => "Switch to {$plan->name}",
+                    'description' => "Save \${$savings}/month by switching to our {$plan->name} plan. You'll still get {$plan->visits_per_month} visits per month.",
+                    'cta' => "Switch to {$plan->name}",
+                    'plan_id' => $plan->id,
+                    'plan_name' => $plan->name,
+                    'plan_price' => (float) $plan->monthly_price,
+                    'monthly_savings' => $savings,
+                ];
+            }
+        }
+
+        // Offer 3: Talk to provider (for dissatisfied/switching)
+        if (in_array($validated['reason'], ['dissatisfied', 'switching_provider'])) {
+            $offers[] = [
+                'type' => 'contact',
+                'title' => 'Speak with your care team',
+                'description' => "We'd love to address your concerns. Would you like us to schedule a quick call with your provider?",
+                'cta' => 'Schedule a Call',
+            ];
+        }
+
+        return response()->json([
+            'data' => [
+                'offers' => $offers,
+                'current_plan' => [
+                    'id' => $currentPlan->id,
+                    'name' => $currentPlan->name,
+                    'monthly_price' => (float) $currentPlan->monthly_price,
+                ],
+                'reason' => $validated['reason'],
+            ],
+        ]);
+    }
+
+    /**
+     * Cancel a membership (with optional retention outcome tracking).
      */
     public function cancel(Request $request, string $id): JsonResponse
     {
@@ -264,11 +346,16 @@ class MembershipController extends Controller
         $validated = $request->validate([
             'reason' => 'required|string|in:moved,cost,dissatisfied,switching_provider,other',
             'reason_notes' => 'nullable|string|max:500',
+            'retention_offered' => 'nullable|boolean',
+            'retention_declined' => 'nullable|string|in:pause,downgrade,contact',
         ]);
 
         $reasonText = $validated['reason'];
         if (!empty($validated['reason_notes'])) {
             $reasonText .= ': ' . $validated['reason_notes'];
+        }
+        if (!empty($validated['retention_declined'])) {
+            $reasonText .= ' [declined retention: ' . $validated['retention_declined'] . ']';
         }
 
         $membership->update([
@@ -284,46 +371,77 @@ class MembershipController extends Controller
     }
 
     /**
-     * Change plan for a membership (upgrade/downgrade).
+     * Preview proration for a plan change (without applying).
      */
-    public function changePlan(Request $request, string $id): JsonResponse
+    public function previewPlanChange(Request $request, string $id): JsonResponse
     {
         $user = $request->user();
         abort_if(!in_array($user->role, ['practice_admin', 'staff']), 403);
 
-        $membership = PatientMembership::where('tenant_id', $user->tenant_id)->findOrFail($id);
+        $membership = PatientMembership::where('tenant_id', $user->tenant_id)
+            ->with('plan')
+            ->findOrFail($id);
 
         if ($membership->status !== 'active') {
-            return response()->json([
-                'message' => 'Only active memberships can change plans.',
-            ], 422);
+            return response()->json(['message' => 'Only active memberships can change plans.'], 422);
         }
 
         $validated = $request->validate([
             'plan_id' => 'required|uuid|exists:membership_plans,id',
         ]);
 
-        // Verify new plan belongs to tenant and is active
         $newPlan = MembershipPlan::where('tenant_id', $user->tenant_id)
             ->where('is_active', true)
             ->findOrFail($validated['plan_id']);
 
         if ($membership->plan_id === $newPlan->id) {
-            return response()->json([
-                'message' => 'Member is already on this plan.',
-            ], 422);
+            return response()->json(['message' => 'Member is already on this plan.'], 422);
         }
 
-        $oldPlanId = $membership->plan_id;
+        $prorationService = app(ProrationService::class);
+        $proration = $prorationService->calculateProration($membership, $membership->plan, $newPlan);
 
-        $membership->update([
-            'plan_id' => $newPlan->id,
+        return response()->json(['data' => $proration]);
+    }
+
+    /**
+     * Change plan for a membership (upgrade/downgrade) with proration.
+     */
+    public function changePlan(Request $request, string $id): JsonResponse
+    {
+        $user = $request->user();
+        abort_if(!in_array($user->role, ['practice_admin', 'staff']), 403);
+
+        $membership = PatientMembership::where('tenant_id', $user->tenant_id)
+            ->with('plan')
+            ->findOrFail($id);
+
+        if ($membership->status !== 'active') {
+            return response()->json(['message' => 'Only active memberships can change plans.'], 422);
+        }
+
+        $validated = $request->validate([
+            'plan_id' => 'required|uuid|exists:membership_plans,id',
         ]);
 
+        $newPlan = MembershipPlan::where('tenant_id', $user->tenant_id)
+            ->where('is_active', true)
+            ->findOrFail($validated['plan_id']);
+
+        if ($membership->plan_id === $newPlan->id) {
+            return response()->json(['message' => 'Member is already on this plan.'], 422);
+        }
+
+        $prorationService = app(ProrationService::class);
+        $result = $prorationService->applyProration($membership, $newPlan);
+
         return response()->json([
-            'data' => $membership->fresh()->load(['patient', 'plan']),
-            'message' => 'Plan changed successfully.',
-            'previous_plan_id' => $oldPlanId,
+            'data' => $result['membership'],
+            'proration' => $result['proration'],
+            'invoice' => $result['invoice'],
+            'message' => $result['proration']['is_upgrade']
+                ? "Plan upgraded with prorated charge of \${$result['proration']['net']}"
+                : "Plan downgraded with prorated credit of \$" . abs($result['proration']['net']),
         ]);
     }
 }

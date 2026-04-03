@@ -7,6 +7,7 @@ use App\Models\DunningEvent;
 use App\Models\DunningPolicy;
 use App\Models\PatientMembership;
 use App\Services\DunningService;
+use App\Services\SmartRetryService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -196,5 +197,47 @@ class DunningController extends Controller
                 'message' => 'Stripe payment retry failed: ' . $e->getMessage(),
             ], 422);
         }
+    }
+
+    /**
+     * Smart retry — uses optimal timing and exponential backoff.
+     */
+    public function smartRetry(Request $request, string $membershipId): JsonResponse
+    {
+        $user = $request->user();
+        abort_if(!in_array($user->role, ['practice_admin', 'staff']), 403);
+
+        $membership = PatientMembership::where('tenant_id', $user->tenant_id)
+            ->findOrFail($membershipId);
+
+        $dunningEvent = DunningEvent::where('membership_id', $membership->id)
+            ->active()
+            ->latest()
+            ->first();
+
+        if (!$dunningEvent) {
+            return response()->json([
+                'message' => 'No active dunning event found for this membership.',
+            ], 422);
+        }
+
+        $smartRetry = app(SmartRetryService::class);
+        $result = $smartRetry->attemptRetry($membership, $dunningEvent);
+
+        return response()->json(['data' => $result]);
+    }
+
+    /**
+     * Get smart retry analytics and upcoming retry schedule.
+     */
+    public function retryAnalytics(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        abort_if(!$user->isPracticeAdmin(), 403);
+
+        $smartRetry = app(SmartRetryService::class);
+        $analytics = $smartRetry->getRetryAnalytics($user->tenant_id);
+
+        return response()->json(['data' => $analytics]);
     }
 }

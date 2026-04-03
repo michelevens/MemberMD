@@ -340,6 +340,8 @@ Route::middleware(['auth:sanctum', 'phi.log'])->group(function () {
         Route::post('/policies', [DunningController::class, 'store']);
         Route::get('/dashboard', [DunningController::class, 'dashboard']);
         Route::post('/{membershipId}/retry', [DunningController::class, 'retryPayment']);
+        Route::post('/{membershipId}/smart-retry', [DunningController::class, 'smartRetry']);
+        Route::get('/retry-analytics', [DunningController::class, 'retryAnalytics']);
     });
 
     // ===== Revenue Analytics & Reporting =====
@@ -492,7 +494,9 @@ Route::middleware(['auth:sanctum', 'phi.log'])->group(function () {
     // ===== Membership Enrollment Actions =====
     Route::post('memberships/{id}/pause', [MembershipController::class, 'pause']);
     Route::post('memberships/{id}/resume', [MembershipController::class, 'resume']);
+    Route::post('memberships/{id}/retention-offers', [MembershipController::class, 'retentionOffers']);
     Route::post('memberships/{id}/cancel', [MembershipController::class, 'cancel']);
+    Route::post('memberships/{id}/preview-plan-change', [MembershipController::class, 'previewPlanChange']);
     Route::post('memberships/{id}/change-plan', [MembershipController::class, 'changePlan']);
 
     // ===== Activity Logger =====

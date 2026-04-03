@@ -5,8 +5,10 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreInvoiceRequest;
 use App\Models\Invoice;
+use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response;
 
 class InvoiceController extends Controller
 {
@@ -69,7 +71,7 @@ class InvoiceController extends Controller
         ], 201);
     }
 
-    public function pdf(Request $request, string $id): JsonResponse
+    public function pdf(Request $request, string $id): Response|JsonResponse
     {
         $user = $request->user();
         $invoice = Invoice::where('tenant_id', $user->tenant_id)
@@ -80,24 +82,48 @@ class InvoiceController extends Controller
             abort_if($invoice->patient->user_id !== $user->id, 403);
         }
 
-        // Return invoice data structured for PDF generation
-        // Actual PDF generation would use a package like DomPDF or Snappy
         $practice = $user->practice;
+        $patient = $invoice->patient;
+        $membership = $invoice->membership;
+        $primaryColor = $practice->primary_color ?? '#27ab83';
 
-        return response()->json([
-            'data' => [
-                'invoice' => $invoice,
-                'practice' => [
-                    'name' => $practice->name,
-                    'address' => $practice->address,
-                    'city' => $practice->city,
-                    'state' => $practice->state,
-                    'zip' => $practice->zip,
-                    'phone' => $practice->phone,
-                    'email' => $practice->email,
-                    'logo_url' => $practice->logo_url,
+        // If ?format=json, return data for client-side rendering
+        if ($request->input('format') === 'json') {
+            return response()->json([
+                'data' => [
+                    'invoice' => $invoice,
+                    'practice' => [
+                        'name' => $practice->name,
+                        'address' => $practice->address,
+                        'city' => $practice->city,
+                        'state' => $practice->state,
+                        'zip' => $practice->zip,
+                        'phone' => $practice->phone,
+                        'email' => $practice->email,
+                        'logo_url' => $practice->logo_url,
+                    ],
                 ],
-            ],
+            ]);
+        }
+
+        // Generate branded PDF via DomPDF
+        $pdf = Pdf::loadView('invoices.pdf', [
+            'invoice' => $invoice,
+            'practice' => $practice,
+            'patient' => $patient,
+            'membership' => $membership,
+            'primaryColor' => $primaryColor,
         ]);
+
+        $pdf->setPaper('letter');
+
+        $filename = "invoice-{$invoice->id}.pdf";
+
+        // ?download=1 forces download, otherwise stream inline
+        if ($request->boolean('download')) {
+            return $pdf->download($filename);
+        }
+
+        return $pdf->stream($filename);
     }
 }
