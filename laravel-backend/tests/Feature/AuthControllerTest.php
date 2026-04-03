@@ -217,7 +217,11 @@ class AuthControllerTest extends TestCase
         $logoutResponse->assertStatus(200)
             ->assertJsonPath('message', 'Logged out');
 
-        // Confirm token no longer works
+        // Confirm token no longer works.
+        // Flush Sanctum's guard state so the next request re-authenticates
+        // via the (now-deleted) Bearer token instead of a cached session user.
+        app('auth')->forgetGuards();
+
         $meResponse = $this->withHeaders([
             'Authorization' => 'Bearer ' . $token,
         ])->getJson('/api/auth/me');

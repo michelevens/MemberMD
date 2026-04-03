@@ -145,7 +145,12 @@ class AvailabilityService
             $q->whereBetween('scheduled_at', [$appointmentStart, $appointmentEnd->subSecond()])
                 ->orWhere(function ($q2) use ($appointmentStart) {
                     $q2->where('scheduled_at', '<', $appointmentStart)
-                        ->whereRaw("scheduled_at + (duration_minutes || ' minutes')::interval > ?", [$appointmentStart]);
+                        ->whereRaw(
+                            \DB::getDriverName() === 'sqlite'
+                                ? "datetime(scheduled_at, '+' || duration_minutes || ' minutes') > ?"
+                                : "scheduled_at + (duration_minutes || ' minutes')::interval > ?",
+                            [$appointmentStart]
+                        );
                 });
         })->exists();
 

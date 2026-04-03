@@ -112,7 +112,12 @@ class AppointmentController extends Controller
                 $q->whereBetween('scheduled_at', [$scheduledAt, $endTime])
                   ->orWhere(function ($q2) use ($scheduledAt, $endTime) {
                       $q2->where('scheduled_at', '<', $scheduledAt)
-                         ->whereRaw("scheduled_at + (duration_minutes || ' minutes')::interval > ?", [$scheduledAt]);
+                         ->whereRaw(
+                             \DB::getDriverName() === 'sqlite'
+                                 ? "datetime(scheduled_at, '+' || duration_minutes || ' minutes') > ?"
+                                 : "scheduled_at + (duration_minutes || ' minutes')::interval > ?",
+                             [$scheduledAt]
+                         );
                   });
             })
             ->exists();

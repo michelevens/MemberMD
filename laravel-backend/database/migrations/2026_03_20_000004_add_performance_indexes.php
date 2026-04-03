@@ -13,14 +13,26 @@ return new class extends Migration
     private function addIndexIfNotExists(string $table, array $columns, ?string $name = null): void
     {
         $name = $name ?? $table . '_' . implode('_', $columns) . '_index';
-        $exists = DB::selectOne(
-            "SELECT 1 FROM pg_indexes WHERE tablename = ? AND indexname = ?",
-            [$table, $name]
-        );
+        $driver = Schema::getConnection()->getDriverName();
+
+        if ($driver === 'pgsql') {
+            $exists = DB::selectOne(
+                "SELECT 1 FROM pg_indexes WHERE tablename = ? AND indexname = ?",
+                [$table, $name]
+            );
+        } else {
+            // SQLite / MySQL / others — just try to create and catch duplicates
+            $exists = false;
+        }
+
         if (!$exists) {
-            Schema::table($table, function (Blueprint $t) use ($columns) {
-                $t->index($columns);
-            });
+            try {
+                Schema::table($table, function (Blueprint $t) use ($columns) {
+                    $t->index($columns);
+                });
+            } catch (\Throwable) {
+                // Index already exists
+            }
         }
     }
 
