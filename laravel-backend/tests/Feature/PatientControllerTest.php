@@ -19,7 +19,7 @@ class PatientControllerTest extends TestCase
         return Practice::create([
             'name'           => 'Test Practice',
             'slug'           => 'test-practice-' . uniqid(),
-            'tenant_code'    => strtoupper(bin2hex(random_bytes(4))),
+            'tenant_code'    => strtoupper(bin2hex(random_bytes(3))),
             'specialty'      => 'primary_care',
             'practice_model' => 'pure_dpc',
             'owner_email'    => 'owner@test.com',
