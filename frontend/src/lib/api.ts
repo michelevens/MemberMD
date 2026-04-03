@@ -308,11 +308,61 @@ export const authService = {
     });
   },
 
+  changePassword: async (data: { currentPassword: string; newPassword: string; newPasswordConfirmation: string }): Promise<ApiResponse<{ message: string }>> => {
+    if (useMockData()) return { data: { message: "Password changed" } };
+    return apiFetch<{ message: string }>("/auth/password", { method: "PUT", body: JSON.stringify(data) });
+  },
+
+  setupMfa: async (): Promise<ApiResponse<{ secret: string; qrCodeUrl: string; otpauthUrl: string }>> => {
+    if (useMockData()) return { data: { secret: "JBSWY3DPEHPK3PXP", qrCodeUrl: "https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=demo", otpauthUrl: "otpauth://totp/MemberMD?secret=JBSWY3DPEHPK3PXP" } };
+    return apiFetch<{ secret: string; qrCodeUrl: string; otpauthUrl: string }>("/auth/mfa/setup", { method: "POST" });
+  },
+
+  enableMfa: async (data: { code: string; secret: string }): Promise<ApiResponse<{ enabled: boolean; backupCodes: string[] }>> => {
+    if (useMockData()) return { data: { enabled: true, backupCodes: ["AAAA-BBBB", "CCCC-DDDD", "EEEE-FFFF", "GGGG-HHHH"] } };
+    return apiFetch<{ enabled: boolean; backupCodes: string[] }>("/auth/mfa/enable", { method: "POST", body: JSON.stringify(data) });
+  },
+
+  disableMfa: async (data: { password: string }): Promise<ApiResponse<{ disabled: boolean }>> => {
+    if (useMockData()) return { data: { disabled: true } };
+    return apiFetch<{ disabled: boolean }>("/auth/mfa/disable", { method: "POST", body: JSON.stringify(data) });
+  },
+
   getStoredUser: (): User | null => {
     try {
       const stored = sessionStorage.getItem("membermd_user");
       return stored ? JSON.parse(stored) : null;
     } catch { return null; }
+  },
+};
+
+// ===== Clinical Lookup Service (NPI, RxNorm, ICD-10) =====
+
+export const clinicalLookupService = {
+  searchNPI: async (query: string, state?: string): Promise<ApiResponse<Record<string, unknown>[]>> => {
+    const params = new URLSearchParams({ q: query });
+    if (state) params.set("state", state);
+    if (useMockData()) return { data: [
+      { npi: "1234567890", name: "Dr. Jane Smith, MD", credentials: "MD", specialty: "Internal Medicine", address: "123 Medical Dr, New York, NY 10001", phone: "(555) 123-4567", state: "NY", enumerationType: "Individual" },
+      { npi: "0987654321", name: "Dr. John Doe, DO", credentials: "DO", specialty: "Family Medicine", address: "456 Health Ave, Los Angeles, CA 90001", phone: "(555) 987-6543", state: "CA", enumerationType: "Individual" },
+    ] };
+    return apiFetch<Record<string, unknown>[]>(`/clinical-lookup/npi?${params}`);
+  },
+  searchNPIByNumber: async (npi: string): Promise<ApiResponse<Record<string, unknown>[]>> => {
+    if (useMockData()) return { data: [{ npi, name: "Dr. Demo Provider, MD", credentials: "MD", specialty: "Internal Medicine", address: "123 Demo St", phone: "(555) 000-0000", state: "NY", enumerationType: "Individual" }] };
+    return apiFetch<Record<string, unknown>[]>(`/clinical-lookup/npi?npi=${npi}`);
+  },
+  searchDrugs: async (query: string): Promise<ApiResponse<Record<string, unknown>[]>> => {
+    if (useMockData()) return { data: [] };
+    return apiFetch<Record<string, unknown>[]>(`/clinical-lookup/drugs?q=${encodeURIComponent(query)}`);
+  },
+  searchICD10: async (query: string): Promise<ApiResponse<Record<string, unknown>[]>> => {
+    if (useMockData()) return { data: [] };
+    return apiFetch<Record<string, unknown>[]>(`/clinical-lookup/icd10?q=${encodeURIComponent(query)}`);
+  },
+  drugInteractions: async (rxcui: string): Promise<ApiResponse<Record<string, unknown>[]>> => {
+    if (useMockData()) return { data: [] };
+    return apiFetch<Record<string, unknown>[]>(`/clinical-lookup/drug-interactions?rxcui=${rxcui}`);
   },
 };
 

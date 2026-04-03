@@ -13,6 +13,7 @@ import { CalendarView } from "../shared/CalendarView";
 import { AppointmentBookingWidget } from "../widgets/AppointmentBookingWidget";
 import { AuditDashboard } from "../shared/AuditDashboard";
 import { EngagementSection } from "../shared/EngagementSection";
+import { ProfilePage } from "../profile/ProfilePage";
 import { ProviderAnalyticsSection } from "../shared/ProviderAnalyticsSection";
 import { ProgramsSection } from "./ProgramsSection";
 import { RevenueAnalyticsTab } from "./RevenueAnalyticsTab";
@@ -107,6 +108,7 @@ type TabId =
   | "staff"
   | "messages"
   | "notifications"
+  | "profile"
   | "engagement"
   | "analytics"
   | "compliance"
@@ -2052,7 +2054,7 @@ export function PracticePortal() {
 
         {/* User section */}
         <div className="p-4 border-t" style={{ borderColor: "rgba(255,255,255,0.08)" }}>
-          <UserSettingsDropdown variant="practice" />
+          <UserSettingsDropdown variant="practice" onNavigateToProfile={() => setActiveTab("profile")} />
         </div>
       </aside>
     );
@@ -7040,6 +7042,8 @@ export function PracticePortal() {
         return renderMessages();
       case "notifications":
         return renderNotifications();
+      case "profile":
+        return <ProfilePage onBack={() => setActiveTab("dashboard")} />;
       case "engagement":
         return <EngagementSection />;
       case "analytics":

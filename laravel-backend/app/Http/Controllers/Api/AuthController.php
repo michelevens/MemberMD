@@ -8,10 +8,13 @@ use App\Models\Practice;
 use App\Models\SecurityEvent;
 use App\Services\PracticeBootstrapService;
 use App\Services\PracticeProvisioningService;
+use App\Services\TOTPService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
+use Laravel\Sanctum\PersonalAccessToken;
 
 class AuthController extends Controller
 {
@@ -36,6 +39,20 @@ class AuthController extends Controller
 
             throw ValidationException::withMessages([
                 'email' => ['The provided credentials are incorrect.'],
+            ]);
+        }
+
+        // If MFA is enabled, return a temporary token for MFA verification
+        if ($user->mfa_enabled) {
+            $mfaToken = $user->createToken('mfa-pending', ['mfa-pending'], now()->addMinutes(5))->plainTextToken;
+
+            $this->logSecurityEvent('mfa_challenge_issued', $request, $user->tenant_id, $user->id);
+
+            return response()->json([
+                'data' => [
+                    'mfaRequired' => true,
+                    'mfaToken' => $mfaToken,
+                ],
             ]);
         }
 
@@ -231,6 +248,8 @@ class AuthController extends Controller
             'first_name' => 'sometimes|string|max:100',
             'last_name' => 'sometimes|string|max:100',
             'phone' => 'nullable|string|max:30',
+            'date_of_birth' => 'nullable|date',
+            'profile_picture' => 'nullable|url|max:500',
         ]);
 
         $request->user()->update($validated);
@@ -238,6 +257,214 @@ class AuthController extends Controller
         return response()->json([
             'data' => $this->userPayload($request->user()->fresh()),
         ]);
+    }
+
+    public function changePassword(Request $request): JsonResponse
+    {
+        $request->validate([
+            'current_password' => 'required|string',
+            'new_password' => [
+                'required', 'string', 'min:12', 'confirmed',
+                'regex:/[A-Z]/', 'regex:/[a-z]/', 'regex:/[0-9]/', 'regex:/[^A-Za-z0-9]/',
+            ],
+        ]);
+
+        $user = $request->user();
+
+        if (!Hash::check($request->current_password, $user->password)) {
+            throw ValidationException::withMessages([
+                'current_password' => ['The current password is incorrect.'],
+            ]);
+        }
+
+        $user->update(['password' => Hash::make($request->new_password)]);
+
+        // Revoke all tokens except the current one
+        $currentTokenId = $user->currentAccessToken()->id;
+        $user->tokens()->where('id', '!=', $currentTokenId)->delete();
+
+        $this->logSecurityEvent('password_changed', $request, $user->tenant_id, $user->id);
+
+        return response()->json(['message' => 'Password updated successfully.']);
+    }
+
+    public function setupMfa(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        $totp = new TOTPService();
+
+        $secret = $totp->generateSecret();
+        $otpauthUrl = $totp->getOtpauthUrl($secret, $user->email);
+        $qrCodeUrl = 'https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=' . urlencode($otpauthUrl);
+
+        $this->logSecurityEvent('mfa_setup_initiated', $request, $user->tenant_id, $user->id);
+
+        return response()->json([
+            'data' => [
+                'secret' => $secret,
+                'qrCodeUrl' => $qrCodeUrl,
+                'otpauthUrl' => $otpauthUrl,
+            ],
+        ]);
+    }
+
+    public function enableMfa(Request $request): JsonResponse
+    {
+        $request->validate([
+            'code' => 'required|string|digits:6',
+            'secret' => 'required|string',
+        ]);
+
+        $totp = new TOTPService();
+
+        if (!$totp->verifyCode($request->secret, $request->code)) {
+            throw ValidationException::withMessages([
+                'code' => ['The verification code is invalid.'],
+            ]);
+        }
+
+        $user = $request->user();
+
+        // Generate 8 backup recovery codes
+        $backupCodes = [];
+        $hashedCodes = [];
+        for ($i = 0; $i < 8; $i++) {
+            $code = strtoupper(Str::random(4) . '-' . Str::random(4));
+            $backupCodes[] = $code;
+            $hashedCodes[] = Hash::make($code);
+        }
+
+        $user->update([
+            'mfa_secret' => $request->secret,
+            'mfa_enabled' => true,
+            'mfa_recovery_codes' => json_encode($hashedCodes),
+        ]);
+
+        $this->logSecurityEvent('mfa_enabled', $request, $user->tenant_id, $user->id);
+
+        return response()->json([
+            'data' => [
+                'enabled' => true,
+                'backupCodes' => $backupCodes,
+            ],
+        ]);
+    }
+
+    public function verifyMfa(Request $request): JsonResponse
+    {
+        $request->validate([
+            'mfa_token' => 'required|string',
+            'code' => 'required|string|digits:6',
+        ]);
+
+        // Parse the token — Sanctum tokens are formatted as "{id}|{plaintext}"
+        $parts = explode('|', $request->mfa_token, 2);
+        if (count($parts) !== 2) {
+            throw ValidationException::withMessages([
+                'mfa_token' => ['Invalid MFA token.'],
+            ]);
+        }
+
+        $accessToken = PersonalAccessToken::find($parts[0]);
+
+        if (!$accessToken || !hash_equals($accessToken->token, hash('sha256', $parts[1]))) {
+            throw ValidationException::withMessages([
+                'mfa_token' => ['Invalid MFA token.'],
+            ]);
+        }
+
+        // Verify token is an mfa-pending token and not expired
+        if ($accessToken->name !== 'mfa-pending') {
+            throw ValidationException::withMessages([
+                'mfa_token' => ['Invalid MFA token.'],
+            ]);
+        }
+
+        if ($accessToken->expires_at && $accessToken->expires_at->isPast()) {
+            $accessToken->delete();
+            throw ValidationException::withMessages([
+                'mfa_token' => ['MFA token has expired. Please log in again.'],
+            ]);
+        }
+
+        $user = $accessToken->tokenable;
+
+        if (!$user || !$user->mfa_secret) {
+            throw ValidationException::withMessages([
+                'code' => ['MFA is not configured for this account.'],
+            ]);
+        }
+
+        $totp = new TOTPService();
+
+        // Try TOTP code first
+        $codeValid = $totp->verifyCode($user->mfa_secret, $request->code);
+
+        // If TOTP fails, check recovery codes
+        if (!$codeValid && $user->mfa_recovery_codes) {
+            $storedCodes = json_decode($user->mfa_recovery_codes, true) ?: [];
+            foreach ($storedCodes as $index => $hashedCode) {
+                if (Hash::check($request->code, $hashedCode)) {
+                    $codeValid = true;
+                    // Remove used recovery code
+                    unset($storedCodes[$index]);
+                    $user->update(['mfa_recovery_codes' => json_encode(array_values($storedCodes))]);
+                    $this->logSecurityEvent('mfa_recovery_code_used', $request, $user->tenant_id, $user->id);
+                    break;
+                }
+            }
+        }
+
+        if (!$codeValid) {
+            $this->logSecurityEvent('mfa_verify_failed', $request, $user->tenant_id, $user->id);
+
+            throw ValidationException::withMessages([
+                'code' => ['The verification code is invalid.'],
+            ]);
+        }
+
+        // Delete the mfa-pending token
+        $accessToken->delete();
+
+        // Create a full auth token
+        $user->update(['last_login_at' => now()]);
+        $token = $user->createToken('auth-token')->plainTextToken;
+
+        $this->logSecurityEvent('login_success', $request, $user->tenant_id, $user->id, ['mfa_verified' => true]);
+
+        return response()->json([
+            'data' => [
+                'access_token' => $token,
+                'token_type' => 'Bearer',
+                'expires_in' => (int) (config('sanctum.expiration', 60) * 60),
+                'user' => $this->userPayload($user),
+            ],
+        ]);
+    }
+
+    public function disableMfa(Request $request): JsonResponse
+    {
+        $request->validate([
+            'password' => 'required|string',
+        ]);
+
+        $user = $request->user();
+
+        if (!Hash::check($request->password, $user->password)) {
+            throw ValidationException::withMessages([
+                'password' => ['The password is incorrect.'],
+            ]);
+        }
+
+        $user->update([
+            'mfa_secret' => null,
+            'mfa_enabled' => false,
+            'mfa_recovery_codes' => null,
+        ]);
+
+        $this->logSecurityEvent('mfa_disabled', $request, $user->tenant_id, $user->id);
+
+        return response()->json(['message' => 'MFA has been disabled.']);
     }
 
     private function userPayload(User $user): array
@@ -250,6 +477,8 @@ class AuthController extends Controller
             'last_name' => $user->last_name,
             'email' => $user->email,
             'phone' => $user->phone,
+            'date_of_birth' => $user->date_of_birth?->toDateString(),
+            'profile_picture' => $user->profile_picture,
             'role' => $user->role,
             'tenant_id' => $user->tenant_id,
             'status' => $user->status,

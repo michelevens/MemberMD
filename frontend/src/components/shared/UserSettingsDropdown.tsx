@@ -21,6 +21,7 @@ import {
 
 interface UserSettingsDropdownProps {
   variant: "superadmin" | "practice" | "patient";
+  onNavigateToProfile?: () => void;
 }
 
 // ─── Colors ──────────────────────────────────────────────────────────────────
@@ -95,7 +96,7 @@ function getAvatarGradient(variant: UserSettingsDropdownProps["variant"]): strin
 
 // ─── Component ───────────────────────────────────────────────────────────────
 
-export function UserSettingsDropdown({ variant }: UserSettingsDropdownProps) {
+export function UserSettingsDropdown({ variant, onNavigateToProfile }: UserSettingsDropdownProps) {
   const auth = useAuth();
   const [isOpen, setIsOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -250,7 +251,7 @@ export function UserSettingsDropdown({ variant }: UserSettingsDropdownProps) {
           <div className="py-1">
             {/* Profile */}
             <button
-              onClick={() => { showToast("Profile editing coming soon"); setIsOpen(false); }}
+              onClick={() => { if (onNavigateToProfile) { onNavigateToProfile(); } else { showToast("Profile editing coming soon"); } setIsOpen(false); }}
               className="w-full text-left px-4 py-2 text-sm flex items-center gap-3 transition-colors hover:bg-slate-50"
               style={{ color: COLORS.slate600 }}
             >
@@ -260,7 +261,7 @@ export function UserSettingsDropdown({ variant }: UserSettingsDropdownProps) {
 
             {/* Enable 2FA */}
             <button
-              onClick={() => { showToast("2FA setup coming soon"); setIsOpen(false); }}
+              onClick={() => { if (onNavigateToProfile) { onNavigateToProfile(); } else { showToast("2FA setup coming soon"); } setIsOpen(false); }}
               className="w-full text-left px-4 py-2 text-sm flex items-center gap-3 transition-colors hover:bg-slate-50"
               style={{ color: COLORS.slate600 }}
             >

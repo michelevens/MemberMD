@@ -80,6 +80,7 @@ Route::get('/health', function () {
 Route::prefix('auth')->group(function () {
     Route::post('/login', [AuthController::class, 'login'])->middleware('throttle:5,1');
     Route::post('/register', [AuthController::class, 'register'])->middleware('throttle:5,1');
+    Route::post('/mfa/verify', [AuthController::class, 'verifyMfa'])->middleware('throttle:5,1');
 });
 
 // ===== External/Public Endpoints (no auth) =====
@@ -124,6 +125,10 @@ Route::middleware(['auth:sanctum', 'phi.log'])->group(function () {
     Route::post('/auth/logout', [AuthController::class, 'logout']);
     Route::get('/auth/me', [AuthController::class, 'me']);
     Route::put('/auth/profile', [AuthController::class, 'updateProfile']);
+    Route::put('/auth/password', [AuthController::class, 'changePassword']);
+    Route::post('/auth/mfa/setup', [AuthController::class, 'setupMfa']);
+    Route::post('/auth/mfa/enable', [AuthController::class, 'enableMfa']);
+    Route::post('/auth/mfa/disable', [AuthController::class, 'disableMfa']);
 
     // SuperAdmin: Platform management
     Route::get('/admin/practices', [PracticeController::class, 'index']);
@@ -530,5 +535,6 @@ Route::middleware(['auth:sanctum', 'phi.log'])->group(function () {
         Route::get('/cpt', [ClinicalLookupController::class, 'searchCPT']);
         Route::get('/loinc', [ClinicalLookupController::class, 'searchLOINC']);
         Route::get('/fda-labels', [ClinicalLookupController::class, 'searchFDALabels']);
+        Route::get('/npi', [ClinicalLookupController::class, 'searchNPI']);
     });
 });

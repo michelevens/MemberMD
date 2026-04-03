@@ -8,6 +8,7 @@ use App\Services\ICD10Service;
 use App\Services\CPTCodeService;
 use App\Services\LOINCService;
 use App\Services\FDADrugService;
+use App\Services\NPILookupService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -90,6 +91,50 @@ class ClinicalLookupController extends Controller
         ]);
 
         $results = $fda->searchLabels($request->q, $request->input('limit', 5));
+
+        return response()->json(['data' => $results]);
+    }
+
+    public function searchNPI(Request $request, NPILookupService $npi): JsonResponse
+    {
+        $request->validate([
+            'npi' => 'sometimes|string|digits:10',
+            'q' => 'required_without:npi|string|min:2|max:100',
+            'state' => 'sometimes|string|size:2',
+            'type' => 'sometimes|string|in:individual,organization',
+            'limit' => 'sometimes|integer|min:1|max:50',
+        ]);
+
+        $limit = $request->input('limit', 10);
+
+        // Search by NPI number
+        if ($request->filled('npi')) {
+            $results = $npi->searchByNPI($request->npi);
+            return response()->json(['data' => $results]);
+        }
+
+        $query = trim($request->q);
+        $state = $request->input('state');
+        $type = $request->input('type', 'individual');
+
+        // Organization search
+        if ($type === 'organization') {
+            $results = $npi->searchByOrganization($query, $state, $limit);
+            return response()->json(['data' => $results]);
+        }
+
+        // Individual search — split query into first/last name
+        $parts = preg_split('/[\s,]+/', $query, 2);
+        if (count($parts) === 2) {
+            $firstName = $parts[0];
+            $lastName = $parts[1];
+        } else {
+            // Single term — search as last name with wildcard first name
+            $firstName = '*';
+            $lastName = $parts[0];
+        }
+
+        $results = $npi->searchByName($firstName, $lastName, $state, $limit);
 
         return response()->json(['data' => $results]);
     }

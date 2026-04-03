@@ -21,14 +21,14 @@ class User extends Authenticatable
         'tenant_id', 'role',
         'first_name', 'last_name', 'phone', 'date_of_birth',
         'profile_picture', 'status',
-        'mfa_enabled', 'mfa_secret',
+        'mfa_enabled', 'mfa_secret', 'mfa_recovery_codes',
         'pin', 'last_login_at',
         'onboarding_completed', 'stripe_customer_id',
         'employer_id',
     ];
 
     protected $hidden = [
-        'password', 'remember_token', 'mfa_secret', 'pin',
+        'password', 'remember_token', 'mfa_secret', 'mfa_recovery_codes', 'pin',
     ];
 
     protected function casts(): array
@@ -39,6 +39,7 @@ class User extends Authenticatable
             'date_of_birth' => 'date',
             'mfa_enabled' => 'boolean',
             'mfa_secret' => 'encrypted',
+            'mfa_recovery_codes' => 'encrypted',
             'last_login_at' => 'datetime',
             'onboarding_completed' => 'boolean',
         ];
