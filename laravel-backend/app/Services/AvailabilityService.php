@@ -148,7 +148,7 @@ class AvailabilityService
                         ->whereRaw(
                             \DB::getDriverName() === 'sqlite'
                                 ? "datetime(scheduled_at, '+' || duration_minutes || ' minutes') > ?"
-                                : "scheduled_at + (duration_minutes || ' minutes')::interval > ?",
+                                : "scheduled_at + (duration_minutes * interval '1 minute') > ?",
                             [$appointmentStart]
                         );
                 });
