@@ -161,10 +161,13 @@ class AppointmentController extends Controller
             }
         }
 
-        // Auto-create appointment reminders
+        // Auto-create appointment reminders (wrapped in savepoint to prevent
+        // PostgreSQL transaction poisoning if the reminders table doesn't exist)
         try {
-            $reminderService = app(ReminderGenerationService::class);
-            $reminderService->createDefaultReminders($appointment);
+            \DB::transaction(function () use ($appointment) {
+                $reminderService = app(ReminderGenerationService::class);
+                $reminderService->createDefaultReminders($appointment);
+            });
         } catch (\Throwable $e) {
             \Log::warning('Auto-create appointment reminders failed: ' . $e->getMessage());
         }
