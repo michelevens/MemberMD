@@ -456,8 +456,15 @@ export function PracticeRegistration() {
     const e: Record<string, string> = {};
     if (!accountInfo.email.trim()) e.accountEmail = "Email is required";
     else if (!isValidEmail(accountInfo.email)) e.accountEmail = "Enter a valid email address";
-    if (!accountInfo.password) e.password = "Password is required";
-    else if (accountInfo.password.length < 8) e.password = "Password must be at least 8 characters";
+    // Match backend rules exactly: 12+ chars, mixed case, digit, symbol.
+    // Anything looser produces a confusing 422 at submit time.
+    const pw = accountInfo.password;
+    if (!pw) e.password = "Password is required";
+    else if (pw.length < 12) e.password = "Password must be at least 12 characters";
+    else if (!/[A-Z]/.test(pw)) e.password = "Password needs an uppercase letter";
+    else if (!/[a-z]/.test(pw)) e.password = "Password needs a lowercase letter";
+    else if (!/[0-9]/.test(pw)) e.password = "Password needs a number";
+    else if (!/[^A-Za-z0-9]/.test(pw)) e.password = "Password needs a symbol";
     if (accountInfo.password !== accountInfo.confirmPassword) e.confirmPassword = "Passwords do not match";
     if (!accountInfo.agreeTerms) e.agreeTerms = "You must agree to the terms";
     setErrors(e);
@@ -535,7 +542,18 @@ export function PracticeRegistration() {
       });
       const data = await response.json();
       if (!response.ok) {
-        setSubmitError(data.message || "Registration failed. Please try again.");
+        // Laravel 422s come back as { message, errors: { field: [msg, ...] } }.
+        // Surface the first per-field message so the user knows which input
+        // to fix, instead of just "The given data was invalid."
+        let detail = "";
+        if (data.errors && typeof data.errors === "object") {
+          const firstField = Object.keys(data.errors)[0];
+          const firstMsg = Array.isArray(data.errors[firstField])
+            ? data.errors[firstField][0]
+            : null;
+          if (firstMsg) detail = `${firstField}: ${firstMsg}`;
+        }
+        setSubmitError(detail || data.message || "Registration failed. Please try again.");
         setLoading(false);
         return;
       }
@@ -1299,7 +1317,7 @@ export function PracticeRegistration() {
                         value={accountInfo.password}
                         onChange={e => updateAccount("password", e.target.value)}
                         className={`${inputClass} pr-12`}
-                        placeholder="Min 8 characters"
+                        placeholder="12+ chars · upper · lower · number · symbol"
                       />
                       <button
                         type="button"
