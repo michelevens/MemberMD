@@ -123,15 +123,29 @@ class OperatorController extends Controller
         $ctx = $this->context();
         $this->assertCanManageUsers($ctx);
 
+        // Restrict eligibility: the user being added must already exist in
+        // one of the operator's tenants. Without this, an operator owner
+        // could attach ANY user from ANY practice on the platform to their
+        // operator scope, granting cross-tenant read of harvested users
+        // (audit finding, security audit, OperatorController:128).
+        $tenantIds = $ctx->tenantIds();
         $validated = $request->validate([
-            'user_id' => 'sometimes|uuid|exists:users,id',
-            'email' => 'required_without:user_id|email|exists:users,email',
+            'user_id' => [
+                'sometimes', 'uuid',
+                \Illuminate\Validation\Rule::exists('users', 'id')
+                    ->whereIn('tenant_id', $tenantIds),
+            ],
+            'email' => [
+                'required_without:user_id', 'email',
+                \Illuminate\Validation\Rule::exists('users', 'email')
+                    ->whereIn('tenant_id', $tenantIds),
+            ],
             'operator_role' => 'required|string|in:owner,admin,viewer',
         ]);
 
         $user = isset($validated['user_id'])
-            ? User::findOrFail($validated['user_id'])
-            : User::where('email', $validated['email'])->firstOrFail();
+            ? User::whereIn('tenant_id', $tenantIds)->findOrFail($validated['user_id'])
+            : User::whereIn('tenant_id', $tenantIds)->where('email', $validated['email'])->firstOrFail();
 
         $existing = OperatorUser::where('operator_id', $ctx->operatorId())
             ->where('user_id', $user->id)

@@ -113,6 +113,11 @@ class TelehealthController extends Controller
             ->with(['appointment.patient', 'appointment.provider.user'])
             ->findOrFail($id);
 
+        // Tenant scope alone is insufficient — without this caller-identity
+        // check, any staff member in the tenant could pull a Daily.co
+        // room_url and join the call (audit finding B8, 2026-04-28).
+        $this->assertCanAccessSession($user, $session);
+
         return response()->json(['data' => $session]);
     }
 
@@ -126,6 +131,8 @@ class TelehealthController extends Controller
         $session = TelehealthSession::where('tenant_id', $user->tenant_id)
             ->with(['appointment.patient', 'appointment.provider'])
             ->findOrFail($id);
+
+        $this->assertCanAccessSession($user, $session);
 
         // Determine if user is provider or patient
         $isProvider = $session->appointment->provider &&
@@ -246,5 +253,29 @@ class TelehealthController extends Controller
 
         // Delegate to join
         return $this->join($request, $session->id);
+    }
+
+    /**
+     * Assert the calling user is allowed to access a telehealth session:
+     *   - The patient on the appointment, OR
+     *   - The provider on the appointment, OR
+     *   - A practice admin / superadmin in the same tenant.
+     *
+     * Tenant scope alone is not sufficient — staff/other-providers in a
+     * tenant must not be able to pull arbitrary Daily.co join URLs.
+     */
+    private function assertCanAccessSession(\App\Models\User $user, TelehealthSession $session): void
+    {
+        if (in_array($user->role, ['superadmin', 'practice_admin'], true)) {
+            return;
+        }
+
+        $isProvider = $session->appointment?->provider
+            && $session->appointment->provider->user_id === $user->id;
+
+        $isPatient = $session->appointment?->patient
+            && $session->appointment->patient->user_id === $user->id;
+
+        abort_if(!$isProvider && !$isPatient, 403, 'You do not have access to this telehealth session.');
     }
 }

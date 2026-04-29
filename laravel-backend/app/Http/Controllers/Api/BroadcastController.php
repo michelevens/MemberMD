@@ -37,11 +37,30 @@ class BroadcastController extends Controller
 
         abort_if(!in_array($user->role, ['superadmin', 'practice_admin']), 403, 'Unauthorized');
 
+        // Audience filters are tenant-scoped — without these checks an admin
+        // could persist foreign patient/plan/provider IDs in audience_filter
+        // and leak them back via index() (audit finding B3-adjacent).
         $validated = $request->validate([
             'subject'         => 'required|string|max:255',
             'body'            => 'required|string',
             'audience_type'   => 'required|string|in:all,by_plan,by_provider,custom',
             'audience_filter' => 'nullable|array',
+            'audience_filter.membership_plan_id' => [
+                'nullable', 'uuid',
+                \Illuminate\Validation\Rule::exists('membership_plans', 'id')
+                    ->where('tenant_id', $user->tenant_id),
+            ],
+            'audience_filter.provider_id' => [
+                'nullable', 'uuid',
+                \Illuminate\Validation\Rule::exists('providers', 'id')
+                    ->where('tenant_id', $user->tenant_id),
+            ],
+            'audience_filter.patient_ids' => 'nullable|array',
+            'audience_filter.patient_ids.*' => [
+                'uuid',
+                \Illuminate\Validation\Rule::exists('patients', 'id')
+                    ->where('tenant_id', $user->tenant_id),
+            ],
             'channels'        => 'required|array|min:1',
             'channels.*'      => 'string|in:in_app,email,sms',
         ]);

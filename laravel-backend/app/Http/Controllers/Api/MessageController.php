@@ -68,8 +68,16 @@ class MessageController extends Controller
 
         $user = $request->user();
 
+        // Recipient MUST belong to the same tenant — without this scope check,
+        // a practice_admin in tenant A could send messages to any user in
+        // tenant B, creating a cross-tenant PHI exfiltration channel
+        // (audit finding B3, 2026-04-28).
         $validated = $request->validate([
-            'recipient_id' => 'required|uuid|exists:users,id',
+            'recipient_id' => [
+                'required', 'uuid',
+                \Illuminate\Validation\Rule::exists('users', 'id')
+                    ->where('tenant_id', $user->tenant_id),
+            ],
             'body' => 'required|string|max:5000',
             'thread_id' => 'nullable|uuid',
             'attachments' => 'nullable|array',

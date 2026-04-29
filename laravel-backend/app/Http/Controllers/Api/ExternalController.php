@@ -95,6 +95,13 @@ class ExternalController extends Controller
             'signature_data' => 'required|string',
         ]);
 
+        // Validate plan belongs to the tenant BEFORE any writes — otherwise
+        // a foreign plan_id creates an orphan User+Patient before the 404
+        // (audit finding B4, 2026-04-28).
+        $plan = MembershipPlan::where('tenant_id', $practice->id)
+            ->where('is_active', true)
+            ->findOrFail($validated['plan_id']);
+
         // Create user account for patient
         $user = User::create([
             'tenant_id' => $practice->id,
@@ -109,7 +116,8 @@ class ExternalController extends Controller
             'status' => 'active',
         ]);
 
-        // Create patient record
+        // Create patient record. Use ?? null for nullable validated fields so
+        // requests that omit them don't crash with "Undefined array key".
         $memberId = 'MBR-' . strtoupper(substr($user->id, 0, 6));
         $patient = Patient::create([
             'tenant_id' => $practice->id,
@@ -117,15 +125,15 @@ class ExternalController extends Controller
             'first_name' => $validated['first_name'],
             'last_name' => $validated['last_name'],
             'date_of_birth' => $validated['date_of_birth'],
-            'gender' => $validated['gender'],
+            'gender' => $validated['gender'] ?? null,
             'phone' => $validated['phone'],
             'email' => $validated['email'],
-            'address' => $validated['address'],
-            'city' => $validated['city'],
-            'state' => $validated['state'],
-            'zip' => $validated['zip'],
-            'primary_care_physician' => $validated['primary_care_physician'],
-            'pharmacy_name' => $validated['pharmacy_name'],
+            'address' => $validated['address'] ?? null,
+            'city' => $validated['city'] ?? null,
+            'state' => $validated['state'] ?? null,
+            'zip' => $validated['zip'] ?? null,
+            'primary_care_physician' => $validated['primary_care_physician'] ?? null,
+            'pharmacy_name' => $validated['pharmacy_name'] ?? null,
             'emergency_contacts' => [[
                 'name' => $validated['emergency_contact_name'],
                 'relationship' => $validated['emergency_contact_relationship'],
@@ -133,9 +141,6 @@ class ExternalController extends Controller
             ]],
             'is_active' => true,
         ]);
-
-        // Create membership
-        $plan = MembershipPlan::findOrFail($validated['plan_id']);
         PatientMembership::create([
             'tenant_id' => $practice->id,
             'patient_id' => $patient->id,

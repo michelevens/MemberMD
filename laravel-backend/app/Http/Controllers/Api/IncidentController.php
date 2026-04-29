@@ -59,9 +59,20 @@ class IncidentController extends Controller
 
         abort_if(!in_array($user->role, ['superadmin', 'practice_admin', 'provider']), 403, 'Unauthorized');
 
+        // patient_id and provider_id MUST be in the calling tenant; otherwise
+        // an admin could file incidents against patients/providers in a
+        // sibling practice and surface those IDs via index() (audit B3-adjacent).
         $validated = $request->validate([
-            'patient_id'    => 'nullable|uuid|exists:patients,id',
-            'provider_id'   => 'nullable|uuid|exists:users,id',
+            'patient_id'    => [
+                'nullable', 'uuid',
+                \Illuminate\Validation\Rule::exists('patients', 'id')
+                    ->where('tenant_id', $user->tenant_id),
+            ],
+            'provider_id'   => [
+                'nullable', 'uuid',
+                \Illuminate\Validation\Rule::exists('users', 'id')
+                    ->where('tenant_id', $user->tenant_id),
+            ],
             'type'          => 'required|string|in:adverse_event,near_miss,patient_complaint,equipment_failure,medication_error,other',
             'severity'      => 'required|string|in:low,medium,high,critical',
             'title'         => 'required|string|max:255',
