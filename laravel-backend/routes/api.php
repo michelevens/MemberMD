@@ -150,6 +150,12 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
     Route::post('/auth/mfa/enable', [AuthController::class, 'enableMfa']);
     Route::post('/auth/mfa/disable', [AuthController::class, 'disableMfa']);
 
+    // Email template preview (practice_admin / superadmin only) — renders
+    // any transactional template with stub data so admins can review
+    // branded emails without sending.
+    Route::get('/admin/email-preview', [\App\Http\Controllers\Api\EmailPreviewController::class, 'index']);
+    Route::get('/admin/email-preview/{template}', [\App\Http\Controllers\Api\EmailPreviewController::class, 'show']);
+
     // SuperAdmin: Platform management
     Route::get('/admin/practices', [PracticeController::class, 'index']);
     Route::get('/admin/practices/{id}', [PracticeController::class, 'show']);

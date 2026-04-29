@@ -36,7 +36,7 @@
         }
 
         /* Button hover */
-        .btn-primary:hover { background-color: #1f9a75 !important; }
+        .btn-primary:hover { filter: brightness(0.92); }
         .btn-outline:hover { background-color: #f0faf6 !important; }
     </style>
 </head>
@@ -58,18 +58,22 @@
 
                     <!-- HEADER -->
                     <tr>
-                        <td style="background: linear-gradient(135deg, #102a43 0%, #1a3a5c 100%); border-radius: 12px 12px 0 0; padding: 28px 40px; text-align: center;">
+                        <td style="background: linear-gradient(135deg, {{ $accentColor ?? '#102a43' }} 0%, #1a3a5c 100%); border-radius: 12px 12px 0 0; padding: 28px 40px; text-align: center;">
                             <!--[if mso]>
                             <v:rect xmlns:v="urn:schemas-microsoft-com:vml" fill="true" stroke="false" style="width:600px;height:80px;">
-                            <v:fill type="gradient" color="#102a43" color2="#1a3a5c" angle="135"/>
+                            <v:fill type="gradient" color="{{ $accentColor ?? '#102a43' }}" color2="#1a3a5c" angle="135"/>
                             <v:textbox inset="0,0,0,0">
                             <![endif]-->
                             <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
                                 <tr>
                                     <td align="center">
-                                        <span style="font-size: 28px; font-weight: 700; color: #ffffff; letter-spacing: -0.5px;">
-                                            Member<span style="color: #27ab83;">MD</span>
-                                        </span>
+                                        @if(!empty($logoUrl))
+                                            <img src="{{ $logoUrl }}" alt="{{ $practiceName ?? 'MemberMD' }}" style="max-height: 48px; max-width: 200px; display: block; margin: 0 auto;">
+                                        @else
+                                            <span style="font-size: 28px; font-weight: 700; color: #ffffff; letter-spacing: -0.5px;">
+                                                {{ $practiceName ?? 'MemberMD' }}
+                                            </span>
+                                        @endif
                                     </td>
                                 </tr>
                                 @hasSection('header_subtitle')
