@@ -76,6 +76,19 @@ class EncounterController extends Controller
         $validated['tenant_id'] = $user->tenant_id;
         $validated['status'] = 'draft';
 
+        // Provider role can only attribute encounters to themselves —
+        // force provider_id to the calling provider's id, regardless
+        // of what the frontend submitted. Prevents misattribution if
+        // the frontend defaults to the practice's first provider for
+        // a non-default provider's session. Practice admins can
+        // attribute on behalf of any provider in the tenant.
+        if ($user->isProvider()) {
+            $callerProvider = $user->provider;
+            if ($callerProvider) {
+                $validated['provider_id'] = $callerProvider->id;
+            }
+        }
+
         $encounter = Encounter::create($validated);
 
         // If created from an appointment, update appointment status

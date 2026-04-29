@@ -20,6 +20,19 @@ class PatientController extends Controller
         $query = Patient::where('tenant_id', $user->tenant_id)
             ->with(['activeMembership.plan']);
 
+        // Provider role: scope to patients who have at least one
+        // encounter or appointment WITH THIS PROVIDER. The schema has
+        // no primary_provider_id column, so panel = patients-of-record-
+        // by-encounter-history. Practice admins still see every patient
+        // in the tenant.
+        if ($user->isProvider() && $user->provider) {
+            $providerId = $user->provider->id;
+            $query->where(function ($q) use ($providerId) {
+                $q->whereHas('encounters', fn ($e) => $e->where('provider_id', $providerId))
+                  ->orWhereHas('appointments', fn ($a) => $a->where('provider_id', $providerId));
+            });
+        }
+
         if ($request->filled('search')) {
             $search = $request->search;
             // email + phone are encrypted at rest, so substring LIKE finds

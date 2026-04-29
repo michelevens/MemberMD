@@ -572,9 +572,27 @@ export function PatientPortal() {
 
   useEffect(() => {
     async function loadPatientData() {
+      // In production we MUST avoid leaving the api* state slots null
+      // when the API rejects — the useMemo fallbacks below would then
+      // serve fictional demo PHI to a real patient (audit B6 regression
+      // path). Default each slot to [] up front so a network failure
+      // shows an empty section, not Wilson's records.
+      const isDemo = isUsingMockData();
+      if (!isDemo) {
+        setApiUpcoming([]);
+        setApiPast([]);
+        setApiThreads([]);
+        setApiMedications([]);
+        setApiDocuments([]);
+      }
       try {
         const results = await Promise.allSettled([
-          appointmentService.list({ status: "upcoming" }),
+          // The Appointment.status enum is scheduled / confirmed /
+          // checked_in / in_progress / completed / canceled / no_show.
+          // "upcoming" is not a real status — it always returned an
+          // empty list. Use scheduled+confirmed so a freshly-booked
+          // appointment shows here; client-side time filter is below.
+          appointmentService.list({ status: "scheduled" }),
           appointmentService.list({ status: "completed" }),
           messageService.list(),
           prescriptionService.list({ status: "active" }),
@@ -1550,7 +1568,10 @@ export function PatientPortal() {
             </span>
           </div>
           <div className="space-y-2">
-            {PHQ9_SCORES.map((score, i) => (
+            {/* PHQ-9 mock data renders only in demo mode. Real patients
+                see an empty state until ScreeningResponse + screening
+                history APIs are wired (audit B6). */}
+            {(demoMode ? PHQ9_SCORES : []).map((score, i) => (
               <div
                 key={i}
                 className="flex items-center gap-3 p-2 rounded-lg"
@@ -1592,7 +1613,7 @@ export function PatientPortal() {
             </span>
           </div>
           <div className="space-y-2">
-            {GAD7_SCORES.map((score, i) => (
+            {(demoMode ? GAD7_SCORES : []).map((score, i) => (
               <div
                 key={i}
                 className="flex items-center gap-3 p-2 rounded-lg"
@@ -1633,7 +1654,7 @@ export function PatientPortal() {
           </h3>
         </div>
         <div className="space-y-2">
-          {DIAGNOSES.map((dx, i) => (
+          {(demoMode ? DIAGNOSES : []).map((dx, i) => (
             <div
               key={i}
               className="flex items-start gap-3 p-3 rounded-xl"

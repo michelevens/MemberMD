@@ -2,7 +2,7 @@
 // 4-step appointment booking flow: Provider → Type → Date/Time → Confirm
 // Includes calendar integration links on success
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import {
   X,
   ChevronLeft,
@@ -18,7 +18,7 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import type { Appointment } from "../../types";
-import { appointmentService, isUsingMockData } from "../../lib/api";
+import { appointmentService, providerService, isUsingMockData, authService, apiFetch } from "../../lib/api";
 
 // ─── Colors ──────────────────────────────────────────────────────────────────
 
@@ -116,6 +116,98 @@ export function AppointmentBookingWidget({ onClose, onBooked }: AppointmentBooki
   const [booking, setBooking] = useState(false);
   const [bookingError, setBookingError] = useState<string | null>(null);
 
+  // ─── Real-data state ─────────────────────────────────────────────────────
+  // In production we replace MOCK_PROVIDERS / MOCK_TYPES with the
+  // practice's actual providers + appointment types, and resolve
+  // patient_id from the logged-in user. Mock state stays for demo mode.
+  const [apiProviders, setApiProviders] = useState<MockProvider[] | null>(null);
+  const [apiTypesByProvider, setApiTypesByProvider] = useState<Record<string, MockAppointmentType[]>>({});
+  const [patientId, setPatientId] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (isUsingMockData()) return;
+    (async () => {
+      // 1) Resolve patient_id for the authenticated user. /auth/me
+      //    returns the User; we need the linked Patient row id.
+      try {
+        const meRes = await authService.me();
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const meData = meRes.data as any;
+        const pid = meData?.patient?.id ?? meData?.patientId ?? null;
+        if (!cancelled && pid) setPatientId(pid);
+      } catch { /* ignore */ }
+
+      // 2) Load providers + map to the widget's display shape.
+      try {
+        const provRes = await providerService.list();
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const list: any[] = Array.isArray(provRes.data) ? provRes.data : (provRes.data as any)?.data || [];
+        const providers: MockProvider[] = list.map((p) => {
+          const first = p.firstName || p.first_name || p.user?.firstName || "";
+          const last = p.lastName || p.last_name || p.user?.lastName || "";
+          const name = [first, last].filter(Boolean).join(" ") || "Provider";
+          const initials = ((first[0] || "") + (last[0] || "")).toUpperCase() || "??";
+          return {
+            id: p.id,
+            name,
+            credentials: p.credentials || "",
+            specialty: (Array.isArray(p.specialties) ? p.specialties[0] : p.specialty) || "",
+            avatarInitials: initials,
+            nextAvailable: "",
+          };
+        });
+        if (!cancelled) setApiProviders(providers);
+      } catch { /* ignore */ }
+
+      // 3) Load practice appointment types. The widget keys types by
+      //    providerId in the mock; real types are practice-scoped, not
+      //    provider-scoped, so we fan them out across all providers.
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const typesRes = await apiFetch<any>("/appointment-types");
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const tlist: any[] = Array.isArray(typesRes.data) ? typesRes.data : (typesRes.data as any)?.data || [];
+        const mapped: MockAppointmentType[] = tlist.map((t) => ({
+          id: t.id,
+          name: t.name,
+          durationMinutes: t.durationMinutes ?? t.duration_minutes ?? 30,
+          isTeleHealth: !!(t.isTelehealth ?? t.is_telehealth),
+          requiresMembership: !!(t.requiresMembership ?? t.requires_membership),
+          color: t.color || "#27ab83",
+        }));
+        if (cancelled) return;
+        // Use the provider list we just populated (or refetch reactively).
+        setApiTypesByProvider((_prev) => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const provIds = (apiProviders || []).map((p) => p.id);
+          if (provIds.length === 0) return { __all__: mapped } as Record<string, MockAppointmentType[]>;
+          const fanned: Record<string, MockAppointmentType[]> = {};
+          provIds.forEach((id) => { fanned[id] = mapped; });
+          return fanned;
+        });
+      } catch { /* ignore */ }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Once apiProviders arrives later, re-fan the type map.
+  useEffect(() => {
+    if (!apiProviders || Object.keys(apiTypesByProvider).length === 0) return;
+    const flat = apiTypesByProvider.__all__ || Object.values(apiTypesByProvider)[0];
+    if (!flat) return;
+    const fanned: Record<string, MockAppointmentType[]> = {};
+    apiProviders.forEach((p) => { fanned[p.id] = flat; });
+    setApiTypesByProvider(fanned);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [apiProviders]);
+
+  // The lists the widget actually renders. Switch by demoMode.
+  const demoMode = isUsingMockData();
+  const providers: MockProvider[] = demoMode ? MOCK_PROVIDERS : (apiProviders || []);
+  const typesByProvider: Record<string, MockAppointmentType[]> = demoMode ? MOCK_TYPES : apiTypesByProvider;
+
   // ─── Calendar Helpers ──────────────────────────────────────────────────────
 
   const calendarDays = useMemo(() => {
@@ -188,14 +280,23 @@ export function AppointmentBookingWidget({ onClose, onBooked }: AppointmentBooki
       return;
     }
 
+    if (!patientId) {
+      setBooking(false);
+      setBookingError("Patient profile not loaded yet — try again in a moment.");
+      return;
+    }
+
+    // Backend StoreAppointmentRequest requires patientId. Earlier
+    // versions of this widget omitted it and got a generic 422.
     const res = await appointmentService.create({
+      patientId,
       providerId: selectedProvider.id,
       appointmentTypeId: selectedType.id,
       scheduledAt: scheduled.toISOString(),
       durationMinutes: selectedType.durationMinutes,
       chiefComplaint: notes || null,
       isTeleHealth: selectedType.isTeleHealth,
-    });
+    } as Partial<Appointment>);
 
     if (res.error || !res.data) {
       setBooking(false);
@@ -274,7 +375,12 @@ export function AppointmentBookingWidget({ onClose, onBooked }: AppointmentBooki
           {/* Step 1: Select Provider */}
           {step === 1 && (
             <div className="space-y-3">
-              {MOCK_PROVIDERS.map((prov) => {
+              {providers.length === 0 && !demoMode && (
+                <div className="text-center py-8 text-sm" style={{ color: C.slate500 }}>
+                  No providers available yet. Contact the practice.
+                </div>
+              )}
+              {providers.map((prov) => {
                 const selected = selectedProvider?.id === prov.id;
                 return (
                   <button
@@ -323,7 +429,12 @@ export function AppointmentBookingWidget({ onClose, onBooked }: AppointmentBooki
               <p className="text-xs mb-2" style={{ color: C.slate400 }}>
                 Available appointment types for {selectedProvider.name}
               </p>
-              {(MOCK_TYPES[selectedProvider.id] || []).map((type) => {
+              {(typesByProvider[selectedProvider.id] || []).length === 0 && !demoMode && (
+                <div className="text-center py-8 text-sm" style={{ color: C.slate500 }}>
+                  No appointment types configured. Contact the practice.
+                </div>
+              )}
+              {(typesByProvider[selectedProvider.id] || []).map((type) => {
                 const selected = selectedType?.id === type.id;
                 return (
                   <button

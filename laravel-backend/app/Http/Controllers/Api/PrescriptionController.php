@@ -68,6 +68,17 @@ class PrescriptionController extends Controller
         $validated['status'] = 'active';
         $validated['prescribed_at'] = now();
 
+        // Provider role can only prescribe under their own provider id —
+        // matches the controller's encounter-store behavior. Stops the
+        // frontend's default-provider-fallback from misattributing Rxs
+        // (and the legal liability) to a colleague.
+        if ($user->isProvider()) {
+            $callerProvider = $user->provider;
+            if ($callerProvider) {
+                $validated['provider_id'] = $callerProvider->id;
+            }
+        }
+
         $prescription = Prescription::create($validated);
 
         return response()->json([

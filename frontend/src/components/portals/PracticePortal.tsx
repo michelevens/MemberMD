@@ -64,6 +64,7 @@ import {
   Phone,
   Video,
   Crown,
+  Key,
   UserPlus,
   ArrowLeft,
   Download,
@@ -298,6 +299,8 @@ interface MockProgramEnrollment {
 
 interface MockPatient {
   id: string;
+  /** Linked User account id (null for legacy patients with no portal account). */
+  userId?: string | null;
   name: string;
   preferredName?: string;
   plan: string;
@@ -635,6 +638,9 @@ export function PracticePortal() {
   const [searchQuery, setSearchQuery] = useState("");
   const [messageInput, setMessageInput] = useState("");
   const [selectedPatient, setSelectedPatient] = useState<MockPatient | null>(null);
+  // Reset-link modal — admin tool for "the patient never got the
+  // password-reset email, give me the link directly."
+  const [resetLinkModal, setResetLinkModal] = useState<{ url: string; patientName: string } | null>(null);
   const [patientDetailTab, setPatientDetailTab] = useState("demographics");
   const [expandedEncounters, setExpandedEncounters] = useState<string[]>([]);
   const [notificationFilter, setNotificationFilter] = useState<"all" | "members" | "appointments" | "billing" | "system">("all");
@@ -885,6 +891,7 @@ export function PracticePortal() {
         if (p.activeMembership) console.log("[MemberMD] Patient membership:", p.firstName, "plan:", p.activeMembership?.plan?.name, "memberNumber:", p.activeMembership?.memberNumber);
         return {
         id: p.id,
+        userId: p.userId || p.user_id || p.user?.id || null,
         name: [p.firstName, p.lastName].filter(Boolean).join(" ") || p.name || "",
         preferredName: p.preferredName || undefined,
         plan: p.activeMembership?.plan?.name || p.planName || "No Plan",
@@ -2723,6 +2730,31 @@ export function PracticePortal() {
               onClick={() => { if (pt) { setBookApptForm(f => ({ ...f, patientId: pt.id })); setShowBookAppointment(true); } }}
             >
               <Calendar className="w-4 h-4" /> Book Appointment
+            </button>
+            <button
+              className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium border border-slate-200 text-slate-500 hover:bg-slate-50 transition-colors"
+              title={pt.userId ? "Generate a portal sign-in link the patient can use" : "Patient has no portal account yet"}
+              onClick={async () => {
+                if (!pt.userId) {
+                  setToast({ message: "Patient has no linked portal account.", type: "error" });
+                  return;
+                }
+                try {
+                  const r = await apiFetch<{ resetUrl: string; expiresInMinutes: number }>(
+                    `/admin/users/${pt.userId}/password-reset-link`,
+                    { method: "POST" },
+                  );
+                  if (r.error || !r.data) {
+                    setToast({ message: r.error || "Could not generate link.", type: "error" });
+                    return;
+                  }
+                  setResetLinkModal({ url: r.data.resetUrl, patientName: pt.name });
+                } catch {
+                  setToast({ message: "Could not generate link.", type: "error" });
+                }
+              }}
+            >
+              <Key className="w-4 h-4" /> Get Reset Link
             </button>
             <button
               className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium border border-slate-200 text-slate-500 hover:bg-slate-50 transition-colors"
@@ -7570,6 +7602,51 @@ export function PracticePortal() {
                   ? (rosterPlanDialog.mode === "change" ? "Changing..." : "Enrolling...")
                   : (rosterPlanDialog.mode === "change" ? "Change Plan" : "Enroll")}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─── Password Reset Link Modal ───────────────────────────────────── */}
+      {resetLinkModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: "rgba(0,0,0,0.5)" }}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden">
+            <div className="p-6" style={{ background: "linear-gradient(135deg, #1B2B4D, #243b53)" }}>
+              <h3 className="text-xl font-bold text-white">Portal Sign-In Link</h3>
+              <p className="text-sm text-slate-300 mt-1">Share this link with {resetLinkModal.patientName} to set their password.</p>
+            </div>
+            <div className="p-6 space-y-4">
+              <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+                <strong>One-time use, expires in 60 minutes.</strong> Do not share over insecure channels — treat like a password.
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1.5">Reset URL</label>
+                <textarea
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs font-mono break-all"
+                  rows={4}
+                  readOnly
+                  value={resetLinkModal.url}
+                  onClick={(e) => (e.target as HTMLTextAreaElement).select()}
+                />
+              </div>
+              <div className="flex items-center justify-end gap-2">
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(resetLinkModal.url);
+                    setToast({ message: "Link copied to clipboard.", type: "success" });
+                  }}
+                  className="px-4 py-2 rounded-lg text-sm font-medium text-white"
+                  style={{ backgroundColor: "#27ab83" }}
+                >
+                  Copy Link
+                </button>
+                <button
+                  onClick={() => setResetLinkModal(null)}
+                  className="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100"
+                >
+                  Close
+                </button>
+              </div>
             </div>
           </div>
         </div>
