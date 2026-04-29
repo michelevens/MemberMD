@@ -17,6 +17,8 @@ import {
   documentService,
   dashboardService,
   authService,
+  telehealthService,
+  isUsingMockData,
 } from "../../lib/api";
 import {
   Home,
@@ -155,6 +157,33 @@ const PATIENT = {
     phone: "(410) 555-0234",
   },
 };
+
+/**
+ * Build an empty patient profile from the authenticated user. Used when
+ * the API returns no data and we are NOT in demo mode — without this
+ * fallback, the UI would show fake "James Wilson" PHI to real patients
+ * (audit finding B6, 2026-04-28).
+ */
+function buildEmptyPatientFromAuth(user: { firstName?: string; lastName?: string; email?: string; phone?: string | null } | null) {
+  return {
+    firstName: user?.firstName ?? "",
+    lastName: user?.lastName ?? "",
+    email: user?.email ?? "",
+    phone: user?.phone ?? "",
+    dob: "",
+    address: "",
+    memberId: "",
+    memberSince: "",
+    planName: "",
+    planPrice: 0,
+    billingFrequency: "monthly",
+    nextPaymentDate: "",
+    paymentMethod: "",
+    provider: "",
+    emergencyContact: { name: "", relationship: "", phone: "" },
+    pharmacy: { name: "", address: "", phone: "" },
+  };
+}
 
 const UPCOMING_APPOINTMENTS: Appointment[] = [
   {
@@ -494,8 +523,12 @@ export function PatientPortal() {
     { id: "fm2", firstName: "Emma", lastName: "Wilson", relationship: "Child", dateOfBirth: "2015-08-10", status: "active" },
   ];
 
-  const planSupportsFamily = PATIENT.planName === "Complete Plan" || PATIENT.planName === "Premium Plan";
-  const [_familyMembers, setFamilyMembers] = useState<FamilyMember[]>(planSupportsFamily ? MOCK_FAMILY_MEMBERS : []);
+  // Family-members starting state is empty in production. MOCK_FAMILY_MEMBERS
+  // only seeds the demo experience; real users see their own roster from the
+  // API (audit B6 — never bleed mock PHI into real accounts).
+  const [_familyMembers, setFamilyMembers] = useState<FamilyMember[]>(
+    isUsingMockData() ? MOCK_FAMILY_MEMBERS : []
+  );
   const [_showAddFamily, setShowAddFamily] = useState(false);
   const [familyForm, _setFamilyForm] = useState({ firstName: "", lastName: "", dateOfBirth: "", relationship: "Spouse", email: "", phone: "" });
   const [_confirmRemoveId, setConfirmRemoveId] = useState<string | null>(null);
@@ -512,6 +545,20 @@ export function PatientPortal() {
   }, []);
 
   useEffect(() => { loadFamilyMembers(); }, [loadFamilyMembers]);
+
+  // Open the telehealth room for an appointment. Resolves or creates the
+  // session server-side, then navigates to the real session UUID. Replaces
+  // the broken `/telehealth/session-${apt.id}` literal-concat URL pattern
+  // (audit finding B10, 2026-04-28).
+  const openTelehealth = useCallback(async (appointmentId: string) => {
+    const res = await telehealthService.openForAppointment(appointmentId);
+    if (res.error || !res.data?.sessionId) {
+      // Surface failure instead of silently navigating to a broken URL
+      window.alert(res.error || "Could not open the video room. Please try again.");
+      return;
+    }
+    navigate(`/telehealth/${res.data.sessionId}`);
+  }, [navigate]);
 
   // ─── API Data State ──────────────────────────────────────────────────────
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -666,13 +713,35 @@ export function PatientPortal() {
     loadPatientData();
   }, []);
 
-  // ─── Resolved data (API with mock fallback) ──────────────────────────────
-  const patient = useMemo(() => apiPatient || PATIENT, [apiPatient]);
-  const upcomingAppointments = useMemo(() => apiUpcoming || UPCOMING_APPOINTMENTS, [apiUpcoming]);
-  const pastAppointments = useMemo(() => apiPast || PAST_APPOINTMENTS, [apiPast]);
-  const messageThreads = useMemo(() => apiThreads || MESSAGE_THREADS, [apiThreads]);
-  const medications = useMemo(() => apiMedications || MEDICATIONS, [apiMedications]);
-  const documents = useMemo(() => apiDocuments || DOCUMENTS, [apiDocuments]);
+  // ─── Resolved data ───────────────────────────────────────────────────────
+  // Mock fallbacks are demo-only. In production, real users with empty data
+  // get empty arrays + their own auth identity — never another fictional
+  // patient's PHI (audit finding B6, 2026-04-28).
+  const demoMode = useMemo(() => isUsingMockData(), []);
+  const patient = useMemo(
+    () => apiPatient || (demoMode ? PATIENT : buildEmptyPatientFromAuth(user)),
+    [apiPatient, demoMode, user]
+  );
+  const upcomingAppointments = useMemo(
+    () => apiUpcoming || (demoMode ? UPCOMING_APPOINTMENTS : []),
+    [apiUpcoming, demoMode]
+  );
+  const pastAppointments = useMemo(
+    () => apiPast || (demoMode ? PAST_APPOINTMENTS : []),
+    [apiPast, demoMode]
+  );
+  const messageThreads = useMemo(
+    () => apiThreads || (demoMode ? MESSAGE_THREADS : []),
+    [apiThreads, demoMode]
+  );
+  const medications = useMemo(
+    () => apiMedications || (demoMode ? MEDICATIONS : []),
+    [apiMedications, demoMode]
+  );
+  const documents = useMemo(
+    () => apiDocuments || (demoMode ? DOCUMENTS : []),
+    [apiDocuments, demoMode]
+  );
 
   // Family member handlers — will be wired when Family UI section is built
   void setFamilyMembers; void setShowAddFamily; void setConfirmRemoveId; void familyForm; void _setFamilyForm;
@@ -1011,7 +1080,7 @@ export function PatientPortal() {
               </div>
               {apt.isVideo ? (
                 <button
-                  onClick={() => navigate(`/telehealth/session-${apt.id}`)}
+                  onClick={() => openTelehealth(apt.id)}
                   className="shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold text-white flex items-center gap-1"
                   style={{ backgroundColor: COLORS.teal500 }}
                 >
@@ -1160,7 +1229,7 @@ export function PatientPortal() {
               <div className="flex items-center gap-2 mt-3 pt-3 border-t" style={{ borderColor: COLORS.slate200 }}>
                 {apt.isVideo && (
                   <button
-                    onClick={() => navigate(`/telehealth/session-${apt.id}`)}
+                    onClick={() => openTelehealth(apt.id)}
                     className="flex-1 py-2 rounded-lg text-sm font-semibold text-white flex items-center justify-center gap-1"
                     style={{ backgroundColor: COLORS.teal500 }}
                   >

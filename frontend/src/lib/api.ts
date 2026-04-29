@@ -53,6 +53,15 @@ function useMockData(): boolean {
   return !token || token.startsWith("mock_token_");
 }
 
+/**
+ * Public version of useMockData() for use by components. UI code MUST gate
+ * mock-data fallbacks behind this — without it, real users with empty data
+ * see another fictional patient's PHI on their dashboard (audit B6).
+ */
+export function isUsingMockData(): boolean {
+  return useMockData();
+}
+
 function getCurrentPracticeId(): string {
   try {
     const user = JSON.parse(sessionStorage.getItem("membermd_user") || "{}");
@@ -1095,6 +1104,29 @@ export const telehealthService = {
   getToken: async (appointmentId: string): Promise<ApiResponse<{ token: string; roomUrl: string }>> => {
     if (useMockData()) return { data: { token: "mock_meeting_token", roomUrl: "https://membermd.daily.co/mock-room" } };
     return apiFetch<{ token: string; roomUrl: string }>(`/telehealth/appointment/${appointmentId}/token`);
+  },
+  /**
+   * Resolve or create a telehealth session for the given appointment, then
+   * return its session id so the caller can navigate to /telehealth/{id}.
+   * Replaces the bug where PatientPortal navigated to a literal
+   * `/telehealth/session-{appointmentId}` URL that doesn't resolve to a
+   * real session UUID (audit finding B10, 2026-04-28).
+   */
+  openForAppointment: async (appointmentId: string): Promise<ApiResponse<{ sessionId: string }>> => {
+    if (useMockData()) return { data: { sessionId: `mock-session-${appointmentId}` } };
+    // Try to create — backend returns existing session if one already exists
+    // for this appointment (or 200 with the freshly created one).
+    const created = await apiFetch<TelehealthSession>("/telehealth", {
+      method: "POST",
+      body: JSON.stringify({ appointmentId }),
+    });
+    if (created.data?.id) {
+      return { data: { sessionId: created.data.id } };
+    }
+    if (created.error) {
+      return { error: created.error };
+    }
+    return { error: "Could not open telehealth session." };
   },
 };
 

@@ -15,8 +15,10 @@ import {
   Calendar as CalendarIcon,
   Crown,
   Repeat,
+  AlertTriangle,
 } from "lucide-react";
 import type { Appointment } from "../../types";
+import { appointmentService, isUsingMockData } from "../../lib/api";
 
 // ─── Colors ──────────────────────────────────────────────────────────────────
 
@@ -112,6 +114,7 @@ export function AppointmentBookingWidget({ onClose, onBooked }: AppointmentBooki
   const [telehealthConsent, setTelehealthConsent] = useState(false);
   const [calendarMonth, setCalendarMonth] = useState(new Date());
   const [booking, setBooking] = useState(false);
+  const [bookingError, setBookingError] = useState<string | null>(null);
 
   // ─── Calendar Helpers ──────────────────────────────────────────────────────
 
@@ -148,30 +151,59 @@ export function AppointmentBookingWidget({ onClose, onBooked }: AppointmentBooki
   async function handleBook() {
     if (!selectedProvider || !selectedType || !selectedDate || !selectedTime) return;
     setBooking(true);
-    // Simulate API call
-    await new Promise((r) => setTimeout(r, 1200));
+    setBookingError(null);
 
-    const mockAppointment: Appointment = {
-      id: `apt_${Date.now()}`,
-      practiceId: "p1",
-      patientId: "pat1",
+    // Combine selected date + time HH:MM into an ISO datetime
+    const [hours, minutes] = selectedTime.split(":").map(Number);
+    const scheduled = new Date(selectedDate);
+    scheduled.setHours(hours || 0, minutes || 0, 0, 0);
+
+    // In demo mode, return a fabricated appointment so the UI flow still
+    // demos. In production we make a real API call — without this, success
+    // screens fired with no DB write (audit finding B9, 2026-04-28).
+    if (isUsingMockData()) {
+      await new Promise((r) => setTimeout(r, 600));
+      const mockAppointment: Appointment = {
+        id: `apt_${Date.now()}`,
+        practiceId: "p1",
+        patientId: "pat1",
+        providerId: selectedProvider.id,
+        appointmentTypeId: selectedType.id,
+        status: "scheduled",
+        scheduledAt: scheduled.toISOString(),
+        durationMinutes: selectedType.durationMinutes,
+        chiefComplaint: notes || null,
+        notes: null,
+        isTeleHealth: selectedType.isTeleHealth,
+        teleHealthUrl: null,
+        canceledAt: null,
+        cancelReason: null,
+        checkedInAt: null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      onBooked?.(mockAppointment);
+      setBooking(false);
+      setStep("success");
+      return;
+    }
+
+    const res = await appointmentService.create({
       providerId: selectedProvider.id,
       appointmentTypeId: selectedType.id,
-      status: "scheduled",
-      scheduledAt: selectedDate.toISOString(),
+      scheduledAt: scheduled.toISOString(),
       durationMinutes: selectedType.durationMinutes,
       chiefComplaint: notes || null,
-      notes: null,
       isTeleHealth: selectedType.isTeleHealth,
-      teleHealthUrl: null,
-      canceledAt: null,
-      cancelReason: null,
-      checkedInAt: null,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
+    });
 
-    onBooked?.(mockAppointment);
+    if (res.error || !res.data) {
+      setBooking(false);
+      setBookingError(res.error || "Could not book the appointment. Please try again.");
+      return;
+    }
+
+    onBooked?.(res.data);
     setBooking(false);
     setStep("success");
   }
@@ -573,6 +605,16 @@ export function AppointmentBookingWidget({ onClose, onBooked }: AppointmentBooki
                     through a secure, HIPAA-compliant video connection.
                   </p>
                 </label>
+              )}
+
+              {bookingError && (
+                <div
+                  className="rounded-lg border p-3 flex items-start gap-2"
+                  style={{ borderColor: "#fca5a5", backgroundColor: "#fef2f2" }}
+                >
+                  <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" style={{ color: "#dc2626" }} />
+                  <p className="text-xs" style={{ color: "#991b1b" }}>{bookingError}</p>
+                </div>
               )}
 
               {/* Book Button */}
