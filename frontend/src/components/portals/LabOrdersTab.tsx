@@ -2,7 +2,7 @@
 // Lab order management: create orders, track status, enter results
 
 import { useState, useEffect, useCallback } from "react";
-import { apiFetch } from "../../lib/api";
+import { apiFetch, providerService } from "../../lib/api";
 import {
   Search,
   Plus,
@@ -147,25 +147,59 @@ export function LabOrdersTab() {
     }
   }, []);
 
+  // Lab orders require a provider_id (FK to users.id, but the user
+  // must have a provider record). We fetch the practice's first
+  // provider on mount and submit it with new orders. Solo-DPC default;
+  // multi-provider clinics will need a picker.
+  const [defaultProviderUserId, setDefaultProviderUserId] = useState<string | null>(null);
+  const fetchDefaultProvider = useCallback(async () => {
+    const res = await providerService.list();
+    if (!res.data) return;
+    const list = Array.isArray(res.data) ? res.data : (res.data as any)?.data || [];
+    // The lab orders endpoint expects users.id (the user behind the
+    // provider), not providers.id — see LabOrderController:62.
+    const first = list[0];
+    if (first?.userId) setDefaultProviderUserId(first.userId);
+    else if (first?.user?.id) setDefaultProviderUserId(first.user.id);
+  }, []);
+
   useEffect(() => {
     fetchOrders();
     fetchPanels();
-  }, [fetchOrders, fetchPanels]);
+    fetchDefaultProvider();
+  }, [fetchOrders, fetchPanels, fetchDefaultProvider]);
 
   const handleCreateOrder = async () => {
     if (!orderForm.patientId || orderForm.selectedPanels.length === 0) return;
+    if (!defaultProviderUserId) {
+      setError("No provider on this practice yet — add one before ordering labs.");
+      return;
+    }
     setSubmitting(true);
+    // Backend expects panels as array of {code, name, cpt?} objects, not
+    // bare strings. Look up each selected name in commonPanels and emit
+    // the validator-shape; fall back to a name-only entry with a
+    // synthesized code so an unmatched custom panel still passes.
+    const panelObjects = orderForm.selectedPanels.map((name) => {
+      const match = commonPanels.find((p) => p.name === name);
+      return match
+        ? { code: match.code, name: match.name }
+        : { code: name.toUpperCase().replace(/\s+/g, "_").slice(0, 20), name };
+    });
     const res = await apiFetch<LabOrder>("/lab-orders", {
       method: "POST",
       body: JSON.stringify({
         patientId: orderForm.patientId,
-        panels: orderForm.selectedPanels,
+        providerId: defaultProviderUserId,
+        panels: panelObjects,
         priority: orderForm.priority,
         specialInstructions: orderForm.specialInstructions || null,
         fasting: orderForm.fasting,
       }),
     });
-    if (res.data) {
+    if (res.error) {
+      setError(res.error);
+    } else if (res.data) {
       setOrders((prev) => [res.data!, ...prev]);
       setShowNewOrder(false);
       setOrderForm({

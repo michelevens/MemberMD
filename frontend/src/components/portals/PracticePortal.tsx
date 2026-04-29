@@ -676,6 +676,11 @@ export function PracticePortal() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [apiWaitlist, setApiWaitlist] = useState<any[]>([]);
   const [dataLoading, setDataLoading] = useState(false);
+  // First provider in the practice — used as a default provider_id when
+  // the create-encounter / create-prescription forms don't expose a
+  // picker. Most solo-DPC practices have one provider so this is the
+  // right answer; multi-provider clinics get a TODO to add a picker.
+  const [defaultProviderId, setDefaultProviderId] = useState<string | null>(null);
   const [showAddPatient, setShowAddPatient] = useState(false);
   const [addPatientForm, setAddPatientForm] = useState<{ firstName: string; lastName: string; email: string; phone: string; dateOfBirth: string; gender: "male" | "female" | "other" | "prefer_not_to_say" }>({ firstName: "", lastName: "", email: "", phone: "", dateOfBirth: "", gender: "male" });
   const [addPatientLoading, setAddPatientLoading] = useState(false);
@@ -833,7 +838,7 @@ export function PracticePortal() {
 
   const loadPracticeData = useCallback(async () => {
     setDataLoading(true);
-    const [statsRes, plansRes, threadsRes, patientsRes, appointmentsRes, encountersRes, prescriptionsRes, invoicesRes, programsRes, screeningsRes, paymentsRes, couponsRes, staffRes, notificationsRes, intakesRes, waitlistRes] = await Promise.allSettled([
+    const [statsRes, plansRes, threadsRes, patientsRes, appointmentsRes, encountersRes, prescriptionsRes, invoicesRes, programsRes, screeningsRes, paymentsRes, couponsRes, staffRes, notificationsRes, intakesRes, waitlistRes, providersRes] = await Promise.allSettled([
       dashboardService.getPracticeStats(),
       membershipPlanService.list(),
       messageService.list(),
@@ -850,6 +855,7 @@ export function PracticePortal() {
       notificationService.list().catch(() => ({ data: [] })),
       apiFetch<unknown[]>("/intakes").catch(() => ({ data: [] })),
       apiFetch<unknown[]>("/appointments/waitlist").catch(() => ({ data: [] })),
+      providerService.list().catch(() => ({ data: [] })),
     ]);
     // Dashboard stats
     if (statsRes.status === "fulfilled" && statsRes.value.data && typeof statsRes.value.data === "object") {
@@ -1065,6 +1071,16 @@ export function PracticePortal() {
         priority: w.priority || "medium",
         status: w.status || "waiting",
       })));
+    }
+    // Default provider id — extract once so encounter / prescription
+     // forms can submit without exposing a picker. Single-provider
+     // practices (the H1 customer profile) have exactly one row here.
+    if (providersRes.status === "fulfilled" && providersRes.value.data) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const provList = Array.isArray(providersRes.value.data) ? providersRes.value.data : (providersRes.value.data as any).data || [];
+      if (provList.length > 0 && provList[0]?.id) {
+        setDefaultProviderId(provList[0].id);
+      }
     }
     setDataLoading(false);
   }, []);
@@ -1403,13 +1419,25 @@ export function PracticePortal() {
       setToast({ message: "Patient is required.", type: "error" });
       return;
     }
+    if (!defaultProviderId) {
+      setToast({ message: "No provider on this practice yet — add one first under Providers.", type: "error" });
+      return;
+    }
     setEncounterLoading(true);
     try {
       const res = await encounterService.create({
         patientId: encounterForm.patientId,
+        // Backend requires both. providerId comes from the practice's
+        // first provider (single-provider DPC default); encounterType
+        // mirrors the form, falling back to follow_up to match the
+        // validator's enum. Cast because the local Encounter type
+        // doesn't yet model encounterType.
+        providerId: defaultProviderId,
+        encounterType: encounterForm.encounterType || "follow_up",
         encounterDate: encounterForm.encounterDate,
         status: "in_progress",
-      });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      } as any);
       if (res.data || !res.error) {
         setToast({ message: "Encounter created. Fill in the SOAP note below.", type: "success" });
         setShowNewEncounter(false);
@@ -1432,22 +1460,30 @@ export function PracticePortal() {
     if (!editingEncounterId) return;
     setSoapLoading(true);
     try {
-      const updateData: Record<string, unknown> = {
+      // Save SOAP fields first. UpdateEncounterRequest does NOT accept
+      // a `status` field, so to actually sign we hit the dedicated
+      // POST /encounters/{id}/sign endpoint after a successful save.
+      const updateRes = await encounterService.update(editingEncounterId, {
         subjective: soapForm.subjective,
         objective: soapForm.objective,
         assessment: soapForm.assessment,
         plan: soapForm.plan,
         chiefComplaint: soapForm.chiefComplaint,
-      };
-      if (sign) updateData.status = "signed";
-      const res = await encounterService.update(editingEncounterId, updateData);
-      if (res.data || !res.error) {
-        setToast({ message: sign ? "Encounter signed successfully." : "SOAP note saved.", type: "success" });
-        if (sign) setEditingEncounterId(null);
-        loadPracticeData();
-      } else {
-        setToast({ message: res.error || "Failed to save note.", type: "error" });
+      });
+      if (updateRes.error) {
+        setToast({ message: updateRes.error, type: "error" });
+        return;
       }
+      if (sign) {
+        const signRes = await encounterService.sign(editingEncounterId);
+        if (signRes.error) {
+          setToast({ message: `Saved note, but signing failed: ${signRes.error}`, type: "error" });
+          return;
+        }
+        setEditingEncounterId(null);
+      }
+      setToast({ message: sign ? "Encounter signed successfully." : "SOAP note saved.", type: "success" });
+      loadPracticeData();
     } catch (err: unknown) {
       setToast({ message: err instanceof Error ? err.message : "Failed to save note.", type: "error" });
     }
@@ -1460,21 +1496,31 @@ export function PracticePortal() {
       setToast({ message: "Patient, medication, and dosage are required.", type: "error" });
       return;
     }
+    if (!defaultProviderId) {
+      setToast({ message: "No provider on this practice yet — add one first under Providers.", type: "error" });
+      return;
+    }
     setRxLoading(true);
     try {
+      // Backend keys: providerId is required; the field is `pharmacyName`
+      // (apiFetch's snake-case transformer converts to pharmacy_name).
+      // The earlier `pharmacy` key landed as `pharmacy` server-side and
+      // got silently stripped by the validator -> 422.
       const res = await prescriptionService.create({
         patientId: rxForm.patientId,
+        providerId: defaultProviderId,
         medicationName: rxForm.medicationName,
         dosage: rxForm.dosage,
         frequency: rxForm.frequency,
         route: rxForm.route,
         quantity: parseInt(rxForm.quantity) || 30,
         refills: parseInt(rxForm.refills) || 0,
-        pharmacy: rxForm.pharmacyName || undefined,
+        pharmacyName: rxForm.pharmacyName || undefined,
+        pharmacyPhone: rxForm.pharmacyPhone || undefined,
         notes: rxForm.notes || undefined,
-        startDate: new Date().toISOString().split("T")[0],
         status: "active",
-      });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      } as any);
       if (res.data || !res.error) {
         setToast({ message: "Prescription created successfully.", type: "success" });
         setShowNewPrescription(false);
