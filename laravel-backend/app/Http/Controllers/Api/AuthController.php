@@ -11,7 +11,10 @@ use App\Services\PracticeProvisioningService;
 use App\Services\TOTPService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Password;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Laravel\Sanctum\PersonalAccessToken;
@@ -25,10 +28,38 @@ class AuthController extends Controller
             'password' => 'required|string',
         ]);
 
+        // Rate limit by email + IP. Two keys (email-only and IP-only)
+        // means attackers can't bypass either:
+        //  - Spreading attempts across IPs still hits the per-email limit.
+        //  - Spreading attempts across emails still hits the per-IP limit.
+        $emailKey = 'login-email:' . strtolower($request->email);
+        $ipKey = 'login-ip:' . $request->ip();
+        if (RateLimiter::tooManyAttempts($emailKey, 5)
+            || RateLimiter::tooManyAttempts($ipKey, 20)) {
+            $this->logSecurityEvent(
+                'login_throttled',
+                $request,
+                null,
+                null,
+                ['email' => $request->email]
+            );
+            $seconds = max(
+                RateLimiter::availableIn($emailKey),
+                RateLimiter::availableIn($ipKey)
+            );
+            return response()->json([
+                'message' => "Too many login attempts. Try again in {$seconds} seconds.",
+            ], 429);
+        }
+
         $user = User::where('email', $request->email)->first();
 
         if (!$user || !Hash::check($request->password, $user->password)) {
-            // Log failed login attempt
+            // Hit BOTH counters on a failed attempt so neither bucket can be
+            // exhausted independently. 60-second decay window.
+            RateLimiter::hit($emailKey, 60);
+            RateLimiter::hit($ipKey, 60);
+
             $this->logSecurityEvent(
                 'login_failed',
                 $request,
@@ -41,6 +72,11 @@ class AuthController extends Controller
                 'email' => ['The provided credentials are incorrect.'],
             ]);
         }
+
+        // Successful login resets the email counter so the user isn't locked
+        // out by their own past typos. IP counter persists — that's a
+        // network-level signal, not a per-account one.
+        RateLimiter::clear($emailKey);
 
         // If MFA is enabled, return a temporary token for MFA verification
         if ($user->mfa_enabled) {
@@ -246,6 +282,84 @@ class AuthController extends Controller
         return response()->json(['message' => 'Logged out']);
     }
 
+    /**
+     * Send a password-reset email. Always returns 200 even when the email
+     * doesn't match a known user — disclosing which emails exist is a user
+     * enumeration vector. The status differential goes to the audit log.
+     */
+    public function forgotPassword(Request $request): JsonResponse
+    {
+        $request->validate(['email' => 'required|email']);
+
+        $key = 'pwreset-email:' . strtolower($request->email);
+        if (RateLimiter::tooManyAttempts($key, 3)) {
+            return response()->json([
+                'message' => 'Too many reset requests. Try again later.',
+            ], 429);
+        }
+        RateLimiter::hit($key, 600); // 10-minute decay
+
+        $status = Password::sendResetLink(['email' => $request->email]);
+
+        $this->logSecurityEvent(
+            'password_reset_requested',
+            $request,
+            null,
+            null,
+            ['email' => $request->email, 'status' => $status]
+        );
+
+        // Always return the same generic response.
+        return response()->json([
+            'message' => 'If an account exists for that email, a reset link has been sent.',
+        ]);
+    }
+
+    /**
+     * Consume a password reset token and set a new password.
+     */
+    public function resetPassword(Request $request): JsonResponse
+    {
+        $request->validate([
+            'email' => 'required|email',
+            'token' => 'required|string',
+            'password' => ['required', 'string', 'min:12', 'confirmed',
+                'regex:/[A-Z]/', 'regex:/[a-z]/', 'regex:/[0-9]/', 'regex:/[^A-Za-z0-9]/'],
+        ]);
+
+        $status = Password::reset(
+            $request->only('email', 'password', 'password_confirmation', 'token'),
+            function (User $user, string $password) {
+                $user->forceFill(['password' => Hash::make($password)])->save();
+                // Revoke all existing sessions — a password reset implies
+                // the user may have been compromised; existing tokens
+                // shouldn't survive.
+                $user->tokens()->delete();
+            }
+        );
+
+        if ($status !== Password::PasswordReset) {
+            $this->logSecurityEvent(
+                'password_reset_failed',
+                $request,
+                null,
+                null,
+                ['email' => $request->email, 'status' => $status]
+            );
+            throw ValidationException::withMessages(['email' => [__($status)]]);
+        }
+
+        $this->logSecurityEvent(
+            'password_reset_success',
+            $request,
+            null,
+            null,
+            ['email' => $request->email]
+        );
+
+        return response()->json(['message' => 'Password has been reset.']);
+    }
+
     public function me(Request $request): JsonResponse
     {
         return response()->json([
@@ -299,6 +413,14 @@ class AuthController extends Controller
         return response()->json(['message' => 'Password updated successfully.']);
     }
 
+    /**
+     * Begin MFA enrollment. The TOTP secret is held server-side in cache
+     * for 10 minutes; the client never sees it after the QR code is
+     * scanned, and the client never sends it back. This prevents an
+     * attacker who can submit forms in a compromised browser session
+     * (XSS or social-engineered link) from enabling MFA against a
+     * secret of their own choosing.
+     */
     public function setupMfa(Request $request): JsonResponse
     {
         $user = $request->user();
@@ -308,11 +430,15 @@ class AuthController extends Controller
         $otpauthUrl = $totp->getOtpauthUrl($secret, $user->email);
         $qrCodeUrl = 'https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=' . urlencode($otpauthUrl);
 
+        // Store the candidate secret server-side. Key is per-user so
+        // concurrent setups don't collide; TTL caps how long an
+        // abandoned setup attempt sits around.
+        Cache::put('mfa-setup:' . $user->id, $secret, now()->addMinutes(10));
+
         $this->logSecurityEvent('mfa_setup_initiated', $request, $user->tenant_id, $user->id);
 
         return response()->json([
             'data' => [
-                'secret' => $secret,
                 'qrCodeUrl' => $qrCodeUrl,
                 'otpauthUrl' => $otpauthUrl,
             ],
@@ -323,18 +449,24 @@ class AuthController extends Controller
     {
         $request->validate([
             'code' => 'required|string|digits:6',
-            'secret' => 'required|string',
         ]);
 
-        $totp = new TOTPService();
+        $user = $request->user();
+        $cacheKey = 'mfa-setup:' . $user->id;
+        $secret = Cache::get($cacheKey);
 
-        if (!$totp->verifyCode($request->secret, $request->code)) {
+        if (!$secret) {
+            throw ValidationException::withMessages([
+                'code' => ['MFA setup expired. Restart the enrollment flow.'],
+            ]);
+        }
+
+        $totp = new TOTPService();
+        if (!$totp->verifyCode($secret, $request->code)) {
             throw ValidationException::withMessages([
                 'code' => ['The verification code is invalid.'],
             ]);
         }
-
-        $user = $request->user();
 
         // Generate 8 backup recovery codes
         $backupCodes = [];
@@ -346,10 +478,13 @@ class AuthController extends Controller
         }
 
         $user->update([
-            'mfa_secret' => $request->secret,
+            'mfa_secret' => $secret,
             'mfa_enabled' => true,
             'mfa_recovery_codes' => json_encode($hashedCodes),
         ]);
+
+        // Burn the cache entry — single-use enrollment.
+        Cache::forget($cacheKey);
 
         $this->logSecurityEvent('mfa_enabled', $request, $user->tenant_id, $user->id);
 
