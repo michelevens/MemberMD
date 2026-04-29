@@ -47,6 +47,14 @@ return [
         'sender_email' => env('SRFAX_SENDER_EMAIL', 'noreply@membermd.io'),
     ],
 
+    'twilio' => [
+        // Account SID + Auth Token from twilio.com/console.
+        // Auth Token is also used to verify inbound webhook signatures.
+        'account_sid' => env('TWILIO_ACCOUNT_SID'),
+        'auth_token' => env('TWILIO_AUTH_TOKEN'),
+        'from' => env('TWILIO_FROM_NUMBER'),
+    ],
+
     'stripe' => [
         'key' => env('STRIPE_KEY'),
         'secret' => env('STRIPE_SECRET'),

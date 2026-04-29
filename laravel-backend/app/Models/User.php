@@ -23,7 +23,8 @@ class User extends Authenticatable
         'first_name', 'last_name', 'phone', 'date_of_birth',
         'profile_picture', 'status',
         'mfa_enabled', 'mfa_secret', 'mfa_recovery_codes',
-        'pin', 'last_login_at',
+        'pin', 'pin_failed_attempts', 'pin_locked_until',
+        'last_login_at',
         'onboarding_completed', 'stripe_customer_id',
         'employer_id',
     ];
@@ -43,7 +44,14 @@ class User extends Authenticatable
             'mfa_recovery_codes' => 'encrypted',
             'last_login_at' => 'datetime',
             'onboarding_completed' => 'boolean',
+            'pin_locked_until' => 'datetime',
+            'pin_failed_attempts' => 'integer',
         ];
+    }
+
+    public function isPinLocked(): bool
+    {
+        return $this->pin_locked_until !== null && $this->pin_locked_until->isFuture();
     }
 
     // Relationships

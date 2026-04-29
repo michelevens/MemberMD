@@ -4,19 +4,38 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Message;
+use App\Services\TwilioSignatureValidator;
 use App\Services\TwilioSmsService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 
+/**
+ * Twilio webhook receivers. Both endpoints validate the X-Twilio-Signature
+ * header against TWILIO_AUTH_TOKEN. Without this check, an attacker could
+ * inject inbound SMS as if from any patient's phone or mark prescription
+ * delivery events fraudulently (audit finding B5, 2026-04-28).
+ */
 class SmsWebhookController extends Controller
 {
+    public function __construct(private readonly TwilioSignatureValidator $validator)
+    {
+    }
+
     /**
      * POST /api/webhooks/sms/inbound
      * Twilio inbound SMS webhook — matches phone to patient, creates message in thread.
      */
     public function inbound(Request $request): JsonResponse
     {
+        if (!$this->validator->validate($request)) {
+            Log::warning('Rejected unsigned/invalid Twilio inbound SMS webhook', [
+                'ip' => $request->ip(),
+                'has_signature' => (bool) $request->header('X-Twilio-Signature'),
+            ]);
+            return response()->json(['error' => 'invalid_signature'], 403);
+        }
+
         $from = $request->input('From', '');
         $body = $request->input('Body', '');
         $to = $request->input('To', '');
@@ -44,6 +63,13 @@ class SmsWebhookController extends Controller
      */
     public function status(Request $request): JsonResponse
     {
+        if (!$this->validator->validate($request)) {
+            Log::warning('Rejected unsigned/invalid Twilio status webhook', [
+                'ip' => $request->ip(),
+            ]);
+            return response()->json(['error' => 'invalid_signature'], 403);
+        }
+
         $messageSid = $request->input('MessageSid', '');
         $messageStatus = $request->input('MessageStatus', '');
 

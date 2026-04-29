@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Appointment;
 use App\Models\ConsentSignature;
 use App\Models\ConsentTemplate;
+use App\Models\KioskSession;
 use App\Models\Patient;
 use App\Models\Practice;
 use App\Models\ScreeningResponse;
@@ -14,36 +15,45 @@ use App\Models\User;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 
 /**
- * Patient Check-In Kiosk — public endpoints (no auth).
- * Authenticates via tenant_code + patient PIN or name+DOB.
- * Pattern ported from ShiftPulse ExternalClockController.
+ * Patient Check-In Kiosk — public endpoints.
+ *
+ * Hardening (audit finding B7, 2026-04-28):
+ *   - PIN is bcrypt-hashed, never compared as plaintext
+ *   - Per-user lockout after 5 failed PIN attempts (30-min cool-down)
+ *   - PIN length enforced (>=4 digits) at identify time
+ *   - identify() mints a 5-min KioskSession token; downstream endpoints
+ *     (screenings, consents, check-in) require X-Kiosk-Session header
+ *     scoped to (tenant_id, patient_id). Anyone holding a UUID can no
+ *     longer pull PHI without an active kiosk session.
  */
 class KioskController extends Controller
 {
+    private const PIN_MAX_ATTEMPTS = 5;
+    private const PIN_LOCK_MINUTES = 30;
+
     /**
      * POST /api/kiosk/identify
-     * Patient enters PIN or name+DOB -> returns their info + today's appointments.
      */
     public function identify(Request $request): JsonResponse
     {
         $request->validate([
             'tenant_code' => 'required|string',
-            'pin' => 'nullable|string',
+            'pin' => 'nullable|string|min:4|max:32',
             'last_name' => 'nullable|string',
             'date_of_birth' => 'nullable|date',
         ]);
 
-        // Must provide either PIN or name+DOB
         if (!$request->filled('pin') && !($request->filled('last_name') && $request->filled('date_of_birth'))) {
             return response()->json([
                 'error' => 'Please provide a PIN or your last name and date of birth.',
             ], 422);
         }
 
-        // Look up practice by tenant_code
         $practice = Practice::where('tenant_code', $request->tenant_code)
             ->where('is_active', true)
             ->first();
@@ -53,23 +63,55 @@ class KioskController extends Controller
         }
 
         $patient = null;
+        $method = null;
 
-        // Strategy 1: PIN-based identification (like ShiftPulse)
+        // Strategy 1: PIN-based identification with bcrypt + lockout
         if ($request->filled('pin')) {
-            $pin = $request->pin;
-
-            // Find user by PIN within this tenant
-            $user = User::where('tenant_id', $practice->id)
+            $pin = (string) $request->pin;
+            $candidates = User::where('tenant_id', $practice->id)
                 ->where('role', 'patient')
                 ->where('status', 'active')
-                ->where('pin', $pin)
-                ->first();
+                ->whereNotNull('pin')
+                ->get();
 
-            if ($user) {
-                $patient = Patient::where('tenant_id', $practice->id)
-                    ->where('user_id', $user->id)
-                    ->where('is_active', true)
-                    ->first();
+            foreach ($candidates as $user) {
+                if ($user->isPinLocked()) {
+                    continue;
+                }
+                // Skip non-bcrypt rows: those are stale plaintext PINs from
+                // before the migration ran. Treat them as locked so a
+                // partially-migrated DB can never grant access via plaintext.
+                if (!is_string($user->pin) || !str_starts_with($user->pin, '$2')) {
+                    continue;
+                }
+                if (Hash::check($pin, $user->pin)) {
+                    $user->update([
+                        'pin_failed_attempts' => 0,
+                        'pin_locked_until' => null,
+                    ]);
+                    $patient = Patient::where('tenant_id', $practice->id)
+                        ->where('user_id', $user->id)
+                        ->where('is_active', true)
+                        ->first();
+                    $method = 'pin';
+                    break;
+                }
+            }
+
+            // No match — increment failure counters on every active patient
+            // user. We don't know which one was being attempted, so the safe
+            // move is to slow down all of them. This blunts PIN enumeration.
+            if (!$patient) {
+                foreach ($candidates as $user) {
+                    if ($user->isPinLocked()) continue;
+                    $attempts = ((int) $user->pin_failed_attempts) + 1;
+                    $update = ['pin_failed_attempts' => $attempts];
+                    if ($attempts >= self::PIN_MAX_ATTEMPTS) {
+                        $update['pin_locked_until'] = now()->addMinutes(self::PIN_LOCK_MINUTES);
+                        $update['pin_failed_attempts'] = 0;
+                    }
+                    $user->update($update);
+                }
             }
         }
 
@@ -77,16 +119,26 @@ class KioskController extends Controller
         if (!$patient && $request->filled('last_name') && $request->filled('date_of_birth')) {
             $patient = Patient::where('tenant_id', $practice->id)
                 ->where('is_active', true)
-                ->whereRaw('LOWER(last_name) = ?', [strtolower($request->last_name)])
+                ->whereRaw('lower(last_name) = ?', [strtolower((string) $request->last_name)])
                 ->whereDate('date_of_birth', $request->date_of_birth)
                 ->first();
+            if ($patient) $method = 'name_dob';
         }
 
         if (!$patient) {
             return response()->json(['error' => 'Patient not found. Check your PIN or information.'], 404);
         }
 
-        // Get today's appointments for this patient
+        // Mint a 5-min kiosk session token
+        $rawToken = Str::random(48);
+        $session = KioskSession::create([
+            'tenant_id' => $practice->id,
+            'patient_id' => $patient->id,
+            'token_hash' => KioskSession::hashToken($rawToken),
+            'identification_method' => $method ?? 'unknown',
+            'expires_at' => now()->addSeconds(KioskSession::TOKEN_TTL_SECONDS),
+        ]);
+
         $today = Carbon::today();
         $appointments = Appointment::where('tenant_id', $practice->id)
             ->where('patient_id', $patient->id)
@@ -120,12 +172,15 @@ class KioskController extends Controller
             ],
             'appointments' => $appointments,
             'practice_name' => $practice->name,
+            'kiosk_session' => [
+                'token' => $rawToken,
+                'expires_at' => $session->expires_at,
+            ],
         ]]);
     }
 
     /**
      * POST /api/kiosk/check-in
-     * Marks an appointment as checked in and notifies the provider.
      */
     public function checkIn(Request $request): JsonResponse
     {
@@ -141,6 +196,10 @@ class KioskController extends Controller
 
         if (!$practice) {
             return response()->json(['error' => 'Practice not found'], 404);
+        }
+
+        if (!$this->verifyKioskSession($request, $practice->id, (string) $request->patient_id)) {
+            return response()->json(['error' => 'Kiosk session expired or invalid.'], 401);
         }
 
         $appointment = Appointment::where('tenant_id', $practice->id)
@@ -159,8 +218,7 @@ class KioskController extends Controller
             ]]);
         }
 
-        // Determine check-in method based on how identify was called
-        $method = $request->input('method', 'pin'); // pin, qr, name_dob
+        $method = $request->input('method', 'pin');
 
         $appointment->update([
             'checked_in_at' => now(),
@@ -168,13 +226,11 @@ class KioskController extends Controller
             'status' => 'checked_in',
         ]);
 
-        // Notify the provider via in-app notification
         try {
             $patient = Patient::find($request->patient_id);
             $providerUser = $appointment->provider?->user;
 
             if ($providerUser && $patient) {
-                // Create an AppNotification record (uses the existing notifications table)
                 $providerUser->notify(new \Illuminate\Notifications\Messages\DatabaseMessage([
                     'title' => 'Patient Checked In',
                     'body' => "{$patient->first_name} {$patient->last_name} has checked in for their " .
@@ -186,7 +242,6 @@ class KioskController extends Controller
                 ]));
             }
         } catch (\Throwable $e) {
-            // Don't block check-in if notification fails
             Log::warning('Kiosk check-in notification failed: ' . $e->getMessage());
         }
 
@@ -199,7 +254,6 @@ class KioskController extends Controller
 
     /**
      * GET /api/kiosk/{tenantCode}/patient/{patientId}/screenings
-     * Returns pending screening questionnaires for the patient.
      */
     public function screenings(Request $request, string $tenantCode, string $patientId): JsonResponse
     {
@@ -211,6 +265,10 @@ class KioskController extends Controller
             return response()->json(['error' => 'Practice not found'], 404);
         }
 
+        if (!$this->verifyKioskSession($request, $practice->id, $patientId)) {
+            return response()->json(['error' => 'Kiosk session expired or invalid.'], 401);
+        }
+
         $patient = Patient::where('tenant_id', $practice->id)
             ->where('id', $patientId)
             ->where('is_active', true)
@@ -220,7 +278,6 @@ class KioskController extends Controller
             return response()->json(['error' => 'Patient not found'], 404);
         }
 
-        // Get all active screening templates for this tenant (or global ones)
         $templates = ScreeningTemplate::where(function ($q) use ($practice) {
                 $q->where('tenant_id', $practice->id)
                   ->orWhereNull('tenant_id');
@@ -228,14 +285,12 @@ class KioskController extends Controller
             ->where('is_active', true)
             ->get();
 
-        // Get completed screening IDs for today
         $completedTemplateIds = ScreeningResponse::where('tenant_id', $practice->id)
             ->where('patient_id', $patient->id)
             ->whereDate('administered_at', today())
             ->pluck('template_id')
             ->toArray();
 
-        // Filter to only templates not yet completed today
         $pending = $templates->reject(function ($template) use ($completedTemplateIds) {
             return in_array($template->id, $completedTemplateIds);
         })->map(fn ($t) => [
@@ -252,7 +307,6 @@ class KioskController extends Controller
 
     /**
      * GET /api/kiosk/{tenantCode}/patient/{patientId}/consents
-     * Returns unsigned required consent forms for the patient.
      */
     public function consents(Request $request, string $tenantCode, string $patientId): JsonResponse
     {
@@ -264,6 +318,10 @@ class KioskController extends Controller
             return response()->json(['error' => 'Practice not found'], 404);
         }
 
+        if (!$this->verifyKioskSession($request, $practice->id, $patientId)) {
+            return response()->json(['error' => 'Kiosk session expired or invalid.'], 401);
+        }
+
         $patient = Patient::where('tenant_id', $practice->id)
             ->where('id', $patientId)
             ->where('is_active', true)
@@ -273,7 +331,6 @@ class KioskController extends Controller
             return response()->json(['error' => 'Patient not found'], 404);
         }
 
-        // Get all required, active consent templates for this tenant (or global ones)
         $templates = ConsentTemplate::where(function ($q) use ($practice) {
                 $q->where('tenant_id', $practice->id)
                   ->orWhereNull('tenant_id');
@@ -282,13 +339,11 @@ class KioskController extends Controller
             ->where('is_active', true)
             ->get();
 
-        // Get already-signed template IDs for this patient
         $signedTemplateIds = ConsentSignature::where('tenant_id', $practice->id)
             ->where('patient_id', $patient->id)
             ->pluck('template_id')
             ->toArray();
 
-        // Filter to only unsigned required consents
         $unsigned = $templates->reject(function ($template) use ($signedTemplateIds) {
             return in_array($template->id, $signedTemplateIds);
         })->map(fn ($t) => [
@@ -300,5 +355,23 @@ class KioskController extends Controller
         ])->values();
 
         return response()->json(['data' => $unsigned]);
+    }
+
+    /**
+     * Verify X-Kiosk-Session against a non-expired session scoped to
+     * (tenant_id, patient_id). Returns false on missing/expired/mismatched.
+     */
+    private function verifyKioskSession(Request $request, string $tenantId, string $patientId): bool
+    {
+        $token = $request->header('X-Kiosk-Session');
+        if (!$token) {
+            return false;
+        }
+        $session = KioskSession::findByToken((string) $token, $tenantId, $patientId);
+        if (!$session) {
+            return false;
+        }
+        $session->update(['used_at' => now()]);
+        return true;
     }
 }
