@@ -1786,6 +1786,10 @@ export function PracticePortal() {
       setToast({ message: "First and last name are required.", type: "error" });
       return;
     }
+    if (!providerForm.email) {
+      setToast({ message: "Email is required — the provider will use it to log in.", type: "error" });
+      return;
+    }
     setAddProviderLoading(true);
     try {
       const res = await providerService.create({
@@ -1794,7 +1798,7 @@ export function PracticePortal() {
         credentials: providerForm.credentials || undefined,
         specialty: providerForm.specialty || undefined,
         npiNumber: providerForm.npiNumber || undefined,
-        email: providerForm.email || undefined,
+        email: providerForm.email,
         phone: providerForm.phone || undefined,
         telehealth: providerForm.telehealth,
       } as Record<string, unknown>);
@@ -1811,6 +1815,48 @@ export function PracticePortal() {
       setToast({ message: err instanceof Error ? err.message : "Failed to add provider.", type: "error" });
     }
     setAddProviderLoading(false);
+  };
+
+  // ─── NPI Lookup (Add/Edit Provider modals) ────────────────────────────
+  const [npiLookupLoading, setNpiLookupLoading] = useState(false);
+  const lookupNpiAndFill = async (npi: string, target: "add" | "edit") => {
+    if (!/^\d{10}$/.test(npi)) {
+      setToast({ message: "NPI must be exactly 10 digits.", type: "error" });
+      return;
+    }
+    setNpiLookupLoading(true);
+    try {
+      const res = await fetch(`https://npiregistry.cms.hhs.gov/api/?version=2.1&number=${npi}`);
+      const data = await res.json();
+      const result = data.results?.[0];
+      if (!result) {
+        setToast({ message: "NPI not found in registry.", type: "error" });
+        return;
+      }
+      const basic = result.basic || {};
+      const firstName = basic.first_name || "";
+      const lastName = basic.last_name || "";
+      const credential = (basic.credential || "").replace(/\./g, "");
+      if (target === "add") {
+        setProviderForm(f => ({
+          ...f,
+          firstName: f.firstName || firstName,
+          lastName: f.lastName || lastName,
+          credentials: f.credentials || credential,
+        }));
+      } else {
+        setEditProviderForm(f => ({
+          ...f,
+          firstName: f.firstName || firstName,
+          lastName: f.lastName || lastName,
+          credentials: f.credentials || credential,
+        }));
+      }
+      setToast({ message: `Found: ${firstName} ${lastName}${credential ? `, ${credential}` : ""}`, type: "success" });
+    } catch {
+      setToast({ message: "NPI lookup failed. Check your connection.", type: "error" });
+    }
+    setNpiLookupLoading(false);
   };
 
   // ─── Edit Provider Handler ─────────────────────────────────────────────
@@ -7999,11 +8045,27 @@ export function PracticePortal() {
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">NPI Number</label>
-                <input className="w-full border rounded-lg px-3 py-2 text-sm" value={providerForm.npiNumber} onChange={e => setProviderForm(f => ({ ...f, npiNumber: e.target.value }))} placeholder="10-digit NPI" />
+                <div className="flex gap-2">
+                  <input
+                    className="flex-1 border rounded-lg px-3 py-2 text-sm"
+                    value={providerForm.npiNumber}
+                    onChange={e => setProviderForm(f => ({ ...f, npiNumber: e.target.value.replace(/\D/g, "").slice(0, 10) }))}
+                    placeholder="10-digit NPI"
+                    maxLength={10}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => lookupNpiAndFill(providerForm.npiNumber, "add")}
+                    disabled={providerForm.npiNumber.length !== 10 || npiLookupLoading}
+                    className="px-3 py-2 rounded-lg border border-slate-200 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    {npiLookupLoading ? "..." : "Lookup"}
+                  </button>
+                </div>
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Email</label>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Email *</label>
                   <input type="email" className="w-full border rounded-lg px-3 py-2 text-sm" value={providerForm.email} onChange={e => setProviderForm(f => ({ ...f, email: e.target.value }))} placeholder="provider@example.com" />
                 </div>
                 <div>
@@ -8064,7 +8126,23 @@ export function PracticePortal() {
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">NPI Number</label>
-                <input className="w-full border rounded-lg px-3 py-2 text-sm" value={editProviderForm.npiNumber} onChange={e => setEditProviderForm(f => ({ ...f, npiNumber: e.target.value }))} placeholder="10-digit NPI" />
+                <div className="flex gap-2">
+                  <input
+                    className="flex-1 border rounded-lg px-3 py-2 text-sm"
+                    value={editProviderForm.npiNumber}
+                    onChange={e => setEditProviderForm(f => ({ ...f, npiNumber: e.target.value.replace(/\D/g, "").slice(0, 10) }))}
+                    placeholder="10-digit NPI"
+                    maxLength={10}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => lookupNpiAndFill(editProviderForm.npiNumber, "edit")}
+                    disabled={editProviderForm.npiNumber.length !== 10 || npiLookupLoading}
+                    className="px-3 py-2 rounded-lg border border-slate-200 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    {npiLookupLoading ? "..." : "Lookup"}
+                  </button>
+                </div>
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>

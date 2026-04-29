@@ -498,6 +498,37 @@ export const practiceService = {
 
 // ─── Providers ──────────────────────────────────────────────────────────────
 
+/**
+ * Translate the camelCase form payload to the snake_case shape the backend's
+ * StoreProviderRequest validator expects. Specialty is a string in the UI
+ * but the backend stores `specialties` as an array; wrap it.
+ */
+function toProviderApiPayload(input: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  if (input.firstName !== undefined) out.first_name = input.firstName;
+  if (input.lastName !== undefined) out.last_name = input.lastName;
+  if (input.email !== undefined) out.email = input.email;
+  if (input.phone !== undefined) out.phone = input.phone;
+  if (input.credentials !== undefined) out.credentials = input.credentials;
+  if (input.bio !== undefined) out.bio = input.bio;
+  if (input.npiNumber !== undefined) out.npi = input.npiNumber;
+  if (input.licenseNumber !== undefined) out.license_number = input.licenseNumber;
+  if (input.licenseState !== undefined) out.license_state = input.licenseState;
+  if (input.title !== undefined) out.title = input.title;
+  if (input.panelCapacity !== undefined) out.panel_capacity = input.panelCapacity;
+  if (input.panelStatus !== undefined) out.panel_status = input.panelStatus;
+  if (input.acceptsNewPatients !== undefined) out.accepts_new_patients = input.acceptsNewPatients;
+  if (input.telehealth !== undefined) out.telehealth_enabled = input.telehealth;
+  if (input.telehealthEnabled !== undefined) out.telehealth_enabled = input.telehealthEnabled;
+  if (input.consultationFee !== undefined) out.consultation_fee = input.consultationFee;
+  if (input.specialty !== undefined && input.specialty !== "") {
+    out.specialties = [input.specialty];
+  }
+  if (Array.isArray(input.specialties)) out.specialties = input.specialties;
+  if (Array.isArray(input.languages)) out.languages = input.languages;
+  return out;
+}
+
 export const providerService = {
   list: async (): Promise<ApiResponse<Provider[]>> => {
     if (useMockData()) return { data: [] };
@@ -507,13 +538,13 @@ export const providerService = {
     if (useMockData()) return { data: {} as Provider };
     return apiFetch<Provider>(`/providers/${id}`);
   },
-  create: async (data: Partial<Provider>): Promise<ApiResponse<Provider>> => {
-    if (useMockData()) return mockCreate<Provider>(data);
-    return apiFetch<Provider>("/providers", { method: "POST", body: JSON.stringify(data) });
+  create: async (data: Record<string, unknown>): Promise<ApiResponse<Provider>> => {
+    if (useMockData()) return mockCreate<Provider>(data as Partial<Provider>);
+    return apiFetch<Provider>("/providers", { method: "POST", body: JSON.stringify(toProviderApiPayload(data)) });
   },
-  update: async (id: string, data: Partial<Provider>): Promise<ApiResponse<Provider>> => {
-    if (useMockData()) return mockUpdate<Provider>(data);
-    return apiFetch<Provider>(`/providers/${id}`, { method: "PUT", body: JSON.stringify(data) });
+  update: async (id: string, data: Record<string, unknown>): Promise<ApiResponse<Provider>> => {
+    if (useMockData()) return mockUpdate<Provider>(data as Partial<Provider>);
+    return apiFetch<Provider>(`/providers/${id}`, { method: "PUT", body: JSON.stringify(toProviderApiPayload(data)) });
   },
   getAvailability: async (id: string): Promise<ApiResponse<ProviderAvailability[]>> => {
     if (useMockData()) return { data: [] };
