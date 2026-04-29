@@ -550,14 +550,33 @@ export const providerService = {
     if (useMockData()) return { data: [] };
     return apiFetch<ProviderAvailability[]>(`/providers/${id}/availability`);
   },
-  setAvailability: async (id: string, data: Partial<ProviderAvailability>[]): Promise<ApiResponse<ProviderAvailability[]>> => {
+  setAvailability: async (id: string, slots: Partial<ProviderAvailability>[]): Promise<ApiResponse<ProviderAvailability[]>> => {
     if (useMockData()) return { data: [] };
-    return apiFetch<ProviderAvailability[]>(`/providers/${id}/availability`, { method: "PUT", body: JSON.stringify(data) });
+    // Backend expects { availability: [{ day_of_week, start_time, end_time, is_available }] }
+    const availability = slots.map(s => ({
+      day_of_week: s.dayOfWeek,
+      start_time: s.startTime,
+      end_time: s.endTime,
+      is_available: s.isAvailable ?? true,
+      location: s.locationOverride ?? null,
+    }));
+    return apiFetch<ProviderAvailability[]>(`/providers/${id}/availability`, {
+      method: "PUT",
+      body: JSON.stringify({ availability }),
+    });
   },
   getAppointments: async (id: string, params?: Record<string, string>): Promise<ApiResponse<Appointment[]>> => {
     if (useMockData()) return { data: [] };
     const query = params ? "?" + new URLSearchParams(params).toString() : "";
     return apiFetch<Appointment[]>(`/providers/${id}/appointments${query}`);
+  },
+  getPatientPanel: async (id: string): Promise<ApiResponse<unknown>> => {
+    if (useMockData()) return { data: null };
+    return apiFetch<unknown>(`/analytics/providers/${id}/patient-panel`);
+  },
+  getRevenue: async (id: string): Promise<ApiResponse<unknown>> => {
+    if (useMockData()) return { data: null };
+    return apiFetch<unknown>(`/analytics/providers/${id}/revenue`);
   },
 };
 

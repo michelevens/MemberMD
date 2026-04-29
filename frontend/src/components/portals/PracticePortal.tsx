@@ -6777,29 +6777,18 @@ export function PracticePortal() {
                     style={{ borderColor: "#27ab83", color: "#27ab83" }}
                     onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#e6f7f2")}
                     onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "")}
-                    onClick={() => setActiveTab("appointments")}
+                    onClick={() => navigate(`/practice/providers/${prov.id}?tab=schedule`)}
                   >
                     View Schedule
                   </button>
                   <button
-                    className="flex-1 px-3 py-2 rounded-lg text-sm font-medium border border-slate-200 text-slate-500 hover:bg-slate-50 transition-colors"
-                    onClick={() => {
-                      const nameParts = prov.name.split(" ");
-                      setEditProviderId(prov.id);
-                      setEditProviderForm({
-                        firstName: nameParts[0] || "",
-                        lastName: nameParts.slice(1).join(" ") || "",
-                        credentials: prov.credentials || "",
-                        specialty: prov.specialty || "",
-                        npiNumber: "",
-                        email: "",
-                        phone: "",
-                        telehealth: prov.telehealth || false,
-                      });
-                      setShowEditProvider(true);
-                    }}
+                    className="flex-1 px-3 py-2 rounded-lg text-sm font-medium text-white transition-colors"
+                    style={{ backgroundColor: "#334e68" }}
+                    onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#243b53")}
+                    onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "#334e68")}
+                    onClick={() => navigate(`/practice/providers/${prov.id}`)}
                   >
-                    Edit
+                    View Details
                   </button>
                 </div>
               </div>
