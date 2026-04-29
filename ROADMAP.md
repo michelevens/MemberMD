@@ -1,442 +1,553 @@
-# MemberMD — DPC Membership Platform Roadmap
+# MemberMD — Multi-Practice DPC Operator OS Roadmap
 
-> Version: 1.0 | Created: March 20, 2026
-> Goal: Match and exceed Hint Health, Atlas.md, and Elation Health
-> Stack: React + TypeScript + Vite + Tailwind | Laravel 12 + PostgreSQL
-
----
-
-## Current State
-
-### What MemberMD Already Has
-- **Auth**: Login, register, Sanctum tokens, MFA, roles (superadmin, practice_admin, provider, staff, patient)
-- **Patients**: Full CRUD, family members, emergency contacts, encrypted PHI
-- **Appointments**: CRUD, available slots, reschedule, waitlist, calendar links (iCal, Google)
-- **Encounters**: SOAP notes, vitals, diagnoses, labs_ordered, sign/amend
-- **Prescriptions**: CRUD, PDF generation, eFax, refill request/process
-- **Membership Plans**: Configurable (monthly/annual, visit limits, telehealth, messaging SLA, lab discounts)
-- **Memberships**: Enrollment, Stripe subscriptions, pause/cancel, entitlements, visit recording
-- **Billing**: Invoices (PDF), payments (refund), coupons
-- **Telehealth**: Daily.co (create, join, end, consent)
-- **Messaging**: Thread-based, unread counts
-- **Documents**: Upload/download
-- **Screenings**: Templates + responses (PHQ-9, etc.)
-- **Programs**: Full program management (enrollment, providers, eligibility, funding)
-- **Notifications**: List, unread count, mark-read
-- **Audit/HIPAA**: Audit logs, PHI access logs, security events, HIPAA checklist
-- **Calendar**: iCal feed, Google Calendar
-- **External/Public**: Basic enrollment endpoint, plan listing, availability check
-- **Frontend**: PatientPortal, PracticePortal, SuperAdminPortal, EnrollmentWidget
-
-### Competitive Gap Analysis
-
-| Feature | Hint Health | Atlas.md | Elation | MemberMD |
-|---------|------------|----------|---------|----------|
-| Employer contracts/portal | **Yes** | No | No | No |
-| E-prescribing (Surescripts) | No | **Yes** | **Yes** | No (PDF/eFax) |
-| Lab ordering (Quest/LabCorp) | No | **Yes** | **Yes** | No |
-| Two-way SMS messaging | No | **Yes** | No | No |
-| Structured charting templates | No | Basic | **Yes** | No (free-text SOAP) |
-| Patient check-in kiosk | No | **Yes** | No | No |
-| Medication dispensing | No | **Yes** | No | No |
-| Revenue analytics | Basic | Basic | No | No |
-| Automated dunning | **Yes** | Basic | No | Partial (model only) |
-| Referral management | No | Basic | **Yes** | No |
-| Embeddable widgets (advanced) | **Yes** | No | No | Basic |
-| Patient engagement scoring | No | No | No | No |
-| Care coordination dashboard | No | No | No | No |
-| Wellness programs | No | No | No | **Yes** |
-| Screening tools | No | No | Built-in | **Yes** |
-| Waitlist | No | No | No | **Yes** |
+> Version: 2.0 | Updated: April 28, 2026
+> **Strategic focus:** Lead with **"the operating system for organizations that run multiple DPC practices"** (franchises, MSOs, IPAs, employer networks, PE-backed roll-ups, health system DPC subsidiaries) as the primary wedge — while **preserving the option** to compete head-on with Hint Health for solo/small DPC practices in the future.
+> **Why this sequence:** Lane C (operators) gives us an architectural moat (true multi-tenant from day one) that Hint, Atlas.md, and Elation cannot easily copy. Winning operators first builds trust signals (SOC 2, scale, case studies), revenue, and engineering depth — which are exactly the assets needed to credibly attack Hint's solo-DPC base later from a position of strength rather than weakness. See `COMPETITIVE_ANALYSIS.md` and `WEDGE_STRATEGY.md`.
 
 ---
 
-## Phase 1: Match Competitors (Weeks 1–10)
+## Two-Horizon Strategy
 
-Close feature gaps that would cause practices to choose a competitor over MemberMD.
+| Horizon | Window | Focus | Why this order |
+|---|---|---|---|
+| **H1 — Lane C: Operator OS** | 2026 Q2 → 2027 Q4 | Multi-practice operators (5–50+ clinics) | Architectural moat, weak incumbents, high ARPU, fast path to credibility |
+| **H2 — Lane A: Solo DPC parity (optional)** | 2028+ | Compete with Hint for solo/small practices | After SOC 2, ~25 operator customers, $3M+ ARR — we'll have the trust signals to win solo DPC on merit, not on hope |
 
----
-
-### 1.1 Two-Way SMS Messaging
-**Why**: Atlas.md's two-way texting is a major patient engagement advantage.
-
-**Spec**:
-- Twilio integration for inbound/outbound SMS
-- SMS appears in existing message thread alongside portal messages
-- Auto-route inbound texts to patient by phone number
-- Opt-in/opt-out (TCPA compliance)
-- Automated appointment reminders via SMS
-
-**Backend**: Extend `Message` model (add `channel`, `external_id`, `delivery_status`), new `TwilioSmsService`, `SmsWebhookController`, `sms_opt_ins` table
-**Frontend**: Channel indicator in threads, SMS compose option, reminder settings
-**Integration**: Twilio Programmable SMS
-**Complexity**: M
+**This is sequencing, not exclusion.** Every architectural decision in H1 is made to *preserve* the H2 option. We are not killing the solo DPC market — we're earning the right to attack it later.
 
 ---
 
-### 1.2 Revenue Analytics & Reporting
-**Why**: Both Hint and Atlas offer revenue reporting. Practices need MRR, churn, ARPM visibility.
+## North Star
 
-**Spec**:
-- Dashboard widgets: MRR, ARR, churn rate, ARPM, lifetime value
-- Membership analytics: enrollments, cancellations, plan distribution, growth trends
-- Financial reports: revenue by plan, by provider, by month
-- Patient panel: capacity utilization, visit frequency
-- Export CSV/PDF
+**Make clinic 31 cost the same to run as clinic 30.**
 
-**Backend**: New `ReportController`, `AnalyticsService`, `report_snapshots` table
-**Frontend**: `RevenueAnalytics.tsx`, `MembershipAnalytics.tsx`, `ProviderAnalytics.tsx` (Recharts)
-**Complexity**: M
+Every roadmap decision is filtered through one question: does this help an operations leader managing N clinics? If it primarily helps a single doctor at a single clinic, it's off-strategy.
 
 ---
 
-### 1.3 Automated Dunning & Payment Recovery
-**Why**: Hint's automated dunning is a key feature. MemberMD has DunningEvent model but no automation.
+## Strategic Frame
 
-**Spec**:
-- Configurable dunning sequence (Day 1: email, Day 3: SMS, Day 7: email, Day 14: pause, Day 30: cancel)
-- Stripe webhook for payment_intent.payment_failed
-- Dashboard: patients in dunning, recovery rate
-- Patient self-service card update
-
-**Backend**: New `DunningPolicy` model, extend `DunningEvent`, `DunningService`, scheduled `ProcessDunning` command
-**Frontend**: `DunningPolicySettings.tsx`, `DunningDashboard.tsx`, `UpdatePaymentMethod.tsx`
-**Integration**: Stripe webhooks, Stripe Customer Portal
-**Complexity**: M
-
----
-
-### 1.4 Patient Check-In Kiosk
-**Why**: Atlas.md has this. Eliminates front desk friction.
-
-**Spec**:
-- Full-screen kiosk mode: PIN, DOB+last name, or QR code check-in
-- On check-in: update demographics, sign consents, complete screenings
-- Provider notified of arrival
-- Tablet-optimized layout
-
-**Backend**: New `KioskController`, extend `Appointment` (add `checked_in_at`, `check_in_method`)
-**Frontend**: `KioskMode.tsx`, QR code display on patient portal
-**Port from ShiftPulse**: Clock-in kiosk pattern (`ClockInWidget.tsx` flow, `ExternalClockController` PIN validation)
-**Complexity**: M
+| Dimension | H1: Operator OS (now → 2027) | H2: Solo DPC parity (2028+, optional) |
+|---|---|---|
+| **Buyer** | VP Ops / COO / CFO at multi-clinic operator | Solo DPC physician / small group |
+| **Compete with** | Spreadsheets + Salesforce + custom dashboards | Hint Health, Atlas.md, Elation |
+| **Position** | Business layer; integrates with their EHR | Full-stack DPC platform |
+| **Pricing** | Platform fee per tenant + 1.5% MRR processed | Per-provider $/month, self-serve tiers |
+| **ACV** | $90K–500K/year | $3–10K/year |
+| **Sales motion** | Founder-led enterprise (6–12 wk cycle) | PLG / self-serve + light-touch sales |
+| **TAM** | ~450–1,000 operators, high ARPU = $80–275M ARR ceiling | ~10K solo practices, $50–150M ARR ceiling |
+| **What unlocks it** | Already have architectural moat | Trust signals (SOC 2 ✅, $3M ARR ✅, case studies ✅) earned in H1 |
 
 ---
 
-### 1.5 Referral Management
-**Why**: Elation has referral tracking. DPC practices frequently refer to specialists.
+## Current State (Verified in Codebase)
 
-**Spec**:
-- Referral lifecycle: created → sent (fax/email) → acknowledged → completed
-- Specialist directory (practice-maintained)
-- Attach referral reports to patient chart
-- Track turnaround time
+### What's already shipped and production-ready
+- ✅ True multi-tenant data isolation (`BelongsToTenant` trait, global scope)
+- ✅ SuperAdmin oversight portal (13 tabs)
+- ✅ Per-tenant branding (logo, colors, tagline)
+- ✅ Membership plans + Stripe subscriptions + coupons + proration + smart dunning
+- ✅ Utilization tracking engine (visits, encounters, labs, meds with auto-toggles)
+- ✅ Embeddable widgets (PlanWidget, EnrollmentWidget) at public URLs
+- ✅ Patient engagement scoring (risk levels by visit frequency, no-show, responsiveness)
+- ✅ HIPAA: AuditLog + PhiAccessLog + encrypted PHI + soft deletes + MFA (TOTP)
+- ✅ Telehealth via Daily.co
+- ✅ Patient portal: appointments, messaging, documents, payments
+- ✅ Encounters (SOAP), prescriptions (records), lab orders (records)
+- ✅ Code lookups: ICD-10, CPT, RxNorm, LOINC, NPI Registry
+- ✅ Programs / care coordination / care gaps
+- ✅ Employer accounts + contracts + invoicing
+- ✅ Inventory + dispensing
+- ✅ PDF invoicing (DomPDF)
+- ✅ CI/CD: GitHub Actions for Laravel + Vitest
 
-**Backend**: New `Referral`, `SpecialistDirectory` models, `ReferralController`
-**Frontend**: `ReferralForm.tsx`, `ReferralTracker.tsx`, `SpecialistDirectoryManager.tsx`
-**Integration**: eFax (already used for prescriptions)
-**Complexity**: M
+### Critical gaps blocking the wedge
+- 🟠 **Stripe Connect onboarding + payouts** — field exists, zero implementation. **P0 blocker.**
+- ❌ **Operator Admin role** — RBAC tier between SuperAdmin and PracticeAdmin
+- ❌ **Network revenue dashboard** — roll-up across operator's tenants
+- ❌ **Master plan templates with tenant overrides**
+- ❌ **White-label embeddable widgets** (operator-branded, custom domain)
+- ❌ **SOC 2 Type I** — single biggest trust signal blocker
+- ❌ **EHR adapters** (Athena, Elation, Atlas.md, eClinicalWorks)
+- ❌ **SSO/SAML** (Okta, Azure AD)
+- ❌ **QuickBooks / NetSuite integration**
+- 🟠 **Test coverage** (~73 tests total) — needs 60%+ for enterprise due diligence
 
----
+### Deferred to H2 (not killed — sequenced)
+These are valuable for solo DPC but not wedge-critical for operators. Build them when H2 opens, **not now**:
+- ⏸ E-prescribing integration (Surescripts via DoseSpot/DrFirst) — needed to attack Hint's solo base
+- ⏸ Live lab interfaces (Quest Quanum, LabCorp Beacon) — same
+- ⏸ AI scribe / ambient documentation (Abridge/Suki integration or in-house)
+- ⏸ Solo-practitioner self-serve tier (PLG signup, billing, onboarding)
+- ⏸ Native mobile apps (web responsive sufficient through H1)
+- ⏸ Patient check-in kiosk (single-clinic feature; nice-to-have for H2 solo DPC)
+- ⏸ Structured charting templates (clinical workflow polish)
+- ⏸ Referral management / specialist directory
 
-### 1.6 Structured Charting Templates
-**Why**: Elation's structured charting is its differentiator. Free-text SOAP is insufficient.
-
-**Spec**:
-- ChartTemplate model with structured fields (checkboxes, dropdowns, text, numeric)
-- Template builder for practice_admin/provider
-- Template library: wellness, acute, chronic, procedure visit types
-- Auto-populate previous values for follow-ups
-- ICD-10/CPT code suggestions from structured data
-
-**Backend**: New `ChartTemplate`, `ChartTemplateField`, `ChartTemplateResponse` models, extend `Encounter` (add `template_id`, `structured_data`)
-**Frontend**: `ChartTemplateBuilder.tsx` (drag-and-drop), `StructuredEncounterForm.tsx`
-**Complexity**: L
-
----
-
-### 1.7 Lab Ordering Integration
-**Why**: Atlas.md and Elation both offer integrated lab ordering. Table stakes.
-
-**Spec**:
-- LabOrder model linked to patient + encounter
-- Quest Quanum and/or LabCorp API for electronic ordering
-- Results webhook to receive lab results
-- Structured results viewer with normal/abnormal flagging
-- Patient portal: view own lab results
-
-**Backend**: New `LabOrder`, `LabResult` models, `LabOrderController`, webhook endpoint
-**Frontend**: `LabOrderPanel.tsx` in encounter, `LabResultsViewer.tsx`
-**Integration**: Quest Quanum API, LabCorp Beacon API (or manual fax fallback initially)
-**Complexity**: L
-
----
-
-### 1.8 Employer Contracts & Portal
-**Why**: Hint Health's #1 differentiator. Employer-sponsored DPC is the fastest-growing segment.
-
-**Spec**:
-- Employer model: company info, contract terms, PEPM pricing, employee cap
-- EmployerPortal: new portal for HR contacts (Dashboard, Employees, Invoices, Reports)
-- HR roster upload (CSV) → employees get enrollment links
-- Monthly employer invoicing based on enrolled headcount
-- De-identified utilization reports for employers
-
-**Backend**: New `Employer`, `EmployerContract`, `EmployerEmployee`, `EmployerInvoice` models, new role `employer_admin`, extend `Patient` (add `employer_id`)
-**Frontend**: `EmployerPortal.tsx`, `EmployerRosterUpload.tsx`, `EmployerContractManager.tsx`
-**Integration**: Stripe (employer invoicing)
-**Complexity**: L
+### Permanently out of scope
+- ❌ Prior auth workflows (insurance-world; DPC is cash-pay)
+- ❌ Claims submission to insurance (out of category)
+- ❌ Immunization registry submissions (state-by-state nightmare, low ROI)
 
 ---
 
-### 1.9 E-Prescribing (Surescripts)
-**Why**: PDF/eFax is not competitive. State mandates require electronic prescribing.
+## Phase 0: Validation Sprint (Weeks 1–4 — DO BEFORE PRODUCT WORK)
 
-**Spec**:
-- Surescripts NCPDP SCRIPT integration (NewRx, RefillRequest, RxChange)
-- EPCS for controlled substances (identity proofing + 2FA per DEA)
-- Medication history lookup
-- Drug interaction checking
-- Pharmacy directory search
+**Critical:** Do not commit engineering capacity to the wedge until validated with real operator buyers.
 
-**Backend**: New `SurescriptsService`, `PharmacyDirectory` model, extend `Prescription` (add `surescripts_message_id`, `epcs_token`)
-**Frontend**: Enhanced prescription form with pharmacy search, drug interaction alerts, EPCS 2FA flow
-**Integration**: Surescripts via certified intermediary (DoseSpot, DrFirst, or RCopia)
-**Complexity**: L (12+ month certification if direct; faster via intermediary)
+### 0.1 Operator Discovery
+- [ ] Build target list: 50 multi-practice DPC operators (DPC Alliance directory, PitchBook PE-backed DPC, Hint Summit attendees with multi-clinic profiles)
+- [ ] Cold outreach: 50 personalized emails referencing their specific operational pain
+- [ ] Goal: 15 conversations, 8 deep discovery calls
+- [ ] Listen for: pain acuity, current tooling stack, willingness to pay, decision criteria
 
----
+### 0.2 Operator Dashboard Mock
+- [ ] Figma mockup of network revenue dashboard, clinic benchmarking, member operations
+- [ ] Demo to the 8 discovery calls
+- [ ] Track: "I want this now" vs. "interesting"
 
-## Phase 2: Exceed Competitors (Weeks 11–18)
+### 0.3 Go/No-Go Decision
+- **GO** if 3+ operators say "I'd pay tomorrow" → execute Phase 1
+- **NO-GO** if all polite interest → reconsider wedge, possibly narrow further (PE roll-ups only? franchises only?)
 
-Features no single competitor offers today — genuine differentiators.
-
----
-
-### 2.1 Embeddable Widget System (Advanced)
-**Why**: Hint has basic enrollment widgets. MemberMD can offer a full configurable, brandable widget platform.
-
-**Spec**:
-- Widget types: enrollment, plan comparison, appointment booking, contact form
-- Practice admins configure branding (colors, logo, custom fields)
-- `widget-loader.js` for embedding on practice websites
-- Widget analytics: impressions, starts, completions, conversion rate
-
-**Backend**: New `WidgetConfig`, `WidgetSubmission` models, `WidgetConfigController`, `WidgetPageController`, blade template, `widget-loader.js`
-**Frontend**: `WidgetConfigManager.tsx`, `WidgetPreview.tsx`, `WidgetAnalytics.tsx`
-**Port from ShiftPulse**:
-- `app/Models/WidgetConfig.php` → change Tenant → Practice
-- `public/widget-loader.js` → change base URL
-- `app/Http/Controllers/Api/WidgetPageController.php` → change Tenant → Practice lookup
-- `resources/views/widget.blade.php` → adapt for enrollment/booking forms
-**Complexity**: M
+**Owner:** Founder-led. Do not delegate.
 
 ---
 
-### 2.2 Unified Communication Hub (Omnichannel)
-**Why**: No competitor unifies portal + SMS + email + telehealth in one timeline.
+## Phase 1: Foundation (Weeks 5–14, Q3 2026)
 
-**Spec**:
-- Single patient communication timeline across all channels
-- Smart routing: urgent auto-escalation, after-hours auto-reply
-- Communication SLA tracking (per membership plan response time)
-- Patient channel preferences
+Goal: ship the minimum to credibly sell to an operator. **First 3 paying operator customers signed in this phase.**
 
-**Backend**: New `CommunicationLog` model, extend `Message` (add `priority`, `sla_deadline`), `CommunicationRouter` service
-**Frontend**: `UnifiedInbox.tsx`, `CommunicationTimeline.tsx`, `SlaTracker.tsx`
-**Complexity**: L | **Depends on**: Phase 1.1 (SMS)
+### 1.1 Stripe Connect Express Onboarding 🚨 P0
+**Why:** Without per-tenant payouts, every clinic's revenue flows through your account — operationally and legally untenable.
 
----
+**Spec:**
+- Each tenant onboards their own Stripe Connect Express account
+- KYC/identity verification flow embedded in tenant onboarding
+- Automated payouts (daily/weekly configurable)
+- Platform fee splitting (your % retained on each transaction)
+- Connect dashboard for tenants: balance, payout schedule, dispute management
+- Webhook handlers for Connect events (account.updated, payout.failed, etc.)
 
-### 2.3 Patient Engagement Scoring & Automation
-**Why**: No competitor tracks patient engagement. Practices lose patients who disengage silently.
-
-**Spec**:
-- Engagement score: visit frequency vs. entitlement, message responsiveness, screening completion, portal logins, no-show rate
-- Automated outreach triggers: "No visit in 60 days" → auto-message
-- At-risk patient dashboard
-- Configurable engagement rules
-
-**Backend**: New `PatientEngagement`, `EngagementRule` models, `EngagementScoringService`, scheduled `CalculateEngagementScores` command
-**Frontend**: `EngagementDashboard.tsx`, `PatientEngagementCard.tsx`, `EngagementRuleBuilder.tsx`
-**Complexity**: M
+**Backend:** `StripeConnectService`, `ConnectOnboardingController`, `ConnectWebhookController`, extend `Practice` model
+**Frontend:** Onboarding wizard in PracticePortal, Connect status in SuperAdmin
+**Complexity:** L
 
 ---
 
-### 2.4 Care Coordination Dashboard
-**Why**: DPC's value is coordinated care. No competitor offers a true care coordination view.
+### 1.2 Operator Admin Role 🚨 P0
+**Why:** Required for operator's corporate ops team. Distinct from SuperAdmin (sees all platform tenants) and PracticeAdmin (sees one).
 
-**Spec**:
-- Per-patient: open referrals, pending labs, overdue screenings, medication reconciliation, care gaps
-- Population health: patients overdue for preventive care, chronic disease registries
-- Care gap alerts: automated USPSTF guideline evaluation
-- Chronic disease tracking: A1C trends, BP trends, PHQ-9 trends
+**Spec:**
+- New role: `operator_admin`
+- New model: `Operator` — owns N tenants
+- New table: `operator_users` — many-to-many with role scoping
+- Tenant-level RBAC: operator admin sees only their assigned tenants
+- Regional/territory sub-admins (operator with sub-scope)
 
-**Backend**: New `CareGap` model, `CareGapService` (USPSTF evaluation), `CareCoordinationController`
-**Frontend**: `CareCoordinationDashboard.tsx`, `PatientCarePanel.tsx`, `PopulationHealthView.tsx`
-**Complexity**: L | **Depends on**: Labs (1.7), referrals (1.5), screenings
-
----
-
-### 2.5 Inventory & Dispensing Tracker
-**Why**: Atlas.md supports in-office dispensing. Many DPC practices dispense common medications.
-
-**Spec**:
-- Inventory: medication/supply, NDC, quantity, reorder point, cost, lot, expiration
-- Dispense from encounter, auto-deduct inventory
-- Reorder alerts, cost tracking, dispensing revenue reports
-
-**Backend**: New `InventoryItem`, `DispenseRecord` models, `InventoryController`
-**Frontend**: `InventoryManager.tsx`, `DispenseForm.tsx`, `ReorderAlerts.tsx`
-**Complexity**: M
+**Backend:** `Operator` model, extend `User` (operator_id, operator_role), `OperatorScope` middleware
+**Frontend:** Operator console shell, tenant switcher, operator-scoped queries
+**Complexity:** M
 
 ---
 
-### 2.6 Outcome Tracking & Value Reporting
-**Why**: No competitor offers this. DPC practices need to prove value with data.
+### 1.3 Network Revenue Dashboard v1 🚨 P0
+**Why:** The flagship operator-tier feature. The "single pane of glass" promise.
 
-**Spec**:
-- Per-patient health metrics over time (weight, BP, A1C, cholesterol, PHQ-9)
-- Value reports: cost savings estimates (ER avoidance, specialist reduction)
-- Employer value reports (aggregate, de-identified)
-- Patient-facing health journey summary
+**Spec:**
+- MRR / ARR rolled up across operator's tenants
+- ARPU, churn rate, LTV per network and per tenant
+- Member count and growth rate
+- Top-line P&L view (revenue, refunds, net)
+- Drilldown: click any metric → per-tenant breakdown
+- Date range filtering, comparison to prior period
+- Export: CSV, PDF
 
-**Backend**: New `HealthMetric`, `ValueReport` models, `OutcomeController`, `ValueCalculationService`
-**Frontend**: `OutcomeTracker.tsx`, `ValueReportGenerator.tsx`, `EmployerValueReport.tsx`
-**Complexity**: M | **Depends on**: Employer portal (1.8), encounters, labs (1.7)
-
----
-
-## Phase 3: Cross-Pollinate from ShiftPulse (Weeks 19–24)
-
-Port proven patterns from ShiftPulse to accelerate development.
+**Backend:** `OperatorAnalyticsController`, `NetworkMetricsService`, materialized views or scheduled aggregates
+**Frontend:** `OperatorConsole.tsx`, `NetworkRevenueDashboard.tsx`, Recharts visualizations
+**Complexity:** L
 
 ---
 
-### 3.1 Broadcast Messaging
-**Spec**: Mass messages to all patients or filtered by plan/provider. Channels: in-app + email + SMS.
+### 1.4 SOC 2 Type I Readiness Kickoff 🚨 P0
+**Why:** Single biggest enterprise trust signal. Required for serious operator conversations.
 
-**Port from ShiftPulse**: `BroadcastController.php` → change role filtering to plan-based audience targeting
-**Backend**: New `BroadcastMessage` model, `BroadcastController`
-**Frontend**: `BroadcastComposer.tsx`, `BroadcastHistory.tsx`
-**Complexity**: S
+**Spec:**
+- Engage Vanta or Drata (~$10–20K/year)
+- Hire fractional vCISO (~$5–10K/month for 6 months)
+- Implement controls: access reviews, change management, incident response, vendor management, security training
+- Target: Type I report by end of Q4 2026
 
----
-
-### 3.2 Provider Credential Tracking
-**Spec**: Track licenses, DEA, board certs, malpractice with expiration alerts and compliance scoring.
-
-**Port from ShiftPulse**: `CredentialController.php` → change `staff_id` to `provider_id`; `CredentialComplianceService` for scoring
-**Backend**: New `ProviderCredential` model, `ProviderCredentialController`, scheduled `CheckCredentialExpiration`
-**Frontend**: `ProviderCredentials.tsx`, `CredentialAlerts.tsx`, `CredentialComplianceScore.tsx`
-**Complexity**: M
+**Owner:** Founder + vCISO. Engineering provides evidence (logs, access reports).
+**Complexity:** M (process-heavy, low engineering effort)
 
 ---
 
-### 3.3 HIPAA Compliance Scoring Dashboard
-**Spec**: Compliance requirements library, per-practice scoring, review history, printable audit report.
+### 1.5 Master Plan Templates with Tenant Overrides
+**Why:** Operators want brand consistency. "Standard Adult Plan" defined once, tenants inherit with bounded variation.
 
-**Port from ShiftPulse**: `ComplianceController.php` → scoring algorithm (weighted: compliant=100, partial=50), critical issues identification, audit logging pattern
-**Backend**: New `ComplianceRequirement`, `ComplianceRecord`, `ComplianceScoreSnapshot` models
-**Frontend**: `HipaaComplianceDashboard.tsx`, `ComplianceRecordForm.tsx`, `ComplianceReport.tsx`
-**Complexity**: M
+**Spec:**
+- Operator defines canonical plan templates
+- Tenants inherit; can override price within operator-set guardrails
+- Mandatory inclusions vs. optional features
+- Template versioning (changes propagate to opted-in tenants)
+- Audit log: which tenant modified which template field when
 
----
-
-### 3.4 Incident / Safety Event Reporting
-**Spec**: Adverse events, near-misses, patient complaints. Review workflow with notifications.
-
-**Port from ShiftPulse**: `IncidentController.php` → change `client_id` to `patient_id`, change role checks to DPC roles
-**Backend**: New `Incident` model, `IncidentController`
-**Frontend**: `IncidentReportForm.tsx`, `IncidentDashboard.tsx`, `IncidentReview.tsx`
-**Complexity**: S
+**Backend:** New `MasterPlanTemplate`, `TenantPlanOverride` models, scoping logic
+**Frontend:** Template builder in operator console, override UI in PracticePortal
+**Complexity:** M
 
 ---
 
-### 3.5 Granular Notification Preferences
-**Spec**: Per-category (appointments, messages, billing, labs, prescriptions) × per-channel (in-app, email, SMS) matrix.
+### 1.6 White-Label Embeddable Widgets
+**Why:** Operators want enrollment at `enroll.theirdomain.com`, not `app.membermd.io/.../tenantcode`.
 
-**Port from ShiftPulse**: Notification preferences pattern from AgencyPortal Settings
-**Backend**: Extend `NotificationPreference`, new `NotificationDispatcher` service
-**Frontend**: `NotificationPreferences.tsx` (category × channel toggle matrix)
-**Complexity**: S
+**Spec:**
+- Custom domain support per operator
+- Operator-defined CSS theming (variables override)
+- JavaScript embed snippet: `<script src="https://operator.com/embed.js"></script>`
+- Iframe + script tag flavors
+- Conversion analytics per widget per tenant per source
 
----
-
-### 3.6 Signature Capture Component
-**Spec**: Reusable draw/type signature for consents, treatment authorizations, telehealth consents.
-
-**Port from ShiftPulse**: Canvas signature pattern from Daily Care Reports (touch support, typed alternative, PNG export)
-**Backend**: Extend `ConsentSignature` (add `signature_image_url`, `ip_address`, `method`), new `ConsentFormTemplate`
-**Frontend**: `SignatureCapture.tsx` (reusable), `ConsentFormBuilder.tsx`, `ConsentSigner.tsx`
-**Complexity**: S
+**Backend:** Custom domain routing, theming layer, analytics tracking
+**Frontend:** Widget configurator in operator console
+**Complexity:** M
 
 ---
 
-## Implementation Sequence
-
-```
-Weeks 1-2:   1.1 SMS Messaging | 1.2 Revenue Analytics | 1.3 Dunning Automation
-Weeks 3-4:   1.4 Check-In Kiosk | 1.5 Referral Management
-Weeks 5-7:   1.6 Chart Templates | 1.7 Lab Ordering (parallel)
-Weeks 8-10:  1.8 Employer Portal | 1.9 E-Prescribing (begin integration)
-Weeks 11-13: 2.1 Widget System | 2.2 Unified Comms | 2.3 Engagement Scoring
-Weeks 14-16: 2.4 Care Coordination | 2.5 Inventory/Dispensing
-Weeks 17-18: 2.6 Outcome Tracking
-Weeks 19-20: 3.1 Broadcasts | 3.4 Incidents | 3.5 Notification Prefs | 3.6 Signatures
-Weeks 21-23: 3.2 Provider Credentials | 3.3 HIPAA Compliance Scoring
-Week 24:     Integration testing, polish, documentation
-```
+### 1.7 First 3 Operator Customers Signed
+**Owner:** Founder-led sales.
+**Pipeline:** From Phase 0 discovery calls.
+**Implementation:** White-glove, 6–12 weeks per customer, $15–35K implementation fee.
+**Success metric:** $25K MRR from operators by end of Q3.
 
 ---
 
-## New Models Summary
+## Phase 2: Differentiation & Trust (Weeks 15–24, Q4 2026)
 
-| Phase | Models |
-|-------|--------|
-| 1 | LabOrder, LabResult, PharmacyDirectory, ChartTemplate, ChartTemplateField, ChartTemplateResponse, Employer, EmployerContract, EmployerEmployee, EmployerInvoice, SmsOptIn, DunningPolicy, Referral, SpecialistDirectory |
-| 2 | CommunicationLog, CareGap, PatientEngagement, EngagementRule, InventoryItem, DispenseRecord, WidgetConfig, WidgetSubmission, HealthMetric, ValueReport |
-| 3 | BroadcastMessage, ProviderCredential, ComplianceRequirement, ComplianceRecord, ComplianceScoreSnapshot, Incident, ConsentFormTemplate |
+Goal: SOC 2 issued, operator features deepened, integration layer started. **7 paying operator customers by end of phase.**
 
----
+### 2.1 SOC 2 Type I Issued ✅
+Continuation of 1.4. Audit completed, report delivered, available to prospects.
 
-## Third-Party Integrations
+### 2.2 Cross-Tenant Member Transfer
+**Why:** Members relocate. Multi-clinic operators need to move records (with audit trail) instead of starting over.
 
-| Integration | Feature | Phase | Cost |
-|-------------|---------|-------|------|
-| Twilio SMS | Two-way texting | 1 | Per-message |
-| Quest Quanum API | Lab ordering | 1 | Per-order |
-| LabCorp Beacon API | Lab ordering | 1 | Per-order |
-| Surescripts (via DoseSpot/DrFirst) | E-prescribing, EPCS | 1 | Per-transaction |
-| Stripe (extended) | Employer invoicing, dunning | 1 | Existing |
-| Recharts | Analytics charts | 1 | Free/OSS |
+**Spec:**
+- Operator-initiated transfer between tenants in their network
+- Full record migration: demographics, encounters, prescriptions, documents
+- Membership transfers with proration credits
+- Audit log entry on both source and destination
+- Compliance review hooks (for HIPAA-sensitive transfers)
 
----
-
-## ShiftPulse Code Reuse Map
-
-| ShiftPulse File | MemberMD Feature | Adaptation |
-|----------------|-------------------|------------|
-| `WidgetConfig.php` | 2.1 Widget System | Tenant → Practice |
-| `widget-loader.js` | 2.1 Widget System | Change base URL |
-| `WidgetPageController.php` | 2.1 Widget System | Tenant → Practice lookup |
-| `widget.blade.php` | 2.1 Widget System | Adapt for enrollment/booking |
-| `BroadcastController.php` | 3.1 Broadcasts | Role filtering → plan-based audience |
-| `CredentialController.php` | 3.2 Credentials | staff_id → provider_id |
-| `CredentialComplianceService.php` | 3.2 Credentials | Adapt credential types |
-| `ComplianceController.php` | 3.3 HIPAA Compliance | Port scoring algorithm, practice scope |
-| `IncidentController.php` | 3.4 Incidents | client_id → patient_id, DPC roles |
-| `NotificationController.php` | 3.5 Notification Prefs | DPC notification categories |
-| `ClockInWidget.tsx` (pattern) | 1.4 Kiosk | Adapt for appointment check-in |
-| Daily Care Report signature (pattern) | 3.6 Signatures | Port canvas component to React |
+**Backend:** `MemberTransferService`, transactional migration logic, audit hooks
+**Frontend:** Transfer wizard in operator console
+**Complexity:** M
 
 ---
 
-## MemberMD Advantages to Protect
+### 2.3 Clinic Onboarding Wizard
+**Why:** Operators acquiring new clinics need <2 week onboarding, not 4 months.
 
-These existing features are unique — no competitor has them. Double down:
+**Spec:**
+- Templated tenant provisioning (defaults from operator config)
+- Setup checklist: branding, plans, providers, payment processing, integrations
+- Progress tracking, blocker identification
+- White-glove support handoff
 
-1. **Wellness Programs** — structured program management with enrollment, eligibility rules, funding sources
-2. **Screening Tools** — built-in PHQ-9, GAD-7, etc. with templated responses
-3. **Waitlist Management** — automated waitlist with notification
-4. **Modern Stack** — React + Laravel vs legacy competitors
-5. **Multi-tenant from day one** — ready for white-label/franchise from the start
-6. **HIPAA Audit Trail** — PHI access logging, security events, compliance dashboard
+**Backend:** `TenantProvisioningService`, configuration templates
+**Frontend:** Onboarding wizard in operator console
+**Complexity:** M
+
+---
+
+### 2.4 SSO / SAML
+**Why:** Enterprise-mandatory for operators with >50 employees.
+
+**Spec:**
+- Okta SAML
+- Azure AD SAML
+- Google Workspace SSO
+- SCIM 2.0 for just-in-time provisioning
+- Per-operator IdP configuration
+
+**Backend:** Laravel Socialite + SAML2 packages
+**Frontend:** SSO config in operator console
+**Complexity:** M
+
+---
+
+### 2.5 QuickBooks Online Integration
+**Why:** Most-requested financial integration. Automated GL postings = closes 2 days vs. 3 weeks.
+
+**Spec:**
+- OAuth flow per tenant (each clinic's own QBO)
+- Automated journal entries: revenue, refunds, fees
+- Customer + invoice sync
+- Reconciliation report (MemberMD vs. QBO)
+
+**Backend:** `QuickBooksService`, OAuth handlers, scheduled sync jobs
+**Frontend:** Integration setup in PracticePortal, sync status dashboard
+**Complexity:** M
+
+---
+
+### 2.6 First EHR Adapter — Athenahealth
+**Why:** Athena is the most common EHR in mid-size DPC operators. Proves the integration model.
+
+**Spec:**
+- OAuth + API integration with Athena
+- Push: encounter triggers from MemberMD → Athena
+- Pull: clinical encounters from Athena → utilization tracking in MemberMD
+- Bi-directional patient sync
+- Field mapping configurable per tenant
+
+**Backend:** `AthenaAdapter` service, sync jobs, mapping config
+**Frontend:** Integration setup, mapping UI
+**Complexity:** L
+
+---
+
+### 2.7 Test Coverage Expansion
+**Why:** Enterprise due diligence requires real test coverage. Currently ~73 tests across stack.
+
+**Target:**
+- Backend: 60%+ coverage on Services and Controllers
+- Frontend: Component tests for portal critical paths
+- Integration tests for Stripe Connect, EHR adapters
+- E2E tests for operator console critical flows
+
+**Owner:** Engineering, ongoing.
+**Complexity:** M (sustained effort)
+
+---
+
+### 2.8 Customers 4–7 Signed
+**Pipeline:** Referrals from first 3 + continued founder outreach.
+**Success metric:** $70K MRR from operators by end of Q4.
+**Output:** First case study published with concrete numbers ("Operator X cut financial close from 3 weeks to 2 days").
+
+---
+
+## Phase 3: Scale (Weeks 25–36, Q1 2027)
+
+Goal: Public API, second EHR adapter, clinic benchmarking. **12 paying operator customers, $1.5M ARR run rate, Series A conversations open.**
+
+### 3.1 Public REST API v1
+**Why:** Operator engineering teams want to build their own dashboards, sync with internal systems.
+
+**Spec:**
+- Full CRUD on members, plans, payments, encounters, appointments
+- API key + scope management per integration
+- Rate limiting (per tenant, per key)
+- Usage analytics
+- OpenAPI spec + interactive docs
+
+**Backend:** API versioning, scope middleware, rate limiter, OpenAPI generator
+**Frontend:** Developer portal, API key management UI
+**Complexity:** L
+
+---
+
+### 3.2 Clinic Benchmarking Analytics
+**Why:** Consulting-grade insight that justifies premium pricing. "Clinic 7's no-show rate is 2.3x network average. Top driver: appointments booked >14 days out."
+
+**Spec:**
+- Per-clinic vs. network average on 20+ KPIs
+- Anomaly detection (statistical outliers flagged)
+- Drill-down explanations (driver analysis)
+- Cohort comparisons (by size, region, plan mix)
+
+**Backend:** `BenchmarkingService`, statistical analysis, scheduled snapshots
+**Frontend:** `ClinicBenchmarkDashboard.tsx`
+**Complexity:** L
+
+---
+
+### 3.3 Second EHR Adapter — Elation
+**Why:** Elation is the second most common in DPC. Validates the adapter framework.
+
+**Spec:** Same shape as Athena adapter (1.6 of Phase 2).
+**Complexity:** M (framework already built)
+
+---
+
+### 3.4 Data Warehouse Export
+**Why:** Operator analytics teams demand Snowflake/BigQuery. Required for $1M+ ACV deals.
+
+**Spec:**
+- Daily incremental sync to operator's warehouse
+- Configurable schema mapping
+- Snowflake, BigQuery, Redshift connectors
+- PII handling (encrypted, configurable masking)
+
+**Backend:** `WarehouseExportService`, connector abstraction
+**Frontend:** Configuration in operator console
+**Complexity:** M
+
+---
+
+### 3.5 Status Page + SLA
+**Why:** Enterprise customers require public uptime visibility and contractual SLA.
+
+**Spec:**
+- Public status page (status.membermd.io)
+- Real-time uptime monitoring (BetterStack or Statuspage.io)
+- Incident communication workflow
+- 99.9% uptime SLA in Enterprise contracts
+
+**Complexity:** S
+
+---
+
+### 3.6 Customers 8–12 Signed
+**Pipeline:** Inbound from case studies + outbound.
+**Success metric:** $130K MRR from operators by end of Q1 2027.
+**Output:** Series A conversations with vertical SaaS investors (Bessemer, Insight, ICONIQ).
+
+---
+
+## Phase 4: Series A & Beyond (Q2 2027+)
+
+Funded build-out. Specific roadmap depends on customer mix and investor input. Likely directions:
+
+- **Wave 2 EHR adapters:** eClinicalWorks, Atlas.md, Epic Community Connect
+- **Financial adapter expansion:** NetSuite, Sage Intacct, Bill.com
+- **CRM adapters:** Salesforce, HubSpot
+- **Advanced operator features:** M&A integration toolkit, multi-region support, white-label mobile (if customer-funded)
+- **HITRUST certification** (for health-system DPC subsidiary deals)
+- **Geographic expansion:** Canada, UK private GP networks
+
+---
+
+## H1 Deferrals (Reactivated in H2)
+
+The following items from Roadmap v1.0 are **deferred, not killed.** They become first-class roadmap items when H2 opens (when SOC 2 + ~25 operator customers + $3M ARR are in hand and competing with Hint head-on becomes viable):
+
+| Item | H1 Status | H2 Re-entry |
+|---|---|---|
+| 1.1 Two-Way SMS Messaging | 🟡 Already partially shipped via Twilio reminders | Expand for H2 solo DPC parity |
+| 1.4 Patient Check-In Kiosk | ⏸ Deferred | H2 — single-clinic UX win |
+| 1.5 Referral Management | ⏸ Deferred | H2 — operators rely on their EHR |
+| 1.6 Structured Charting Templates | ⏸ Deferred | H2 — clinical depth for solo DPC |
+| 1.7 Lab Ordering Integration (live) | ⏸ Deferred | H2 — Quest/LabCorp integration |
+| 1.9 E-Prescribing (Surescripts) | ⏸ Deferred | H2 — table stakes for solo DPC, via DoseSpot/DrFirst |
+| 2.2 Unified Communication Hub | ⏸ Deferred | H2 |
+| 2.4 Care Coordination Dashboard | ⏸ Deferred | H2 |
+| 2.6 Outcome Tracking & Value Reporting | 🟡 Reframed as operator benchmarking (Phase 3.2) | Patient-facing version in H2 |
+| 3.2 Provider Credential Tracking | ⏸ Deferred | H2 |
+| 3.4 Incident / Safety Event Reporting | ⏸ Deferred | H2 |
+| 3.6 Signature Capture | ✅ Keep small | — |
+
+**The discipline through H1:** every deferral is a "yes" to operator-tier velocity. If a current customer asks for one of these now, evaluate against the wedge — if it doesn't help them *and* 4 other operators, defer to H2. Track requests in a "H2 customer-validated" backlog so we have data when we open H2.
+
+---
+
+## H2: Solo DPC Parity (2028+, Optional but Preserved)
+
+Goal: when H1 has produced trust signals (SOC 2, ~25 operator customers, $3M+ ARR, named case studies), open a self-serve solo DPC tier and compete with Hint Health head-on — from a position of strength.
+
+### Why this works in H2 but not now
+- **Trust:** SOC 2, real customer base, scale references — Hint's #1 advantage today neutralized.
+- **Capital:** Series A funding (likely $15–30M) lets us hire a PLG team, build self-serve onboarding, and absorb 12–18 months of CAC payback on solo customers.
+- **Engineering depth:** the operator-tier integrations (Stripe Connect, EHR adapters, audit infrastructure) **are** the platform a solo DPC tier sits on top of. We don't rebuild — we re-package.
+- **Brand:** "the platform that runs Crossover Health, Plum Health, and 25 other operators" sells solo DPC better than any feature comparison.
+
+### H2 Phase A — Solo DPC Foundation (Q1–Q2 2028)
+- [ ] PLG self-serve signup + onboarding flow
+- [ ] E-prescribing via Surescripts (DoseSpot or DrFirst intermediary)
+- [ ] Quest Quanum + LabCorp Beacon lab ordering integrations
+- [ ] Two-way SMS messaging expansion (full inbound + outbound)
+- [ ] Solo-tier pricing: $199–$299/provider/month
+- [ ] Migration tooling for practices switching from Hint
+
+### H2 Phase B — Solo DPC Differentiation (Q3 2028+)
+- [ ] AI scribe / ambient documentation (in-house or Abridge/Suki integration)
+- [ ] Structured charting templates (Elation-style)
+- [ ] Patient check-in kiosk
+- [ ] Referral management + specialist directory
+- [ ] Care coordination dashboard
+- [ ] Native mobile apps (member + provider)
+- [ ] Unified communication hub (omnichannel)
+- [ ] Provider credential tracking
+
+### H2 Re-entry Decision Gate (End of Q4 2027)
+Open H2 only if:
+- [ ] SOC 2 Type II issued
+- [ ] ≥ 20 operator customers, $2.5M+ ARR
+- [ ] At least 3 case studies with named operators
+- [ ] Series A closed or in late stages
+- [ ] Engineering team ≥ 6 (capacity to ship two product surfaces)
+
+If gate criteria are missed, defer H2 by 2–4 quarters and double down on H1 expansion (more operator customers, geographic expansion).
+
+### Architectural Decisions That Preserve the H2 Option
+Every H1 build choice should ask: *would this make H2 harder?* These rules apply throughout H1:
+
+1. **Multi-tenancy works for tenant-of-1** — the operator data model must allow a "tenant of one" (single-practice operator) so an H2 solo customer is just `Operator(num_tenants=1)`. No re-architecture needed.
+2. **Public API designed for both audiences** — REST surface usable by an operator's engineering team *or* a solo practice's third-party integrations. No operator-only abstractions baked in.
+3. **EHR adapters built as a framework** — Athena and Elation adapters in H1 use a generic adapter interface. H2 adds DoseSpot, Surescripts, LabCorp on the same framework.
+4. **Branding/white-label generic** — operator white-labeling in H1 = solo practice branding in H2 with no rework.
+5. **Pricing engine flexible** — supports both platform-fee + %MRR (H1) and per-provider flat (H2) without rewrites.
+6. **No operator-specific naming in core domain** — keep models named `Practice`, `Member`, etc. The "Operator" concept layers on top, doesn't replace.
+
+These are cheap to maintain in H1 and very expensive to retrofit later. **This is how we keep the option alive.**
+
+---
+
+## Pricing Model
+
+| Tier | Clinics | Platform Fee | + % MRR | Implementation | Typical ACV |
+|---|---|---|---|---|---|
+| Starter | 1–5 | $399/clinic/mo | 1.5% | $15K | $90K Y1 |
+| Growth | 6–25 | $299/clinic/mo | 1.5% | $35K | $150–300K |
+| Enterprise | 26+ | $199/clinic/mo + custom | 1.5% (caps available) | $75K+ | $300K–$1M+ |
+
+**Add-ons:** Custom integrations $25–100K | Dedicated CSM $30K/yr | HITRUST certification (passthrough)
+
+---
+
+## Success Metrics by Phase
+
+| Phase | Quarter | Operator Customers | Solo Customers | MRR (total) | ARR run rate |
+|---|---|---|---|---|---|
+| 0: Validation | Q2 2026 | 0 (8 discovery calls) | — | $0 | $0 |
+| 1: Foundation | Q3 2026 | 3 | — | $25K | $300K |
+| 2: Differentiation | Q4 2026 | 7 | — | $70K | $840K |
+| 3: Scale | Q1 2027 | 12 | — | $130K | $1.56M |
+| 4: Series A | Q2–Q4 2027 | 25+ | — | $300K+ | $3.6M+ |
+| **H2-A: Solo DPC launch** | Q1–Q2 2028 | 35+ | 50+ | $500K+ | $6M+ |
+| **H2-B: Dual-market scale** | Q3 2028+ | 50+ | 200+ | $900K+ | $11M+ |
+
+---
+
+## Risks & Mitigations
+
+| Risk | Mitigation |
+|---|---|
+| Operator segment smaller than estimated | Phase 0 validation before pivot. Go/No-Go gate. |
+| Hint announces multi-tenancy | 12–18 mo head start; architectural rebuild is hard for them. |
+| Clinical EHR depth gap costs deals | Own the narrative: "we're business layer, you keep your EHR." |
+| SOC 2 takes longer than 6 mo | Start now, parallel to product. Vanta + vCISO can hit Type I in 6 mo. |
+| Founder-led sales doesn't scale | Hire AE by customer 7. Document playbook from customers 1–5. |
+| Existing solo customers churn | Acceptable. They're not the future ICP. Continue support, stop acquiring. |
+
+---
+
+## Architectural Advantages (The Moat)
+
+These are why Lane C works for MemberMD and not for Hint/Atlas.md/Elation — and why H2 (solo DPC parity) becomes possible later from a position of strength:
+
+1. **True multi-tenant from day one** — `BelongsToTenant` global scope, UUID PKs, per-tenant data isolation. Hint's Rails monolith would need a rewrite. In H2, "solo practice" = "operator with one tenant" — no re-architecture.
+2. **Embeddable widgets at public URLs** — already shipped. White-labeling for operators (H1) becomes solo-practice branding (H2) for free.
+3. **Utilization tracking engine** — already shipped, models hybrid plans (base fee + metered). Differentiates against Hint's flat-fee bias in both H1 and H2.
+4. **Modern stack** — React 18 + Laravel 12. Easier to recruit, faster to ship, better DX for operator engineering teams using the API and for H2 solo-practice integrations.
+5. **Audit + PHI access logging** — SOC 2 / HIPAA evidence already generated by `Auditable` trait and `PhiAccessLog`. SOC 2 earned in H1 is the trust signal that makes H2 viable.
+
+---
+
+## Source Documents
+
+- `COMPETITIVE_ANALYSIS.md` — feature matrix vs. Hint, Atlas.md, Elation
+- `WEDGE_STRATEGY.md` — full strategic rationale for Lane C
+- `CLAUDE.md` — codebase rules and tech stack
