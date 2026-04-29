@@ -921,16 +921,18 @@ export function PracticePortal() {
       })));
     }
     // Encounters (API returns paginated)
-    // eslint-disable-next-line no-console
-    console.log("[MemberMD][load] encountersRes status:", encountersRes.status,
-      "data shape:", encountersRes.status === "fulfilled" ? typeof encountersRes.value.data : "n/a",
+    {
+      const status = encountersRes.status;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      "data preview:", encountersRes.status === "fulfilled" ? JSON.stringify(encountersRes.value.data).slice(0, 300) : "n/a");
+      const dataPreview = status === "fulfilled" ? JSON.stringify((encountersRes as any).value?.data ?? null).slice(0, 300) : "rejected";
+      // eslint-disable-next-line no-console
+      console.log("[MemberMD][load] encounters " + status + " preview=" + dataPreview);
+    }
     if (encountersRes.status === "fulfilled" && encountersRes.value.data) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const encList = Array.isArray(encountersRes.value.data) ? encountersRes.value.data : (encountersRes.value.data as any).data || [];
       // eslint-disable-next-line no-console
-      console.log("[MemberMD][load] encList length:", encList.length, "first:", encList[0] ? JSON.stringify(encList[0]).slice(0, 200) : "none");
+      console.log("[MemberMD][load] encList length=" + encList.length + " first=" + (encList[0] ? JSON.stringify(encList[0]).slice(0, 200) : "none"));
       setApiEncounters(encList.map((e: any) => ({
         id: e.id,
         date: e.encounterDate ? new Date(e.encounterDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : e.date || "",
@@ -1445,11 +1447,8 @@ export function PracticePortal() {
         status: "in_progress",
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } as any);
-      // TEMP diagnostic: print the raw response so we can see exactly
-      // what shape comes back when "encounter created" but list-tab
-      // doesn't show it. Remove once the encounter list bug is fixed.
       // eslint-disable-next-line no-console
-      console.log("[MemberMD][encounter.create] raw response:", JSON.stringify(res).slice(0, 800));
+      console.log("[MemberMD][encounter.create] response=" + JSON.stringify(res).slice(0, 800));
 
       if (res.data && (res.data as { id?: string }).id) {
         setActiveTab("encounters");
@@ -1458,12 +1457,7 @@ export function PracticePortal() {
         setEditingEncounterId((res.data as { id: string }).id);
         setSoapForm({ subjective: "", objective: "", assessment: "", plan: "", chiefComplaint: "" });
         setEncounterForm({ patientId: "", encounterType: "follow_up", programId: "", encounterDate: new Date().toISOString().split("T")[0] });
-        // Refresh the list so the new encounter shows up in the table.
         await loadPracticeData();
-        // eslint-disable-next-line no-console
-        console.log("[MemberMD][encounter.create] post-refresh apiEncounters length:",
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          (apiEncounters as any)?.length ?? "null");
       } else {
         setToast({ message: res.error || "Encounter create returned an unexpected response. Try again.", type: "error" });
       }
