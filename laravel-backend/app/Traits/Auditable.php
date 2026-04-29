@@ -34,6 +34,20 @@ trait Auditable
             $oldValues = array_diff_key($oldValues, $hidden);
             $newValues = array_diff_key($newValues, $hidden);
 
+            // Strip any column that uses an `encrypted` / `encrypted:array`
+            // cast — getDirty() returns DECRYPTED values for those, which
+            // would land in audit_logs.changes as plaintext PHI and defeat
+            // the encryption-at-rest guarantee. Audit logs need to record
+            // THAT a field changed, not what it changed TO.
+            $encryptedKeys = [];
+            if (method_exists($model, 'getCasts')) {
+                foreach ($model->getCasts() as $col => $cast) {
+                    if ($cast === 'encrypted' || str_starts_with((string) $cast, 'encrypted:')) {
+                        $encryptedKeys[$col] = true;
+                    }
+                }
+            }
+
             // Build changed fields list for updates
             $changes = null;
             if ($action === 'updated' && method_exists($model, 'getDirty')) {
@@ -42,6 +56,11 @@ trait Auditable
                 $dirty = array_diff_key($dirty, $hidden);
                 $changes = [];
                 foreach ($dirty as $field => $newVal) {
+                    if (isset($encryptedKeys[$field])) {
+                        // Record that the field changed, but neither value.
+                        $changes[$field] = ['old' => '[redacted]', 'new' => '[redacted]'];
+                        continue;
+                    }
                     $changes[$field] = [
                         'old' => $oldValues[$field] ?? null,
                         'new' => $newVal,

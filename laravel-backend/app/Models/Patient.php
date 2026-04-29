@@ -11,10 +11,11 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use App\Traits\BelongsToTenant;
 use App\Traits\Auditable;
+use App\Traits\TolerantEncryptedCasts;
 
 class Patient extends Model
 {
-    use HasFactory, HasUuids, BelongsToTenant, Auditable, SoftDeletes;
+    use HasFactory, HasUuids, BelongsToTenant, Auditable, SoftDeletes, TolerantEncryptedCasts;
 
     protected $fillable = [
         'tenant_id', 'user_id',

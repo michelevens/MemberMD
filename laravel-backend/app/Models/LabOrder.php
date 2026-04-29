@@ -9,10 +9,11 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use App\Traits\BelongsToTenant;
 use App\Traits\Auditable;
+use App\Traits\TolerantEncryptedCasts;
 
 class LabOrder extends Model
 {
-    use HasFactory, HasUuids, BelongsToTenant, Auditable;
+    use HasFactory, HasUuids, BelongsToTenant, Auditable, TolerantEncryptedCasts;
 
     protected $fillable = [
         'tenant_id', 'patient_id', 'provider_id', 'encounter_id',

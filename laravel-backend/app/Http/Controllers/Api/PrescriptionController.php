@@ -180,8 +180,12 @@ class PrescriptionController extends Controller
 
         $pdf->setPaper('letter');
 
-        $filename = "rx_{$prescription->patient->last_name}_{$prescription->medication_name}.pdf";
-        $filename = preg_replace('/[^a-zA-Z0-9_\-.]/', '_', $filename);
+        // Filename uses only the prescription id — NOT patient last name
+        // or medication name. Both of those are PHI (medication_name is
+        // explicitly an `encrypted` cast). The filename ends up in the
+        // Content-Disposition header which webserver and proxy access
+        // logs capture. Keep PHI out of those logs.
+        $filename = "rx_{$prescription->id}.pdf";
 
         return $pdf->download($filename);
     }

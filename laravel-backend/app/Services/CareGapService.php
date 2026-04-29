@@ -9,7 +9,6 @@ use App\Models\Referral;
 use App\Models\ScreeningResponse;
 use App\Models\LabOrder;
 use Carbon\Carbon;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 class CareGapService
@@ -92,9 +91,12 @@ class CareGapService
 
         // PHQ-9 depression screening — annually for adults 18+
         if ($age >= 18) {
+            // Relation on ScreeningResponse is `template` (not `screening`).
+            // Match against either slug or code so we don't miss seeded
+            // templates that use a `code` like 'phq9'.
             $lastPhq9 = ScreeningResponse::where('patient_id', $patient->id)
-                ->whereHas('screening', function ($q) {
-                    $q->where('slug', 'like', '%phq%');
+                ->whereHas('template', function ($q) {
+                    $q->where('slug', 'like', '%phq%')->orWhere('code', 'like', '%phq%');
                 })
                 ->where('created_at', '>=', now()->subYear())
                 ->exists();
@@ -113,15 +115,7 @@ class CareGapService
 
         // Mammogram — women 40+, every 2 years (USPSTF)
         if (in_array($gender, ['female', 'f']) && $age >= 40) {
-            $lastMammogram = Encounter::where('patient_id', $patient->id)
-                ->where('created_at', '>=', now()->subYears(2))
-                ->where(function ($q) {
-                    $q->whereJsonContains('diagnoses', ['code' => 'Z12.31'])
-                      ->orWhere('chief_complaint', 'like', '%mammogr%');
-                })
-                ->exists();
-
-            if (!$lastMammogram) {
+            if (!$this->hasRecentEncounterMatching($patient, now()->subYears(2), 'Z12.31', 'mammogr')) {
                 $gaps[] = [
                     'gap_type' => 'screening_overdue',
                     'title' => 'Mammogram Screening Overdue',
@@ -135,15 +129,7 @@ class CareGapService
 
         // Colonoscopy — 45+, every 10 years
         if ($age >= 45) {
-            $lastColonoscopy = Encounter::where('patient_id', $patient->id)
-                ->where('created_at', '>=', now()->subYears(10))
-                ->where(function ($q) {
-                    $q->whereJsonContains('diagnoses', ['code' => 'Z12.11'])
-                      ->orWhere('chief_complaint', 'like', '%colonoscop%');
-                })
-                ->exists();
-
-            if (!$lastColonoscopy) {
+            if (!$this->hasRecentEncounterMatching($patient, now()->subYears(10), 'Z12.11', 'colonoscop')) {
                 $gaps[] = [
                     'gap_type' => 'screening_overdue',
                     'title' => 'Colorectal Cancer Screening Overdue',
@@ -156,6 +142,82 @@ class CareGapService
         }
 
         return $gaps;
+    }
+
+    /**
+     * Encounter.diagnoses (encrypted:array) and chief_complaint (encrypted)
+     * cannot be queried with whereJsonContains or LIKE — the column on
+     * disk is ciphertext. Pull the in-window encounters and filter in PHP
+     * after Eloquent has decrypted them.
+     *
+     * Page bound: 90 days * normal volume should be small per patient.
+     * For a patient with extreme volume this still loads in one chunk;
+     * acceptable until we add population-health background jobs.
+     */
+    private function hasRecentEncounterMatching(
+        Patient $patient,
+        \Carbon\Carbon $since,
+        string $diagnosisCode,
+        string $chiefComplaintNeedle,
+    ): bool {
+        $encounters = Encounter::where('patient_id', $patient->id)
+            ->where('created_at', '>=', $since)
+            ->limit(500)
+            ->get(['id', 'diagnoses', 'chief_complaint']);
+
+        $needleLower = strtolower($chiefComplaintNeedle);
+        foreach ($encounters as $enc) {
+            $cc = (string) ($enc->chief_complaint ?? '');
+            if ($cc !== '' && str_contains(strtolower($cc), $needleLower)) {
+                return true;
+            }
+            $diagnoses = $enc->diagnoses ?? [];
+            foreach ((array) $diagnoses as $d) {
+                $code = is_array($d) ? ($d['code'] ?? '') : (string) $d;
+                if ($code === $diagnosisCode) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
+     * LabOrder.panels (encrypted:array) cannot be queried with
+     * whereJsonContains or LIKE — column on disk is ciphertext. Pull
+     * in-window orders and filter in PHP after Eloquent decrypts.
+     *
+     * @param array<string> $panelCodes  Exact code matches (case-sensitive)
+     * @param array<string> $nameNeedles Substring matches against panel name (case-insensitive)
+     */
+    private function hasRecentLabMatching(
+        Patient $patient,
+        \Carbon\Carbon $since,
+        array $panelCodes,
+        array $nameNeedles,
+    ): bool {
+        $orders = LabOrder::where('patient_id', $patient->id)
+            ->where('tenant_id', $patient->tenant_id)
+            ->where('created_at', '>=', $since)
+            ->limit(500)
+            ->get(['id', 'panels']);
+
+        $needlesLower = array_map('strtolower', $nameNeedles);
+        foreach ($orders as $order) {
+            foreach ((array) ($order->panels ?? []) as $panel) {
+                $code = is_array($panel) ? ($panel['code'] ?? '') : '';
+                if (in_array($code, $panelCodes, true)) {
+                    return true;
+                }
+                $name = is_array($panel) ? strtolower((string) ($panel['name'] ?? '')) : '';
+                foreach ($needlesLower as $needle) {
+                    if ($name !== '' && str_contains($name, $needle)) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
     }
 
     /**
@@ -173,17 +235,7 @@ class CareGapService
         });
 
         if ($hasDiabetes) {
-            $lastA1c = LabOrder::where('patient_id', $patient->id)
-                ->where('tenant_id', $patient->tenant_id)
-                ->where('created_at', '>=', now()->subMonths(6))
-                ->where(function ($q) {
-                    $q->whereJsonContains('panels', ['code' => 'A1C'])
-                      ->orWhereRaw("panels::text ILIKE '%a1c%'")
-                      ->orWhereRaw("panels::text ILIKE '%hemoglobin%'");
-                })
-                ->exists();
-
-            if (!$lastA1c) {
+            if (!$this->hasRecentLabMatching($patient, now()->subMonths(6), ['A1C'], ['a1c', 'hemoglobin'])) {
                 $gaps[] = [
                     'gap_type' => 'lab_overdue',
                     'title' => 'HbA1C Lab Overdue (Diabetic)',
@@ -198,17 +250,7 @@ class CareGapService
         // Lipid panel — adults, every 12 months (simplified)
         $age = $patient->date_of_birth ? Carbon::parse($patient->date_of_birth)->age : null;
         if ($age && $age >= 20) {
-            $lastLipid = LabOrder::where('patient_id', $patient->id)
-                ->where('tenant_id', $patient->tenant_id)
-                ->where('created_at', '>=', now()->subYear())
-                ->where(function ($q) {
-                    $q->whereJsonContains('panels', ['code' => 'LIPID'])
-                      ->orWhereRaw("panels::text ILIKE '%lipid%'")
-                      ->orWhereRaw("panels::text ILIKE '%cholesterol%'");
-                })
-                ->exists();
-
-            if (!$lastLipid) {
+            if (!$this->hasRecentLabMatching($patient, now()->subYear(), ['LIPID'], ['lipid', 'cholesterol'])) {
                 $gaps[] = [
                     'gap_type' => 'lab_overdue',
                     'title' => 'Lipid Panel Overdue',

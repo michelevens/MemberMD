@@ -10,10 +10,11 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\MorphTo;
 use App\Traits\BelongsToTenant;
 use App\Traits\Auditable;
+use App\Traits\TolerantEncryptedCasts;
 
 class Document extends Model
 {
-    use HasFactory, HasUuids, BelongsToTenant, Auditable, SoftDeletes;
+    use HasFactory, HasUuids, BelongsToTenant, Auditable, SoftDeletes, TolerantEncryptedCasts;
 
     protected $fillable = [
         'tenant_id', 'name', 'original_name', 'type', 'category',
