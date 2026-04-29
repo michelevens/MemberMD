@@ -3,7 +3,8 @@
 // Tabs: Dashboard, Patient Roster, Membership Plans, Appointments, Messages, Invoices, + Coming Soon tabs
 
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
+import { ProviderDetailPage } from "./ProviderDetailPage";
 import { useAuth } from "../../contexts/AuthContext";
 import { dashboardService, membershipPlanService, messageService, patientService, appointmentService, encounterService, prescriptionService, invoiceService, programService, telehealthService, screeningService, couponService, providerService, paymentService, notificationService, apiFetch, billingEnhancedService } from "../../lib/api";
 import { HeaderToolbar } from "../shared/HeaderToolbar";
@@ -622,6 +623,12 @@ function ConfirmDialog({ title, message, onConfirm, onCancel, confirmLabel, dang
 export function PracticePortal() {
   const auth = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+  // Sub-route detection: /practice/providers/:id renders the provider
+  // detail page INSIDE the portal so the sidebar stays. Reading the
+  // hash directly rather than nested <Routes> avoids a wider refactor.
+  const providerDetailMatch = /^\/practice\/providers\/([^/?]+)/.exec(location.pathname);
+  const selectedProviderId = providerDetailMatch ? providerDetailMatch[1] : null;
   const [activeTab, setActiveTab] = useState<TabId>("dashboard");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [selectedThread, setSelectedThread] = useState(isDemoMode ? MOCK_THREADS[0].id : "");
@@ -7057,6 +7064,15 @@ export function PracticePortal() {
   // ─── Tab Router ─────────────────────────────────────────────────────────
 
   function renderContent() {
+    if (selectedProviderId) {
+      return (
+        <ProviderDetailPage
+          providerId={selectedProviderId}
+          embedded
+          onBack={() => navigate("/practice")}
+        />
+      );
+    }
     if (selectedPatient) return renderPatientDetail();
 
     switch (activeTab) {

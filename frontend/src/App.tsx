@@ -104,11 +104,6 @@ const PracticePortal = namedLazy(
   "PracticePortal"
 );
 
-const ProviderDetailPage = namedLazy(
-  () => import("./components/portals/ProviderDetailPage"),
-  "ProviderDetailPage"
-);
-
 const PatientPortal = namedLazy(
   () => import("./components/portals/PatientPortal"),
   "PatientPortal"
@@ -190,7 +185,6 @@ function AuthGate() {
       <Routes>
         <Route path="/superadmin/*" element={<SuperAdminPortal />} />
         <Route path="/operator/*" element={<OperatorPortal />} />
-        <Route path="/practice/providers/:id" element={<ProviderDetailPage />} />
         <Route path="/practice/*" element={<PracticePortal />} />
         <Route path="/patient/*" element={<PatientPortal />} />
         <Route path="/telehealth/:sessionId" element={<TelehealthRoom />} />

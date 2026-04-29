@@ -70,8 +70,29 @@ interface PanelSummary {
   };
 }
 
-export function ProviderDetailPage() {
-  const { id } = useParams<{ id: string }>();
+interface ProviderDetailPageProps {
+  /**
+   * When provided, the page reads the provider id from props instead
+   * of useParams. Lets a parent portal (e.g. PracticePortal) embed
+   * this page inside its sidebar layout via state instead of routing.
+   */
+  providerId?: string;
+  /**
+   * When true, drops the standalone full-page chrome (navy header,
+   * outer min-h-screen wrapper) so the page nests cleanly inside an
+   * existing portal layout. The tab bar + body still render.
+   */
+  embedded?: boolean;
+  /**
+   * Custom back-button handler for embedded mode. Defaults to
+   * navigate("/practice") when standalone.
+   */
+  onBack?: () => void;
+}
+
+export function ProviderDetailPage({ providerId, embedded = false, onBack }: ProviderDetailPageProps = {}) {
+  const params = useParams<{ id: string }>();
+  const id = providerId ?? params.id;
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -116,7 +137,7 @@ export function ProviderDetailPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50">
+      <div className={embedded ? "flex items-center justify-center py-20" : "min-h-screen flex items-center justify-center bg-slate-50"}>
         <Loader2 className="w-8 h-8 animate-spin text-teal-500" />
       </div>
     );
@@ -124,16 +145,16 @@ export function ProviderDetailPage() {
 
   if (error || !provider) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50 px-4">
+      <div className={embedded ? "flex items-center justify-center py-20 px-4" : "min-h-screen flex items-center justify-center bg-slate-50 px-4"}>
         <div className="max-w-md w-full bg-white rounded-2xl shadow-lg p-8 text-center">
           <AlertTriangle className="w-12 h-12 text-red-500 mx-auto mb-4" />
           <h2 className="text-lg font-semibold text-slate-900 mb-2">Couldn't load provider</h2>
           <p className="text-sm text-slate-500 mb-6">{error}</p>
           <button
-            onClick={() => navigate("/practice")}
+            onClick={() => (onBack ? onBack() : navigate("/practice"))}
             className="px-5 py-2.5 bg-teal-600 text-white rounded-lg text-sm font-medium hover:bg-teal-700"
           >
-            Back to Practice
+            Back to Providers
           </button>
         </div>
       </div>
@@ -145,17 +166,25 @@ export function ProviderDetailPage() {
     || "Provider";
   const credentials = (provider as unknown as { credentials?: string }).credentials || "";
 
+  const handleBack = () => (onBack ? onBack() : navigate("/practice"));
+
+  // When embedded, the parent (PracticePortal) provides the page chrome
+  // (sidebar, top nav). We render only the header card + body, in the
+  // parent's content column.
+  const RootWrapper: React.FC<{ children: React.ReactNode }> = ({ children }) =>
+    embedded ? <div>{children}</div> : <div className="min-h-screen bg-slate-50">{children}</div>;
+
   return (
-    <div className="min-h-screen bg-slate-50">
+    <RootWrapper>
       {/* Header */}
-      <div className="bg-white border-b border-slate-200">
-        <div className="max-w-6xl mx-auto px-6 py-4">
+      <div className={embedded ? "bg-white rounded-t-2xl border border-b-0 border-slate-200" : "bg-white border-b border-slate-200"}>
+        <div className={embedded ? "px-6 py-4" : "max-w-6xl mx-auto px-6 py-4"}>
           <button
-            onClick={() => navigate("/practice")}
+            onClick={handleBack}
             className="flex items-center gap-2 text-sm text-slate-600 hover:text-slate-900 mb-3"
           >
             <ArrowLeft className="w-4 h-4" />
-            Back to Practice
+            Back to Providers
           </button>
           <div className="flex items-start gap-4">
             <div
@@ -205,7 +234,7 @@ export function ProviderDetailPage() {
       </div>
 
       {/* Body */}
-      <div className="max-w-6xl mx-auto px-6 py-8">
+      <div className={embedded ? "px-6 py-6 bg-white rounded-b-2xl border border-t-0 border-slate-200" : "max-w-6xl mx-auto px-6 py-8"}>
         {activeTab === "overview" && <OverviewTab provider={provider} />}
         {activeTab === "profile" && <ProfileTab provider={provider} onSaved={loadProvider} setToast={setToast} />}
         {activeTab === "schedule" && <ScheduleTab providerId={provider.id} setToast={setToast} />}
@@ -225,7 +254,7 @@ export function ProviderDetailPage() {
           {toast.message}
         </div>
       )}
-    </div>
+    </RootWrapper>
   );
 }
 
