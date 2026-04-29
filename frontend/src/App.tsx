@@ -7,6 +7,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import { LoginScreen } from "./components/auth/LoginScreen";
+import { ForgotPasswordScreen } from "./components/auth/ForgotPasswordScreen";
+import { ResetPasswordScreen } from "./components/auth/ResetPasswordScreen";
 
 // ─── Error Boundary ─────────────────────────────────────────────────────────────
 
@@ -163,6 +165,8 @@ function AuthGate() {
       <Suspense fallback={<LoadingFallback />}>
         <Routes>
           <Route path="/login" element={<LoginScreen />} />
+          <Route path="/forgot-password" element={<ForgotPasswordScreen />} />
+          <Route path="/reset-password" element={<ResetPasswordScreen />} />
           <Route path="/register" element={<PracticeRegistration />} />
           <Route path="/plans/:tenantCode" element={<PlanWidget />} />
           <Route path="/enroll/:tenantCode" element={<EnrollmentWidget />} />
