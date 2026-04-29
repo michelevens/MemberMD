@@ -80,11 +80,6 @@ class PatientController extends Controller
         // Patients.user_id is NOT NULL — every patient is also a portal
         // user candidate. The users.email column has a GLOBAL unique
         // constraint (not tenant-scoped), so look it up globally.
-        //  - Same tenant -> reuse the existing User row.
-        //  - Different tenant -> reject with a clear error so the admin
-        //    can pick a different email or contact the other clinic.
-        //  - Not found -> create a new User with a random password; the
-        //    patient claims the account via the password-reset flow.
         $existingUser = \App\Models\User::where('email', $validated['email'])->first();
 
         if ($existingUser && $existingUser->tenant_id !== $actor->tenant_id) {
@@ -94,29 +89,42 @@ class PatientController extends Controller
             ], 422);
         }
 
-        if ($existingUser) {
-            $patientUser = $existingUser;
-        } else {
-            $patientUser = \App\Models\User::create([
+        // Wrap in a transaction so a Patient::create failure doesn't leave
+        // an orphan User row in the DB. Catch and surface the actual error
+        // — the previous "Server Error" toast hid which step failed.
+        try {
+            return \Illuminate\Support\Facades\DB::transaction(function () use ($actor, $validated, $existingUser) {
+                $patientUser = $existingUser ?: \App\Models\User::create([
+                    'tenant_id' => $actor->tenant_id,
+                    'email' => $validated['email'],
+                    'password' => \Illuminate\Support\Facades\Hash::make(\Illuminate\Support\Str::random(40)),
+                    'first_name' => $validated['first_name'],
+                    'last_name' => $validated['last_name'],
+                    'name' => trim($validated['first_name'] . ' ' . $validated['last_name']),
+                    'phone' => $validated['phone'] ?? null,
+                    'role' => 'patient',
+                    'status' => 'active',
+                ]);
+
+                $validated['tenant_id'] = $actor->tenant_id;
+                $validated['user_id'] = $patientUser->id;
+                $validated['is_active'] = true;
+
+                $patient = Patient::create($validated);
+
+                return response()->json(['data' => $patient], 201);
+            });
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::error('Patient create failed', [
+                'email' => $validated['email'] ?? null,
                 'tenant_id' => $actor->tenant_id,
-                'email' => $validated['email'],
-                'password' => \Illuminate\Support\Facades\Hash::make(\Illuminate\Support\Str::random(40)),
-                'first_name' => $validated['first_name'],
-                'last_name' => $validated['last_name'],
-                'name' => trim($validated['first_name'] . ' ' . $validated['last_name']),
-                'phone' => $validated['phone'] ?? null,
-                'role' => 'patient',
-                'status' => 'active',
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
             ]);
+            return response()->json([
+                'message' => 'Could not create patient: ' . $e->getMessage(),
+            ], 500);
         }
-
-        $validated['tenant_id'] = $actor->tenant_id;
-        $validated['user_id'] = $patientUser->id;
-        $validated['is_active'] = true;
-
-        $patient = Patient::create($validated);
-
-        return response()->json(['data' => $patient], 201);
     }
 
     public function update(UpdatePatientRequest $request, string $id): JsonResponse
