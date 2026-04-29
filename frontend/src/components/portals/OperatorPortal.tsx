@@ -15,24 +15,18 @@ import {
   operatorService,
   type OperatorMe,
   type OperatorTenant,
-  type OperatorNetworkMetrics,
-  type OperatorClinicMetric,
   type OperatorMember,
   type OperatorUserMembership,
 } from "../../lib/api";
+import { OperatorNetworkDashboard } from "./operator/OperatorNetworkDashboard";
 import {
   LayoutDashboard,
   Building2,
   Search,
   Users,
   Settings as SettingsIcon,
-  TrendingUp,
-  TrendingDown,
-  DollarSign,
-  UserCheck,
   AlertTriangle,
   CheckCircle2,
-  ExternalLink,
   ArrowRight,
   Loader2,
   Plus,
@@ -82,19 +76,8 @@ const TABS: { id: TabId; label: string; icon: React.ElementType }[] = [
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function formatMoney(cents: number): string {
-  const dollars = cents / 100;
-  if (Math.abs(dollars) >= 1_000_000) return `$${(dollars / 1_000_000).toFixed(2)}M`;
-  if (Math.abs(dollars) >= 1_000) return `$${(dollars / 1_000).toFixed(1)}K`;
-  return `$${dollars.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
-}
-
 function formatNumber(n: number): string {
   return n.toLocaleString("en-US");
-}
-
-function formatPercent(rate: number): string {
-  return `${(rate * 100).toFixed(1)}%`;
 }
 
 function toast(msg: string, kind: "success" | "error" = "success") {
@@ -187,7 +170,7 @@ export function OperatorPortal() {
   const renderContent = (): ReactNode => {
     switch (activeTab) {
       case "dashboard":
-        return <NetworkDashboard />;
+        return <OperatorNetworkDashboard />;
       case "clinics":
         return <ClinicsTab me={me} />;
       case "members":
@@ -280,69 +263,7 @@ export function OperatorPortal() {
 
 export default OperatorPortal;
 
-// ─── Network Dashboard ──────────────────────────────────────────────────────
-
-function NetworkDashboard() {
-  const [metrics, setMetrics] = useState<OperatorNetworkMetrics | null>(null);
-  const [clinics, setClinics] = useState<OperatorClinicMetric[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      setLoading(true);
-      const [m, c] = await Promise.all([
-        operatorService.network(),
-        operatorService.clinics(),
-      ]);
-      if (cancelled) return;
-      if (m.error) setError(m.error);
-      if (m.data) setMetrics(m.data);
-      if (c.data) setClinics(c.data);
-      setLoading(false);
-    })();
-    return () => { cancelled = true; };
-  }, []);
-
-  if (loading) {
-    return <Loader2 className="w-6 h-6 animate-spin" style={{ color: C.slate400 }} />;
-  }
-
-  if (error || !metrics) {
-    return <ErrorPanel message={error || "Could not load network metrics."} />;
-  }
-
-  const topByMrr = useMemo(() => [...clinics].sort((a, b) => b.mrrCents - a.mrrCents).slice(0, 5), [clinics]);
-  const bottomByMrr = useMemo(() => [...clinics].filter(c => c.mrrCents > 0).sort((a, b) => a.mrrCents - b.mrrCents).slice(0, 5), [clinics]);
-
-  return (
-    <div className="space-y-6">
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Kpi label="Network MRR" value={formatMoney(metrics.mrrCents)} icon={DollarSign} accent={C.teal600} />
-        <Kpi label="Active Members" value={formatNumber(metrics.memberCount)} icon={UserCheck} accent={C.navy700} />
-        <Kpi label="ARPU" value={formatMoney(metrics.arpuCents)} icon={TrendingUp} accent={C.teal600} />
-        <Kpi
-          label="30-day Churn"
-          value={formatPercent(metrics.churnRate30d)}
-          icon={metrics.churnRate30d > 0.05 ? TrendingDown : TrendingUp}
-          accent={metrics.churnRate30d > 0.05 ? C.red500 : C.green700}
-        />
-      </div>
-
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <SmallStat label="Active clinics" value={`${metrics.activeTenantCount} of ${metrics.tenantCount}`} />
-        <SmallStat label="New members (30d)" value={formatNumber(metrics.newMembers30d)} />
-        <SmallStat label="Cancellations (30d)" value={formatNumber(metrics.cancelled30d)} />
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <ClinicLeaderboard title="Top clinics by MRR" data={topByMrr} />
-        <ClinicLeaderboard title="Lowest clinics by MRR" data={bottomByMrr} />
-      </div>
-    </div>
-  );
-}
+// Network dashboard moved to ./operator/OperatorNetworkDashboard.tsx
 
 // ─── Clinics Tab ────────────────────────────────────────────────────────────
 
@@ -888,63 +809,6 @@ function OperatorSettingsTab({ me, onSaved }: { me: OperatorMe; onSaved: () => v
 
 // ─── Atoms ──────────────────────────────────────────────────────────────────
 
-function Kpi({ label, value, icon: Icon, accent }: { label: string; value: string; icon: React.ElementType; accent: string }) {
-  return (
-    <div
-      className="rounded-2xl border p-5"
-      style={{ backgroundColor: C.white, borderColor: C.slate200 }}
-    >
-      <div className="flex items-center justify-between mb-3">
-        <p className="text-xs font-semibold uppercase tracking-wider" style={{ color: C.slate500 }}>{label}</p>
-        <Icon className="w-4 h-4" style={{ color: accent }} />
-      </div>
-      <p className="text-2xl font-bold" style={{ color: C.navy900 }}>{value}</p>
-    </div>
-  );
-}
-
-function SmallStat({ label, value }: { label: string; value: string }) {
-  return (
-    <div
-      className="rounded-xl border px-4 py-3"
-      style={{ backgroundColor: C.white, borderColor: C.slate200 }}
-    >
-      <p className="text-xs" style={{ color: C.slate500 }}>{label}</p>
-      <p className="text-base font-semibold mt-0.5" style={{ color: C.navy900 }}>{value}</p>
-    </div>
-  );
-}
-
-function ClinicLeaderboard({ title, data }: { title: string; data: OperatorClinicMetric[] }) {
-  return (
-    <div
-      className="rounded-2xl border p-5"
-      style={{ backgroundColor: C.white, borderColor: C.slate200 }}
-    >
-      <h3 className="text-sm font-semibold mb-4" style={{ color: C.navy900 }}>{title}</h3>
-      {data.length === 0 ? (
-        <p className="text-xs" style={{ color: C.slate400 }}>No data yet.</p>
-      ) : (
-        <ul className="space-y-2">
-          {data.map((c) => (
-            <li key={c.tenantId} className="flex items-center justify-between gap-3">
-              <div className="min-w-0">
-                <p className="text-sm font-medium truncate" style={{ color: C.navy900 }}>{c.name}</p>
-                <p className="text-xs truncate" style={{ color: C.slate500 }}>
-                  {c.memberCount} members · ARPU {formatMoney(c.arpuCents)}
-                </p>
-              </div>
-              <p className="text-sm font-bold shrink-0" style={{ color: C.teal600 }}>
-                {formatMoney(c.mrrCents)}
-              </p>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
-}
-
 function Th({ children, align = "left" }: { children: ReactNode; align?: "left" | "center" | "right" }) {
   const alignClass = align === "right" ? "text-right" : align === "center" ? "text-center" : "text-left";
   return (
@@ -1030,5 +894,3 @@ function ErrorPanel({ message }: { message: string }) {
   );
 }
 
-// Suppress unused-export warning for ExternalLink import (reserved for future drilldown links)
-void ExternalLink;

@@ -135,8 +135,11 @@ PUT    /api/operator                           — update operator profile (admi
 GET    /api/operator/users                     — operator user list
 POST   /api/operator/users                     — add user (owner only)
 DELETE /api/operator/users/{userId}            — remove user (owner only)
-GET    /api/operator/analytics/network         — top-line rollups
-GET    /api/operator/analytics/clinics         — per-tenant metrics
+GET    /api/operator/analytics/network         — top-line snapshot + prior-period deltas
+GET    /api/operator/analytics/clinics          — per-tenant rollups (with growth + churn)
+GET    /api/operator/analytics/clinics/{id}     — per-clinic deep-dive
+GET    /api/operator/analytics/timeseries       — daily 30d / monthly 12mo
+GET    /api/operator/analytics/cohort-retention — retention curve
 GET    /api/operator/members/search?q=...      — cross-clinic member search
 POST   /api/auth/switch-tenant                 — change active tenant
 ```

@@ -235,6 +235,9 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
         Route::prefix('analytics')->group(function () {
             Route::get('/network', [OperatorAnalyticsController::class, 'network']);
             Route::get('/clinics', [OperatorAnalyticsController::class, 'clinics']);
+            Route::get('/clinics/{tenantId}', [OperatorAnalyticsController::class, 'clinicDetail']);
+            Route::get('/timeseries', [OperatorAnalyticsController::class, 'timeseries']);
+            Route::get('/cohort-retention', [OperatorAnalyticsController::class, 'cohortRetention']);
         });
 
         Route::get('/members/search', [OperatorMemberController::class, 'search']);

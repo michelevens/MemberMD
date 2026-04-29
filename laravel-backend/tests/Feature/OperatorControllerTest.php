@@ -308,9 +308,9 @@ class OperatorControllerTest extends TestCase
         $response = $this->actingAs($user, 'sanctum')->getJson('/api/operator/analytics/network');
 
         $response->assertOk()
-            ->assertJsonPath('data.mrr_cents', 10000)        // $100 from plan A only, NOT $300 total
-            ->assertJsonPath('data.member_count', 1)
-            ->assertJsonPath('data.tenant_count', 1);
+            ->assertJsonPath('data.current.mrr_cents', 10000)        // $100 from plan A only, NOT $300 total
+            ->assertJsonPath('data.current.member_count', 1)
+            ->assertJsonPath('data.current.tenant_count', 1);
     }
 
     public function test_member_search_does_not_leak_across_operators(): void

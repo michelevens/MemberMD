@@ -1546,19 +1546,77 @@ export interface OperatorTenant {
   createdAt: string;
 }
 
-export interface OperatorNetworkMetrics {
+export interface OperatorNetworkSnapshot {
   mrrCents: number;
   arrCents: number;
   arpuCents: number;
   memberCount: number;
   patientCount: number;
-  churnRate30d: number;
-  newMembers30d: number;
-  cancelled30d: number;
+  churnRate: number;
+  newMembers: number;
+  cancelled: number;
   tenantCount: number;
   activeTenantCount: number;
-  window: string;
+}
+
+export interface OperatorNetworkDeltas {
+  mrrCentsDelta: number;
+  mrrPctChange: number | null;
+  memberCountDelta: number;
+  memberPctChange: number | null;
+  arpuCentsDelta: number;
+  churnRateDelta: number;
+  newMembersDelta: number;
+}
+
+export interface OperatorNetworkMetrics {
+  current: OperatorNetworkSnapshot;
+  prior: OperatorNetworkSnapshot;
+  deltas: OperatorNetworkDeltas;
+  windowDays: number;
   asOf: string;
+}
+
+export interface OperatorTimeBucket {
+  bucket: string; // YYYY-MM-DD or YYYY-MM
+  mrrCents: number;
+  memberCount: number;
+  newMembers: number;
+  cancelled: number;
+}
+
+export interface OperatorTimeseries {
+  granularity: "daily" | "monthly" | "both";
+  daily?: OperatorTimeBucket[];
+  monthly?: OperatorTimeBucket[];
+}
+
+export interface OperatorCohortPoint {
+  cohort: string; // YYYY-MM
+  monthsAged: number;
+  cohortSize: number;
+  stillActive: number;
+  retentionRate: number | null;
+}
+
+export interface OperatorClinicDetail {
+  tenant: {
+    id: string;
+    name: string;
+    city: string | null;
+    state: string | null;
+    specialty: string | null;
+    tenantCode: string;
+    isActive: boolean;
+    subscriptionStatus: string | null;
+    stripeConnectStatus: string | null;
+    stripeChargesEnabled: boolean;
+    patientCount: number;
+    createdAt: string;
+  };
+  snapshot: OperatorNetworkMetrics;
+  daily: OperatorTimeBucket[];
+  monthly: OperatorTimeBucket[];
 }
 
 export interface OperatorClinicMetric {
@@ -1568,7 +1626,12 @@ export interface OperatorClinicMetric {
   state: string | null;
   isActive: boolean;
   mrrCents: number;
+  mrrCents30dAgo: number;
+  growthRate30d: number | null;
   memberCount: number;
+  newMembers30d: number;
+  cancelled30d: number;
+  churnRate30d: number;
   patientCount: number;
   arpuCents: number;
   stripeConnectStatus: string | null;
@@ -1638,6 +1701,24 @@ export const operatorService = {
 
   clinics: async (): Promise<ApiResponse<OperatorClinicMetric[]>> => {
     return apiFetch<OperatorClinicMetric[]>("/operator/analytics/clinics");
+  },
+
+  clinicDetail: async (tenantId: string): Promise<ApiResponse<OperatorClinicDetail>> => {
+    return apiFetch<OperatorClinicDetail>(`/operator/analytics/clinics/${tenantId}`);
+  },
+
+  timeseries: async (
+    granularity: "daily" | "monthly" | "both" = "both",
+    opts: { days?: number; months?: number } = {},
+  ): Promise<ApiResponse<OperatorTimeseries>> => {
+    const params = new URLSearchParams({ granularity });
+    if (opts.days) params.set("days", String(opts.days));
+    if (opts.months) params.set("months", String(opts.months));
+    return apiFetch<OperatorTimeseries>(`/operator/analytics/timeseries?${params.toString()}`);
+  },
+
+  cohortRetention: async (months = 12): Promise<ApiResponse<OperatorCohortPoint[]>> => {
+    return apiFetch<OperatorCohortPoint[]>(`/operator/analytics/cohort-retention?months=${months}`);
   },
 
   searchMembers: async (q: string, limit = 25): Promise<ApiResponse<OperatorMember[]>> => {
