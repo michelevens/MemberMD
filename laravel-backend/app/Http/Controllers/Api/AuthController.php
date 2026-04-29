@@ -306,6 +306,23 @@ class AuthController extends Controller
             ['email' => $request->email, 'status' => $status]
         );
 
+        // Loud log when the broker decided NOT to send — Laravel returns
+        // a status string like "passwords.throttled" or "passwords.user"
+        // (no such user) silently. Without this, "I never got the email"
+        // looks like a mail-driver problem when really the broker
+        // refused to dispatch in the first place.
+        if ($status !== Password::RESET_LINK_SENT) {
+            \Illuminate\Support\Facades\Log::warning('Password reset link NOT sent', [
+                'email' => $request->email,
+                'broker_status' => $status,
+                'reason' => match ($status) {
+                    Password::INVALID_USER => 'No user with this email',
+                    Password::RESET_THROTTLED => 'Laravel broker throttled (60s window per user)',
+                    default => 'Other broker rejection',
+                },
+            ]);
+        }
+
         // Always return the same generic response.
         return response()->json([
             'message' => 'If an account exists for that email, a reset link has been sent.',
@@ -355,6 +372,49 @@ class AuthController extends Controller
         );
 
         return response()->json(['message' => 'Password has been reset.']);
+    }
+
+    /**
+     * Admin-only: generate a password-reset link for an arbitrary user
+     * in the same tenant and return it in the response. Bypasses email
+     * entirely — used for customer support ("the user never got the
+     * email, send me the link directly so I can pass it to them") and
+     * for QA / testing patient login when mail delivery is being
+     * troubleshooted. The link is identical to what the broker would
+     * email, so consumes one entry in password_reset_tokens.
+     */
+    public function generateResetLinkForUser(Request $request, string $userId): JsonResponse
+    {
+        $actor = $request->user();
+        abort_if(!$actor->isPracticeAdmin() && !$actor->isSuperAdmin(), 403);
+
+        $target = User::where('id', $userId)
+            ->where('tenant_id', $actor->tenant_id)
+            ->first();
+
+        if (!$target) {
+            return response()->json(['message' => 'User not found in this practice.'], 404);
+        }
+
+        $token = Password::broker()->createToken($target);
+        $frontend = env('FRONTEND_URL', 'https://app.membermd.io');
+        $resetUrl = rtrim($frontend, '/') . "/#/reset-password?token={$token}&email=" . urlencode($target->email);
+
+        $this->logSecurityEvent(
+            'password_reset_link_generated_by_admin',
+            $request,
+            $target->tenant_id,
+            $target->id,
+            ['target_email' => $target->email, 'admin_user_id' => $actor->id]
+        );
+
+        return response()->json([
+            'data' => [
+                'reset_url' => $resetUrl,
+                'expires_in_minutes' => 60,
+                'user_email' => $target->email,
+            ],
+        ]);
     }
 
     public function me(Request $request): JsonResponse

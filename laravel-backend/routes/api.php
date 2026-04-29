@@ -156,6 +156,10 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
     Route::get('/admin/email-preview', [\App\Http\Controllers\Api\EmailPreviewController::class, 'index']);
     Route::get('/admin/email-preview/{template}', [\App\Http\Controllers\Api\EmailPreviewController::class, 'show']);
 
+    // Admin tool: generate a password-reset link for any user in the
+    // tenant. Bypasses email — admin gets the URL directly to share.
+    Route::post('/admin/users/{userId}/password-reset-link', [AuthController::class, 'generateResetLinkForUser']);
+
     // SuperAdmin: Platform management
     Route::get('/admin/practices', [PracticeController::class, 'index']);
     Route::get('/admin/practices/{id}', [PracticeController::class, 'show']);
