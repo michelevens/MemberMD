@@ -1732,3 +1732,163 @@ export const operatorService = {
     });
   },
 };
+
+// ===== Master Plan Templates =====
+
+export type TemplateStatus = "draft" | "published" | "archived";
+
+export const LOCKABLE_TEMPLATE_FIELDS = [
+  "name",
+  "description",
+  "badge_text",
+  "monthly_price",
+  "annual_price",
+  "visits_per_month",
+  "telehealth_included",
+  "messaging_included",
+  "messaging_response_sla_hours",
+  "crisis_support",
+  "lab_discount_pct",
+  "prescription_management",
+  "specialist_referrals",
+  "care_plan_included",
+  "visit_rollover",
+  "overage_fee",
+  "family_eligible",
+  "family_member_price",
+  "min_commitment_months",
+  "features_list",
+] as const;
+
+export type LockableField = typeof LOCKABLE_TEMPLATE_FIELDS[number];
+
+export interface MasterPlanTemplate {
+  id: string;
+  operatorId: string;
+  name: string;
+  slug: string;
+  description: string | null;
+  badgeText: string | null;
+  defaultMonthlyPrice: number;
+  defaultAnnualPrice: number | null;
+  defaultVisitsPerMonth: number;
+  defaultTelehealthIncluded: boolean;
+  defaultMessagingIncluded: boolean;
+  defaultMessagingResponseSlaHours: number | null;
+  defaultCrisisSupport: boolean;
+  defaultLabDiscountPct: number | null;
+  defaultPrescriptionManagement: boolean;
+  defaultSpecialistReferrals: boolean;
+  defaultCarePlanIncluded: boolean;
+  defaultVisitRollover: boolean;
+  defaultOverageFee: number | null;
+  defaultFamilyEligible: boolean;
+  defaultFamilyMemberPrice: number | null;
+  defaultMinCommitmentMonths: number | null;
+  defaultFeaturesList: string[] | null;
+  lockedFields: LockableField[];
+  monthlyPriceMin: number | null;
+  monthlyPriceMax: number | null;
+  annualPriceMin: number | null;
+  annualPriceMax: number | null;
+  status: TemplateStatus;
+  version: number;
+  plansCount: number | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PlanFieldState {
+  locked: boolean;
+  overridden: boolean;
+  templateDefault: unknown;
+  currentValue: unknown;
+  monthlyPriceMin?: number | null;
+  monthlyPriceMax?: number | null;
+  annualPriceMin?: number | null;
+  annualPriceMax?: number | null;
+}
+
+export type PlanFieldStates = Partial<Record<LockableField, PlanFieldState>>;
+
+export const masterPlanTemplateService = {
+  list: async (status?: TemplateStatus): Promise<ApiResponse<MasterPlanTemplate[]>> => {
+    const qs = status ? `?status=${status}` : "";
+    return apiFetch<MasterPlanTemplate[]>(`/operator/plan-templates${qs}`);
+  },
+
+  show: async (id: string): Promise<ApiResponse<MasterPlanTemplate>> => {
+    return apiFetch<MasterPlanTemplate>(`/operator/plan-templates/${id}`);
+  },
+
+  create: async (data: Partial<MasterPlanTemplate>): Promise<ApiResponse<MasterPlanTemplate>> => {
+    return apiFetch<MasterPlanTemplate>("/operator/plan-templates", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  },
+
+  update: async (id: string, data: Partial<MasterPlanTemplate>): Promise<ApiResponse<MasterPlanTemplate>> => {
+    return apiFetch<MasterPlanTemplate>(`/operator/plan-templates/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+  },
+
+  archive: async (id: string): Promise<ApiResponse<{ message: string }>> => {
+    return apiFetch<{ message: string }>(`/operator/plan-templates/${id}`, {
+      method: "DELETE",
+    });
+  },
+
+  publish: async (id: string): Promise<ApiResponse<MasterPlanTemplate>> => {
+    return apiFetch<MasterPlanTemplate>(`/operator/plan-templates/${id}/publish`, {
+      method: "POST",
+    });
+  },
+
+  applyToTenant: async (
+    id: string,
+    tenantId: string,
+    replacePlanId?: string,
+  ): Promise<ApiResponse<Record<string, unknown>>> => {
+    return apiFetch<Record<string, unknown>>(`/operator/plan-templates/${id}/apply-to/${tenantId}`, {
+      method: "POST",
+      body: JSON.stringify(replacePlanId ? { replacePlanId } : {}),
+    });
+  },
+
+  syncAll: async (id: string): Promise<ApiResponse<{ templateId: string; plansSynced: number }>> => {
+    return apiFetch<{ templateId: string; plansSynced: number }>(
+      `/operator/plan-templates/${id}/sync-all`,
+      { method: "POST" }
+    );
+  },
+};
+
+// ===== Tenant-side template helpers (extends membershipPlanService) =====
+
+export const planTemplateService = {
+  fieldStates: async (planId: string): Promise<ApiResponse<PlanFieldStates>> => {
+    return apiFetch<PlanFieldStates>(`/membership-plans/${planId}/field-states`);
+  },
+
+  resetToTemplate: async (planId: string, fields?: string[]): Promise<ApiResponse<Record<string, unknown>>> => {
+    return apiFetch<Record<string, unknown>>(`/membership-plans/${planId}/reset-to-template`, {
+      method: "POST",
+      body: JSON.stringify(fields ? { fields } : {}),
+    });
+  },
+
+  syncFromTemplate: async (planId: string): Promise<ApiResponse<Record<string, unknown>>> => {
+    return apiFetch<Record<string, unknown>>(`/membership-plans/${planId}/sync-from-template`, {
+      method: "POST",
+    });
+  },
+
+  detach: async (planId: string): Promise<ApiResponse<Record<string, unknown>>> => {
+    return apiFetch<Record<string, unknown>>(`/membership-plans/${planId}/detach-template`, {
+      method: "POST",
+    });
+  },
+};

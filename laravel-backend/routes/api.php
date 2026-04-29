@@ -36,6 +36,7 @@ use App\Http\Controllers\Api\StripeWebhookController;
 use App\Http\Controllers\Api\OperatorController;
 use App\Http\Controllers\Api\OperatorAnalyticsController;
 use App\Http\Controllers\Api\OperatorMemberController;
+use App\Http\Controllers\Api\MasterPlanTemplateController;
 use App\Http\Controllers\Api\KioskController;
 use App\Http\Controllers\Api\DunningController;
 use App\Http\Controllers\Api\ReportController;
@@ -185,6 +186,10 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
     Route::apiResource('prescriptions', PrescriptionController::class)->except(['destroy']);
 
     // ===== Membership Plans =====
+    Route::get('/membership-plans/{id}/field-states', [MembershipPlanController::class, 'fieldStates']);
+    Route::post('/membership-plans/{id}/reset-to-template', [MembershipPlanController::class, 'resetToTemplate']);
+    Route::post('/membership-plans/{id}/sync-from-template', [MembershipPlanController::class, 'syncFromTemplate']);
+    Route::post('/membership-plans/{id}/detach-template', [MembershipPlanController::class, 'detachFromTemplate']);
     Route::apiResource('membership-plans', MembershipPlanController::class);
 
     // ===== Memberships (Patient Enrollments) =====
@@ -241,6 +246,18 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
         });
 
         Route::get('/members/search', [OperatorMemberController::class, 'search']);
+
+        // ===== Master Plan Templates =====
+        Route::prefix('plan-templates')->group(function () {
+            Route::get('/', [MasterPlanTemplateController::class, 'index']);
+            Route::post('/', [MasterPlanTemplateController::class, 'store']);
+            Route::get('/{id}', [MasterPlanTemplateController::class, 'show']);
+            Route::put('/{id}', [MasterPlanTemplateController::class, 'update']);
+            Route::delete('/{id}', [MasterPlanTemplateController::class, 'destroy']);
+            Route::post('/{id}/publish', [MasterPlanTemplateController::class, 'publish']);
+            Route::post('/{id}/apply-to/{tenantId}', [MasterPlanTemplateController::class, 'applyToTenant']);
+            Route::post('/{id}/sync-all', [MasterPlanTemplateController::class, 'syncAll']);
+        });
     });
 
     // ===== Documents =====

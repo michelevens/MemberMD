@@ -26,6 +26,8 @@ class MembershipPlan extends Model
         'family_eligible', 'family_member_price',
         'min_commitment_months', 'features_list',
         'sort_order', 'is_active',
+        'master_template_id', 'template_version_applied',
+        'is_synced_with_template', 'template_last_synced_at',
     ];
 
     protected $casts = [
@@ -48,10 +50,20 @@ class MembershipPlan extends Model
         'features_list' => 'array',
         'sort_order' => 'integer',
         'is_active' => 'boolean',
+        'template_version_applied' => 'integer',
+        'is_synced_with_template' => 'boolean',
+        'template_last_synced_at' => 'datetime',
     ];
 
     public function program(): BelongsTo { return $this->belongsTo(Program::class); }
     public function memberships(): HasMany { return $this->hasMany(PatientMembership::class, 'plan_id'); }
     public function addons(): HasMany { return $this->hasMany(PlanAddon::class, 'plan_id'); }
     public function planEntitlements(): HasMany { return $this->hasMany(PlanEntitlement::class, 'plan_id'); }
+    public function masterTemplate(): BelongsTo { return $this->belongsTo(MasterPlanTemplate::class, 'master_template_id'); }
+    public function overrides(): HasMany { return $this->hasMany(TenantPlanOverride::class, 'plan_id'); }
+
+    public function isFromTemplate(): bool
+    {
+        return !empty($this->master_template_id);
+    }
 }

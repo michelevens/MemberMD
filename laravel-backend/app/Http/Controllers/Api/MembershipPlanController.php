@@ -4,11 +4,16 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\MembershipPlan;
+use App\Services\PlanSyncService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 class MembershipPlanController extends Controller
 {
+    public function __construct(private readonly PlanSyncService $sync)
+    {
+    }
+
     public function index(Request $request): JsonResponse
     {
         $user = $request->user();
@@ -116,9 +121,16 @@ class MembershipPlanController extends Controller
             'stripe_annual_price_id' => 'nullable|string|max:255',
         ]);
 
-        $plan->update($validated);
+        // If the plan is derived from a template, route through PlanSyncService
+        // which enforces the lock matrix and price bounds and records overrides.
+        if ($plan->isFromTemplate()) {
+            $plan = $this->sync->applyOverrides($plan, $validated, $user->id);
+        } else {
+            $plan->update($validated);
+            $plan = $plan->fresh();
+        }
 
-        return response()->json(['data' => $plan->fresh()]);
+        return response()->json(['data' => $plan]);
     }
 
     public function destroy(Request $request, string $id): JsonResponse
@@ -130,5 +142,81 @@ class MembershipPlanController extends Controller
         $plan->update(['is_active' => false]);
 
         return response()->json(['data' => ['message' => 'Plan deactivated.']]);
+    }
+
+    /**
+     * Per-field lock/override state for a template-derived plan. The frontend
+     * uses this to disable locked inputs and surface override badges.
+     */
+    public function fieldStates(Request $request, string $id): JsonResponse
+    {
+        $user = $request->user();
+        $plan = MembershipPlan::where('tenant_id', $user->tenant_id)->findOrFail($id);
+
+        if (!$plan->isFromTemplate()) {
+            return response()->json(['data' => []]);
+        }
+
+        return response()->json(['data' => $this->sync->fieldStates($plan)]);
+    }
+
+    /**
+     * Reset specified fields back to template defaults. Pass no fields to
+     * reset all overrides on the plan.
+     */
+    public function resetToTemplate(Request $request, string $id): JsonResponse
+    {
+        $user = $request->user();
+        abort_if(!$user->isPracticeAdmin(), 403);
+
+        $plan = MembershipPlan::where('tenant_id', $user->tenant_id)->findOrFail($id);
+
+        $validated = $request->validate([
+            'fields' => 'sometimes|array',
+            'fields.*' => 'string',
+        ]);
+
+        $plan = $this->sync->resetToTemplate($plan, $validated['fields'] ?? null);
+
+        return response()->json(['data' => $plan]);
+    }
+
+    /**
+     * Pull the latest template defaults into this plan, preserving any
+     * tenant overrides.
+     */
+    public function syncFromTemplate(Request $request, string $id): JsonResponse
+    {
+        $user = $request->user();
+        abort_if(!$user->isPracticeAdmin(), 403);
+
+        $plan = MembershipPlan::where('tenant_id', $user->tenant_id)->findOrFail($id);
+
+        if (!$plan->isFromTemplate()) {
+            return response()->json(['message' => 'Plan is not derived from a template.'], 422);
+        }
+
+        $plan = $this->sync->sync($plan);
+
+        return response()->json(['data' => $plan]);
+    }
+
+    /**
+     * Detach a plan from its template — keeps current values, breaks the link.
+     */
+    public function detachFromTemplate(Request $request, string $id): JsonResponse
+    {
+        $user = $request->user();
+        abort_if(!$user->isPracticeAdmin(), 403);
+
+        $plan = MembershipPlan::where('tenant_id', $user->tenant_id)->findOrFail($id);
+
+        if (!$plan->isFromTemplate()) {
+            return response()->json(['message' => 'Plan is not derived from a template.'], 422);
+        }
+
+        $plan = $this->sync->detach($plan);
+
+        return response()->json(['data' => $plan]);
     }
 }

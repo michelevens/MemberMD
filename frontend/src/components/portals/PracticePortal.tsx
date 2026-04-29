@@ -4507,6 +4507,12 @@ export function PracticePortal() {
             const memberCount = plan.membershipsCount ?? plan.memberCount ?? plan.member_count ?? 0;
             const monthlyPrice = plan.monthlyPrice ?? plan.monthly_price ?? 0;
             const revenue = memberCount * monthlyPrice;
+            // Operator template linkage (hybrid inheritance — see ADR-0005, plan-templates.md)
+            const masterTemplateId = (plan as Record<string, unknown>).masterTemplateId
+              ?? (plan as Record<string, unknown>).master_template_id;
+            const isSynced = (plan as Record<string, unknown>).isSyncedWithTemplate
+              ?? (plan as Record<string, unknown>).is_synced_with_template;
+            const isFromTemplate = !!masterTemplateId;
 
             return (
               <div key={plan.id} className="glass rounded-2xl overflow-hidden hover-lift flex flex-col cursor-pointer" onClick={() => openPlanDetail(plan)}>
@@ -4521,6 +4527,15 @@ export function PracticePortal() {
                     <Icon className="w-24 h-24 -mt-4 -mr-4" />
                   </div>
                   <div className="relative">
+                    {isFromTemplate && (
+                      <span
+                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium mb-2 mr-2"
+                        style={{ backgroundColor: "rgba(255,255,255,0.18)", color: "#ffffff" }}
+                        title={isSynced ? "Synced with operator template" : "Has tenant overrides"}
+                      >
+                        {isSynced ? "From template" : "Customized"}
+                      </span>
+                    )}
                     {plan.badge && (
                       <span
                         className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold mb-2"

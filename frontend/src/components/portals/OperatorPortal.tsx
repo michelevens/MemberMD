@@ -19,12 +19,14 @@ import {
   type OperatorUserMembership,
 } from "../../lib/api";
 import { OperatorNetworkDashboard } from "./operator/OperatorNetworkDashboard";
+import { OperatorPlanTemplates } from "./operator/OperatorPlanTemplates";
 import {
   LayoutDashboard,
   Building2,
   Search,
   Users,
   Settings as SettingsIcon,
+  FileText,
   AlertTriangle,
   CheckCircle2,
   ArrowRight,
@@ -64,11 +66,12 @@ const C = {
 
 // ─── Tab Definitions ─────────────────────────────────────────────────────────
 
-type TabId = "dashboard" | "clinics" | "members" | "users" | "settings";
+type TabId = "dashboard" | "clinics" | "templates" | "members" | "users" | "settings";
 
 const TABS: { id: TabId; label: string; icon: React.ElementType }[] = [
   { id: "dashboard", label: "Network Dashboard", icon: LayoutDashboard },
   { id: "clinics", label: "Clinics", icon: Building2 },
+  { id: "templates", label: "Plan Templates", icon: FileText },
   { id: "members", label: "Member Search", icon: Search },
   { id: "users", label: "Operator Users", icon: Users },
   { id: "settings", label: "Settings", icon: SettingsIcon },
@@ -173,6 +176,8 @@ export function OperatorPortal() {
         return <OperatorNetworkDashboard />;
       case "clinics":
         return <ClinicsTab me={me} />;
+      case "templates":
+        return <OperatorPlanTemplates me={me} />;
       case "members":
         return <MemberSearchTab />;
       case "users":
