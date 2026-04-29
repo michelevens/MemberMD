@@ -110,6 +110,13 @@ class PatientController extends Controller
                 $validated['user_id'] = $patientUser->id;
                 $validated['is_active'] = true;
 
+                // The patients schema has preferred_language NOT NULL with
+                // a DEFAULT 'English'; the encryption migration dropped the
+                // default to avoid an encrypted-cast collision. The Add
+                // Patient form doesn't collect this field, so we have to
+                // supply the app-level default here.
+                $validated['preferred_language'] = $validated['preferred_language'] ?? 'English';
+
                 $patient = Patient::create($validated);
 
                 return response()->json(['data' => $patient], 201);
