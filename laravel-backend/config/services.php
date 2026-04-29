@@ -47,4 +47,13 @@ return [
         'sender_email' => env('SRFAX_SENDER_EMAIL', 'noreply@membermd.io'),
     ],
 
+    'stripe' => [
+        'key' => env('STRIPE_KEY'),
+        'secret' => env('STRIPE_SECRET'),
+        'webhook_secret' => env('STRIPE_WEBHOOK_SECRET'),
+        'connect_webhook_secret' => env('STRIPE_CONNECT_WEBHOOK_SECRET'),
+        'connect_return_url' => env('STRIPE_CONNECT_RETURN_URL', env('APP_URL') . '/#/practice/settings/payments?status=return'),
+        'connect_refresh_url' => env('STRIPE_CONNECT_REFRESH_URL', env('APP_URL') . '/#/practice/settings/payments?status=refresh'),
+    ],
+
 ];

@@ -31,6 +31,8 @@ use App\Http\Controllers\Api\IncidentController;
 use App\Http\Controllers\Api\ReferralController;
 use App\Http\Controllers\Api\SpecialistDirectoryController;
 use App\Http\Controllers\Api\SmsWebhookController;
+use App\Http\Controllers\Api\StripeConnectController;
+use App\Http\Controllers\Api\StripeWebhookController;
 use App\Http\Controllers\Api\KioskController;
 use App\Http\Controllers\Api\DunningController;
 use App\Http\Controllers\Api\ReportController;
@@ -103,6 +105,12 @@ Route::get('/calendar/ical/{token}', [CalendarController::class, 'icalFeed']);
 Route::prefix('webhooks/sms')->middleware('throttle:120,1')->group(function () {
     Route::post('/inbound', [SmsWebhookController::class, 'inbound']);
     Route::post('/status', [SmsWebhookController::class, 'status']);
+});
+
+// ===== Stripe Webhooks (public, signature-verified) =====
+Route::prefix('webhooks/stripe')->middleware('throttle:300,1')->group(function () {
+    Route::post('/', [StripeWebhookController::class, 'platform']);
+    Route::post('/connect', [StripeWebhookController::class, 'connect']);
 });
 
 // ===== Patient Check-In Kiosk (public, no auth) =====
@@ -200,6 +208,15 @@ Route::middleware(['auth:sanctum', 'phi.log'])->group(function () {
     Route::post('/payments/{id}/refund', [PaymentController::class, 'refund']);
     Route::get('/payments', [PaymentController::class, 'index']);
     Route::post('/payments', [PaymentController::class, 'store']);
+
+    // ===== Stripe Connect (per-practice payouts) =====
+    Route::prefix('stripe/connect')->group(function () {
+        Route::get('/status', [StripeConnectController::class, 'status']);
+        Route::post('/onboarding-link', [StripeConnectController::class, 'createOnboardingLink']);
+        Route::post('/dashboard-link', [StripeConnectController::class, 'createDashboardLink']);
+        Route::post('/refresh', [StripeConnectController::class, 'refresh']);
+        Route::delete('/', [StripeConnectController::class, 'disconnect']);
+    });
 
     // ===== Documents =====
     Route::get('/documents/{id}/download', [DocumentController::class, 'download']);

@@ -26,7 +26,9 @@ import {
   QrCode,
   Key,
   Globe,
+  Wallet,
 } from "lucide-react";
+import { PaymentSetup } from "./PaymentSetup";
 
 // ─── Colors ──────────────────────────────────────────────────────────────────
 
@@ -60,6 +62,7 @@ type PracticeTab =
   | "branding"
   | "scheduling"
   | "membership"
+  | "payments"
   | "notifications"
   | "team"
   | "compliance"
@@ -92,6 +95,7 @@ const TAB_CONFIG: { id: PracticeTab; label: string; icon: React.ElementType }[] 
   { id: "branding", label: "Branding", icon: Palette },
   { id: "scheduling", label: "Scheduling", icon: Calendar },
   { id: "membership", label: "Membership", icon: CreditCard },
+  { id: "payments", label: "Payments", icon: Wallet },
   { id: "notifications", label: "Notifications", icon: Bell },
   { id: "team", label: "Team", icon: Users },
   { id: "compliance", label: "Compliance", icon: Shield },
@@ -1458,6 +1462,7 @@ export function PracticeSettings({ initialTab }: { initialTab?: string }) {
       case "branding": return renderBranding();
       case "scheduling": return renderScheduling();
       case "membership": return renderMembership();
+      case "payments": return <PaymentSetup />;
       case "notifications": return renderNotifications();
       case "team": return renderTeam();
       case "compliance": return renderCompliance();

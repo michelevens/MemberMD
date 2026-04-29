@@ -1396,3 +1396,66 @@ export const billingEnhancedService = {
     return apiFetch<Record<string, unknown>>(`/memberships/${membershipId}/retention-offers`, { method: "POST", body: JSON.stringify({ reason }) });
   },
 };
+
+// ===== Stripe Connect Service =====
+
+export type StripeConnectStatus =
+  | "not_started"
+  | "pending_onboarding"
+  | "pending_verification"
+  | "restricted"
+  | "active"
+  | "disconnected";
+
+export interface StripeConnectStatusResponse {
+  practiceId: string;
+  stripeAccountId: string | null;
+  status: StripeConnectStatus;
+  chargesEnabled: boolean;
+  payoutsEnabled: boolean;
+  detailsSubmitted: boolean;
+  requirements: Record<string, unknown> | null;
+  disabledReason: string | null;
+  onboardedAt: string | null;
+  platformFeePercent: number;
+  canAcceptPayments: boolean;
+}
+
+export const stripeConnectService = {
+  status: async (): Promise<ApiResponse<StripeConnectStatusResponse>> => {
+    if (useMockData()) {
+      return {
+        data: {
+          practiceId: "p1",
+          stripeAccountId: null,
+          status: "not_started",
+          chargesEnabled: false,
+          payoutsEnabled: false,
+          detailsSubmitted: false,
+          requirements: null,
+          disabledReason: null,
+          onboardedAt: null,
+          platformFeePercent: 0,
+          canAcceptPayments: false,
+        },
+      };
+    }
+    return apiFetch<StripeConnectStatusResponse>("/stripe/connect/status");
+  },
+
+  createOnboardingLink: async (): Promise<ApiResponse<{ url: string; expiresInSeconds: number }>> => {
+    return apiFetch<{ url: string; expiresInSeconds: number }>("/stripe/connect/onboarding-link", { method: "POST" });
+  },
+
+  createDashboardLink: async (): Promise<ApiResponse<{ url: string }>> => {
+    return apiFetch<{ url: string }>("/stripe/connect/dashboard-link", { method: "POST" });
+  },
+
+  refresh: async (): Promise<ApiResponse<StripeConnectStatusResponse>> => {
+    return apiFetch<StripeConnectStatusResponse>("/stripe/connect/refresh", { method: "POST" });
+  },
+
+  disconnect: async (): Promise<ApiResponse<StripeConnectStatusResponse>> => {
+    return apiFetch<StripeConnectStatusResponse>("/stripe/connect", { method: "DELETE" });
+  },
+};

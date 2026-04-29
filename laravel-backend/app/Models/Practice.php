@@ -19,6 +19,10 @@ class Practice extends Model
         'logo_url', 'primary_color', 'tagline',
         'tenant_code', 'owner_email',
         'stripe_account_id', 'stripe_customer_id',
+        'stripe_connect_status', 'stripe_connect_onboarded_at',
+        'stripe_charges_enabled', 'stripe_payouts_enabled', 'stripe_details_submitted',
+        'stripe_requirements', 'stripe_disabled_reason',
+        'platform_fee_percent',
         'subscription_plan', 'subscription_status',
         'settings', 'utilization_settings', 'branding',
         'panel_capacity', 'is_active',
@@ -39,6 +43,12 @@ class Practice extends Model
         'password_policy' => 'array',
         'enforce_mfa' => 'boolean',
         'session_timeout_minutes' => 'integer',
+        'stripe_connect_onboarded_at' => 'datetime',
+        'stripe_charges_enabled' => 'boolean',
+        'stripe_payouts_enabled' => 'boolean',
+        'stripe_details_submitted' => 'boolean',
+        'stripe_requirements' => 'array',
+        'platform_fee_percent' => 'decimal:2',
     ];
 
     protected $hidden = ['npi', 'tax_id'];
@@ -69,5 +79,15 @@ class Practice extends Model
     public function isActive(): bool
     {
         return $this->is_active && in_array($this->subscription_status, ['active', 'trial']);
+    }
+
+    public function canAcceptPayments(): bool
+    {
+        return !empty($this->stripe_account_id) && $this->stripe_charges_enabled === true;
+    }
+
+    public function platformFeeBps(): int
+    {
+        return (int) round(((float) $this->platform_fee_percent) * 100);
     }
 }

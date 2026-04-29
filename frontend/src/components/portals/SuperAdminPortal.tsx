@@ -120,6 +120,8 @@ interface MockPractice {
   npi?: string;
   taxId?: string;
   tenantCode?: string;
+  stripeConnectStatus?: "not_started" | "pending_onboarding" | "pending_verification" | "restricted" | "active" | "disconnected";
+  stripeChargesEnabled?: boolean;
 }
 
 interface MockPendingPractice extends MockPractice {
@@ -915,6 +917,36 @@ function StatusBadge({ status }: { status: "active" | "trial" | "suspended" | "p
   );
 }
 
+function PayoutBadge({
+  status,
+  chargesEnabled,
+}: {
+  status?: "not_started" | "pending_onboarding" | "pending_verification" | "restricted" | "active" | "disconnected";
+  chargesEnabled?: boolean;
+}) {
+  // Treat undefined status as not_started so legacy practices render predictably
+  const s = status ?? "not_started";
+  const config: Record<string, { label: string; bg: string; color: string }> = {
+    active: { label: "Active", bg: "#ecf9ec", color: "#2f8132" },
+    pending_verification: { label: "Verifying", bg: "#fffbeb", color: "#d97706" },
+    pending_onboarding: { label: "Onboarding", bg: "#fffbeb", color: "#d97706" },
+    restricted: { label: "Restricted", bg: "#fef2f2", color: "#dc2626" },
+    disconnected: { label: "Disconnected", bg: "#f1f5f9", color: "#64748b" },
+    not_started: { label: "Not set up", bg: "#f1f5f9", color: "#64748b" },
+  };
+  // If charges aren't enabled but status claims active, show as restricted instead
+  const effective = s === "active" && chargesEnabled === false ? "restricted" : s;
+  const c = config[effective];
+  return (
+    <span
+      className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium"
+      style={{ backgroundColor: c.bg, color: c.color }}
+    >
+      {c.label}
+    </span>
+  );
+}
+
 function TierBadge({ tier }: { tier: "starter" | "professional" | "enterprise" }) {
   const config = {
     starter: { label: "Starter", bg: "#f1f5f9", color: "#475569" },
@@ -1594,6 +1626,9 @@ export function SuperAdminPortal() {
                   <th className="text-center px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">
                     Status
                   </th>
+                  <th className="text-center px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                    Payouts
+                  </th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">
                     Joined
                   </th>
@@ -1605,7 +1640,7 @@ export function SuperAdminPortal() {
               <tbody className="divide-y divide-slate-100">
                 {filteredPractices.length === 0 && (
                   <tr>
-                    <td colSpan={7} className="px-6 py-12 text-center text-sm text-slate-400">
+                    <td colSpan={10} className="px-6 py-12 text-center text-sm text-slate-400">
                       No practices registered yet
                     </td>
                   </tr>
@@ -1657,6 +1692,12 @@ export function SuperAdminPortal() {
                     </td>
                     <td className="px-4 py-3.5 text-center">
                       <StatusBadge status={practice.status} />
+                    </td>
+                    <td className="px-4 py-3.5 text-center">
+                      <PayoutBadge
+                        status={practice.stripeConnectStatus}
+                        chargesEnabled={practice.stripeChargesEnabled}
+                      />
                     </td>
                     <td className="px-4 py-3.5 text-sm text-slate-500">
                       {new Date(practice.joinedAt).toLocaleDateString("en-US", {
