@@ -24,6 +24,11 @@ class Document extends Model
 
     protected $casts = [
         'size' => 'integer',
+        // Document metadata encrypted per audit B2 (2026-04-28). file_path
+        // / file_url stay plaintext — they're storage references, not PHI.
+        'name' => 'encrypted',
+        'original_name' => 'encrypted',
+        'description' => 'encrypted',
     ];
 
     public function documentable(): MorphTo { return $this->morphTo(); }

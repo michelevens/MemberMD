@@ -29,11 +29,21 @@ class Encounter extends Model
 
     protected $casts = [
         'encounter_date' => 'date',
-        'diagnoses' => 'array',
-        'vitals' => 'array',
+        // SOAP note fields encrypted per audit B2 (2026-04-28).
+        // discharge_instructions is in the migration's encrypt list but no
+        // schema migration creates that column, so it's omitted here.
+        // follow_up_instructions stays plaintext — provider-facing only,
+        // narrative summary, queryable for population-health reporting.
+        'chief_complaint' => 'encrypted',
+        'subjective' => 'encrypted',
+        'objective' => 'encrypted',
+        'assessment' => 'encrypted',
+        'plan' => 'encrypted',
+        'diagnoses' => 'encrypted:array',
+        'vitals' => 'encrypted:array',
+        'labs_ordered' => 'encrypted:array',
+        'screening_scores' => 'encrypted:array',
         'prescriptions_written' => 'array',
-        'labs_ordered' => 'array',
-        'screening_scores' => 'array',
         'signed_at' => 'datetime',
         'amended_at' => 'datetime',
         'follow_up_weeks' => 'integer',

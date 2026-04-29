@@ -158,11 +158,11 @@ class PatientControllerTest extends TestCase
             ->assertJsonPath('data.first_name', 'Janet')
             ->assertJsonPath('data.phone', '555-000-1111');
 
-        $this->assertDatabaseHas('patients', [
-            'id'         => $patient->id,
-            'first_name' => 'Janet',
-            'phone'      => '555-000-1111',
-        ]);
+        // phone is encrypted at rest, so assertDatabaseHas can't match
+        // plaintext. Verify via Eloquent (which decrypts on read).
+        $patient->refresh();
+        $this->assertSame('Janet', $patient->first_name);
+        $this->assertSame('555-000-1111', $patient->phone);
     }
 
     public function test_patient_can_view_own_record(): void

@@ -25,8 +25,11 @@ class LabOrder extends Model
     ];
 
     protected $casts = [
-        'panels' => 'array',
-        'diagnosis_codes' => 'array',
+        // Lab clinical fields encrypted per audit B2 (2026-04-28).
+        'panels' => 'encrypted:array',
+        'diagnosis_codes' => 'encrypted:array',
+        'special_instructions' => 'encrypted',
+        'notes' => 'encrypted',
         'fasting_required' => 'boolean',
         'ordered_at' => 'datetime',
         'sent_at' => 'datetime',

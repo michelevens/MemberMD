@@ -55,15 +55,29 @@ class OperatorMemberController extends Controller
         // search (operators searching for partial last names is real).
         $pattern = strlen($q) >= 4 ? "%{$q}%" : "{$q}%";
 
+        // email/phone are encrypted at rest, so substring LIKE returns 0
+        // rows. Fall back to exact-match against the blind-index hash
+        // (sha256 of normalized value) when the query looks like a full
+        // email or phone number.
+        $emailHash = filter_var($q, FILTER_VALIDATE_EMAIL)
+            ? Patient::blindHash($q) : null;
+        $phoneNormalized = preg_replace('/[^0-9+]/', '', $q);
+        $phoneHash = strlen($phoneNormalized) >= 7
+            ? Patient::blindHash($phoneNormalized) : null;
+
         // Build query without the global tenant scope by using whereIn
         // explicitly (the global scope will also constrain to tenantIds since
         // we're operator-scoped — this is intentional defense-in-depth).
         $patients = Patient::whereIn('tenant_id', $tenantIds)
-            ->where(function ($qb) use ($pattern) {
+            ->where(function ($qb) use ($pattern, $emailHash, $phoneHash) {
                 $qb->where('first_name', 'like', $pattern)
-                   ->orWhere('last_name', 'like', $pattern)
-                   ->orWhere('email', 'like', $pattern)
-                   ->orWhere('phone', 'like', $pattern);
+                   ->orWhere('last_name', 'like', $pattern);
+                if ($emailHash) {
+                    $qb->orWhere('email_blind_index', $emailHash);
+                }
+                if ($phoneHash) {
+                    $qb->orWhere('phone_blind_index', $phoneHash);
+                }
             })
             ->orderBy('last_name')
             ->limit($limit)

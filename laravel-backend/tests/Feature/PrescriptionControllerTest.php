@@ -127,12 +127,14 @@ class PrescriptionControllerTest extends TestCase
             ->assertJsonPath('data.patient_id', $patient->id)
             ->assertJsonPath('data.provider_id', $provider->id);
 
-        $this->assertDatabaseHas('prescriptions', [
-            'patient_id' => $patient->id,
-            'provider_id' => $provider->id,
-            'medication_name' => 'Lisinopril',
-            'status' => 'active',
-        ]);
+        // medication_name is encrypted at rest. Match plaintext via
+        // Eloquent (which auto-decrypts) instead of assertDatabaseHas.
+        $rx = \App\Models\Prescription::where('patient_id', $patient->id)
+            ->where('status', 'active')
+            ->first();
+        $this->assertNotNull($rx);
+        $this->assertSame($provider->id, $rx->provider_id);
+        $this->assertSame('Lisinopril', $rx->medication_name);
     }
 
     public function test_patient_can_request_refill(): void

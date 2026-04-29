@@ -22,11 +22,24 @@ class PatientController extends Controller
 
         if ($request->filled('search')) {
             $search = $request->search;
-            $query->where(function ($q) use ($search) {
+            // email + phone are encrypted at rest, so substring LIKE finds
+            // nothing. Match on the blind-index hash when the term looks
+            // like a full email or phone number; first/last name remain
+            // plaintext so substring search still works there.
+            $emailHash = filter_var($search, FILTER_VALIDATE_EMAIL)
+                ? Patient::blindHash($search) : null;
+            $phoneNormalized = preg_replace('/[^0-9+]/', '', $search);
+            $phoneHash = strlen($phoneNormalized) >= 7
+                ? Patient::blindHash($phoneNormalized) : null;
+            $query->where(function ($q) use ($search, $emailHash, $phoneHash) {
                 $q->where('first_name', 'ilike', "%{$search}%")
-                  ->orWhere('last_name', 'ilike', "%{$search}%")
-                  ->orWhere('email', 'ilike', "%{$search}%")
-                  ->orWhere('phone', 'ilike', "%{$search}%");
+                  ->orWhere('last_name', 'ilike', "%{$search}%");
+                if ($emailHash) {
+                    $q->orWhere('email_blind_index', $emailHash);
+                }
+                if ($phoneHash) {
+                    $q->orWhere('phone_blind_index', $phoneHash);
+                }
             });
         }
 

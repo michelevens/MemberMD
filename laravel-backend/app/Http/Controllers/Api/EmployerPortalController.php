@@ -137,9 +137,10 @@ class EmployerPortalController extends Controller
         try {
             foreach ($request->roster as $index => $row) {
                 try {
-                    // Check if patient already exists by email in this tenant
+                    // Check if patient already exists by email in this tenant.
+                    // email is encrypted at rest — match on the blind-index hash.
                     $existingPatient = Patient::where('tenant_id', $employer->tenant_id)
-                        ->where('email', $row['email'])
+                        ->where('email_blind_index', Patient::blindHash($row['email']))
                         ->first();
 
                     if ($existingPatient) {

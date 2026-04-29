@@ -32,6 +32,16 @@ class Prescription extends Model
         'dispense_as_written' => 'boolean',
         'prescribed_at' => 'datetime',
         'discontinued_at' => 'datetime',
+        // Clinical fields encrypted per audit B2 (2026-04-28). Only the
+        // columns that actually exist in the prescriptions schema are cast;
+        // pharmacy_fax / dea_number / pharmacy_address appear in fillable
+        // but no migration creates them, so casting them would error.
+        'medication_name' => 'encrypted',
+        'dosage' => 'encrypted',
+        'frequency' => 'encrypted',
+        'pharmacy_name' => 'encrypted',
+        'pharmacy_phone' => 'encrypted',
+        'notes' => 'encrypted',
     ];
 
     public function patient(): BelongsTo { return $this->belongsTo(Patient::class); }
