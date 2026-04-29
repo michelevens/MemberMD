@@ -37,6 +37,9 @@ use App\Http\Controllers\Api\OperatorController;
 use App\Http\Controllers\Api\OperatorAnalyticsController;
 use App\Http\Controllers\Api\OperatorMemberController;
 use App\Http\Controllers\Api\MasterPlanTemplateController;
+use App\Http\Controllers\Api\TenantDomainController;
+use App\Http\Controllers\Api\WidgetThemeController;
+use App\Http\Controllers\Api\WidgetAnalyticsController;
 use App\Http\Controllers\Api\KioskController;
 use App\Http\Controllers\Api\DunningController;
 use App\Http\Controllers\Api\ReportController;
@@ -127,6 +130,9 @@ Route::prefix('kiosk')->middleware('throttle:30,1')->group(function () {
 
 // ===== Public Widget Endpoints (no auth) =====
 Route::prefix('public/widget')->middleware('throttle:60,1')->group(function () {
+    Route::get('/resolve', [PublicWidgetController::class, 'resolveDomain']);
+    Route::get('/{tenantCode}/theme', [PublicWidgetController::class, 'theme']);
+    Route::post('/events', [WidgetAnalyticsController::class, 'ingest'])->middleware('throttle:600,1');
     Route::get('/{tenantCode}/{type}', [PublicWidgetController::class, 'config']);
     Route::post('/{tenantCode}/{type}/submit', [PublicWidgetController::class, 'submit'])->middleware('throttle:5,1');
 });
@@ -216,6 +222,22 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
     Route::post('/payments/{id}/refund', [PaymentController::class, 'refund']);
     Route::get('/payments', [PaymentController::class, 'index']);
     Route::post('/payments', [PaymentController::class, 'store']);
+
+    // ===== Branded Widgets — custom domains, theming, analytics =====
+    Route::prefix('tenant-domains')->group(function () {
+        Route::get('/', [TenantDomainController::class, 'index']);
+        Route::post('/', [TenantDomainController::class, 'store']);
+        Route::post('/{id}/verify', [TenantDomainController::class, 'verify']);
+        Route::post('/{id}/primary', [TenantDomainController::class, 'makePrimary']);
+        Route::delete('/{id}', [TenantDomainController::class, 'destroy']);
+    });
+    Route::prefix('widget-themes')->group(function () {
+        Route::get('/', [WidgetThemeController::class, 'index']);
+        Route::get('/{scope}', [WidgetThemeController::class, 'show']);
+        Route::put('/{scope}', [WidgetThemeController::class, 'upsert']);
+        Route::delete('/{scope}', [WidgetThemeController::class, 'destroy']);
+    });
+    Route::get('/widget-analytics/summary', [WidgetAnalyticsController::class, 'summary']);
 
     // ===== Stripe Connect (per-practice payouts) =====
     Route::prefix('stripe/connect')->group(function () {

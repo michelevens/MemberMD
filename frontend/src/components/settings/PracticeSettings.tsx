@@ -27,8 +27,10 @@ import {
   Key,
   Globe,
   Wallet,
+  Sparkles,
 } from "lucide-react";
 import { PaymentSetup } from "./PaymentSetup";
+import { BrandedWidgets } from "./BrandedWidgets";
 
 // ─── Colors ──────────────────────────────────────────────────────────────────
 
@@ -60,6 +62,7 @@ const C = {
 type PracticeTab =
   | "info"
   | "branding"
+  | "widgets"
   | "scheduling"
   | "membership"
   | "payments"
@@ -93,6 +96,7 @@ interface TeamMember {
 const TAB_CONFIG: { id: PracticeTab; label: string; icon: React.ElementType }[] = [
   { id: "info", label: "Practice Info", icon: Building2 },
   { id: "branding", label: "Branding", icon: Palette },
+  { id: "widgets", label: "Branded Widgets", icon: Sparkles },
   { id: "scheduling", label: "Scheduling", icon: Calendar },
   { id: "membership", label: "Membership", icon: CreditCard },
   { id: "payments", label: "Payments", icon: Wallet },
@@ -1460,6 +1464,7 @@ export function PracticeSettings({ initialTab }: { initialTab?: string }) {
     switch (activeTab) {
       case "info": return renderInfo();
       case "branding": return renderBranding();
+      case "widgets": return <BrandedWidgets />;
       case "scheduling": return renderScheduling();
       case "membership": return renderMembership();
       case "payments": return <PaymentSetup />;

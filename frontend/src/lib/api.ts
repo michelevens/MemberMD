@@ -1892,3 +1892,162 @@ export const planTemplateService = {
     });
   },
 };
+
+// ===== Branded Widgets — Custom Domains + Themes + Analytics =====
+
+export type SslStatus = "pending" | "active" | "failed";
+
+export interface TenantDomain {
+  id: string;
+  tenantId: string;
+  domain: string;
+  verificationToken: string;
+  verificationMethod: "txt" | "manual";
+  verifiedAt: string | null;
+  isVerified: boolean;
+  sslStatus: SslStatus;
+  isPrimary: boolean;
+  isActive: boolean;
+  txtRecordHost: string;
+  txtRecordValue: string;
+  createdAt: string;
+}
+
+export const tenantDomainService = {
+  list: async (): Promise<ApiResponse<TenantDomain[]>> => {
+    return apiFetch<TenantDomain[]>("/tenant-domains");
+  },
+
+  add: async (domain: string): Promise<ApiResponse<TenantDomain>> => {
+    return apiFetch<TenantDomain>("/tenant-domains", {
+      method: "POST",
+      body: JSON.stringify({ domain }),
+    });
+  },
+
+  verify: async (id: string): Promise<ApiResponse<TenantDomain>> => {
+    return apiFetch<TenantDomain>(`/tenant-domains/${id}/verify`, { method: "POST" });
+  },
+
+  makePrimary: async (id: string): Promise<ApiResponse<TenantDomain>> => {
+    return apiFetch<TenantDomain>(`/tenant-domains/${id}/primary`, { method: "POST" });
+  },
+
+  release: async (id: string): Promise<ApiResponse<{ message: string }>> => {
+    return apiFetch<{ message: string }>(`/tenant-domains/${id}`, { method: "DELETE" });
+  },
+};
+
+export type WidgetThemeScope = "all" | "enrollment" | "plans" | "booking";
+
+export interface WidgetTheme {
+  id?: string;
+  tenantId: string;
+  scope: WidgetThemeScope;
+  cssVariables: Record<string, string>;
+  customCss: string | null;
+  fontFamily: string | null;
+  logo: { url?: string; position?: string; maxHeight?: number } | null;
+  isActive: boolean;
+  isDefault?: boolean;
+}
+
+export const widgetThemeService = {
+  list: async (): Promise<ApiResponse<WidgetTheme[]>> => {
+    return apiFetch<WidgetTheme[]>("/widget-themes");
+  },
+
+  show: async (scope: WidgetThemeScope): Promise<ApiResponse<WidgetTheme>> => {
+    return apiFetch<WidgetTheme>(`/widget-themes/${scope}`);
+  },
+
+  upsert: async (scope: WidgetThemeScope, data: Partial<WidgetTheme>): Promise<ApiResponse<WidgetTheme>> => {
+    return apiFetch<WidgetTheme>(`/widget-themes/${scope}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+  },
+
+  reset: async (scope: WidgetThemeScope): Promise<ApiResponse<{ message: string }>> => {
+    return apiFetch<{ message: string }>(`/widget-themes/${scope}`, { method: "DELETE" });
+  },
+};
+
+export interface WidgetAnalyticsTypeStats {
+  impressions: number;
+  starts: number;
+  completes: number;
+  errors: number;
+  startRate: number;
+  conversionRate: number;
+  overallRate: number;
+}
+
+export interface WidgetAnalyticsSummary {
+  windowDays: number;
+  byWidgetType: Record<string, WidgetAnalyticsTypeStats>;
+}
+
+export const widgetAnalyticsService = {
+  summary: async (days = 30, widgetType?: string): Promise<ApiResponse<WidgetAnalyticsSummary>> => {
+    const qs = new URLSearchParams({ days: String(days) });
+    if (widgetType) qs.set("widget_type", widgetType);
+    return apiFetch<WidgetAnalyticsSummary>(`/widget-analytics/summary?${qs}`);
+  },
+
+  /**
+   * Public ingest used by embedded widgets — no auth.
+   * Beacon-style fire-and-forget; returns silently.
+   */
+  trackEvent: async (
+    tenantCode: string,
+    widgetType: "enrollment" | "plans" | "booking",
+    eventType: "impression" | "start" | "complete" | "error",
+    extra: { sessionId?: string; utmSource?: string; utmMedium?: string; utmCampaign?: string; metadata?: Record<string, unknown> } = {},
+  ): Promise<void> => {
+    try {
+      await fetch(`${API_BASE_URL}/public/widget/events`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        keepalive: true,
+        body: JSON.stringify({
+          tenant_code: tenantCode,
+          widget_type: widgetType,
+          event_type: eventType,
+          session_id: extra.sessionId,
+          utm_source: extra.utmSource,
+          utm_medium: extra.utmMedium,
+          utm_campaign: extra.utmCampaign,
+          metadata: extra.metadata,
+        }),
+      });
+    } catch {
+      // Analytics failures must never break the widget
+    }
+  },
+};
+
+// Public theme fetch — used by widgets to apply branded styles
+export interface PublicWidgetTheme {
+  tenantCode: string;
+  practiceName: string;
+  logoUrl: string | null;
+  cssVariables: Record<string, string>;
+  customCss: string | null;
+  fontFamily: string | null;
+  logo: { url?: string; position?: string; maxHeight?: number } | null;
+}
+
+export async function fetchPublicWidgetTheme(
+  tenantCode: string,
+  scope: WidgetThemeScope = "all",
+): Promise<PublicWidgetTheme | null> {
+  try {
+    const res = await fetch(`${API_BASE_URL}/public/widget/${tenantCode}/theme?scope=${scope}`);
+    if (!res.ok) return null;
+    const json = await res.json();
+    return transformKeys<PublicWidgetTheme>(json.data ?? json, snakeToCamel);
+  } catch {
+    return null;
+  }
+}

@@ -5,6 +5,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { Check, X } from "lucide-react";
+import { useWidgetTheme } from "../../hooks/useWidgetTheme";
 
 // ─── Config ─────────────────────────────────────────────────────────────────
 
@@ -254,6 +255,9 @@ function transformApiPlan(raw: Record<string, unknown>): Plan {
 export function PlanWidget() {
   const { tenantCode } = useParams<{ tenantCode: string }>();
   const navigate = useNavigate();
+
+  // Apply branded theme + track impression. No-op when tenantCode is missing.
+  useWidgetTheme(tenantCode, "plans", { trackImpression: { widgetType: "plans" } });
 
   const [data, setData] = useState<PracticeInfo | null>(null);
   const [loading, setLoading] = useState(true);

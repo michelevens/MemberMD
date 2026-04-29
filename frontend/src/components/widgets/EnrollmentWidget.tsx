@@ -5,6 +5,8 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { Check, ChevronLeft, ChevronRight, ArrowRight } from "lucide-react";
+import { useWidgetTheme } from "../../hooks/useWidgetTheme";
+import { widgetAnalyticsService } from "../../lib/api";
 
 // ─── Config ─────────────────────────────────────────────────────────────────
 
@@ -174,6 +176,9 @@ export function EnrollmentWidget() {
   const [searchParams] = useSearchParams();
   const planParam = searchParams.get("plan");
 
+  // Apply branded theme + track impression
+  useWidgetTheme(tenantCode, "enrollment", { trackImpression: { widgetType: "enrollment" } });
+
   const [step, setStep] = useState(0);
   const [form, setForm] = useState<FormData>(INITIAL_FORM);
   const [plans, setPlans] = useState<Plan[]>([]);
@@ -292,7 +297,14 @@ export function EnrollmentWidget() {
 
   function nextStep() {
     if (!validateStep()) return;
-    setStep((s) => Math.min(s + 1, STEPS.length - 1));
+    setStep((s) => {
+      const next = Math.min(s + 1, STEPS.length - 1);
+      // Fire "start" once when the user advances past the first step
+      if (s === 0 && next === 1 && tenantCode) {
+        void widgetAnalyticsService.trackEvent(tenantCode, "enrollment", "start");
+      }
+      return next;
+    });
   }
 
   function prevStep() {
@@ -352,10 +364,16 @@ export function EnrollmentWidget() {
       const data = await res.json();
       setMemberId(data.member_id || "MBR-000000");
       setSubmitted(true);
+      if (tenantCode) {
+        void widgetAnalyticsService.trackEvent(tenantCode, "enrollment", "complete");
+      }
     } catch (err) {
       // For mock/demo — simulate success
       setMemberId("MBR-" + Math.random().toString(36).substring(2, 8).toUpperCase());
       setSubmitted(true);
+      if (tenantCode) {
+        void widgetAnalyticsService.trackEvent(tenantCode, "enrollment", "complete");
+      }
     } finally {
       setSubmitting(false);
     }

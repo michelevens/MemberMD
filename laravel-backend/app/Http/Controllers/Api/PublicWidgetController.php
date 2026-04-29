@@ -4,13 +4,111 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Practice;
+use App\Models\TenantDomain;
 use App\Models\WidgetConfig;
 use App\Models\WidgetSubmission;
+use App\Models\WidgetTheme;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 class PublicWidgetController extends Controller
 {
+    /**
+     * GET /public/widget/resolve
+     * Resolve the calling Host header to a tenant code so embedded widgets
+     * served from a custom domain (e.g., enroll.acmedpc.com) can bootstrap
+     * without a tenantCode in the URL.
+     *
+     * Returns 404 if the Host doesn't match any verified tenant domain.
+     */
+    public function resolveDomain(Request $request): JsonResponse
+    {
+        $host = $this->normalizeHost($request->getHost());
+        if (!$host) {
+            return response()->json(['error' => 'Host header required.'], 400);
+        }
+
+        $domain = TenantDomain::withoutGlobalScope('tenant')
+            ->where('domain', $host)
+            ->whereNotNull('verified_at')
+            ->where('is_active', true)
+            ->first();
+
+        if (!$domain) {
+            return response()->json(['error' => 'Domain not configured.'], 404);
+        }
+
+        $practice = Practice::where('id', $domain->tenant_id)->where('is_active', true)->first();
+        if (!$practice) {
+            return response()->json(['error' => 'Practice inactive.'], 404);
+        }
+
+        return response()->json([
+            'data' => [
+                'tenant_code' => $practice->tenant_code,
+                'practice_name' => $practice->name,
+                'domain' => $domain->domain,
+            ],
+        ]);
+    }
+
+    /**
+     * GET /public/widget/{tenantCode}/theme
+     * Resolved theme variables + custom CSS for the given tenant. Used by
+     * embeddable widgets to apply branded styling at runtime.
+     */
+    public function theme(string $tenantCode, Request $request): JsonResponse
+    {
+        $practice = Practice::where('tenant_code', $tenantCode)
+            ->where('is_active', true)
+            ->first();
+
+        if (!$practice) {
+            return response()->json(['error' => 'Practice not found'], 404);
+        }
+
+        $scope = $request->query('scope', WidgetTheme::SCOPE_ALL);
+        if (!in_array($scope, WidgetTheme::SCOPES, true)) {
+            $scope = WidgetTheme::SCOPE_ALL;
+        }
+
+        // Look for a scope-specific theme first, then fall back to "all"
+        $theme = WidgetTheme::withoutGlobalScope('tenant')
+            ->where('tenant_id', $practice->id)
+            ->where('scope', $scope)
+            ->first();
+
+        if (!$theme && $scope !== WidgetTheme::SCOPE_ALL) {
+            $theme = WidgetTheme::withoutGlobalScope('tenant')
+                ->where('tenant_id', $practice->id)
+                ->where('scope', WidgetTheme::SCOPE_ALL)
+                ->first();
+        }
+
+        return response()->json([
+            'data' => [
+                'tenant_code' => $tenantCode,
+                'practice_name' => $practice->name,
+                'logo_url' => $practice->logo_url,
+                'css_variables' => $theme ? $theme->resolvedVariables() : WidgetTheme::defaults(),
+                'custom_css' => $theme?->custom_css,
+                'font_family' => $theme?->font_family,
+                'logo' => $theme?->logo,
+            ],
+        ]);
+    }
+
+    private function normalizeHost(?string $host): ?string
+    {
+        if (!$host) return null;
+        $host = strtolower($host);
+        // Strip port if present
+        if (str_contains($host, ':')) {
+            $host = explode(':', $host, 2)[0];
+        }
+        return $host ?: null;
+    }
+
     /**
      * GET /public/widget/{tenantCode}/{type}
      * Return widget config + practice name (no auth).
