@@ -172,9 +172,24 @@ class AppointmentController extends Controller
             \Log::warning('Auto-create appointment reminders failed: ' . $e->getMessage());
         }
 
-        return response()->json([
-            'data' => $appointment->load(['patient', 'provider.user', 'appointmentType'])
-        ], 201);
+        $appointment->load(['patient', 'provider.user', 'appointmentType']);
+
+        // Confirmation email — patient gets a branded "you're booked"
+        // message immediately. The reminder job sends a separate email
+        // 24h ahead via the existing AppointmentReminder Mailable.
+        if ($appointment->patient && $appointment->patient->email) {
+            \App\Services\MailDispatcher::send(
+                $appointment->patient->email,
+                new \App\Mail\AppointmentConfirmation(
+                    appointment: $appointment,
+                    patient: $appointment->patient,
+                    practice: $appointment->practice ?? \App\Models\Practice::find($user->tenant_id),
+                ),
+                'appointment-confirmation',
+            );
+        }
+
+        return response()->json(['data' => $appointment], 201);
     }
 
     public function update(UpdateAppointmentRequest $request, string $id): JsonResponse

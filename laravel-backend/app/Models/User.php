@@ -136,4 +136,23 @@ class User extends Authenticatable
 
         return Practice::whereIn('operator_id', $operatorIds)->pluck('id')->all();
     }
+
+    /**
+     * Override Laravel's default password-reset notification so the
+     * email goes out via our branded PasswordReset Mailable instead of
+     * the framework's plain-styled default. Called by Laravel's
+     * Password::sendResetLink.
+     */
+    public function sendPasswordResetNotification($token): void
+    {
+        $frontend = env('FRONTEND_URL', 'https://app.membermd.io');
+        $resetUrl = rtrim($frontend, '/') . "/#/reset-password?token={$token}&email=" . urlencode($this->email);
+        $userName = trim(($this->first_name ?? '') . ' ' . ($this->last_name ?? '')) ?: null;
+
+        \App\Services\MailDispatcher::send(
+            $this->email,
+            new \App\Mail\PasswordReset(resetUrl: $resetUrl, userName: $userName),
+            'password-reset',
+        );
+    }
 }
