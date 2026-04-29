@@ -33,6 +33,30 @@ const TABS: { key: TabKey; label: string; icon: typeof UserIcon }[] = [
   { key: "settings", label: "Settings", icon: SettingsIcon },
 ];
 
+// Several backend endpoints return Laravel pagination envelopes —
+// { data: T[], current_page, total, ... } — wrapped inside the
+// outer ApiResponse<{ data: ... }>. The list endpoints unwrap the
+// outer envelope but pass the inner pagination object through
+// untouched. These helpers normalize to plain arrays so the
+// component never sees the envelope shape.
+function unwrapAppointments(value: unknown): Appointment[] {
+  if (Array.isArray(value)) return value as Appointment[];
+  if (value && typeof value === "object" && "data" in (value as Record<string, unknown>)) {
+    const inner = (value as { data: unknown }).data;
+    if (Array.isArray(inner)) return inner as Appointment[];
+  }
+  return [];
+}
+
+function unwrapPatients(value: unknown): Patient[] {
+  if (Array.isArray(value)) return value as Patient[];
+  if (value && typeof value === "object" && "data" in (value as Record<string, unknown>)) {
+    const inner = (value as { data: unknown }).data;
+    if (Array.isArray(inner)) return inner as Patient[];
+  }
+  return [];
+}
+
 // Shape returned by the analytics panel endpoint (fields are loose because
 // the backend may evolve; we read defensively).
 interface PanelSummary {
@@ -221,7 +245,7 @@ function OverviewTab({ provider }: { provider: Provider }) {
       ]);
       if (cancelled) return;
       if (panelRes.data) setPanel(panelRes.data as PanelSummary);
-      if (apptRes.data) setAppts(apptRes.data);
+      setAppts(unwrapAppointments(apptRes.data));
       setLoading(false);
     })();
     return () => { cancelled = true; };
@@ -567,7 +591,7 @@ function PanelTab({ providerId }: { providerId: string }) {
       // aggregates, not the raw patient list.
       const res = await patientService.list();
       if (cancelled) return;
-      const list = (res.data || []).filter(p =>
+      const list = unwrapPatients(res.data).filter(p =>
         p.primaryProviderId === providerId
       );
       setPatients(list);
@@ -662,7 +686,7 @@ function AppointmentsTab({ providerId }: { providerId: string }) {
     (async () => {
       const res = await providerService.getAppointments(providerId);
       if (cancelled) return;
-      setAppts(res.data || []);
+      setAppts(unwrapAppointments(res.data));
       setLoading(false);
     })();
     return () => { cancelled = true; };
