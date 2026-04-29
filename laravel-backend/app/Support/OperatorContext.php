@@ -48,11 +48,21 @@ class OperatorContext
 
     public function activeTenantId(): ?string
     {
-        // If no explicit active tenant was set (e.g., header missing), pick
-        // the first scoped tenant. For solo customers, this is always the
-        // single tenant. Operator users with N tenants get their first tenant
-        // by default until they switch.
-        return $this->activeTenantId ?? ($this->tenantIds[0] ?? null);
+        if ($this->activeTenantId !== null) {
+            return $this->activeTenantId;
+        }
+
+        // Fall back to the authenticated user's home tenant if it's in scope.
+        // This protects operator users whose UI didn't send X-Active-Tenant-Id
+        // from accidentally writing to a sibling tenant via tenantIds[0].
+        if (auth()->check()) {
+            $userTenantId = auth()->user()->tenant_id;
+            if ($userTenantId && in_array($userTenantId, $this->tenantIds, true)) {
+                return $userTenantId;
+            }
+        }
+
+        return $this->tenantIds[0] ?? null;
     }
 
     public function operatorId(): ?string
@@ -83,10 +93,13 @@ class OperatorContext
     /**
      * Build context for the given user. If the user has no operator
      * membership, returns null (caller falls back to legacy behavior).
+     *
+     * Uses the per-request cached memberships from User::loadedOperatorMemberships()
+     * to avoid re-querying on every authenticated request.
      */
     public static function forUser(User $user, ?string $activeTenantId = null, ?string $activeOperatorId = null): ?self
     {
-        $memberships = $user->operatorMemberships()->get();
+        $memberships = $user->loadedOperatorMemberships();
         if ($memberships->isEmpty()) {
             return null;
         }

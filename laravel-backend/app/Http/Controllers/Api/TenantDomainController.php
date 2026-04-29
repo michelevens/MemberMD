@@ -3,10 +3,12 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\AuditLog;
 use App\Models\TenantDomain;
 use App\Services\DomainVerificationService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 
 /**
  * Practice-side custom domain management.
@@ -66,6 +68,10 @@ class TenantDomainController extends Controller
             'is_primary' => false,
         ]);
 
+        $this->audit($request, 'domain.claimed', $tenantDomain->id, [
+            'domain' => $domain,
+        ]);
+
         return response()->json(['data' => $this->serialize($tenantDomain)], 201);
     }
 
@@ -85,8 +91,15 @@ class TenantDomainController extends Controller
                 'verified_at' => now(),
                 'ssl_status' => TenantDomain::SSL_PENDING,
             ]);
+            $this->audit($request, 'domain.verified', $domain->id, [
+                'domain' => $domain->domain,
+            ]);
             return response()->json(['data' => $this->serialize($domain->fresh()), 'message' => 'Domain verified.']);
         }
+
+        $this->audit($request, 'domain.verify_failed', $domain->id, [
+            'domain' => $domain->domain,
+        ]);
 
         return response()->json([
             'message' => 'TXT record not found yet. DNS propagation can take a few minutes — try again shortly.',
@@ -112,6 +125,10 @@ class TenantDomainController extends Controller
 
         $domain->update(['is_primary' => true]);
 
+        $this->audit($request, 'domain.made_primary', $domain->id, [
+            'domain' => $domain->domain,
+        ]);
+
         return response()->json(['data' => $this->serialize($domain->fresh())]);
     }
 
@@ -121,9 +138,43 @@ class TenantDomainController extends Controller
         abort_if(!$user->isPracticeAdmin(), 403);
 
         $domain = TenantDomain::where('tenant_id', $user->tenant_id)->findOrFail($id);
+        $domainName = $domain->domain;
+        $wasVerified = $domain->isVerified();
+        $wasPrimary = $domain->is_primary;
         $domain->delete();
 
+        $this->audit($request, 'domain.released', $id, [
+            'domain' => $domainName,
+            'was_verified' => $wasVerified,
+            'was_primary' => $wasPrimary,
+        ]);
+
         return response()->json(['message' => 'Domain released.']);
+    }
+
+    /**
+     * SOC 2 evidence audit for domain lifecycle events. Domain claims are
+     * security-relevant — a stolen domain claim is a phishing vector.
+     */
+    private function audit(Request $request, string $action, ?string $resourceId, array $metadata = []): void
+    {
+        try {
+            AuditLog::create([
+                'tenant_id' => $request->user()?->tenant_id,
+                'user_id' => $request->user()?->id,
+                'action' => $action,
+                'resource' => 'TenantDomain',
+                'resource_id' => $resourceId,
+                'ip_address' => $request->ip(),
+                'user_agent' => substr((string) $request->userAgent(), 0, 512) ?: null,
+                'metadata' => $metadata,
+            ]);
+        } catch (\Throwable $e) {
+            Log::warning('TenantDomain audit log write failed', [
+                'action' => $action,
+                'error' => $e->getMessage(),
+            ]);
+        }
     }
 
     private function serialize(TenantDomain $d): array

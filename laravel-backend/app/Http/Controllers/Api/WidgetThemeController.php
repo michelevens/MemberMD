@@ -70,6 +70,20 @@ class WidgetThemeController extends Controller
             'is_active' => 'sometimes|boolean',
         ]);
 
+        // Restrict logo.url to https or data:image/ — blocks javascript:,
+        // off-host http, and other tracking/exfil schemes that the basic
+        // 'string' rule would let through.
+        if (isset($validated['logo']['url']) && $validated['logo']['url'] !== '') {
+            $url = $validated['logo']['url'];
+            $allowedScheme = preg_match('#^https://#i', $url) === 1
+                || preg_match('#^data:image/(png|jpeg|jpg|gif|svg\+xml|webp);#i', $url) === 1;
+            if (!$allowedScheme) {
+                throw \Illuminate\Validation\ValidationException::withMessages([
+                    'logo.url' => ['Logo URL must use https:// or be a data:image/ URI.'],
+                ]);
+            }
+        }
+
         // Filter css_variables to allowed keys
         if (isset($validated['css_variables'])) {
             $validated['css_variables'] = array_intersect_key(

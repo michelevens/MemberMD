@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\AuditLog;
 use App\Models\MasterPlanTemplate;
 use App\Models\Practice;
 use App\Services\PlanSyncService;
@@ -10,6 +11,7 @@ use App\Support\OperatorContext;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 /**
  * Operator-scoped CRUD for master plan templates.
@@ -117,7 +119,14 @@ class MasterPlanTemplateController extends Controller
         $this->assertCanWrite($ctx);
 
         $template = $this->findOwned($id, $ctx);
+        $previousStatus = $template->status;
         $template->update(['status' => MasterPlanTemplate::STATUS_PUBLISHED]);
+
+        $this->audit($request, 'plan_template.published', $template->id, [
+            'template_name' => $template->name,
+            'previous_status' => $previousStatus,
+            'version' => $template->version,
+        ]);
 
         return response()->json(['data' => $this->serialize($template->fresh()->loadCount('plans'))]);
     }
@@ -144,6 +153,15 @@ class MasterPlanTemplateController extends Controller
 
         $plan = $this->sync->apply($template, $tenant, $existingPlan);
 
+        $this->audit($request, 'plan_template.applied_to_tenant', $template->id, [
+            'template_name' => $template->name,
+            'tenant_id' => $tenant->id,
+            'tenant_name' => $tenant->name,
+            'plan_id' => $plan->id,
+            'replaced_plan_id' => $existingPlanId,
+            'version' => $template->version,
+        ]);
+
         return response()->json(['data' => $plan]);
     }
 
@@ -162,6 +180,13 @@ class MasterPlanTemplateController extends Controller
                 $synced++;
             }
         });
+
+        $this->audit($request, 'plan_template.synced_all', $template->id, [
+            'template_name' => $template->name,
+            'version' => $template->version,
+            'plans_synced' => $synced,
+            'affected_plan_ids' => $plans->pluck('id')->all(),
+        ]);
 
         return response()->json([
             'data' => [
@@ -236,6 +261,33 @@ class MasterPlanTemplateController extends Controller
         }
 
         return $data;
+    }
+
+    /**
+     * SOC 2 evidence audit. Operator-tier mutations are recorded with the
+     * acting user, IP, operator scope, and a metadata payload describing
+     * the impact (e.g., affected plan IDs on a sync).
+     */
+    private function audit(Request $request, string $action, ?string $resourceId, array $metadata = []): void
+    {
+        try {
+            $ctx = app()->bound(OperatorContext::class) ? app(OperatorContext::class) : null;
+            AuditLog::create([
+                'tenant_id' => $ctx?->activeTenantId() ?? $request->user()?->tenant_id,
+                'user_id' => $request->user()?->id,
+                'action' => $action,
+                'resource' => 'MasterPlanTemplate',
+                'resource_id' => $resourceId,
+                'ip_address' => $request->ip(),
+                'user_agent' => substr((string) $request->userAgent(), 0, 512) ?: null,
+                'metadata' => array_merge(['operator_id' => $ctx?->operatorId()], $metadata),
+            ]);
+        } catch (\Throwable $e) {
+            Log::warning('MasterPlanTemplate audit log write failed', [
+                'action' => $action,
+                'error' => $e->getMessage(),
+            ]);
+        }
     }
 
     private function serialize(MasterPlanTemplate $t): array

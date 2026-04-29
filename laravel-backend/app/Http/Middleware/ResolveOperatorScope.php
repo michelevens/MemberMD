@@ -27,7 +27,10 @@ class ResolveOperatorScope
     {
         $user = $request->user();
 
-        if ($user && method_exists($user, 'isOperatorMember') && $user->isOperatorMember()) {
+        // isOperatorMember() reads the per-request cached memberships, so
+        // this is a single query per request even when called from both
+        // middleware and BelongsToTenant.
+        if ($user && $user->isOperatorMember()) {
             $context = OperatorContext::forUser(
                 $user,
                 $request->header('X-Active-Tenant-Id'),

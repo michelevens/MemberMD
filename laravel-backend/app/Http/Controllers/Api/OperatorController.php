@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\AuditLog;
 use App\Models\Operator;
 use App\Models\OperatorUser;
 use App\Models\Practice;
@@ -10,6 +11,7 @@ use App\Models\User;
 use App\Support\OperatorContext;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 
 /**
  * Operator-tier endpoints.
@@ -82,7 +84,13 @@ class OperatorController extends Controller
             'settings' => 'sometimes|nullable|array',
         ]);
 
+        $before = $operator->only(array_keys($validated));
         $operator->update($validated);
+
+        $this->audit($request, 'operator.updated', $operator->id, [
+            'changed_fields' => array_keys($validated),
+            'before' => $before,
+        ]);
 
         return response()->json(['data' => $this->serializeOperator($operator->fresh())]);
     }
@@ -141,6 +149,13 @@ class OperatorController extends Controller
             'operator_role' => $validated['operator_role'],
         ]);
 
+        $this->audit($request, 'operator.user_added', $ctx->operatorId(), [
+            'membership_id' => $membership->id,
+            'added_user_id' => $user->id,
+            'added_user_email' => $user->email,
+            'operator_role' => $validated['operator_role'],
+        ]);
+
         return response()->json([
             'data' => [
                 'id' => $membership->id,
@@ -174,7 +189,13 @@ class OperatorController extends Controller
             ], 422);
         }
 
+        $removedRole = $membership->operator_role;
         $membership->delete();
+
+        $this->audit($request, 'operator.user_removed', $ctx->operatorId(), [
+            'removed_user_id' => $userId,
+            'removed_role' => $removedRole,
+        ]);
 
         return response()->json(['message' => 'User removed from operator.']);
     }
@@ -236,6 +257,32 @@ class OperatorController extends Controller
             'tenant_count' => $operator->practices()->count(),
             'created_at' => $operator->created_at,
         ];
+    }
+
+    /**
+     * Append an audit_logs row for SOC 2 evidence on operator-tier mutations.
+     * Uses the active tenant_id when present so the row is properly scoped.
+     */
+    private function audit(Request $request, string $action, ?string $resourceId, array $metadata = []): void
+    {
+        try {
+            $ctx = app()->bound(OperatorContext::class) ? app(OperatorContext::class) : null;
+            AuditLog::create([
+                'tenant_id' => $ctx?->activeTenantId() ?? $request->user()?->tenant_id,
+                'user_id' => $request->user()?->id,
+                'action' => $action,
+                'resource' => 'Operator',
+                'resource_id' => $resourceId,
+                'ip_address' => $request->ip(),
+                'user_agent' => substr((string) $request->userAgent(), 0, 512) ?: null,
+                'metadata' => array_merge(['operator_id' => $ctx?->operatorId()], $metadata),
+            ]);
+        } catch (\Throwable $e) {
+            Log::warning('Operator audit log write failed', [
+                'action' => $action,
+                'error' => $e->getMessage(),
+            ]);
+        }
     }
 
     private function serializeTenant(Practice $practice): array

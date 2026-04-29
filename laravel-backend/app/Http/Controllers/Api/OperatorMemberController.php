@@ -4,10 +4,12 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Patient;
+use App\Models\PhiAccessLog;
 use App\Models\Practice;
 use App\Support\OperatorContext;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\RateLimiter;
 
 /**
  * Cross-tenant member search for operator-tier users.
@@ -37,15 +39,31 @@ class OperatorMemberController extends Controller
         $q = trim((string) $request->query('q'));
         $limit = (int) ($request->query('limit') ?? 25);
 
+        // Per-user rate limit. Cross-tenant PHI search is high-cost (full-table
+        // scan with leading wildcard) and high-impact (PHI exposure across
+        // clinics). Cap to a generous ceiling that supports interactive use
+        // but blocks scripted enumeration.
+        $user = $request->user();
+        $rateKey = "operator-member-search:{$user->id}";
+        if (RateLimiter::tooManyAttempts($rateKey, 30)) {
+            return response()->json(['message' => 'Too many searches — try again in a minute.'], 429);
+        }
+        RateLimiter::hit($rateKey, 60);
+
+        // Use prefix-match (no leading wildcard) for short queries to avoid
+        // unbounded full-table scans. For 4+ char queries we permit substring
+        // search (operators searching for partial last names is real).
+        $pattern = strlen($q) >= 4 ? "%{$q}%" : "{$q}%";
+
         // Build query without the global tenant scope by using whereIn
         // explicitly (the global scope will also constrain to tenantIds since
         // we're operator-scoped — this is intentional defense-in-depth).
         $patients = Patient::whereIn('tenant_id', $tenantIds)
-            ->where(function ($qb) use ($q) {
-                $qb->where('first_name', 'like', "%{$q}%")
-                   ->orWhere('last_name', 'like', "%{$q}%")
-                   ->orWhere('email', 'like', "%{$q}%")
-                   ->orWhere('phone', 'like', "%{$q}%");
+            ->where(function ($qb) use ($pattern) {
+                $qb->where('first_name', 'like', $pattern)
+                   ->orWhere('last_name', 'like', $pattern)
+                   ->orWhere('email', 'like', $pattern)
+                   ->orWhere('phone', 'like', $pattern);
             })
             ->orderBy('last_name')
             ->limit($limit)
@@ -53,6 +71,34 @@ class OperatorMemberController extends Controller
 
         $tenantNames = Practice::whereIn('id', $patients->pluck('tenant_id')->unique())
             ->pluck('name', 'id');
+
+        // PHI access log — cross-tenant search is a SOC 2 evidence event.
+        // We log one row per result (each row IS a PHI disclosure) plus a
+        // search-summary row so the queries themselves are auditable too.
+        try {
+            foreach ($patients as $p) {
+                PhiAccessLog::create([
+                    'tenant_id' => $p->tenant_id,
+                    'user_id' => $user->id,
+                    'patient_id' => $p->id,
+                    'resource_type' => 'Patient',
+                    'resource_id' => $p->id,
+                    'access_type' => 'operator_search_hit',
+                    'ip_address' => $request->ip(),
+                    'user_agent' => substr((string) $request->userAgent(), 0, 512) ?: null,
+                    'metadata' => [
+                        'operator_id' => $ctx->operatorId(),
+                        'query_length' => strlen($q),
+                    ],
+                ]);
+            }
+        } catch (\Throwable $e) {
+            // PHI logging failure must never break the primary flow
+            \Illuminate\Support\Facades\Log::warning('PHI access log write failed', [
+                'user_id' => $user->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
 
         return response()->json([
             'data' => $patients->map(function (Patient $p) use ($tenantNames) {

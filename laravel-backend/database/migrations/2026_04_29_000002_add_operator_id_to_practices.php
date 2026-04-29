@@ -17,26 +17,31 @@ return new class extends Migration {
         // Backfill: every existing practice gets a default Operator. Per ADR-0001
         // (tenant-of-one), solo practices live under a 1-tenant operator just
         // like multi-clinic operators — no special-casing in app code.
-        $practices = DB::table('practices')->get(['id', 'name', 'slug', 'email']);
+        //
+        // The whole backfill runs in a transaction so partial failures don't
+        // leave half the practices linked and the other half orphaned.
+        DB::transaction(function () {
+            $practices = DB::table('practices')->get(['id', 'name', 'slug', 'email']);
 
-        foreach ($practices as $practice) {
-            $operatorId = (string) Str::uuid();
-            $slug = $this->uniqueOperatorSlug($practice->slug ?? Str::slug($practice->name));
+            foreach ($practices as $practice) {
+                $operatorId = (string) Str::uuid();
+                $slug = $this->uniqueOperatorSlug($practice->slug ?? Str::slug($practice->name));
 
-            DB::table('operators')->insert([
-                'id' => $operatorId,
-                'name' => $practice->name,
-                'slug' => $slug,
-                'contact_email' => $practice->email,
-                'is_active' => true,
-                'created_at' => now(),
-                'updated_at' => now(),
-            ]);
+                DB::table('operators')->insert([
+                    'id' => $operatorId,
+                    'name' => $practice->name,
+                    'slug' => $slug,
+                    'contact_email' => $practice->email,
+                    'is_active' => true,
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ]);
 
-            DB::table('practices')
-                ->where('id', $practice->id)
-                ->update(['operator_id' => $operatorId]);
-        }
+                DB::table('practices')
+                    ->where('id', $practice->id)
+                    ->update(['operator_id' => $operatorId]);
+            }
+        });
 
         // Add FK constraint. Column stays nullable at the DB level for SQLite
         // compatibility (Laravel migrations can't reliably ->change() on

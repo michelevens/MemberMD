@@ -70,6 +70,7 @@ class PlanSyncService
 
         return DB::transaction(function () use ($plan) {
             $template = $plan->masterTemplate()->firstOrFail();
+            $this->assertTemplateMatchesPlanTenant($template, $plan);
             $overriddenFields = TenantPlanOverride::where('plan_id', $plan->id)
                 ->pluck('field_name')
                 ->all();
@@ -111,6 +112,7 @@ class PlanSyncService
         }
 
         $template = $plan->masterTemplate()->firstOrFail();
+        $this->assertTemplateMatchesPlanTenant($template, $plan);
         $errors = [];
 
         foreach ($changes as $field => $newValue) {
@@ -137,6 +139,15 @@ class PlanSyncService
         if (!empty($errors)) {
             throw ValidationException::withMessages($errors);
         }
+
+        // Restrict the update payload. Tenants on a template-derived plan
+        // can only modify lockable fields (subject to the lock matrix and
+        // bounds checked above) plus a small allowlist of operational fields
+        // that are intentionally tenant-controlled. In particular, Stripe
+        // price IDs MUST NOT be tenant-writable on a template plan.
+        $tenantWritableExtras = ['is_active', 'sort_order', 'program_id'];
+        $allowedKeys = array_merge(MasterPlanTemplate::LOCKABLE_FIELDS, $tenantWritableExtras);
+        $changes = array_intersect_key($changes, array_flip($allowedKeys));
 
         return DB::transaction(function () use ($plan, $changes, $template, $userId) {
             $defaults = $template->defaultsAsPlanAttributes();
@@ -194,6 +205,7 @@ class PlanSyncService
 
         return DB::transaction(function () use ($plan, $fields) {
             $template = $plan->masterTemplate()->firstOrFail();
+            $this->assertTemplateMatchesPlanTenant($template, $plan);
             $defaults = $template->defaultsAsPlanAttributes();
 
             $query = TenantPlanOverride::where('plan_id', $plan->id);
@@ -311,6 +323,22 @@ class PlanSyncService
         if ($template->operator_id !== $tenant->operator_id) {
             throw ValidationException::withMessages([
                 'master_template_id' => ['This template does not belong to your operator.'],
+            ]);
+        }
+    }
+
+    /**
+     * Re-verify that a linked plan's tenant still belongs to the template's
+     * operator. Defends against stale links after operator restructuring
+     * (M&A, tenant transfers, etc.) — without this, sync()/applyOverrides
+     * could pull defaults from a foreign operator's template.
+     */
+    private function assertTemplateMatchesPlanTenant(MasterPlanTemplate $template, MembershipPlan $plan): void
+    {
+        $tenant = Practice::find($plan->tenant_id);
+        if (!$tenant || $template->operator_id !== $tenant->operator_id) {
+            throw ValidationException::withMessages([
+                'master_template_id' => ['Template no longer matches the plan\'s tenant operator.'],
             ]);
         }
     }

@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Practice;
 use App\Services\StripeConnectService;
+use App\Support\OperatorContext;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use RuntimeException;
@@ -123,8 +124,17 @@ class StripeConnectController extends Controller
     private function resolvePractice(Request $request): Practice
     {
         $user = $request->user();
-        abort_if(empty($user->tenant_id), 403, 'No practice scope on this user.');
 
+        // For operator-tier users, use the active tenant from the request
+        // context — they may have switched away from their home tenant.
+        if (app()->bound(OperatorContext::class)) {
+            $activeTenantId = app(OperatorContext::class)->activeTenantId();
+            if ($activeTenantId) {
+                return Practice::findOrFail($activeTenantId);
+            }
+        }
+
+        abort_if(empty($user->tenant_id), 403, 'No practice scope on this user.');
         return Practice::findOrFail($user->tenant_id);
     }
 
@@ -132,5 +142,13 @@ class StripeConnectController extends Controller
     {
         $user = $request->user();
         abort_if(!in_array($user->role, ['practice_admin', 'superadmin']), 403, 'Only practice admins can manage payments.');
+
+        // If the user is acting under an operator scope, a read-only viewer
+        // role overrides any tenant-level practice_admin permission for
+        // money-flow actions. Operator owners/admins still pass.
+        if (app()->bound(OperatorContext::class)) {
+            $ctx = app(OperatorContext::class);
+            abort_if($ctx->isReadOnly(), 403, 'Read-only operator role cannot manage payments.');
+        }
     }
 }

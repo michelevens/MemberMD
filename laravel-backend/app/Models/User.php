@@ -95,9 +95,24 @@ class User extends Authenticatable
             ->all();
     }
 
+    /**
+     * @var \Illuminate\Database\Eloquent\Collection<int,OperatorUser>|null
+     * Per-request memo of the user's operator memberships so middleware +
+     * BelongsToTenant don't re-query on every model interaction.
+     */
+    private ?\Illuminate\Database\Eloquent\Collection $cachedOperatorMemberships = null;
+
+    public function loadedOperatorMemberships(): \Illuminate\Database\Eloquent\Collection
+    {
+        if ($this->cachedOperatorMemberships === null) {
+            $this->cachedOperatorMemberships = $this->operatorMemberships()->get();
+        }
+        return $this->cachedOperatorMemberships;
+    }
+
     public function isOperatorMember(): bool
     {
-        return $this->operatorMemberships()->exists();
+        return $this->loadedOperatorMemberships()->isNotEmpty();
     }
 
     /**

@@ -8,6 +8,7 @@ use App\Models\StripeConnectEvent;
 use App\Services\StripeConnectService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Stripe\Account;
 use Stripe\Event;
@@ -66,7 +67,7 @@ class StripeWebhookController extends Controller
             ? Practice::where('stripe_account_id', $accountId)->first()
             : null;
 
-        $eventRecord = $this->connect->recordWebhookEvent(
+        $this->connect->recordWebhookEvent(
             $event->id,
             $event->type,
             $accountId,
@@ -74,23 +75,56 @@ class StripeWebhookController extends Controller
             $event->toArray()
         );
 
-        // Idempotency: if this event was already processed, ack and stop.
-        if ($eventRecord->processing_status === 'processed') {
+        // Idempotency under concurrency: re-fetch the event row inside a
+        // transaction with a row-level lock. Two simultaneous Stripe deliveries
+        // of the same event_id will block on the same row; the first to win
+        // the lock processes, the second sees status='processed' and acks.
+        $alreadyProcessed = false;
+        $handlerError = null;
+
+        try {
+            DB::transaction(function () use ($event, $practice, &$alreadyProcessed, &$handlerError) {
+                $locked = StripeConnectEvent::where('stripe_event_id', $event->id)
+                    ->lockForUpdate()
+                    ->first();
+
+                if (!$locked) {
+                    // Should be impossible — recordWebhookEvent just inserted it.
+                    $handlerError = 'event row missing after insert';
+                    return;
+                }
+
+                if ($locked->processing_status === 'processed') {
+                    $alreadyProcessed = true;
+                    return;
+                }
+
+                try {
+                    $this->dispatch($event, $practice);
+                    $this->connect->markEventProcessed($locked);
+                } catch (Throwable $e) {
+                    Log::error('Stripe Connect webhook handler failed', [
+                        'event_id' => $event->id,
+                        'event_type' => $event->type,
+                        'error' => $e->getMessage(),
+                    ]);
+                    $this->connect->markEventProcessed($locked, $e->getMessage());
+                    $handlerError = $e->getMessage();
+                }
+            });
+        } catch (Throwable $e) {
+            Log::error('Stripe Connect webhook transaction failed', [
+                'event_id' => $event->id,
+                'error' => $e->getMessage(),
+            ]);
+            return response()->json(['error' => 'handler_failed'], 500);
+        }
+
+        if ($alreadyProcessed) {
             return response()->json(['received' => true, 'duplicate' => true]);
         }
 
-        try {
-            $this->dispatch($event, $practice);
-            $this->connect->markEventProcessed($eventRecord);
-        } catch (Throwable $e) {
-            Log::error('Stripe Connect webhook handler failed', [
-                'event_id' => $event->id,
-                'event_type' => $event->type,
-                'error' => $e->getMessage(),
-            ]);
-            $this->connect->markEventProcessed($eventRecord, $e->getMessage());
-
-            // Return 500 so Stripe retries. Don't leak internals.
+        if ($handlerError !== null) {
             return response()->json(['error' => 'handler_failed'], 500);
         }
 
