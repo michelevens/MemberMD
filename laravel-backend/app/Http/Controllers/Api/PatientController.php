@@ -78,14 +78,25 @@ class PatientController extends Controller
         $validated = $request->validated();
 
         // Patients.user_id is NOT NULL — every patient is also a portal
-        // user candidate. If no User exists yet for this email, create one
-        // with a random unguessable password; the patient claims the
-        // account via the password-reset flow.
-        $patientUser = \App\Models\User::where('tenant_id', $actor->tenant_id)
-            ->where('email', $validated['email'])
-            ->first();
+        // user candidate. The users.email column has a GLOBAL unique
+        // constraint (not tenant-scoped), so look it up globally.
+        //  - Same tenant -> reuse the existing User row.
+        //  - Different tenant -> reject with a clear error so the admin
+        //    can pick a different email or contact the other clinic.
+        //  - Not found -> create a new User with a random password; the
+        //    patient claims the account via the password-reset flow.
+        $existingUser = \App\Models\User::where('email', $validated['email'])->first();
 
-        if (!$patientUser) {
+        if ($existingUser && $existingUser->tenant_id !== $actor->tenant_id) {
+            return response()->json([
+                'message' => 'A user with that email already exists at another practice. Use a different email for this patient.',
+                'errors' => ['email' => ['Email is registered at another practice.']],
+            ], 422);
+        }
+
+        if ($existingUser) {
+            $patientUser = $existingUser;
+        } else {
             $patientUser = \App\Models\User::create([
                 'tenant_id' => $actor->tenant_id,
                 'email' => $validated['email'],
