@@ -657,6 +657,12 @@ export function PracticePortal() {
   const [apiAppointments, setApiAppointments] = useState<any[] | null>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [apiEncounters, setApiEncounters] = useState<any[] | null>(null);
+  // Raw unmapped encounter rows from the API — kept alongside the
+  // tab-table-shaped apiEncounters so the patient detail Encounters
+  // subtab can render full SOAP content (chief_complaint, subjective,
+  // objective, assessment, plan) for THIS patient. Without this, the
+  // patient subtab only had access to display-summary fields.
+  const [apiEncountersRaw, setApiEncountersRaw] = useState<any[] | null>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [apiPrescriptions, setApiPrescriptions] = useState<any[] | null>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -924,6 +930,7 @@ export function PracticePortal() {
     if (encountersRes.status === "fulfilled" && encountersRes.value.data) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const encList = Array.isArray(encountersRes.value.data) ? encountersRes.value.data : (encountersRes.value.data as any).data || [];
+      setApiEncountersRaw(encList);
       setApiEncounters(encList.map((e: any) => ({
         id: e.id,
         date: e.encounterDate ? new Date(e.encounterDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : e.date || "",
@@ -3458,67 +3465,95 @@ export function PracticePortal() {
         )}
 
         {/* Encounters */}
-        {patientDetailTab === "encounters" && (
-          <div className="space-y-4">
-            <h3 className="font-semibold text-slate-800">Visit Notes (SOAP)</h3>
-            {mockEncounters.length === 0 && (
-              <div className="py-8 text-center text-slate-400 text-sm">No encounter notes for this patient yet.</div>
-            )}
-            {mockEncounters.map((enc) => {
-              const isExpanded = expandedEncounters.includes(enc.id);
-              const typeBg: Record<string, { bg: string; text: string }> = {
-                "Initial Evaluation": { bg: "#e6f7f2", text: "#147d64" },
-                "Med Management": { bg: "#e0e8f0", text: "#334e68" },
-                "Therapy": { bg: "#fffbeb", text: "#d97706" },
-              };
-              const tb = typeBg[enc.type] || typeBg["Med Management"];
-              return (
-                <div key={enc.id} className="glass rounded-xl overflow-hidden">
-                  <button
-                    onClick={() => toggleEncounter(enc.id)}
-                    className="w-full p-4 flex items-center justify-between text-left hover:bg-slate-50 transition-colors"
-                  >
-                    <div className="flex items-center gap-3 flex-wrap">
-                      <span className="font-medium text-slate-700">{enc.date}</span>
-                      <span className="px-2 py-0.5 rounded text-xs font-medium" style={{ backgroundColor: tb.bg, color: tb.text }}>{enc.type}</span>
-                      <span className="text-sm text-slate-500">{enc.provider}</span>
-                      <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${enc.signed ? "" : ""}`} style={enc.signed ? { backgroundColor: "#ecf9ec", color: "#2f8132" } : { backgroundColor: "#fffbeb", color: "#d97706" }}>
-                        {enc.signed ? "Signed" : "Draft"}
-                      </span>
-                    </div>
-                    {isExpanded ? <ChevronUp className="w-4 h-4 text-slate-400 shrink-0" /> : <ChevronDown className="w-4 h-4 text-slate-400 shrink-0" />}
-                  </button>
-                  {isExpanded && (
-                    <div className="px-4 pb-4 space-y-4 border-t border-slate-100 pt-4">
-                      {enc.chiefComplaint && (
+        {patientDetailTab === "encounters" && (() => {
+          // Patient encounter list now reads from the real API. Falls back
+          // to the mockEncounters demo fixture only when not in demo mode
+          // AND apiEncountersRaw is still loading. Filters by patientId so
+          // we only show this patient's records.
+          const realEncounters = (apiEncountersRaw || []).filter(
+            (e: any) => e.patientId === pt.id || e.patient_id === pt.id
+          );
+          const useReal = !isDemoMode || realEncounters.length > 0;
+          const encountersToShow = useReal ? realEncounters : mockEncounters;
+          return (
+            <div className="space-y-4">
+              <h3 className="font-semibold text-slate-800">Visit Notes (SOAP)</h3>
+              {encountersToShow.length === 0 && (
+                <div className="py-8 text-center text-slate-400 text-sm">No encounter notes for this patient yet.</div>
+              )}
+              {encountersToShow.map((enc: any) => {
+                const isExpanded = expandedEncounters.includes(enc.id);
+                const typeBg: Record<string, { bg: string; text: string }> = {
+                  // Backend enum values
+                  office_visit: { bg: "#e0e8f0", text: "#334e68" },
+                  follow_up: { bg: "#e6f7f2", text: "#147d64" },
+                  telehealth: { bg: "#f3e8ff", text: "#7c3aed" },
+                  phone: { bg: "#fef3c7", text: "#92400e" },
+                  urgent: { bg: "#fee2e2", text: "#b91c1c" },
+                  annual_wellness: { bg: "#fffbeb", text: "#d97706" },
+                  procedure: { bg: "#dbeafe", text: "#1e40af" },
+                  // Demo-mode display values kept for backward compat
+                  "Initial Evaluation": { bg: "#e6f7f2", text: "#147d64" },
+                  "Med Management": { bg: "#e0e8f0", text: "#334e68" },
+                  "Therapy": { bg: "#fffbeb", text: "#d97706" },
+                };
+                const encType = enc.encounterType || enc.type || "follow_up";
+                const tb = typeBg[encType] || typeBg.follow_up;
+                const encDate = enc.encounterDate
+                  ? new Date(enc.encounterDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+                  : (enc.date || "—");
+                const providerLabel = enc.provider
+                  ? `${enc.provider.title || ""} ${enc.provider.lastName || enc.provider.last_name || ""}`.trim() || enc.provider.firstName || ""
+                  : (typeof enc.provider === "string" ? enc.provider : "");
+                const isSigned = enc.signed_at || enc.signedAt || enc.status === "signed" || enc.signed;
+                return (
+                  <div key={enc.id} className="glass rounded-xl overflow-hidden">
+                    <button
+                      onClick={() => toggleEncounter(enc.id)}
+                      className="w-full p-4 flex items-center justify-between text-left hover:bg-slate-50 transition-colors"
+                    >
+                      <div className="flex items-center gap-3 flex-wrap">
+                        <span className="font-medium text-slate-700">{encDate}</span>
+                        <span className="px-2 py-0.5 rounded text-xs font-medium capitalize" style={{ backgroundColor: tb.bg, color: tb.text }}>{encType.replace(/_/g, " ")}</span>
+                        {providerLabel && <span className="text-sm text-slate-500">{providerLabel}</span>}
+                        <span className="px-2 py-0.5 rounded-full text-xs font-medium" style={isSigned ? { backgroundColor: "#ecf9ec", color: "#2f8132" } : { backgroundColor: "#fffbeb", color: "#d97706" }}>
+                          {isSigned ? "Signed" : "Draft"}
+                        </span>
+                      </div>
+                      {isExpanded ? <ChevronUp className="w-4 h-4 text-slate-400 shrink-0" /> : <ChevronDown className="w-4 h-4 text-slate-400 shrink-0" />}
+                    </button>
+                    {isExpanded && (
+                      <div className="px-4 pb-4 space-y-4 border-t border-slate-100 pt-4">
+                        {(enc.chiefComplaint || enc.chief_complaint) && (
+                          <div>
+                            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">Chief Complaint</p>
+                            <p className="text-sm text-slate-600">{enc.chiefComplaint || enc.chief_complaint}</p>
+                          </div>
+                        )}
                         <div>
-                          <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">Chief Complaint</p>
-                          <p className="text-sm text-slate-600">{enc.chiefComplaint}</p>
+                          <p className="text-xs font-semibold uppercase tracking-wider mb-1" style={{ color: "#27ab83" }}>S — Subjective</p>
+                          <p className="text-sm text-slate-600 leading-relaxed whitespace-pre-wrap">{enc.subjective || <span className="text-slate-400 italic">Not documented</span>}</p>
                         </div>
-                      )}
-                      <div>
-                        <p className="text-xs font-semibold uppercase tracking-wider mb-1" style={{ color: "#27ab83" }}>S — Subjective</p>
-                        <p className="text-sm text-slate-600 leading-relaxed">{enc.subjective}</p>
+                        <div>
+                          <p className="text-xs font-semibold uppercase tracking-wider mb-1" style={{ color: "#334e68" }}>O — Objective</p>
+                          <p className="text-sm text-slate-600 leading-relaxed whitespace-pre-wrap">{enc.objective || <span className="text-slate-400 italic">Not documented</span>}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs font-semibold uppercase tracking-wider mb-1" style={{ color: "#d97706" }}>A — Assessment</p>
+                          <p className="text-sm text-slate-600 leading-relaxed whitespace-pre-wrap">{enc.assessment || <span className="text-slate-400 italic">Not documented</span>}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs font-semibold uppercase tracking-wider mb-1" style={{ color: "#147d64" }}>P — Plan</p>
+                          <p className="text-sm text-slate-600 leading-relaxed whitespace-pre-wrap">{enc.plan || <span className="text-slate-400 italic">Not documented</span>}</p>
+                        </div>
                       </div>
-                      <div>
-                        <p className="text-xs font-semibold uppercase tracking-wider mb-1" style={{ color: "#334e68" }}>O — Objective</p>
-                        <p className="text-sm text-slate-600 leading-relaxed">{enc.objective}</p>
-                      </div>
-                      <div>
-                        <p className="text-xs font-semibold uppercase tracking-wider mb-1" style={{ color: "#d97706" }}>A — Assessment</p>
-                        <p className="text-sm text-slate-600 leading-relaxed">{enc.assessment}</p>
-                      </div>
-                      <div>
-                        <p className="text-xs font-semibold uppercase tracking-wider mb-1" style={{ color: "#147d64" }}>P — Plan</p>
-                        <p className="text-sm text-slate-600 leading-relaxed">{enc.plan}</p>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        )}
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })()}
 
         {/* Screenings */}
         {patientDetailTab === "screenings" && (
