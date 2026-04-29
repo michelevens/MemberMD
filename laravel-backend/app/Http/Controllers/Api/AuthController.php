@@ -164,6 +164,17 @@ class AuthController extends Controller
             'onboarding_completed' => false,
         ]);
 
+        // Per ADR-0001: every Practice has an Operator. Make the registering
+        // user the owner of their auto-created Operator. Solo customers won't
+        // see this until they need it; multi-clinic operators upgrade in place.
+        if ($practice->operator_id) {
+            \App\Models\OperatorUser::create([
+                'operator_id' => $practice->operator_id,
+                'user_id' => $user->id,
+                'operator_role' => \App\Models\OperatorUser::ROLE_OWNER,
+            ]);
+        }
+
         // Create Provider record for the registering provider
         try {
             $licenses = $validated['licenses'] ?? [];
@@ -471,6 +482,22 @@ class AuthController extends Controller
     {
         $practice = $user->tenant_id ? Practice::find($user->tenant_id) : null;
 
+        // Surface operator memberships so the SPA can route to OperatorPortal
+        // when the user is an operator member. See ROADMAP H1 / Operator OS.
+        $operatorMemberships = $user->operatorMemberships()->with('operator:id,name,slug')->get();
+        $operators = $operatorMemberships->map(function ($m) {
+            if (!$m->operator) {
+                return null;
+            }
+            return [
+                'id' => $m->operator->id,
+                'name' => $m->operator->name,
+                'slug' => $m->operator->slug,
+                'role' => $m->operator_role,
+                'tenant_count' => $m->operator->practices()->count(),
+            ];
+        })->filter()->values();
+
         return [
             'id' => $user->id,
             'first_name' => $user->first_name,
@@ -491,7 +518,9 @@ class AuthController extends Controller
                 'specialty' => $practice->specialty,
                 'practice_model' => $practice->practice_model,
                 'tenant_code' => $practice->tenant_code,
+                'operator_id' => $practice->operator_id,
             ] : null,
+            'operators' => $operators,
         ];
     }
 

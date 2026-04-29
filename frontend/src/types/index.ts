@@ -37,6 +37,18 @@ export type UserRole =
   | "staff"
   | "patient";
 
+// ─── Operator membership ──────────────────────────────────────────────────────
+
+export type OperatorRole = "owner" | "admin" | "viewer";
+
+export interface OperatorMembership {
+  id: string;
+  name: string;
+  slug: string;
+  role: OperatorRole;
+  tenantCount: number;
+}
+
 // ─── User ─────────────────────────────────────────────────────────────────────
 
 export interface User {
@@ -53,6 +65,8 @@ export interface User {
   lastLoginAt: string | null;
   createdAt: string;
   updatedAt: string;
+  /** Operator memberships, if any. Empty array for non-operator users. */
+  operators?: OperatorMembership[];
 }
 
 // ─── Practice ─────────────────────────────────────────────────────────────────

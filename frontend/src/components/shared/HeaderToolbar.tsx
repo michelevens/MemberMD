@@ -3,9 +3,11 @@
 // Messages, Notifications, Settings, Dark Mode, UserSettingsDropdown
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import { MessageSquare, Bell, Settings, Moon, Sun, X } from "lucide-react";
+import { MessageSquare, Bell, Settings, Moon, Sun, X, Building2, ChevronDown, ArrowLeftRight } from "lucide-react";
 import { UserSettingsDropdown } from "./UserSettingsDropdown";
 import { useTheme } from "../../contexts/ThemeContext";
+import { useAuth } from "../../contexts/AuthContext";
+import { operatorService, type OperatorTenant } from "../../lib/api";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -410,11 +412,139 @@ export function HeaderToolbar({ variant, onNavigate }: HeaderToolbarProps) {
         )}
       </button>
 
+      {/* Tenant Switcher (operator members only) */}
+      <TenantSwitcher />
+
       {/* User Dropdown */}
       <UserSettingsDropdown
         variant={variant}
         onNavigateToProfile={onNavigate ? () => onNavigate("profile") : undefined}
       />
+    </div>
+  );
+}
+
+// ─── Tenant Switcher (operator members only) ──────────────────────────────────
+
+function TenantSwitcher() {
+  const auth = useAuth();
+  const [tenants, setTenants] = useState<OperatorTenant[]>([]);
+  const [open, setOpen] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
+
+  const loadTenants = useCallback(async () => {
+    if (loaded || loading) return;
+    setLoading(true);
+    const res = await operatorService.tenants();
+    if (res.data) {
+      setTenants(res.data);
+      setLoaded(true);
+    }
+    setLoading(false);
+  }, [loaded, loading]);
+
+  // Only render for operator members with at least one operator
+  if (!auth.isOperatorMember || (auth.operators.length === 0)) {
+    return null;
+  }
+
+  const onToggle = () => {
+    const next = !open;
+    setOpen(next);
+    if (next) void loadTenants();
+  };
+
+  const switchTo = (tenantId: string) => {
+    auth.switchTenant(tenantId);
+    setOpen(false);
+    // Stay on the current portal route — page reload picks up the new scope
+    window.location.reload();
+  };
+
+  const goToOperator = () => {
+    auth.switchTenant(null);
+    setOpen(false);
+    window.location.hash = "#/operator";
+  };
+
+  const activeTenant = tenants.find(t => t.id === auth.activeTenantId);
+  const label = activeTenant?.name || (auth.activeTenantId ? "Clinic" : "All clinics");
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        onClick={onToggle}
+        className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium text-white transition-colors hover:bg-white/10"
+        title="Switch clinic"
+      >
+        <Building2 className="w-4 h-4" />
+        <span className="hidden sm:inline truncate max-w-[120px]">{label}</span>
+        <ChevronDown className="w-3.5 h-3.5 opacity-70" />
+      </button>
+
+      {open && (
+        <div
+          className="absolute right-0 z-50 rounded-xl shadow-lg border overflow-hidden"
+          style={{
+            width: "280px",
+            top: "calc(100% + 8px)",
+            backgroundColor: "rgba(255,255,255,0.97)",
+            backdropFilter: "blur(16px)",
+            borderColor: COLORS.slate200,
+          }}
+        >
+          <div className="px-4 py-2.5 border-b" style={{ borderColor: COLORS.slate200 }}>
+            <p className="text-xs font-semibold uppercase tracking-wider" style={{ color: COLORS.slate500 }}>
+              Switch context
+            </p>
+          </div>
+
+          <button
+            onClick={goToOperator}
+            className="w-full text-left px-4 py-2.5 text-sm flex items-center gap-3 transition-colors hover:bg-slate-50"
+            style={{ color: COLORS.navy700 }}
+          >
+            <ArrowLeftRight className="w-4 h-4" style={{ color: COLORS.slate400 }} />
+            <span className="flex-1">Network console</span>
+          </button>
+
+          <div className="border-t" style={{ borderColor: COLORS.slate200 }} />
+
+          <div className="max-h-72 overflow-y-auto py-1">
+            {loading && (
+              <p className="px-4 py-3 text-xs" style={{ color: COLORS.slate400 }}>Loading clinics…</p>
+            )}
+            {!loading && tenants.length === 0 && loaded && (
+              <p className="px-4 py-3 text-xs" style={{ color: COLORS.slate400 }}>No clinics in scope.</p>
+            )}
+            {tenants.map((t) => (
+              <button
+                key={t.id}
+                onClick={() => switchTo(t.id)}
+                className="w-full text-left px-4 py-2 text-sm flex items-center gap-3 transition-colors hover:bg-slate-50"
+                style={{ color: COLORS.navy700, fontWeight: t.id === auth.activeTenantId ? 600 : 400 }}
+              >
+                <Building2 className="w-4 h-4" style={{ color: COLORS.slate400 }} />
+                <span className="truncate flex-1">{t.name}</span>
+                {t.id === auth.activeTenantId && (
+                  <span className="text-xs" style={{ color: COLORS.teal600 }}>active</span>
+                )}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

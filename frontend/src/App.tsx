@@ -109,6 +109,11 @@ const PatientPortal = namedLazy(
   "PatientPortal"
 );
 
+const OperatorPortal = namedLazy(
+  () => import("./components/portals/OperatorPortal"),
+  "OperatorPortal"
+);
+
 const PracticeRegistration = namedLazy(
   () => import("./components/auth/PracticeRegistration"),
   "PracticeRegistration"
@@ -168,13 +173,18 @@ function AuthGate() {
     );
   }
 
-  // Role-based portal routing
-  const portalPath = getPortalPath(user?.role);
+  // Role-based portal routing.
+  // Operator members with multi-tenant scope land in OperatorPortal by default.
+  // Solo customers (operator with a single tenant — see ADR-0001) skip the
+  // operator console and go straight to their normal role-based portal.
+  const isMultiTenantOperator = (user?.operators ?? []).some(o => (o.tenantCount ?? 0) > 1);
+  const portalPath = isMultiTenantOperator ? "/operator" : getPortalPath(user?.role);
 
   return (
     <Suspense fallback={<LoadingFallback />}>
       <Routes>
         <Route path="/superadmin/*" element={<SuperAdminPortal />} />
+        <Route path="/operator/*" element={<OperatorPortal />} />
         <Route path="/practice/*" element={<PracticePortal />} />
         <Route path="/patient/*" element={<PatientPortal />} />
         <Route path="/telehealth/:sessionId" element={<TelehealthRoom />} />

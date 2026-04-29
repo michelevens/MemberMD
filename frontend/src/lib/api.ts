@@ -91,6 +91,36 @@ export function removeAuthToken(): void {
   authToken = null;
   sessionStorage.removeItem("membermd_token");
   sessionStorage.removeItem("membermd_user");
+  sessionStorage.removeItem("membermd_operator_id");
+  sessionStorage.removeItem("membermd_active_tenant_id");
+}
+
+// ===== Operator scope (for multi-practice operators) =====
+// Stored client-side and sent on every request as headers so the backend's
+// OperatorScope middleware can resolve the right scope.
+
+export function getActiveOperatorId(): string | null {
+  return sessionStorage.getItem("membermd_operator_id");
+}
+
+export function setActiveOperatorId(id: string | null): void {
+  if (id) {
+    sessionStorage.setItem("membermd_operator_id", id);
+  } else {
+    sessionStorage.removeItem("membermd_operator_id");
+  }
+}
+
+export function getActiveTenantId(): string | null {
+  return sessionStorage.getItem("membermd_active_tenant_id");
+}
+
+export function setActiveTenantId(id: string | null): void {
+  if (id) {
+    sessionStorage.setItem("membermd_active_tenant_id", id);
+  } else {
+    sessionStorage.removeItem("membermd_active_tenant_id");
+  }
 }
 
 // ===== Key Transformation (snake_case <-> camelCase) =====
@@ -131,6 +161,16 @@ export async function apiFetch<T>(
 
   if (token) {
     headers["Authorization"] = `Bearer ${token}`;
+  }
+
+  // Operator scope headers — read by App\Http\Middleware\ResolveOperatorScope
+  const operatorId = getActiveOperatorId();
+  if (operatorId) {
+    headers["X-Operator-Id"] = operatorId;
+  }
+  const activeTenantId = getActiveTenantId();
+  if (activeTenantId) {
+    headers["X-Active-Tenant-Id"] = activeTenantId;
   }
 
   try {
@@ -1457,5 +1497,157 @@ export const stripeConnectService = {
 
   disconnect: async (): Promise<ApiResponse<StripeConnectStatusResponse>> => {
     return apiFetch<StripeConnectStatusResponse>("/stripe/connect", { method: "DELETE" });
+  },
+};
+
+// ===== Operator Service (multi-practice operators) =====
+
+export type OperatorRoleApi = "owner" | "admin" | "viewer";
+
+export interface OperatorMe {
+  operator: {
+    id: string;
+    name: string;
+    slug: string;
+    contactEmail: string | null;
+    contactPhone: string | null;
+    website: string | null;
+    defaultBranding: Record<string, unknown> | null;
+    settings: Record<string, unknown> | null;
+    isActive: boolean;
+    tenantCount: number;
+    createdAt: string;
+  };
+  role: OperatorRoleApi;
+  canWrite: boolean;
+  canManageUsers: boolean;
+  tenantIds: string[];
+  activeTenantId: string | null;
+}
+
+export interface OperatorTenant {
+  id: string;
+  name: string;
+  slug: string;
+  specialty: string | null;
+  practiceModel: string | null;
+  tenantCode: string;
+  city: string | null;
+  state: string | null;
+  isActive: boolean;
+  subscriptionStatus: string | null;
+  stripeConnectStatus: string | null;
+  stripeChargesEnabled: boolean;
+  logoUrl: string | null;
+  primaryColor: string | null;
+  patientCount: number | null;
+  providerCount: number | null;
+  userCount: number | null;
+  createdAt: string;
+}
+
+export interface OperatorNetworkMetrics {
+  mrrCents: number;
+  arrCents: number;
+  arpuCents: number;
+  memberCount: number;
+  patientCount: number;
+  churnRate30d: number;
+  newMembers30d: number;
+  cancelled30d: number;
+  tenantCount: number;
+  activeTenantCount: number;
+  window: string;
+  asOf: string;
+}
+
+export interface OperatorClinicMetric {
+  tenantId: string;
+  name: string;
+  city: string | null;
+  state: string | null;
+  isActive: boolean;
+  mrrCents: number;
+  memberCount: number;
+  patientCount: number;
+  arpuCents: number;
+  stripeConnectStatus: string | null;
+}
+
+export interface OperatorMember {
+  patientId: string;
+  tenantId: string;
+  tenantName: string | null;
+  firstName: string;
+  lastName: string;
+  email: string | null;
+  phone: string | null;
+  dateOfBirth: string | null;
+}
+
+export interface OperatorUserMembership {
+  id: string;
+  userId: string;
+  operatorRole: OperatorRoleApi;
+  firstName: string | null;
+  lastName: string | null;
+  email: string | null;
+  addedAt: string;
+}
+
+export const operatorService = {
+  me: async (): Promise<ApiResponse<OperatorMe>> => {
+    return apiFetch<OperatorMe>("/operator/me");
+  },
+
+  tenants: async (): Promise<ApiResponse<OperatorTenant[]>> => {
+    return apiFetch<OperatorTenant[]>("/operator/tenants");
+  },
+
+  show: async (): Promise<ApiResponse<OperatorMe["operator"]>> => {
+    return apiFetch<OperatorMe["operator"]>("/operator");
+  },
+
+  update: async (data: Partial<OperatorMe["operator"]>): Promise<ApiResponse<OperatorMe["operator"]>> => {
+    return apiFetch<OperatorMe["operator"]>("/operator", {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+  },
+
+  listUsers: async (): Promise<ApiResponse<OperatorUserMembership[]>> => {
+    return apiFetch<OperatorUserMembership[]>("/operator/users");
+  },
+
+  addUser: async (input: { email: string; operatorRole: OperatorRoleApi }): Promise<ApiResponse<OperatorUserMembership>> => {
+    return apiFetch<OperatorUserMembership>("/operator/users", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  },
+
+  removeUser: async (userId: string): Promise<ApiResponse<{ message: string }>> => {
+    return apiFetch<{ message: string }>(`/operator/users/${userId}`, {
+      method: "DELETE",
+    });
+  },
+
+  network: async (): Promise<ApiResponse<OperatorNetworkMetrics>> => {
+    return apiFetch<OperatorNetworkMetrics>("/operator/analytics/network");
+  },
+
+  clinics: async (): Promise<ApiResponse<OperatorClinicMetric[]>> => {
+    return apiFetch<OperatorClinicMetric[]>("/operator/analytics/clinics");
+  },
+
+  searchMembers: async (q: string, limit = 25): Promise<ApiResponse<OperatorMember[]>> => {
+    return apiFetch<OperatorMember[]>(`/operator/members/search?q=${encodeURIComponent(q)}&limit=${limit}`);
+  },
+
+  switchTenant: async (tenantId: string): Promise<ApiResponse<{ activeTenantId: string }>> => {
+    return apiFetch<{ activeTenantId: string }>("/auth/switch-tenant", {
+      method: "POST",
+      body: JSON.stringify({ tenantId }),
+    });
   },
 };

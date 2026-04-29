@@ -33,6 +33,9 @@ use App\Http\Controllers\Api\SpecialistDirectoryController;
 use App\Http\Controllers\Api\SmsWebhookController;
 use App\Http\Controllers\Api\StripeConnectController;
 use App\Http\Controllers\Api\StripeWebhookController;
+use App\Http\Controllers\Api\OperatorController;
+use App\Http\Controllers\Api\OperatorAnalyticsController;
+use App\Http\Controllers\Api\OperatorMemberController;
 use App\Http\Controllers\Api\KioskController;
 use App\Http\Controllers\Api\DunningController;
 use App\Http\Controllers\Api\ReportController;
@@ -128,7 +131,7 @@ Route::prefix('public/widget')->middleware('throttle:60,1')->group(function () {
 });
 
 // ===== Authenticated Routes =====
-Route::middleware(['auth:sanctum', 'phi.log'])->group(function () {
+Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function () {
     // Auth
     Route::post('/auth/logout', [AuthController::class, 'logout']);
     Route::get('/auth/me', [AuthController::class, 'me']);
@@ -216,6 +219,25 @@ Route::middleware(['auth:sanctum', 'phi.log'])->group(function () {
         Route::post('/dashboard-link', [StripeConnectController::class, 'createDashboardLink']);
         Route::post('/refresh', [StripeConnectController::class, 'refresh']);
         Route::delete('/', [StripeConnectController::class, 'disconnect']);
+    });
+
+    // ===== Operator-tier (multi-practice operators) =====
+    Route::post('/auth/switch-tenant', [OperatorController::class, 'switchTenant']);
+    Route::prefix('operator')->group(function () {
+        Route::get('/me', [OperatorController::class, 'me']);
+        Route::get('/tenants', [OperatorController::class, 'tenants']);
+        Route::get('/', [OperatorController::class, 'show']);
+        Route::put('/', [OperatorController::class, 'update']);
+        Route::get('/users', [OperatorController::class, 'listUsers']);
+        Route::post('/users', [OperatorController::class, 'addUser']);
+        Route::delete('/users/{userId}', [OperatorController::class, 'removeUser']);
+
+        Route::prefix('analytics')->group(function () {
+            Route::get('/network', [OperatorAnalyticsController::class, 'network']);
+            Route::get('/clinics', [OperatorAnalyticsController::class, 'clinics']);
+        });
+
+        Route::get('/members/search', [OperatorMemberController::class, 'search']);
     });
 
     // ===== Documents =====

@@ -3,8 +3,17 @@
 // Pattern from ShiftPulse/EnnHealth
 
 import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from "react";
-import type { User, UserRole, LoginCredentials } from "../types";
-import { authService, setAuthToken, removeAuthToken, getAuthToken } from "../lib/api";
+import type { User, UserRole, LoginCredentials, OperatorMembership } from "../types";
+import {
+  authService,
+  setAuthToken,
+  removeAuthToken,
+  getAuthToken,
+  setActiveOperatorId,
+  setActiveTenantId,
+  getActiveOperatorId,
+  getActiveTenantId,
+} from "../lib/api";
 
 interface AuthState {
   user: User | null;
@@ -14,6 +23,8 @@ interface AuthState {
   mfaToken: string | null;
   sessionExpiresAt: number | null;
   showSessionWarning: boolean;
+  activeOperatorId: string | null;
+  activeTenantId: string | null;
 }
 
 interface AuthContextValue extends AuthState {
@@ -24,6 +35,14 @@ interface AuthContextValue extends AuthState {
   extendSession: () => void;
   dismissSessionWarning: () => void;
   hasRole: (roles: UserRole | UserRole[]) => boolean;
+  /** Operators this user belongs to, if any. */
+  operators: OperatorMembership[];
+  /** True if the user has at least one operator membership. */
+  isOperatorMember: boolean;
+  /** Switch active operator (when user belongs to multiple). */
+  switchOperator: (operatorId: string) => void;
+  /** Switch active tenant within current operator scope. */
+  switchTenant: (tenantId: string | null) => void;
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -40,6 +59,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     mfaToken: null,
     sessionExpiresAt: null,
     showSessionWarning: false,
+    activeOperatorId: getActiveOperatorId(),
+    activeTenantId: getActiveTenantId(),
   });
 
   // Restore session on mount
@@ -133,6 +154,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (result.data) {
       setAuthToken(result.data.accessToken);
       sessionStorage.setItem("membermd_user", JSON.stringify(result.data.user));
+      const initialOperatorId = result.data.user.operators?.[0]?.id ?? null;
+      setActiveOperatorId(initialOperatorId);
+      setActiveTenantId(null); // user picks tenant or backend defaults to first
       setState(prev => ({
         ...prev,
         user: result.data!.user,
@@ -142,6 +166,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         mfaToken: null,
         sessionExpiresAt: Date.now() + SESSION_DURATION,
         showSessionWarning: false,
+        activeOperatorId: initialOperatorId,
+        activeTenantId: null,
       }));
       return { success: true };
     }
@@ -160,6 +186,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (result.data?.accessToken) {
       setAuthToken(result.data.accessToken);
       sessionStorage.setItem("membermd_user", JSON.stringify(result.data.user));
+      const initialOperatorId = result.data.user.operators?.[0]?.id ?? null;
+      setActiveOperatorId(initialOperatorId);
+      setActiveTenantId(null);
       setState(prev => ({
         ...prev,
         user: result.data!.user,
@@ -168,6 +197,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         mfaToken: null,
         sessionExpiresAt: Date.now() + SESSION_DURATION,
         showSessionWarning: false,
+        activeOperatorId: initialOperatorId,
+        activeTenantId: null,
       }));
       return { success: true };
     }
@@ -186,7 +217,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       mfaToken: null,
       sessionExpiresAt: null,
       showSessionWarning: false,
+      activeOperatorId: null,
+      activeTenantId: null,
     });
+  }, []);
+
+  const switchOperator = useCallback((operatorId: string) => {
+    setActiveOperatorId(operatorId);
+    setActiveTenantId(null);
+    setState(prev => ({ ...prev, activeOperatorId: operatorId, activeTenantId: null }));
+  }, []);
+
+  const switchTenant = useCallback((tenantId: string | null) => {
+    setActiveTenantId(tenantId);
+    setState(prev => ({ ...prev, activeTenantId: tenantId }));
   }, []);
 
   const updateUser = useCallback((updates: Partial<User>) => {
@@ -216,6 +260,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return arr.includes(state.user.role);
   }, [state.user]);
 
+  const operators = state.user?.operators ?? [];
+  const isOperatorMember = operators.length > 0;
+
   return (
     <AuthContext.Provider
       value={{
@@ -227,6 +274,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         extendSession,
         dismissSessionWarning,
         hasRole,
+        operators,
+        isOperatorMember,
+        switchOperator,
+        switchTenant,
       }}
     >
       {children}

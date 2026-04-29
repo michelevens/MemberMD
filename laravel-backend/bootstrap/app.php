@@ -47,6 +47,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->alias([
             'phi.log' => \App\Http\Middleware\PHIAccessLogger::class,
             'security.headers' => \App\Http\Middleware\SecurityHeaders::class,
+            'operator.scope' => \App\Http\Middleware\ResolveOperatorScope::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

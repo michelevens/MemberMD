@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
@@ -66,4 +67,50 @@ class User extends Authenticatable
     public function isPatient(): bool { return $this->role === 'patient'; }
     public function isEmployerAdmin(): bool { return $this->role === 'employer_admin'; }
     public function employer(): BelongsTo { return $this->belongsTo(Employer::class); }
+
+    // ─── Operator membership ───────────────────────────────────────────────
+    // A user may belong to one or more Operators with a per-operator role
+    // (owner / admin / viewer). This is independent of their tenant-level
+    // role (practice_admin, provider, staff, patient, etc.).
+
+    public function operators(): BelongsToMany
+    {
+        return $this->belongsToMany(Operator::class, 'operator_users')
+            ->withPivot('operator_role')
+            ->withTimestamps();
+    }
+
+    public function operatorMemberships(): HasMany
+    {
+        return $this->hasMany(OperatorUser::class);
+    }
+
+    /**
+     * Return [operator_id => operator_role] for all operators this user belongs to.
+     */
+    public function operatorRoles(): array
+    {
+        return $this->operatorMemberships()
+            ->pluck('operator_role', 'operator_id')
+            ->all();
+    }
+
+    public function isOperatorMember(): bool
+    {
+        return $this->operatorMemberships()->exists();
+    }
+
+    /**
+     * Tenant IDs this user can read across via operator membership.
+     * Returns an empty array for users with no operator membership.
+     */
+    public function operatorScopedTenantIds(): array
+    {
+        $operatorIds = array_keys($this->operatorRoles());
+        if (empty($operatorIds)) {
+            return [];
+        }
+
+        return Practice::whereIn('operator_id', $operatorIds)->pluck('id')->all();
+    }
 }

@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use App\Traits\Auditable;
 
@@ -13,6 +14,7 @@ class Practice extends Model
     use HasFactory, HasUuids, Auditable;
 
     protected $fillable = [
+        'operator_id',
         'name', 'slug', 'specialty', 'selected_programs', 'practice_model',
         'phone', 'email', 'website', 'address', 'city', 'state', 'zip',
         'npi', 'tax_id',
@@ -62,10 +64,25 @@ class Practice extends Model
                 } while (static::where('tenant_code', $code)->exists());
                 $practice->tenant_code = $code;
             }
+
+            // Per ADR-0001: every Practice must have an Operator. If one isn't
+            // provided, auto-create a default 1-tenant Operator. Solo customers
+            // never see this distinction; multi-clinic operators get a real one.
+            if (!$practice->operator_id) {
+                $operator = Operator::create([
+                    'name' => $practice->name,
+                    'contact_email' => $practice->email ?? $practice->owner_email,
+                    'contact_phone' => $practice->phone,
+                    'website' => $practice->website,
+                    'is_active' => true,
+                ]);
+                $practice->operator_id = $operator->id;
+            }
         });
     }
 
     // Relationships
+    public function operator(): BelongsTo { return $this->belongsTo(Operator::class); }
     public function users(): HasMany { return $this->hasMany(User::class, 'tenant_id'); }
     public function providers(): HasMany { return $this->hasMany(Provider::class, 'tenant_id'); }
     public function patients(): HasMany { return $this->hasMany(Patient::class, 'tenant_id'); }
