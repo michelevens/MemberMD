@@ -74,11 +74,33 @@ class PatientController extends Controller
     {
         $this->authorize('create', Patient::class);
 
-        $user = $request->user();
-
+        $actor = $request->user();
         $validated = $request->validated();
 
-        $validated['tenant_id'] = $user->tenant_id;
+        // Patients.user_id is NOT NULL — every patient is also a portal
+        // user candidate. If no User exists yet for this email, create one
+        // with a random unguessable password; the patient claims the
+        // account via the password-reset flow.
+        $patientUser = \App\Models\User::where('tenant_id', $actor->tenant_id)
+            ->where('email', $validated['email'])
+            ->first();
+
+        if (!$patientUser) {
+            $patientUser = \App\Models\User::create([
+                'tenant_id' => $actor->tenant_id,
+                'email' => $validated['email'],
+                'password' => \Illuminate\Support\Facades\Hash::make(\Illuminate\Support\Str::random(40)),
+                'first_name' => $validated['first_name'],
+                'last_name' => $validated['last_name'],
+                'name' => trim($validated['first_name'] . ' ' . $validated['last_name']),
+                'phone' => $validated['phone'] ?? null,
+                'role' => 'patient',
+                'status' => 'active',
+            ]);
+        }
+
+        $validated['tenant_id'] = $actor->tenant_id;
+        $validated['user_id'] = $patientUser->id;
         $validated['is_active'] = true;
 
         $patient = Patient::create($validated);

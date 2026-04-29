@@ -1333,6 +1333,10 @@ export function PracticePortal() {
       setAddPatientError("First name, last name, and date of birth are required.");
       return;
     }
+    if (!addPatientForm.email) {
+      setAddPatientError("Email is required — the patient uses it to access the portal.");
+      return;
+    }
     setAddPatientLoading(true);
     setAddPatientError(null);
     try {
@@ -7510,7 +7514,7 @@ export function PracticePortal() {
                 </div>
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Email</label>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Email *</label>
                 <input type="email" className="w-full border rounded-lg px-3 py-2 text-sm" value={addPatientForm.email}
                   onChange={(e) => setAddPatientForm(f => ({ ...f, email: e.target.value }))} placeholder="john@example.com" />
               </div>

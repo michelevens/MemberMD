@@ -109,12 +109,13 @@ class PatientControllerTest extends TestCase
             ->assertJsonPath('data.email', 'john.smith@example.com')
             ->assertJsonPath('data.tenant_id', $practice->id);
 
-        $this->assertDatabaseHas('patients', [
-            'first_name' => 'John',
-            'last_name'  => 'Smith',
-            'email'      => 'john.smith@example.com',
-            'tenant_id'  => $practice->id,
-        ]);
+        // email is encrypted at rest — match plaintext via Eloquent.
+        $patient = \App\Models\Patient::where('tenant_id', $practice->id)
+            ->where('first_name', 'John')
+            ->first();
+        $this->assertNotNull($patient);
+        $this->assertSame('Smith', $patient->last_name);
+        $this->assertSame('john.smith@example.com', $patient->email);
     }
 
     public function test_practice_admin_can_view_patient(): void

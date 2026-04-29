@@ -596,6 +596,61 @@ export const membershipPlanService = {
 
 // ─── Patients ───────────────────────────────────────────────────────────────
 
+/**
+ * Translate the camelCase form payload to the snake_case shape the backend's
+ * StorePatientRequest validator expects. Address fields collapse:
+ * addressLine1 + addressLine2 -> address. Emergency contact fields fold
+ * into emergency_contacts: [{name, phone, relation}].
+ */
+function toPatientApiPayload(input: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  if (input.firstName !== undefined) out.first_name = input.firstName;
+  if (input.lastName !== undefined) out.last_name = input.lastName;
+  if (input.email !== undefined) out.email = input.email;
+  if (input.phone !== undefined) out.phone = input.phone;
+  if (input.dateOfBirth !== undefined) out.date_of_birth = input.dateOfBirth;
+  if (input.gender !== undefined) out.gender = input.gender;
+  if (input.pronouns !== undefined) out.pronouns = input.pronouns;
+  if (input.preferredName !== undefined) out.preferred_name = input.preferredName;
+  if (input.addressLine1 !== undefined || input.addressLine2 !== undefined) {
+    const a1 = (input.addressLine1 as string) || "";
+    const a2 = (input.addressLine2 as string) || "";
+    out.address = [a1, a2].filter(Boolean).join(", ");
+  } else if (input.address !== undefined) {
+    out.address = input.address;
+  }
+  if (input.city !== undefined) out.city = input.city;
+  if (input.state !== undefined) out.state = input.state;
+  if (input.zip !== undefined) out.zip = input.zip;
+  if (input.preferredLanguage !== undefined) out.preferred_language = input.preferredLanguage;
+  if (input.maritalStatus !== undefined) out.marital_status = input.maritalStatus;
+  if (input.employmentStatus !== undefined) out.employment_status = input.employmentStatus;
+  if (Array.isArray(input.emergencyContacts)) {
+    out.emergency_contacts = input.emergencyContacts;
+  } else if (input.emergencyContactName || input.emergencyContactPhone) {
+    out.emergency_contacts = [{
+      name: input.emergencyContactName || "",
+      phone: input.emergencyContactPhone || "",
+      relation: input.emergencyContactRelation || "",
+    }];
+  }
+  if (Array.isArray(input.allergies)) out.allergies = input.allergies;
+  if (Array.isArray(input.currentMedications)) out.medications = input.currentMedications;
+  if (Array.isArray(input.medications)) out.medications = input.medications;
+  if (Array.isArray(input.chronicConditions)) out.primary_diagnoses = input.chronicConditions;
+  if (Array.isArray(input.primaryDiagnoses)) out.primary_diagnoses = input.primaryDiagnoses;
+  if (input.primaryCarePhysician !== undefined) out.primary_care_physician = input.primaryCarePhysician;
+  if (input.pcpPhone !== undefined) out.pcp_phone = input.pcpPhone;
+  if (input.referringProvider !== undefined) out.referring_provider = input.referringProvider;
+  if (input.insurancePrimary !== undefined) out.insurance_primary = input.insurancePrimary;
+  if (input.insuranceSecondary !== undefined) out.insurance_secondary = input.insuranceSecondary;
+  if (input.pharmacyName !== undefined) out.pharmacy_name = input.pharmacyName;
+  if (input.pharmacyAddress !== undefined) out.pharmacy_address = input.pharmacyAddress;
+  if (input.pharmacyPhone !== undefined) out.pharmacy_phone = input.pharmacyPhone;
+  if (input.referralSource !== undefined) out.referral_source = input.referralSource;
+  return out;
+}
+
 export const patientService = {
   list: async (params?: Record<string, string>): Promise<ApiResponse<Patient[]>> => {
     if (useMockData()) return { data: [] };
@@ -606,13 +661,13 @@ export const patientService = {
     if (useMockData()) return { data: {} as Patient };
     return apiFetch<Patient>(`/patients/${id}`);
   },
-  create: async (data: Partial<Patient>): Promise<ApiResponse<Patient>> => {
-    if (useMockData()) return mockCreate<Patient>(data);
-    return apiFetch<Patient>("/patients", { method: "POST", body: JSON.stringify(data) });
+  create: async (data: Record<string, unknown>): Promise<ApiResponse<Patient>> => {
+    if (useMockData()) return mockCreate<Patient>(data as Partial<Patient>);
+    return apiFetch<Patient>("/patients", { method: "POST", body: JSON.stringify(toPatientApiPayload(data)) });
   },
-  update: async (id: string, data: Partial<Patient>): Promise<ApiResponse<Patient>> => {
-    if (useMockData()) return mockUpdate<Patient>(data);
-    return apiFetch<Patient>(`/patients/${id}`, { method: "PUT", body: JSON.stringify(data) });
+  update: async (id: string, data: Record<string, unknown>): Promise<ApiResponse<Patient>> => {
+    if (useMockData()) return mockUpdate<Patient>(data as Partial<Patient>);
+    return apiFetch<Patient>(`/patients/${id}`, { method: "PUT", body: JSON.stringify(toPatientApiPayload(data)) });
   },
   delete: async (id: string): Promise<ApiResponse<void>> => {
     if (useMockData()) return mockDelete();
