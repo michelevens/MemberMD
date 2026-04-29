@@ -921,18 +921,9 @@ export function PracticePortal() {
       })));
     }
     // Encounters (API returns paginated)
-    {
-      const status = encountersRes.status;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const dataPreview = status === "fulfilled" ? JSON.stringify((encountersRes as any).value?.data ?? null).slice(0, 300) : "rejected";
-      // eslint-disable-next-line no-console
-      console.log("[MemberMD][load] encounters " + status + " preview=" + dataPreview);
-    }
     if (encountersRes.status === "fulfilled" && encountersRes.value.data) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const encList = Array.isArray(encountersRes.value.data) ? encountersRes.value.data : (encountersRes.value.data as any).data || [];
-      // eslint-disable-next-line no-console
-      console.log("[MemberMD][load] encList length=" + encList.length + " first=" + (encList[0] ? JSON.stringify(encList[0]).slice(0, 200) : "none"));
       setApiEncounters(encList.map((e: any) => ({
         id: e.id,
         date: e.encounterDate ? new Date(e.encounterDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : e.date || "",
@@ -1447,9 +1438,6 @@ export function PracticePortal() {
         status: "in_progress",
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } as any);
-      // eslint-disable-next-line no-console
-      console.log("[MemberMD][encounter.create] response=" + JSON.stringify(res).slice(0, 800));
-
       if (res.data && (res.data as { id?: string }).id) {
         setActiveTab("encounters");
         setToast({ message: "Encounter created. Fill in the SOAP note below.", type: "success" });
@@ -5958,6 +5946,15 @@ export function PracticePortal() {
     ] : [];
 
     const encounterTypeConfig: Record<string, { bg: string; text: string }> = {
+      // Backend enum values (StoreEncounterRequest):
+      office_visit: { bg: "#e0e8f0", text: "#334e68" },
+      follow_up: { bg: "#e6f7f2", text: "#147d64" },
+      telehealth: { bg: "#f3e8ff", text: "#7c3aed" },
+      phone: { bg: "#fef3c7", text: "#92400e" },
+      urgent: { bg: "#fee2e2", text: "#b91c1c" },
+      annual_wellness: { bg: "#fffbeb", text: "#d97706" },
+      procedure: { bg: "#dbeafe", text: "#1e40af" },
+      // Legacy / display-side aliases kept so older data still gets a chip:
       Initial: { bg: "#e6f7f2", text: "#147d64" },
       "Follow-Up": { bg: "#e0e8f0", text: "#334e68" },
       "Med Mgmt": { bg: "#fffbeb", text: "#d97706" },
@@ -6040,8 +6037,13 @@ export function PracticePortal() {
                   <tr><td colSpan={9} className="py-8 text-center text-slate-400 text-sm">No encounters yet. Click "New Encounter" to document a visit.</td></tr>
                 )}
                 {(apiEncounters || mockPracticeEncounters).map((enc) => {
+                  // Defensive lookups: if enc.type / enc.status come back
+                  // as a value not in the config (e.g. "office_visit"
+                  // wasn't here, "draft" is), fall back instead of
+                  // throwing — one bad row used to take down the whole
+                  // table.
                   const tc = encounterTypeConfig[enc.type] || encounterTypeConfig["Follow-Up"];
-                  const esc = encounterStatusConfig[enc.status];
+                  const esc = encounterStatusConfig[enc.status] || encounterStatusConfig.draft;
                   const pbc = programBadgeConfig[enc.program] || { bg: "#e0e8f0", text: "#334e68" };
                   return (
                     <tr key={enc.id} className="border-t border-slate-100 hover:bg-slate-50 transition-colors">
@@ -7712,14 +7714,17 @@ export function PracticePortal() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Encounter Type</label>
+                  {/* Values must match StoreEncounterRequest::rules() enum:
+                      office_visit, telehealth, phone, urgent, follow_up,
+                      annual_wellness, procedure. */}
                   <select className="w-full border rounded-lg px-3 py-2 text-sm" value={encounterForm.encounterType} onChange={e => setEncounterForm(f => ({ ...f, encounterType: e.target.value }))}>
-                    <option value="initial_eval">Initial Evaluation</option>
+                    <option value="office_visit">Office Visit</option>
                     <option value="follow_up">Follow-Up</option>
-                    <option value="med_management">Med Management</option>
-                    <option value="therapy">Therapy</option>
-                    <option value="crisis">Crisis</option>
-                    <option value="care_coordination">Care Coordination</option>
-                    <option value="device_review">Device Review</option>
+                    <option value="telehealth">Telehealth</option>
+                    <option value="phone">Phone</option>
+                    <option value="urgent">Urgent</option>
+                    <option value="annual_wellness">Annual Wellness</option>
+                    <option value="procedure">Procedure</option>
                   </select>
                 </div>
                 <div>
