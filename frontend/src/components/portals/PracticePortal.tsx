@@ -1438,16 +1438,25 @@ export function PracticePortal() {
         status: "in_progress",
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } as any);
-      if (res.data || !res.error) {
+      if (res.data && res.data.id) {
+        // Navigate to the Encounters tab BEFORE opening the SOAP
+        // editor — the inline editor only renders inside
+        // renderEncounters(). Previously, the editor opened invisibly
+        // on whatever tab the user was on, which is why "Fill in
+        // the SOAP note below" appeared but no editor showed up.
+        setActiveTab("encounters");
         setToast({ message: "Encounter created. Fill in the SOAP note below.", type: "success" });
         setShowNewEncounter(false);
-        const encId = res.data?.id || `new-enc-${Date.now()}`;
-        setEditingEncounterId(encId);
+        setEditingEncounterId(res.data.id);
         setSoapForm({ subjective: "", objective: "", assessment: "", plan: "", chiefComplaint: "" });
         setEncounterForm({ patientId: "", encounterType: "follow_up", programId: "", encounterDate: new Date().toISOString().split("T")[0] });
-        loadPracticeData();
+        // Refresh the list so the new encounter shows up in the table.
+        await loadPracticeData();
       } else {
-        setToast({ message: res.error || "Failed to create encounter.", type: "error" });
+        // Anything that isn't a clear success — including 422 with no
+        // data, or 201 with a missing id — surfaces as an error so the
+        // SOAP editor doesn't open against a non-existent encounter id.
+        setToast({ message: res.error || "Encounter create returned an unexpected response. Try again.", type: "error" });
       }
     } catch (err: unknown) {
       setToast({ message: err instanceof Error ? err.message : "Failed to create encounter.", type: "error" });
@@ -1521,13 +1530,16 @@ export function PracticePortal() {
         status: "active",
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } as any);
-      if (res.data || !res.error) {
+      if (res.data && res.data.id) {
+        // Navigate to the Prescriptions tab so the user can see their
+        // newly-created Rx in the list. Same UX gap as encounters had.
+        setActiveTab("prescriptions");
         setToast({ message: "Prescription created successfully.", type: "success" });
         setShowNewPrescription(false);
         setRxForm({ patientId: "", medicationName: "", dosage: "", frequency: "", route: "oral", quantity: "30", refills: "3", isControlled: false, schedule: "", pharmacyName: "", pharmacyPhone: "", notes: "" });
-        loadPracticeData();
+        await loadPracticeData();
       } else {
-        setToast({ message: res.error || "Failed to create prescription.", type: "error" });
+        setToast({ message: res.error || "Prescription create returned an unexpected response. Try again.", type: "error" });
       }
     } catch (err: unknown) {
       setToast({ message: err instanceof Error ? err.message : "Failed to create prescription.", type: "error" });
