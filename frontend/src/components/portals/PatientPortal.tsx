@@ -8,6 +8,7 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../contexts/AuthContext";
 import { HeaderToolbar } from "../shared/HeaderToolbar";
 import { AppointmentBookingWidget } from "../widgets/AppointmentBookingWidget";
+import { ProfilePage } from "../profile/ProfilePage";
 import {
   familyService,
   appointmentService,
@@ -47,7 +48,7 @@ import {
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
-type TabId = "home" | "appointments" | "messages" | "health" | "account";
+type TabId = "home" | "appointments" | "messages" | "health" | "account" | "profile";
 
 interface Appointment {
   id: string;
@@ -1857,6 +1858,8 @@ export function PatientPortal() {
         return renderHealth();
       case "account":
         return renderAccount();
+      case "profile":
+        return <ProfilePage onBack={() => setActiveTab("home")} />;
       default:
         return renderHome();
     }

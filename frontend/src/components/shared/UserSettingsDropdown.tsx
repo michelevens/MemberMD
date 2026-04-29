@@ -183,21 +183,19 @@ export function UserSettingsDropdown({ variant, onNavigateToProfile }: UserSetti
             </div>
           </div>
 
-          {/* Variant-specific section */}
-          {variant === "superadmin" && (
-            <div className="px-4 py-2.5" style={{ borderBottom: `1px solid ${COLORS.slate200}` }}>
-              <div className="flex items-center gap-2 mb-1.5">
-                <Shield className="w-3.5 h-3.5" style={{ color: COLORS.slate400 }} />
-                <span className="text-xs" style={{ color: COLORS.slate500 }}>MemberMD v1.0</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="w-2 h-2 rounded-full" style={{ backgroundColor: COLORS.green500 }} />
-                <span className="text-xs font-medium" style={{ color: COLORS.green500 }}>
-                  All Systems Operational
-                </span>
-              </div>
+          {/* System status — shown for all variants */}
+          <div className="px-4 py-2.5" style={{ borderBottom: `1px solid ${COLORS.slate200}` }}>
+            <div className="flex items-center gap-2 mb-1.5">
+              <Shield className="w-3.5 h-3.5" style={{ color: COLORS.slate400 }} />
+              <span className="text-xs" style={{ color: COLORS.slate500 }}>MemberMD v1.0</span>
             </div>
-          )}
+            <div className="flex items-center gap-2">
+              <div className="w-2 h-2 rounded-full" style={{ backgroundColor: COLORS.green500 }} />
+              <span className="text-xs font-medium" style={{ color: COLORS.green500 }}>
+                All Systems Operational
+              </span>
+            </div>
+          </div>
 
           {variant === "practice" && (
             <div className="px-4 py-2.5" style={{ borderBottom: `1px solid ${COLORS.slate200}` }}>
@@ -302,16 +300,15 @@ export function UserSettingsDropdown({ variant, onNavigateToProfile }: UserSetti
               </>
             )}
 
-            {variant === "superadmin" && (
-              <button
-                onClick={() => { showToast("System health dashboard"); setIsOpen(false); }}
-                className="w-full text-left px-4 py-2 text-sm flex items-center gap-3 transition-colors hover:bg-slate-50"
-                style={{ color: COLORS.slate600 }}
-              >
-                <CheckCircle2 className="w-4 h-4" style={{ color: COLORS.slate400 }} />
-                System Status
-              </button>
-            )}
+            {/* System Status — shown for all variants */}
+            <button
+              onClick={() => { showToast("All systems operational"); setIsOpen(false); }}
+              className="w-full text-left px-4 py-2 text-sm flex items-center gap-3 transition-colors hover:bg-slate-50"
+              style={{ color: COLORS.slate600 }}
+            >
+              <CheckCircle2 className="w-4 h-4" style={{ color: COLORS.slate400 }} />
+              System Status
+            </button>
           </div>
 
           {/* Divider */}

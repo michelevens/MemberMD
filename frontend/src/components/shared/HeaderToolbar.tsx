@@ -411,7 +411,10 @@ export function HeaderToolbar({ variant, onNavigate }: HeaderToolbarProps) {
       </button>
 
       {/* User Dropdown */}
-      <UserSettingsDropdown variant={variant} />
+      <UserSettingsDropdown
+        variant={variant}
+        onNavigateToProfile={onNavigate ? () => onNavigate("profile") : undefined}
+      />
     </div>
   );
 }

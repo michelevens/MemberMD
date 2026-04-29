@@ -7,6 +7,7 @@ import { ProgramTemplatesTab } from "./ProgramTemplatesTab";
 import { HeaderToolbar } from "../shared/HeaderToolbar";
 import { PlatformSettings } from "../settings/PlatformSettings";
 import { UserSettingsDropdown } from "../shared/UserSettingsDropdown";
+import { ProfilePage } from "../profile/ProfilePage";
 import {
   LayoutDashboard,
   Building2,
@@ -85,7 +86,8 @@ type TabId =
   | "billing"
   | "support"
   | "audit-logs"
-  | "settings";
+  | "settings"
+  | "profile";
 
 interface NavItem {
   id: TabId;
@@ -1188,7 +1190,7 @@ export function SuperAdminPortal() {
 
         {/* User section */}
         <div className="border-t border-white/10 px-4 py-3">
-          <UserSettingsDropdown variant="superadmin" />
+          <UserSettingsDropdown variant="superadmin" onNavigateToProfile={() => setActiveTab("profile")} />
         </div>
       </aside>
     );
@@ -4010,6 +4012,8 @@ export function SuperAdminPortal() {
         return renderSupport();
       case "settings":
         return <PlatformSettings />;
+      case "profile":
+        return <ProfilePage onBack={() => setActiveTab("dashboard")} />;
       default:
         return renderDashboard();
     }
