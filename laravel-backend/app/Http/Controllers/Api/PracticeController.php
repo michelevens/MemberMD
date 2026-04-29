@@ -81,4 +81,35 @@ class PracticeController extends Controller
 
         return response()->json(['data' => $practice]);
     }
+
+    /**
+     * Update branding (logo, colors) for the current practice. Used by
+     * the email-template preview and any other place that renders
+     * practice-aware visuals. Practice admins only.
+     */
+    public function updateBranding(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        abort_if(!$user->isPracticeAdmin() && !$user->isSuperAdmin(), 403);
+
+        $validated = $request->validate([
+            'primary_color' => ['nullable', 'string', 'regex:/^#[0-9a-fA-F]{6}$/'],
+            'accent_color' => ['nullable', 'string', 'regex:/^#[0-9a-fA-F]{6}$/'],
+            'logo_url' => ['nullable', 'url', 'max:1000'],
+        ]);
+
+        $practice = Practice::findOrFail($user->tenant_id);
+
+        // Merge with existing branding instead of overwriting — admin
+        // can update one field at a time without losing the others.
+        $current = (array) ($practice->branding ?? []);
+        $merged = array_filter(
+            array_merge($current, $validated),
+            fn ($v) => $v !== null
+        );
+
+        $practice->update(['branding' => $merged]);
+
+        return response()->json(['data' => $practice->fresh()]);
+    }
 }

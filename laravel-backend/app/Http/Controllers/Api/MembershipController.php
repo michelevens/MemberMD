@@ -105,9 +105,19 @@ class MembershipController extends Controller
             'rollover_visits' => 0,
         ]);
 
-        return response()->json([
-            'data' => $membership->load(['patient', 'plan', 'entitlements'])
-        ], 201);
+        $membership->load(['patient', 'plan', 'entitlements']);
+
+        // Welcome the patient — their plan is live and they should
+        // know what they can do next.
+        if ($membership->patient && $membership->patient->email) {
+            \App\Services\MailDispatcher::send(
+                $membership->patient->email,
+                new \App\Mail\MembershipActivated(membership: $membership),
+                'membership-activated',
+            );
+        }
+
+        return response()->json(['data' => $membership], 201);
     }
 
     public function update(Request $request, string $id): JsonResponse

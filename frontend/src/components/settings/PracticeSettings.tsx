@@ -2,7 +2,8 @@
 // Practice-level settings: Practice Info, Branding, Scheduling, Membership,
 // Notifications, Team, Compliance, Integrations
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { apiFetch } from "../../lib/api";
 import {
   Building2,
   Palette,
@@ -397,10 +398,49 @@ export function PracticeSettings({ initialTab }: { initialTab?: string }) {
 
   const markChanged = () => { if (!hasChanges) setHasChanges(true); };
 
-  const handleSave = () => {
-    showToast("Settings saved");
+  const handleSave = async () => {
+    // Branding is the only tab currently wired to the backend. The
+    // others retain their stub-save behavior until each is moved off
+    // local-only state.
+    if (activeTab === "branding") {
+      const res = await apiFetch<{ branding?: Record<string, unknown> }>(
+        "/practice/branding",
+        {
+          method: "PUT",
+          body: JSON.stringify({
+            primary_color: primaryColor,
+            accent_color: secondaryColor || accentColor,
+            logo_url: logoUrl || null,
+          }),
+        }
+      );
+      if (res.error) {
+        showToast(res.error);
+        return;
+      }
+      showToast("Branding saved");
+    } else {
+      showToast("Settings saved");
+    }
     setHasChanges(false);
   };
+
+  // Load branding from the backend on mount so the form reflects what's
+  // actually persisted, not just the placeholder defaults.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const res = await apiFetch<{ branding?: Record<string, string> }>("/practice/me");
+      if (cancelled || res.error || !res.data) return;
+      const b = (res.data as { branding?: Record<string, string> }).branding;
+      if (!b) return;
+      if (b.primary_color) setPrimaryColor(b.primary_color);
+      if (b.accent_color) setSecondaryColor(b.accent_color);
+      if (b.logo_url) setLogoUrl(b.logo_url);
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ─── Practice Info State ─────────────────────────────────────────────────
   const [practiceName, setPracticeName] = useState("Clearstone Group");
@@ -557,6 +597,7 @@ export function PracticeSettings({ initialTab }: { initialTab?: string }) {
 
   // ─── Tab: Branding ───────────────────────────────────────────────────────
   function renderBranding() {
+    const apiBase = (import.meta.env.VITE_API_URL || "/api").replace(/\/$/, "");
     return (
       <>
         <SectionCard title="Colors">
@@ -565,6 +606,10 @@ export function PracticeSettings({ initialTab }: { initialTab?: string }) {
             <ColorPicker label="Secondary Color" value={secondaryColor} onChange={set(setSecondaryColor)} />
             <ColorPicker label="Accent Color" value={accentColor} onChange={set(setAccentColor)} />
           </div>
+          <p className="text-xs mt-3" style={{ color: C.slate500 }}>
+            Primary color drives buttons and CTAs in patient-facing emails. Secondary is the email header gradient base.
+            Save your changes, then click <a href={`${apiBase}/admin/email-preview`} target="_blank" rel="noreferrer" style={{ color: C.teal600, textDecoration: "underline" }}>Preview emails</a> to see how they look.
+          </p>
         </SectionCard>
 
         <SectionCard title="Logo">

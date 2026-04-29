@@ -236,23 +236,20 @@ class AuthController extends Controller
             \Illuminate\Support\Facades\Log::warning('Provider creation during registration failed: ' . $e->getMessage());
         }
 
-        // Send welcome email
-        try {
-            \Illuminate\Support\Facades\Mail::raw(
-                "Welcome to MemberMD!\n\n" .
-                "Your practice \"{$practice->name}\" has been created successfully.\n\n" .
-                "Practice Code: {$practice->tenant_code}\n" .
-                "Login: {$validated['email']}\n\n" .
-                "Get started at https://app.membermd.io\n\n" .
-                "— The MemberMD Team",
-                function ($message) use ($validated, $practice) {
-                    $message->to($validated['email'])
-                        ->subject("Welcome to MemberMD — {$practice->name} is ready!");
-                }
-            );
-        } catch (\Throwable $e) {
-            \Illuminate\Support\Facades\Log::warning('Welcome email failed: ' . $e->getMessage());
-        }
+        // Send branded welcome email — Mailable + Blade template, with
+        // per-practice branding injected by the View::composer so the
+        // email matches the practice's logo/colors immediately.
+        \App\Services\MailDispatcher::send(
+            $validated['email'],
+            new \App\Mail\WelcomeEmail(
+                user: $user,
+                practice: $practice,
+                planCount: $provisioningSummary['plans'] ?? 0,
+                appointmentTypeCount: $provisioningSummary['appointment_types'] ?? 0,
+                screeningCount: $provisioningSummary['screening_templates'] ?? 0,
+            ),
+            'practice-welcome',
+        );
 
         $user->update(['last_login_at' => now()]);
 
@@ -487,6 +484,15 @@ class AuthController extends Controller
         Cache::forget($cacheKey);
 
         $this->logSecurityEvent('mfa_enabled', $request, $user->tenant_id, $user->id);
+
+        // Send confirmation — security-sensitive change, the user should
+        // know it happened. If they DIDN'T do this, the email is the
+        // canary that lets them react before the attacker locks them out.
+        \App\Services\MailDispatcher::send(
+            $user->email,
+            new \App\Mail\MfaEnabledMail(user: $user, ipAddress: $request->ip() ?? 'unknown'),
+            'mfa-enabled',
+        );
 
         return response()->json([
             'data' => [

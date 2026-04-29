@@ -163,6 +163,7 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
 
     // Practice: own practice
     Route::get('/practice/me', [PracticeController::class, 'myPractice']);
+    Route::put('/practice/branding', [PracticeController::class, 'updateBranding']);
 
     // Master Data (SuperAdmin)
     Route::get('/admin/master-data/specialties', [MasterDataController::class, 'specialties']);

@@ -204,11 +204,30 @@ class AppointmentController extends Controller
 
         $this->authorize('delete', $appointment);
 
+        $reason = $request->input('cancel_reason', 'Cancelled by user');
+
         $appointment->update([
             'status' => 'cancelled',
-            'cancel_reason' => $request->input('cancel_reason', 'Cancelled by user'),
+            'cancel_reason' => $reason,
             'cancelled_at' => now(),
         ]);
+
+        // Notify the patient. A patient cancelling their own appointment
+        // gets a confirming "we got it" email; a staff cancellation gets
+        // a "we had to cancel, please rebook" email — same template,
+        // different copy controlled by the byPatient flag.
+        $appointment->loadMissing('patient');
+        if ($appointment->patient && $appointment->patient->email) {
+            \App\Services\MailDispatcher::send(
+                $appointment->patient->email,
+                new \App\Mail\AppointmentCanceled(
+                    appointment: $appointment,
+                    reason: $reason,
+                    byPatient: $user->isPatient(),
+                ),
+                'appointment-canceled',
+            );
+        }
 
         return response()->json(['data' => ['message' => 'Appointment cancelled.']]);
     }
@@ -305,6 +324,8 @@ class AppointmentController extends Controller
             ], 422);
         }
 
+        $oldScheduledAt = $appointment->scheduled_at;
+
         $appointment->update([
             'scheduled_at' => $validated['scheduled_at'],
             'duration_minutes' => $duration,
@@ -313,8 +334,23 @@ class AppointmentController extends Controller
                 : $appointment->notes,
         ]);
 
+        $fresh = $appointment->fresh()->load(['patient', 'provider.user', 'appointmentType']);
+
+        // Notify the patient of the new time. The mailable receives the
+        // OLD scheduled_at so the email can show "Was: ... → Now: ..."
+        if ($fresh->patient && $fresh->patient->email) {
+            \App\Services\MailDispatcher::send(
+                $fresh->patient->email,
+                new \App\Mail\AppointmentRescheduled(
+                    appointment: $fresh,
+                    oldScheduledAt: (string) $oldScheduledAt,
+                ),
+                'appointment-rescheduled',
+            );
+        }
+
         return response()->json([
-            'data' => $appointment->fresh()->load(['patient', 'provider.user', 'appointmentType']),
+            'data' => $fresh,
         ]);
     }
 
