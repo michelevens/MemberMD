@@ -20,6 +20,7 @@ import {
   messageService,
   prescriptionService,
   documentService,
+  patientService,
   dashboardService,
   authService,
   telehealthService,
@@ -87,6 +88,9 @@ interface MessageThread {
   timestamp: string;
   unread: boolean;
   messages: Message[];
+  /** Counterpart user id — needed when patient replies. Best-effort: set from
+      the most recent inbound message's sender_id. May be null on demo data. */
+  recipientId?: string | null;
 }
 
 interface Medication {
@@ -503,7 +507,17 @@ export function PatientPortal() {
 
   const [activeThread, setActiveThread] = useState<string | null>(null);
   const [messageInput, setMessageInput] = useState("");
+  const [sendingMessage, setSendingMessage] = useState(false);
+  const [refillingId, setRefillingId] = useState<string | null>(null);
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [expandedVisit, setExpandedVisit] = useState<string | null>(null);
+  const [profileEditOpen, setProfileEditOpen] = useState<null | "personal" | "emergency" | "pharmacy">(null);
+  // Lightweight flash banner — appears top-right, auto-dismisses in 3s.
+  const [flash, setFlash] = useState<{ kind: "success" | "error"; text: string } | null>(null);
+  const showFlash = useCallback((kind: "success" | "error", text: string) => {
+    setFlash({ kind, text });
+    setTimeout(() => setFlash(null), 3000);
+  }, []);
   const [notifPrefs, setNotifPrefs] = useState({
     appointments: true,
     billing: true,
@@ -658,6 +672,12 @@ export function PatientPortal() {
             });
             const threads: MessageThread[] = Object.entries(grouped).map(([tid, msgs]) => {
               const last = msgs[msgs.length - 1];
+              // Counterpart = sender_id of the latest inbound (provider->patient)
+              // message. Used as the recipient_id when the patient replies.
+              const inbound = [...msgs].reverse().find(
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                (m: any) => ((m.senderType ?? m.sender_type) || "provider") !== "patient",
+              );
               return {
                 id: tid,
                 providerName: last.senderName || last.sender_name || last.providerName || last.provider_name || "Provider",
@@ -665,6 +685,7 @@ export function PatientPortal() {
                 lastMessage: last.body || last.text || last.content || "",
                 timestamp: last.createdAt || last.created_at || last.timestamp || "",
                 unread: msgs.some((m: Record<string, unknown>) => !(m.isRead ?? m.is_read)),
+                recipientId: inbound?.senderId || inbound?.sender_id || null,
                 messages: msgs.map((m: Record<string, unknown>) => ({
                   id: (m.id as string) || "",
                   text: (m.body as string) || (m.text as string) || (m.content as string) || "",
@@ -734,6 +755,116 @@ export function PatientPortal() {
   }, []);
 
   useEffect(() => { loadPatientData(); }, [loadPatientData]);
+
+  // ─── Action handlers ─────────────────────────────────────────────────────
+
+  const handleSendMessage = useCallback(async () => {
+    const body = messageInput.trim();
+    if (!body || sendingMessage) return;
+    if (!activeThread) return;
+    const thread = (apiThreads ?? []).find((t) => t.id === activeThread)
+      ?? (isUsingMockData() ? MESSAGE_THREADS.find((t) => t.id === activeThread) : undefined);
+    if (!thread?.recipientId) {
+      // No counterpart user_id (demo data) — just append optimistically.
+      setApiThreads((prev) => {
+        const list = prev ?? [];
+        return list.map((t) =>
+          t.id === activeThread
+            ? {
+                ...t,
+                messages: [
+                  ...t.messages,
+                  { id: `local-${Date.now()}`, text: body, sender: "patient" as const, timestamp: new Date().toISOString() },
+                ],
+                lastMessage: body,
+                timestamp: new Date().toISOString(),
+              }
+            : t,
+        );
+      });
+      setMessageInput("");
+      return;
+    }
+    setSendingMessage(true);
+    try {
+      const r = await messageService.send({
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        recipientId: thread.recipientId as any,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        threadId: activeThread as any,
+        body,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      } as any);
+      if (r.error) {
+        showFlash("error", r.error);
+        return;
+      }
+      // Optimistic append + refresh in the background
+      setApiThreads((prev) => {
+        const list = prev ?? [];
+        return list.map((t) =>
+          t.id === activeThread
+            ? {
+                ...t,
+                messages: [
+                  ...t.messages,
+                  { id: r.data?.id || `local-${Date.now()}`, text: body, sender: "patient" as const, timestamp: new Date().toISOString() },
+                ],
+                lastMessage: body,
+                timestamp: new Date().toISOString(),
+              }
+            : t,
+        );
+      });
+      setMessageInput("");
+    } catch (e) {
+      showFlash("error", e instanceof Error ? e.message : "Send failed");
+    } finally {
+      setSendingMessage(false);
+    }
+  }, [messageInput, sendingMessage, activeThread, apiThreads, showFlash]);
+
+  const handleRefill = useCallback(async (medId: string) => {
+    if (refillingId) return;
+    setRefillingId(medId);
+    try {
+      const r = await prescriptionService.refill(medId);
+      if (r.error) {
+        showFlash("error", r.error);
+        return;
+      }
+      showFlash("success", "Refill request sent — your provider will review shortly.");
+    } catch (e) {
+      showFlash("error", e instanceof Error ? e.message : "Refill request failed");
+    } finally {
+      setRefillingId(null);
+    }
+  }, [refillingId, showFlash]);
+
+  const handleDownload = useCallback(async (docId: string, filename: string) => {
+    if (downloadingId) return;
+    setDownloadingId(docId);
+    try {
+      const r = await documentService.download(docId);
+      if (r.error || !r.data) {
+        showFlash("error", r.error || "Download failed");
+        return;
+      }
+      const blob = r.data as Blob;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename || "document";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      showFlash("error", e instanceof Error ? e.message : "Download failed");
+    } finally {
+      setDownloadingId(null);
+    }
+  }, [downloadingId, showFlash]);
 
   // ─── Resolved data ───────────────────────────────────────────────────────
   // Mock fallbacks are demo-only. In production, real users with empty data
@@ -1008,6 +1139,7 @@ export function PatientPortal() {
                 </button>
               ) : (
                 <button
+                  onClick={() => { setActiveTab("appointments"); setExpandedVisit(apt.id); }}
                   className="shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold border"
                   style={{ color: COLORS.teal600, borderColor: COLORS.teal500 }}
                 >
@@ -1385,20 +1517,33 @@ export function PatientPortal() {
             className="pt-3 border-t flex items-center gap-2"
             style={{ borderColor: COLORS.slate200 }}
           >
-            <button className="p-2 rounded-full hover:bg-slate-100">
+            <button
+              onClick={() => showFlash("error", "File attachments are coming soon — for now please paste a description in the message body.")}
+              className="p-2 rounded-full hover:bg-slate-100"
+              title="Attach a file (coming soon)"
+            >
               <Paperclip className="w-5 h-5" style={{ color: COLORS.slate400 }} />
             </button>
             <input
               type="text"
               value={messageInput}
               onChange={(e) => setMessageInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey && messageInput.trim() && !sendingMessage) {
+                  e.preventDefault();
+                  void handleSendMessage();
+                }
+              }}
               placeholder="Type a message..."
               className="flex-1 bg-slate-100 rounded-full px-4 py-2.5 text-sm outline-none"
               style={{ color: COLORS.navy800 }}
             />
             <button
-              className="p-2.5 rounded-full text-white"
+              onClick={() => void handleSendMessage()}
+              disabled={!messageInput.trim() || sendingMessage}
+              className="p-2.5 rounded-full text-white disabled:opacity-50"
               style={{ backgroundColor: COLORS.teal500 }}
+              aria-label="Send message"
             >
               <Send className="w-4 h-4" />
             </button>
@@ -1446,10 +1591,12 @@ export function PatientPortal() {
                 </p>
               </div>
               <button
-                className="shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold border"
+                onClick={() => void handleRefill(med.id)}
+                disabled={refillingId === med.id}
+                className="shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold border disabled:opacity-50"
                 style={{ borderColor: COLORS.teal500, color: COLORS.teal600 }}
               >
-                Refill
+                {refillingId === med.id ? "..." : "Refill"}
               </button>
             </div>
           ))}
@@ -1617,7 +1764,12 @@ export function PatientPortal() {
                   </p>
                 </div>
               </div>
-              <button className="p-2 rounded-lg hover:bg-slate-100">
+              <button
+                onClick={() => void handleDownload(doc.id, doc.name)}
+                disabled={downloadingId === doc.id}
+                className="p-2 rounded-lg hover:bg-slate-100 disabled:opacity-50"
+                aria-label={`Download ${doc.name}`}
+              >
                 <Download className="w-4 h-4" style={{ color: COLORS.teal500 }} />
               </button>
             </div>
@@ -1641,7 +1793,11 @@ export function PatientPortal() {
           <h3 className="text-sm font-semibold" style={{ color: COLORS.navy800 }}>
             Personal Information
           </h3>
-          <button className="text-xs font-semibold" style={{ color: COLORS.teal500 }}>
+          <button
+            onClick={() => setActiveTab("profile")}
+            className="text-xs font-semibold"
+            style={{ color: COLORS.teal500 }}
+          >
             Edit
           </button>
         </div>
@@ -1679,7 +1835,11 @@ export function PatientPortal() {
           <h3 className="text-sm font-semibold" style={{ color: COLORS.navy800 }}>
             Emergency Contact
           </h3>
-          <button className="text-xs font-semibold" style={{ color: COLORS.teal500 }}>
+          <button
+            onClick={() => setProfileEditOpen("emergency")}
+            className="text-xs font-semibold"
+            style={{ color: COLORS.teal500 }}
+          >
             Edit
           </button>
         </div>
@@ -1710,7 +1870,11 @@ export function PatientPortal() {
           <h3 className="text-sm font-semibold" style={{ color: COLORS.navy800 }}>
             Preferred Pharmacy
           </h3>
-          <button className="text-xs font-semibold" style={{ color: COLORS.teal500 }}>
+          <button
+            onClick={() => setProfileEditOpen("pharmacy")}
+            className="text-xs font-semibold"
+            style={{ color: COLORS.teal500 }}
+          >
             Change
           </button>
         </div>
@@ -1865,6 +2029,154 @@ export function PatientPortal() {
         }))}
         onSelect={(id) => setActiveTab(id as TabId)}
       />
+
+      {/* Flash banner (top-right). 3s auto-dismiss; setFlash(null) on click. */}
+      {flash && (
+        <div
+          onClick={() => setFlash(null)}
+          className="fixed top-5 right-5 z-50 px-4 py-3 rounded-xl shadow-2xl text-sm font-medium cursor-pointer max-w-sm"
+          style={{
+            backgroundColor: flash.kind === "success" ? "#ecf9ec" : "#fef2f2",
+            color: flash.kind === "success" ? "#147d64" : "#b91c1c",
+            border: `1px solid ${flash.kind === "success" ? "#a7e3c4" : "#fecaca"}`,
+          }}
+          role="alert"
+        >
+          {flash.text}
+        </div>
+      )}
+
+      {/* Emergency contact / pharmacy edit dialog — minimal inline form
+          that updates the patient profile via patientService.update.
+          Falls back to a "contact your practice" message if the patient
+          row hasn't loaded (demo-only path). */}
+      {profileEditOpen && (
+        <PatientFieldEditDialog
+          mode={profileEditOpen}
+          patient={patient}
+          onClose={() => setProfileEditOpen(null)}
+          onSaved={(text) => {
+            setProfileEditOpen(null);
+            showFlash("success", text);
+            loadPatientData();
+          }}
+          onError={(text) => showFlash("error", text)}
+        />
+      )}
     </>
+  );
+}
+
+// ─── Inline edit dialog for emergency contact / pharmacy ────────────────────
+//
+// Renders a simple modal with the relevant fields, calls patientService.update
+// with the right payload shape on save. Kept inline because no other portal
+// page needs this; if a third call site appears, lift it into shared/.
+
+interface PatientFieldEditDialogProps {
+  mode: "personal" | "emergency" | "pharmacy";
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  patient: any;
+  onClose: () => void;
+  onSaved: (msg: string) => void;
+  onError: (msg: string) => void;
+}
+
+function PatientFieldEditDialog({ mode, patient, onClose, onSaved, onError }: PatientFieldEditDialogProps) {
+  const initial: Record<string, string> = mode === "emergency"
+    ? {
+        emergency_contact_name: String(patient.emergencyContact?.name ?? ""),
+        emergency_contact_relationship: String(patient.emergencyContact?.relationship ?? ""),
+        emergency_contact_phone: String(patient.emergencyContact?.phone ?? ""),
+      }
+    : {
+        pharmacy_name: String(patient.pharmacy?.name ?? ""),
+        pharmacy_address: String(patient.pharmacy?.address ?? ""),
+        pharmacy_phone: String(patient.pharmacy?.phone ?? ""),
+      };
+  const [values, setValues] = useState<Record<string, string>>(initial);
+  const [saving, setSaving] = useState(false);
+
+  const set = (k: string, v: string) => setValues((prev) => ({ ...prev, [k]: v }));
+
+  const handleSave = async () => {
+    if (!patient.id) {
+      onError("No patient record found — please contact your practice to update this.");
+      return;
+    }
+    setSaving(true);
+    try {
+      const r = await patientService.update(patient.id, values);
+      if (r.error) {
+        onError(r.error);
+        return;
+      }
+      onSaved(mode === "emergency" ? "Emergency contact updated." : "Pharmacy updated.");
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "Update failed");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const fields = mode === "emergency"
+    ? [
+        { key: "emergency_contact_name", label: "Name" },
+        { key: "emergency_contact_relationship", label: "Relationship" },
+        { key: "emergency_contact_phone", label: "Phone" },
+      ]
+    : [
+        { key: "pharmacy_name", label: "Pharmacy name" },
+        { key: "pharmacy_address", label: "Address" },
+        { key: "pharmacy_phone", label: "Phone" },
+      ];
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      style={{ backgroundColor: "rgba(16, 42, 67, 0.5)" }}
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-md bg-white rounded-2xl shadow-2xl p-6"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h3 className="text-lg font-bold mb-4" style={{ color: "#102a43" }}>
+          {mode === "emergency" ? "Edit Emergency Contact" : "Change Preferred Pharmacy"}
+        </h3>
+        <div className="space-y-3">
+          {fields.map((f) => (
+            <div key={f.key}>
+              <label className="block text-xs font-medium mb-1" style={{ color: "#475569" }}>
+                {f.label}
+              </label>
+              <input
+                type="text"
+                value={values[f.key] ?? ""}
+                onChange={(e) => set(f.key, e.target.value)}
+                className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400"
+              />
+            </div>
+          ))}
+        </div>
+        <div className="flex justify-end gap-2 mt-5">
+          <button
+            onClick={onClose}
+            disabled={saving}
+            className="px-4 py-2 rounded-lg text-sm font-medium border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => void handleSave()}
+            disabled={saving}
+            className="px-4 py-2 rounded-lg text-sm font-medium text-white disabled:opacity-50"
+            style={{ backgroundColor: "#27ab83" }}
+          >
+            {saving ? "Saving…" : "Save"}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
