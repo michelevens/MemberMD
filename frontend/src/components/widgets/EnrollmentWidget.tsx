@@ -4,9 +4,10 @@
 
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
-import { Check, ChevronLeft, ChevronRight, ArrowRight } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, ArrowRight, FileText, X } from "lucide-react";
 import { useWidgetTheme } from "../../hooks/useWidgetTheme";
-import { widgetAnalyticsService } from "../../lib/api";
+import { widgetAnalyticsService, consentService, type PublicConsentTemplate } from "../../lib/api";
+import { AgreementBody } from "../shared/AgreementBody";
 
 // ─── Config ─────────────────────────────────────────────────────────────────
 
@@ -78,11 +79,13 @@ interface FormData {
   emergencyContactName: string;
   emergencyContactRelationship: string;
   emergencyContactPhone: string;
-  // Step 5
+  // Step 5 (legacy hardcoded — still used as fallback when template fetch fails)
   consentHipaa: boolean;
   consentTreatment: boolean;
   consentFinancial: boolean;
   consentTelehealth: boolean;
+  // Step 5 (dynamic) — per-template acknowledgements keyed by slug
+  consents: Record<string, boolean>;
   signatureData: string;
   // Honeypot
   websiteUrl: string;
@@ -112,6 +115,7 @@ const INITIAL_FORM: FormData = {
   consentTreatment: false,
   consentFinancial: false,
   consentTelehealth: false,
+  consents: {},
   signatureData: "",
   websiteUrl: "",
 };
@@ -189,6 +193,11 @@ export function EnrollmentWidget() {
   const [memberId, setMemberId] = useState("");
   const [errors, setErrors] = useState<Record<string, string>>({});
 
+  // Dynamic consent templates loaded from /external/consent-templates/{tenantCode}.
+  // Falls back to legacy hardcoded checkboxes if the fetch fails.
+  const [templates, setTemplates] = useState<PublicConsentTemplate[]>([]);
+  const [previewTemplate, setPreviewTemplate] = useState<PublicConsentTemplate | null>(null);
+
   const isEmbedded = useMemo(() => {
     try {
       return window.parent !== window;
@@ -236,6 +245,24 @@ export function EnrollmentWidget() {
       })
       .finally(() => setLoading(false));
   }, [tenantCode]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Fetch consent templates for the preview modal. Independent of plan fetch
+  // — failure here just means the legacy 4-checkbox fallback runs.
+  useEffect(() => {
+    if (!tenantCode) return;
+    let cancelled = false;
+    consentService.publicForEnrollment(tenantCode).then((res) => {
+      if (cancelled || !res.data) return;
+      const sorted = [...res.data].sort((a, b) => a.display_order - b.display_order);
+      setTemplates(sorted);
+      // Initialize per-template acknowledgement state to false for each.
+      setForm((prev) => ({
+        ...prev,
+        consents: sorted.reduce((acc, t) => ({ ...acc, [t.slug]: false }), {} as Record<string, boolean>),
+      }));
+    }).catch(() => { /* legacy fallback path */ });
+    return () => { cancelled = true; };
+  }, [tenantCode]);
 
   function preSelectPlan(planList: Plan[]) {
     if (planParam) {
@@ -285,9 +312,21 @@ export function EnrollmentWidget() {
     }
 
     if (step === 4) {
-      if (!form.consentHipaa) errs.consentHipaa = "HIPAA consent is required";
-      if (!form.consentTreatment) errs.consentTreatment = "Treatment consent is required";
-      if (!form.consentFinancial) errs.consentFinancial = "Financial consent is required";
+      // When dynamic templates loaded: every is_required template must be
+      // acknowledged. When the fetch failed we fall through to the legacy
+      // hardcoded checks.
+      if (templates.length > 0) {
+        const requiredUnchecked = templates
+          .filter((t) => t.is_required)
+          .filter((t) => !form.consents[t.slug]);
+        if (requiredUnchecked.length > 0) {
+          errs.consents = `Please acknowledge: ${requiredUnchecked.map((t) => t.name).join(", ")}`;
+        }
+      } else {
+        if (!form.consentHipaa) errs.consentHipaa = "HIPAA consent is required";
+        if (!form.consentTreatment) errs.consentTreatment = "Treatment consent is required";
+        if (!form.consentFinancial) errs.consentFinancial = "Financial consent is required";
+      }
       if (!form.signatureData.trim()) errs.signatureData = "Signature is required";
     }
 
@@ -317,11 +356,20 @@ export function EnrollmentWidget() {
     if (!validateStep()) return;
     setSubmitting(true);
 
-    const consents: string[] = [];
-    if (form.consentHipaa) consents.push("hipaa");
-    if (form.consentTreatment) consents.push("treatment");
-    if (form.consentFinancial) consents.push("financial");
-    if (form.consentTelehealth) consents.push("telehealth");
+    // Build the list of acknowledged consent slugs. Prefer the dynamic
+    // template state when loaded; fall back to the legacy hardcoded fields
+    // so existing tenants without our new endpoint still work.
+    let consents: string[] = [];
+    if (templates.length > 0) {
+      consents = templates
+        .filter((t) => form.consents[t.slug])
+        .map((t) => t.slug);
+    } else {
+      if (form.consentHipaa) consents.push("hipaa");
+      if (form.consentTreatment) consents.push("treatment");
+      if (form.consentFinancial) consents.push("financial");
+      if (form.consentTelehealth) consents.push("telehealth");
+    }
 
     const body = {
       plan_id: form.planId,
@@ -744,50 +792,76 @@ export function EnrollmentWidget() {
   }
 
   function renderStep4() {
+    const useDynamic = templates.length > 0;
+
     return (
       <div>
         <h3 className="text-lg font-semibold mb-1" style={{ color: C.navy900 }}>
-          Consent & Agreement
+          Agreements & Consents
         </h3>
         <p className="text-sm mb-5" style={{ color: C.slate500 }}>
-          Please review and agree to the following
+          Click <strong>Preview</strong> to read each document in full before checking the box.
         </p>
 
-        <div className="space-y-4">
-          <ConsentCheckbox
-            checked={form.consentHipaa}
-            error={errors.consentHipaa}
-            onChange={(v) => updateField("consentHipaa", v)}
-            label="HIPAA Notice of Privacy Practices"
-            description="I acknowledge receipt of the Notice of Privacy Practices and understand how my health information may be used and disclosed."
-          />
-          <ConsentCheckbox
-            checked={form.consentTreatment}
-            error={errors.consentTreatment}
-            onChange={(v) => updateField("consentTreatment", v)}
-            label="Consent to Treatment"
-            description="I consent to examination, testing, and treatment as deemed necessary by my healthcare provider."
-          />
-          <ConsentCheckbox
-            checked={form.consentFinancial}
-            error={errors.consentFinancial}
-            onChange={(v) => updateField("consentFinancial", v)}
-            label="Financial Agreement"
-            description="I understand the membership fees, billing terms, and cancellation policy associated with this plan."
-          />
-          <ConsentCheckbox
-            checked={form.consentTelehealth}
-            onChange={(v) => updateField("consentTelehealth", v)}
-            label="Telehealth Consent (Optional)"
-            description="I consent to receive healthcare services via telehealth technology when appropriate."
-          />
+        <div className="space-y-3">
+          {useDynamic
+            ? templates.map((t) => (
+                <ConsentCardWithPreview
+                  key={t.slug}
+                  template={t}
+                  checked={!!form.consents[t.slug]}
+                  onChange={(v) =>
+                    setForm((prev) => ({
+                      ...prev,
+                      consents: { ...prev.consents, [t.slug]: v },
+                    }))
+                  }
+                  onPreview={() => setPreviewTemplate(t)}
+                />
+              ))
+            : (
+              <>
+                {/* Legacy hardcoded fallback when /external/consent-templates fails */}
+                <ConsentCheckbox
+                  checked={form.consentHipaa}
+                  error={errors.consentHipaa}
+                  onChange={(v) => updateField("consentHipaa", v)}
+                  label="HIPAA Notice of Privacy Practices"
+                  description="I acknowledge receipt of the Notice of Privacy Practices and understand how my health information may be used and disclosed."
+                />
+                <ConsentCheckbox
+                  checked={form.consentTreatment}
+                  error={errors.consentTreatment}
+                  onChange={(v) => updateField("consentTreatment", v)}
+                  label="Consent to Treatment"
+                  description="I consent to examination, testing, and treatment as deemed necessary by my healthcare provider."
+                />
+                <ConsentCheckbox
+                  checked={form.consentFinancial}
+                  error={errors.consentFinancial}
+                  onChange={(v) => updateField("consentFinancial", v)}
+                  label="Financial Agreement"
+                  description="I understand the membership fees, billing terms, and cancellation policy associated with this plan."
+                />
+                <ConsentCheckbox
+                  checked={form.consentTelehealth}
+                  onChange={(v) => updateField("consentTelehealth", v)}
+                  label="Telehealth Consent (Optional)"
+                  description="I consent to receive healthcare services via telehealth technology when appropriate."
+                />
+              </>
+            )}
+
+          {errors.consents && (
+            <p className="text-xs mt-1" style={{ color: C.red500 }}>{errors.consents}</p>
+          )}
 
           <div className="mt-6">
             <label className="block text-sm font-medium mb-1.5" style={{ color: C.navy800 }}>
               Electronic Signature *
             </label>
             <p className="text-xs mb-2" style={{ color: C.slate500 }}>
-              Type your full legal name to sign
+              Type your full legal name to sign all checked agreements above.
             </p>
             <input
               type="text"
@@ -807,6 +881,14 @@ export function EnrollmentWidget() {
             )}
           </div>
         </div>
+
+        {/* Preview modal */}
+        {previewTemplate && (
+          <AgreementPreviewModal
+            template={previewTemplate}
+            onClose={() => setPreviewTemplate(null)}
+          />
+        )}
       </div>
     );
   }
@@ -1111,6 +1193,180 @@ function ReviewItem({ label, value }: { label: string; value: string }) {
     <div>
       <span className="text-xs" style={{ color: C.slate400 }}>{label}: </span>
       <span className="text-sm" style={{ color: C.navy900 }}>{value}</span>
+    </div>
+  );
+}
+
+/**
+ * One row in the consent list — shows the template's name + description,
+ * a Preview button that opens the modal, and a checkbox the patient
+ * checks AFTER reading. Required vs optional is communicated via badge.
+ */
+function ConsentCardWithPreview({
+  template,
+  checked,
+  onChange,
+  onPreview,
+}: {
+  template: PublicConsentTemplate;
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  onPreview: () => void;
+}) {
+  return (
+    <div
+      className="rounded-lg border p-4"
+      style={{
+        borderColor: checked ? C.teal500 : C.slate200,
+        backgroundColor: checked ? "rgba(39, 171, 131, 0.04)" : C.white,
+      }}
+    >
+      <div className="flex items-start gap-3">
+        <input
+          type="checkbox"
+          checked={checked}
+          onChange={(e) => onChange(e.target.checked)}
+          className="mt-0.5"
+          style={{ width: "18px", height: "18px", accentColor: C.teal500, cursor: "pointer" }}
+        />
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <p className="text-sm font-semibold" style={{ color: C.navy900 }}>
+              {template.name}
+            </p>
+            {template.is_required ? (
+              <span
+                className="text-xs font-semibold px-2 py-0.5 rounded"
+                style={{ backgroundColor: "#fef3c7", color: "#92400e" }}
+              >
+                Required
+              </span>
+            ) : (
+              <span
+                className="text-xs px-2 py-0.5 rounded"
+                style={{ backgroundColor: C.slate100, color: C.slate500 }}
+              >
+                Optional
+              </span>
+            )}
+            <span className="text-xs" style={{ color: C.slate400 }}>
+              v{template.version}
+            </span>
+          </div>
+          {template.description && (
+            <p className="text-xs mt-1" style={{ color: C.slate500 }}>
+              {template.description}
+            </p>
+          )}
+          <button
+            type="button"
+            onClick={onPreview}
+            className="inline-flex items-center gap-1.5 mt-2 text-xs font-semibold transition-colors hover:underline"
+            style={{ color: C.teal600 }}
+          >
+            <FileText className="w-3.5 h-3.5" />
+            Preview full document
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Modal showing the template's full body (rendered Markdown). Patient
+ * scrolls through the legal text. Closing the modal does NOT auto-check
+ * the agreement — the patient still has to click the box themselves on
+ * the underlying step. That's deliberate: a "by viewing this you agree"
+ * flow doesn't survive a court challenge.
+ */
+function AgreementPreviewModal({
+  template,
+  onClose,
+}: {
+  template: PublicConsentTemplate;
+  onClose: () => void;
+}) {
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: "fixed",
+        inset: 0,
+        backgroundColor: "rgba(15, 23, 42, 0.55)",
+        backdropFilter: "blur(4px)",
+        zIndex: 50,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: "16px",
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          backgroundColor: C.white,
+          borderRadius: "12px",
+          maxWidth: "780px",
+          width: "100%",
+          maxHeight: "90vh",
+          display: "flex",
+          flexDirection: "column",
+          boxShadow: "0 20px 50px rgba(0,0,0,0.25)",
+        }}
+      >
+        <div
+          style={{
+            padding: "16px 20px",
+            borderBottom: "1px solid " + C.slate200,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+          }}
+        >
+          <div>
+            <h3 className="text-base font-semibold" style={{ color: C.navy900 }}>
+              {template.name}
+            </h3>
+            <p className="text-xs mt-0.5" style={{ color: C.slate500 }}>
+              Version {template.version}
+              {template.is_required ? " · Required" : " · Optional"}
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-1.5 rounded-lg transition-colors hover:bg-slate-100"
+            aria-label="Close"
+          >
+            <X className="w-4 h-4" style={{ color: C.slate500 }} />
+          </button>
+        </div>
+        <div
+          style={{
+            padding: "20px 24px",
+            overflowY: "auto",
+            flex: 1,
+          }}
+        >
+          <AgreementBody content={template.content} />
+        </div>
+        <div
+          style={{
+            padding: "12px 20px",
+            borderTop: "1px solid " + C.slate200,
+            backgroundColor: C.slate50,
+            textAlign: "right",
+          }}
+        >
+          <button
+            onClick={onClose}
+            className="px-4 py-2 rounded-lg text-sm font-medium text-white transition-opacity hover:opacity-90"
+            style={{ backgroundColor: C.teal500 }}
+          >
+            Done — return to checklist
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

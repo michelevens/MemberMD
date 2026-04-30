@@ -1115,29 +1115,139 @@ export const paymentService = {
 
 // ─── Consent ────────────────────────────────────────────────────────────────
 
+/**
+ * Public-facing consent template payload returned by
+ *   GET /external/consent-templates/{tenantCode}
+ * Used by the enrollment widget to render previews. Slugs are stable
+ * across versions — UI keys off slug, not id.
+ */
+export interface PublicConsentTemplate {
+  id: string;
+  slug: string;
+  name: string;
+  description: string | null;
+  type: string;
+  content: string;
+  version: string;
+  version_int: number;
+  is_required: boolean;
+  display_order: number;
+}
+
 export const consentService = {
-  listTemplates: async (): Promise<ApiResponse<ConsentTemplate[]>> => {
+  /** Public — fetched by EnrollmentWidget for the preview modal. */
+  publicForEnrollment: async (tenantCode: string): Promise<ApiResponse<PublicConsentTemplate[]>> => {
     if (useMockData()) return { data: [] };
-    return apiFetch<ConsentTemplate[]>("/consent-templates");
+    return apiFetch<PublicConsentTemplate[]>(`/external/consent-templates/${tenantCode}`);
   },
-  createTemplate: async (data: Partial<ConsentTemplate>): Promise<ApiResponse<ConsentTemplate>> => {
-    if (useMockData()) return mockCreate<ConsentTemplate>(data);
+
+  /**
+   * Practice admin — split response: tenant-customized templates and
+   * platform templates the admin can fork+edit.
+   */
+  listTemplates: async (): Promise<ApiResponse<{
+    tenant: ConsentTemplate[];
+    platform_available_to_fork: ConsentTemplate[];
+  }>> => {
+    if (useMockData()) return { data: { tenant: [], platform_available_to_fork: [] } };
+    return apiFetch(`/consent-templates`);
+  },
+  getTemplate: async (id: string): Promise<ApiResponse<ConsentTemplate>> => {
+    if (useMockData()) return { data: {} as ConsentTemplate };
+    return apiFetch<ConsentTemplate>(`/consent-templates/${id}`);
+  },
+  createTemplate: async (data: Partial<ConsentTemplate> & {
+    content: string;
+    parent_template_id?: string | null;
+    type?: string;
+    description?: string | null;
+    is_required?: boolean;
+    display_order?: number;
+    slug?: string | null;
+  }): Promise<ApiResponse<ConsentTemplate>> => {
+    if (useMockData()) return mockCreate<ConsentTemplate>(data as Partial<ConsentTemplate>);
     return apiFetch<ConsentTemplate>("/consent-templates", { method: "POST", body: JSON.stringify(data) });
   },
   updateTemplate: async (id: string, data: Partial<ConsentTemplate>): Promise<ApiResponse<ConsentTemplate>> => {
     if (useMockData()) return mockUpdate<ConsentTemplate>(data);
     return apiFetch<ConsentTemplate>(`/consent-templates/${id}`, { method: "PUT", body: JSON.stringify(data) });
   },
-  listSignatures: async (patientId?: string): Promise<ApiResponse<ConsentSignature[]>> => {
-    if (useMockData()) return { data: [] };
-    const query = patientId ? `?patient_id=${patientId}` : "";
-    return apiFetch<ConsentSignature[]>(`/consent-signatures${query}`);
+  /** Bumps version, supersedes the current template, keeps existing signatures locked. */
+  publishVersion: async (id: string, content: string, description?: string): Promise<ApiResponse<ConsentTemplate>> => {
+    if (useMockData()) return mockUpdate<ConsentTemplate>({ id });
+    return apiFetch<ConsentTemplate>(`/consent-templates/${id}/publish-version`, {
+      method: "POST",
+      body: JSON.stringify({ content, description }),
+    });
   },
+  deleteTemplate: async (id: string): Promise<ApiResponse<{ message: string }>> => {
+    if (useMockData()) return { data: { message: "Mocked." } };
+    return apiFetch(`/consent-templates/${id}`, { method: "DELETE" });
+  },
+
+  /** Patient or admin — list signed consents. Patient only sees their own. */
+  listSignatures: async (params?: { patient_id?: string; template_id?: string; membership_id?: string }): Promise<ApiResponse<ConsentSignature[]>> => {
+    if (useMockData()) return { data: [] };
+    const q = params ? "?" + new URLSearchParams(params as Record<string, string>).toString() : "";
+    return apiFetch<ConsentSignature[]>(`/consent-signatures${q}`);
+  },
+  getSignature: async (id: string): Promise<ApiResponse<ConsentSignature>> => {
+    if (useMockData()) return { data: {} as ConsentSignature };
+    return apiFetch<ConsentSignature>(`/consent-signatures/${id}`);
+  },
+  /**
+   * Returns the absolute URL for the signed-agreement PDF. Caller opens
+   * in a new tab or anchors a link. Bearer token isn't part of the URL —
+   * downloads must go through fetch with auth header for now.
+   */
+  signaturePdfUrl: (id: string): string => {
+    const base = (typeof import.meta !== "undefined" ? (import.meta as { env?: { VITE_API_URL?: string } }).env?.VITE_API_URL : null) || "";
+    return `${base}/consent-signatures/${id}/pdf`;
+  },
+  /** Same for the membership-level agreement PDF (whole contract). */
+  membershipAgreementPdfUrl: (membershipId: string): string => {
+    const base = (typeof import.meta !== "undefined" ? (import.meta as { env?: { VITE_API_URL?: string } }).env?.VITE_API_URL : null) || "";
+    return `${base}/memberships/${membershipId}/agreement-pdf`;
+  },
+  /**
+   * Authenticated PDF download. Fetches as blob with the bearer token,
+   * triggers browser save. Use this from buttons; the signaturePdfUrl
+   * helper is only useful for embedding in <iframe> previews etc.
+   */
+  downloadSignaturePdf: async (id: string, filename = "agreement.pdf"): Promise<void> => {
+    return downloadAuthenticatedFile(`/consent-signatures/${id}/pdf`, filename);
+  },
+  downloadMembershipAgreementPdf: async (membershipId: string, filename = "membership-agreement.pdf"): Promise<void> => {
+    return downloadAuthenticatedFile(`/memberships/${membershipId}/agreement-pdf`, filename);
+  },
+
   sign: async (data: Partial<ConsentSignature>): Promise<ApiResponse<ConsentSignature>> => {
     if (useMockData()) return mockCreate<ConsentSignature>(data);
     return apiFetch<ConsentSignature>("/consent-signatures", { method: "POST", body: JSON.stringify(data) });
   },
 };
+
+/**
+ * Fetch a binary endpoint with the auth token and trigger a browser
+ * download. Used by signed-PDF download buttons.
+ */
+async function downloadAuthenticatedFile(path: string, filename: string): Promise<void> {
+  const base = (typeof import.meta !== "undefined" ? (import.meta as { env?: { VITE_API_URL?: string } }).env?.VITE_API_URL : null) || "";
+  const token = localStorage.getItem("auth_token") ?? localStorage.getItem("token") ?? "";
+  const res = await fetch(`${base}${path}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) throw new Error(`Download failed: ${res.status}`);
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
 
 // ─── Documents ──────────────────────────────────────────────────────────────
 

@@ -13,6 +13,7 @@ import { AddAllergyDialog, type AllergyEntry } from "../clinical/AddAllergyDialo
 import { AddMeasureDialog } from "../clinical/AddMeasureDialog";
 import { AIDocumentationAssistant } from "../clinical/AIDocumentationAssistant";
 import { CareTimeline, generateDemoTimelineEvents } from "../clinical/CareTimeline";
+import { PatientConsentsTab } from "./practice/PatientConsentsTab";
 import { PracticeSettings } from "../settings/PracticeSettings";
 import { CalendarView } from "../shared/CalendarView";
 import { AppointmentBookingWidget } from "../widgets/AppointmentBookingWidget";
@@ -3972,59 +3973,7 @@ export function PracticePortal() {
 
         {/* Consents — placeholder list with request flow. */}
         {patientDetailTab === "consents" && (
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="font-semibold text-slate-800">Consents & Authorizations</h3>
-              <button
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white transition-colors"
-                style={{ backgroundColor: "#27ab83" }}
-                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#147d64")}
-                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "#27ab83")}
-                onClick={() => setToast({ message: "Request Consent flow — coming soon.", type: "success" })}
-              >
-                <Send className="w-3.5 h-3.5" /> Request Consent
-              </button>
-            </div>
-            <div className="glass rounded-xl divide-y divide-slate-100">
-              {[
-                { name: "HIPAA Authorization", status: "signed", date: pt.memberSince || "—" },
-                { name: "Telehealth Consent", status: "signed", date: pt.memberSince || "—" },
-                { name: "Treatment Consent", status: "signed", date: pt.memberSince || "—" },
-                { name: "Release of Information", status: "pending", date: "—" },
-                { name: "Financial Responsibility", status: "signed", date: pt.memberSince || "—" },
-              ].map((c, idx) => {
-                const isSigned = c.status === "signed";
-                return (
-                  <div key={idx} className="flex items-center justify-between p-4 hover:bg-slate-50 transition-colors">
-                    <div className="flex items-center gap-3">
-                      <div
-                        className="w-9 h-9 rounded-lg flex items-center justify-center"
-                        style={{ backgroundColor: isSigned ? "#ecf9ec" : "#fffbeb" }}
-                      >
-                        <Shield className="w-4 h-4" style={{ color: isSigned ? "#2f8132" : "#d97706" }} />
-                      </div>
-                      <div>
-                        <p className="text-sm font-medium text-slate-700">{c.name}</p>
-                        <p className="text-xs text-slate-400">
-                          {isSigned ? `Signed ${c.date}` : "Awaiting patient signature"}
-                        </p>
-                      </div>
-                    </div>
-                    <span
-                      className="px-2.5 py-1 rounded text-xs font-semibold"
-                      style={
-                        isSigned
-                          ? { backgroundColor: "#ecf9ec", color: "#2f8132" }
-                          : { backgroundColor: "#fffbeb", color: "#d97706" }
-                      }
-                    >
-                      {isSigned ? "Signed" : "Pending"}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
+          <PatientConsentsTab patientId={pt.id} setToast={setToast} />
         )}
 
         {/* Care Team — assigned providers + external contacts. */}

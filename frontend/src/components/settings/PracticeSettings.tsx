@@ -35,6 +35,7 @@ import {
 } from "lucide-react";
 import { PaymentSetup } from "./PaymentSetup";
 import { BrandedWidgets } from "./BrandedWidgets";
+import { AgreementEditor } from "./AgreementEditor";
 
 // ─── Colors ──────────────────────────────────────────────────────────────────
 
@@ -71,6 +72,7 @@ type PracticeTab =
   | "membership"
   | "payments"
   | "clinical"
+  | "agreements"
   | "notifications"
   | "team"
   | "compliance"
@@ -106,6 +108,7 @@ const TAB_CONFIG: { id: PracticeTab; label: string; icon: React.ElementType }[] 
   { id: "membership", label: "Membership", icon: CreditCard },
   { id: "payments", label: "Payments", icon: Wallet },
   { id: "clinical", label: "Clinical Config", icon: Stethoscope },
+  { id: "agreements", label: "Agreements", icon: FileText },
   { id: "notifications", label: "Notifications", icon: Bell },
   { id: "team", label: "Team", icon: Users },
   { id: "compliance", label: "Compliance", icon: Shield },
@@ -1873,6 +1876,7 @@ export function PracticeSettings({ initialTab }: { initialTab?: string }) {
       case "membership": return renderMembership();
       case "payments": return <PaymentSetup />;
       case "clinical": return renderClinical();
+      case "agreements": return <AgreementEditor />;
       case "notifications": return renderNotifications();
       case "team": return renderTeam();
       case "compliance": return renderCompliance();

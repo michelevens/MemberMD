@@ -21,6 +21,7 @@ import {
   paymentMethodService,
   entitlementService,
 } from "../../../lib/api";
+import { MyAgreementsSection } from "./MyAgreementsSection";
 import type { PatientMembership, Invoice, PatientEntitlement } from "../../../types";
 
 // ─── Colors ─────────────────────────────────────────────────────────────────
@@ -391,6 +392,9 @@ export function BillingTab() {
           </div>
         )}
       </div>
+
+      {/* ── My Agreements ─────────────────────────────────────────────────── */}
+      <MyAgreementsSection />
 
       {/* ── Dialogs ───────────────────────────────────────────────────────── */}
       {cardsOpen && (
