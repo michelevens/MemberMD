@@ -8,6 +8,7 @@ import { ProviderDetailPage } from "./ProviderDetailPage";
 import { useAuth } from "../../contexts/AuthContext";
 import { dashboardService, membershipPlanService, messageService, patientService, appointmentService, encounterService, prescriptionService, invoiceService, programService, telehealthService, screeningService, couponService, providerService, paymentService, notificationService, apiFetch, billingEnhancedService } from "../../lib/api";
 import { PortalShell, type NavSection as ShellNavSection, type PortalColor } from "../shared/PortalShell";
+import { CommandPalette, useCommandPaletteShortcut } from "../shared/CommandPalette";
 import { PracticeSettings } from "../settings/PracticeSettings";
 import { CalendarView } from "../shared/CalendarView";
 import { AppointmentBookingWidget } from "../widgets/AppointmentBookingWidget";
@@ -7265,6 +7266,20 @@ export function PracticePortal() {
     : portalRole === "superadmin" ? "Superadmin"
     : "Practice Admin";
 
+  // Command palette — Cmd+K / Ctrl+K opens it. Items are derived from
+  // the same role-filtered NAV_SECTIONS so admins/providers/staff each
+  // see only the destinations they can actually reach.
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  useCommandPaletteShortcut(() => setPaletteOpen(true));
+  const paletteItems = filteredSections.flatMap((section) =>
+    section.items.map((it) => ({
+      id: it.id,
+      label: it.label,
+      hint: section.label,
+      icon: it.icon,
+    })),
+  );
+
   return (
     <>
       <PortalShell
@@ -8343,6 +8358,14 @@ export function PracticePortal() {
           </div>
         </div>
       )}
+
+      {/* Command Palette — Cmd+K / Ctrl+K to jump to any section. */}
+      <CommandPalette
+        open={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+        items={paletteItems}
+        onSelect={(id) => setActiveTab(id as TabId)}
+      />
     </>
   );
 }

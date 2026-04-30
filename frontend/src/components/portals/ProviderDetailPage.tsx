@@ -305,7 +305,7 @@ function OverviewTab({ provider }: { provider: Provider }) {
         {stats.map(s => {
           const Icon = s.icon;
           return (
-            <div key={s.label} className="bg-white rounded-2xl border border-slate-200 p-5">
+            <div key={s.label} className="glass rounded-2xl border border-gray-200/50 p-5">
               <div className="flex items-center gap-2 text-slate-500 text-xs font-medium mb-2">
                 <Icon className="w-3.5 h-3.5" />
                 {s.label}
@@ -316,7 +316,7 @@ function OverviewTab({ provider }: { provider: Provider }) {
         })}
       </div>
 
-      <div className="bg-white rounded-2xl border border-slate-200 p-6">
+      <div className="glass rounded-2xl border border-gray-200/50 p-6">
         <h3 className="text-sm font-semibold text-slate-900 mb-4">Provider info</h3>
         <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3 text-sm">
           <InfoRow label="Title" value={provider.title} />
@@ -411,7 +411,7 @@ function ProfileTab({ provider, onSaved, setToast }: ProfileTabProps) {
   };
 
   return (
-    <div className="bg-white rounded-2xl border border-slate-200 p-6 max-w-3xl">
+    <div className="glass rounded-2xl border border-gray-200/50 p-6 max-w-3xl">
       <h3 className="text-sm font-semibold text-slate-900 mb-1">Edit profile</h3>
       <p className="text-xs text-slate-500 mb-6">Update the provider's identity, credentials, and bio.</p>
 
@@ -553,7 +553,7 @@ function ScheduleTab({ providerId, setToast }: ScheduleTabProps) {
   }
 
   return (
-    <div className="bg-white rounded-2xl border border-slate-200 p-6 max-w-3xl">
+    <div className="glass rounded-2xl border border-gray-200/50 p-6 max-w-3xl">
       <h3 className="text-sm font-semibold text-slate-900 mb-1">Weekly schedule</h3>
       <p className="text-xs text-slate-500 mb-6">Set the hours this provider is available for appointments. Toggle a day off to mark it unavailable.</p>
 
@@ -643,7 +643,7 @@ function PanelTab({ providerId }: { providerId: string }) {
   }
 
   return (
-    <div className="bg-white rounded-2xl border border-slate-200 p-6">
+    <div className="glass rounded-2xl border border-gray-200/50 p-6">
       <div className="flex items-center justify-between gap-4 mb-6">
         <div>
           <h3 className="text-sm font-semibold text-slate-900">Patient panel</h3>
@@ -741,7 +741,7 @@ function AppointmentsTab({ providerId }: { providerId: string }) {
   const list = view === "upcoming" ? partitioned.upcoming : partitioned.past;
 
   return (
-    <div className="bg-white rounded-2xl border border-slate-200 p-6">
+    <div className="glass rounded-2xl border border-gray-200/50 p-6">
       <div className="flex items-center gap-1 mb-6 border-b border-slate-200">
         <button
           onClick={() => setView("upcoming")}
@@ -829,7 +829,7 @@ function LicensingTab({ provider, onSaved, setToast }: LicensingTabProps) {
   };
 
   return (
-    <div className="bg-white rounded-2xl border border-slate-200 p-6 max-w-2xl">
+    <div className="glass rounded-2xl border border-gray-200/50 p-6 max-w-2xl">
       <h3 className="text-sm font-semibold text-slate-900 mb-1">Licensing & DEA</h3>
       <p className="text-xs text-slate-500 mb-6">State medical license and DEA registration.</p>
 
@@ -900,7 +900,7 @@ function SettingsTab({ provider, onSaved, setToast }: SettingsTabProps) {
   };
 
   return (
-    <div className="bg-white rounded-2xl border border-slate-200 p-6 max-w-2xl">
+    <div className="glass rounded-2xl border border-gray-200/50 p-6 max-w-2xl">
       <h3 className="text-sm font-semibold text-slate-900 mb-1">Practice settings</h3>
       <p className="text-xs text-slate-500 mb-6">Panel size, telehealth, and intake controls.</p>
 

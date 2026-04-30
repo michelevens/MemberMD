@@ -11,6 +11,7 @@ import { useAuth } from "../../contexts/AuthContext";
 import { AppointmentBookingWidget } from "../widgets/AppointmentBookingWidget";
 import { ProfilePage } from "../profile/ProfilePage";
 import { PortalShell, type NavItem } from "../shared/PortalShell";
+import { CommandPalette, useCommandPaletteShortcut } from "../shared/CommandPalette";
 import {
   familyService,
   appointmentService,
@@ -1865,6 +1866,11 @@ export function PatientPortal() {
     || patient.firstName
     || "Member";
 
+  // Command palette wiring — same Cmd+K shortcut as the practice portal
+  // so the gesture is consistent across portals.
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  useCommandPaletteShortcut(() => setPaletteOpen(true));
+
   return (
     <>
       <PortalShell
@@ -1888,6 +1894,16 @@ export function PatientPortal() {
           onBooked={() => setShowBookingWidget(false)}
         />
       )}
+      <CommandPalette
+        open={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+        items={sidebarNav.map((it) => ({
+          id: it.id,
+          label: it.label,
+          icon: it.icon,
+        }))}
+        onSelect={(id) => setActiveTab(id as TabId)}
+      />
     </>
   );
 }
