@@ -89,12 +89,10 @@ class DemoSeeder extends Seeder
         DB::table('employer_roster_snapshots')->where('tenant_id', $existing->id)->delete();
         // Users with tenant_id pointing here also go (FK cascade)
         $existing->delete();
-        // Standalone users we own by email
-        User::whereIn('email', [
-            'admin@clearstone.test',
-            'provider@clearstone.test',
-            'staff@clearstone.test',
-        ])->delete();
+        // Standalone users we own by email — wildcard the whole demo domain
+        // so orphaned users from a half-completed prior run get cleared too
+        // (e.g. patient1@clearstone.test surviving a mid-seed failure).
+        User::where('email', 'like', '%@clearstone.test')->delete();
     }
 
     // ─── Practice ────────────────────────────────────────────────────────────
