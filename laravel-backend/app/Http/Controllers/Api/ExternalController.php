@@ -235,14 +235,20 @@ class ExternalController extends Controller
         // retroactively rewrite what the patient agreed to. The signature
         // string is the raw typed name from the widget — replace with a real
         // esignature service later, but the audit fields are correct now.
+        // ConsentTemplate uses `type` (not `category`) and `content` (not `body`)
+        // per the actual schema. Templates that match by type and either belong
+        // to the tenant or are platform-wide (tenant_id IS NULL).
         $consentTypes = (array) $validated['consents'];
-        $templates = ConsentTemplate::where('tenant_id', $practice->id)
-            ->whereIn('category', $consentTypes)
+        $templates = ConsentTemplate::whereIn('type', $consentTypes)
             ->where('is_active', true)
+            ->where(function ($q) use ($practice) {
+                $q->where('tenant_id', $practice->id)
+                  ->orWhereNull('tenant_id');
+            })
             ->get()
-            ->keyBy('category');
-        foreach ($consentTypes as $category) {
-            $template = $templates->get($category);
+            ->keyBy('type');
+        foreach ($consentTypes as $type) {
+            $template = $templates->get($type);
             if (!$template) {
                 continue; // practice hasn't published this template yet — skip rather than block enrollment
             }

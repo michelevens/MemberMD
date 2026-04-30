@@ -100,6 +100,9 @@ Route::prefix('external')->middleware('throttle:60,1')->group(function () {
     Route::get('/plans/{tenantCode}', [ExternalController::class, 'plans']);
     Route::post('/enroll/{tenantCode}', [ExternalController::class, 'enroll'])->middleware('throttle:5,1');
     Route::get('/availability/{tenantCode}', [ExternalController::class, 'availability']);
+    // Public consent template preview for the enrollment widget — patients
+    // need to read full agreement text BEFORE checking the consent boxes.
+    Route::get('/consent-templates/{tenantCode}', [\App\Http\Controllers\Api\ConsentTemplateController::class, 'publicForEnrollment']);
 });
 
 // ===== Public Registration Data (no auth) =====
@@ -328,7 +331,7 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
     Route::put('/notifications/{id}/read', [NotificationController::class, 'markAsRead']);
     Route::get('/notifications', [NotificationController::class, 'index']);
 
-    // ===== Consent Forms =====
+    // ===== Consent Forms (legacy ConsentFormController) =====
     Route::prefix('consents')->group(function () {
         Route::get('/templates', [ConsentFormController::class, 'templates']);
         Route::post('/templates', [ConsentFormController::class, 'storeTemplate']);
@@ -336,6 +339,18 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
         Route::post('/sign', [ConsentFormController::class, 'sign']);
         Route::get('/patient/{patientId}', [ConsentFormController::class, 'patientConsents']);
     });
+
+    // ===== Membership Agreement subsystem (ConsentTemplate / ConsentSignature) =====
+    // Practice admins manage versioned consent + agreement templates here.
+    // Patients + admins read signatures from /consent-signatures and download
+    // PDFs of any signed agreement.
+    Route::apiResource('consent-templates', \App\Http\Controllers\Api\ConsentTemplateController::class);
+    Route::post('consent-templates/{id}/publish-version', [\App\Http\Controllers\Api\ConsentTemplateController::class, 'publishNewVersion']);
+
+    Route::get('consent-signatures', [\App\Http\Controllers\Api\ConsentSignatureController::class, 'index']);
+    Route::get('consent-signatures/{id}', [\App\Http\Controllers\Api\ConsentSignatureController::class, 'show']);
+    Route::get('consent-signatures/{id}/pdf', [\App\Http\Controllers\Api\ConsentSignatureController::class, 'downloadPdf']);
+    Route::get('memberships/{id}/agreement-pdf', [\App\Http\Controllers\Api\ConsentSignatureController::class, 'membershipAgreementPdf']);
 
     // ===== Appointment Enhancements =====
     Route::get('/appointments/available-slots', [AppointmentController::class, 'availableSlots']);

@@ -16,7 +16,9 @@ class MembershipPlan extends Model
 
     protected $fillable = [
         'tenant_id', 'program_id', 'name', 'description', 'badge_text',
+        'agreement_template_id',
         'monthly_price', 'annual_price',
+        'enrollment_fee', 'intake_fee',
         'trial_days', 'trial_requires_payment_method',
         'stripe_monthly_price_id', 'stripe_annual_price_id',
         'visits_per_month', 'telehealth_included', 'messaging_included',
@@ -34,6 +36,8 @@ class MembershipPlan extends Model
     protected $casts = [
         'monthly_price' => 'decimal:2',
         'annual_price' => 'decimal:2',
+        'enrollment_fee' => 'decimal:2',
+        'intake_fee' => 'decimal:2',
         'trial_days' => 'integer',
         'trial_requires_payment_method' => 'boolean',
         'visits_per_month' => 'integer',
@@ -71,6 +75,7 @@ class MembershipPlan extends Model
         static::updating(function (self $plan) {
             $versioned = [
                 'monthly_price', 'annual_price',
+                'enrollment_fee', 'intake_fee',
                 'visits_per_month', 'overage_fee',
                 'family_member_price', 'min_commitment_months',
                 'telehealth_included', 'messaging_included',
@@ -95,6 +100,7 @@ class MembershipPlan extends Model
 
     public function program(): BelongsTo { return $this->belongsTo(Program::class); }
     public function memberships(): HasMany { return $this->hasMany(PatientMembership::class, 'plan_id'); }
+    public function agreementTemplate(): BelongsTo { return $this->belongsTo(ConsentTemplate::class, 'agreement_template_id'); }
     public function addons(): HasMany { return $this->hasMany(PlanAddon::class, 'plan_id'); }
     public function planEntitlements(): HasMany { return $this->hasMany(PlanEntitlement::class, 'plan_id'); }
     public function masterTemplate(): BelongsTo { return $this->belongsTo(MasterPlanTemplate::class, 'master_template_id'); }

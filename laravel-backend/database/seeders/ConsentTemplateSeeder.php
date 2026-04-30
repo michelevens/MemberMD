@@ -149,6 +149,42 @@ class ConsentTemplateSeeder extends Seeder
                     'I may specify and update my preferred contact method at any time through the patient portal. I may revoke this consent at any time by submitting a written request. Revocation will not affect communications that occurred before the revocation.' . "\n\n" .
                     'By signing below, I acknowledge that I have read and understand this Communications Consent and authorize the practice to communicate with me through the channels described above.',
             ],
+
+            // ─── DPC Membership Agreement (the contract itself) ─────────────
+            // This is the contract the patient signs to subscribe. Practices
+            // bind it to a MembershipPlan via the new agreement_template_id
+            // FK; patients see this exact template (with plan entitlements
+            // appended) at enrollment time and on download from their portal.
+            [
+                'type' => 'membership_agreement',
+                'name' => 'Direct Primary Care Membership Agreement',
+                'specialty' => null,
+                'is_required' => true,
+                'version' => '1.0',
+                'content' => "# Direct Primary Care Membership Agreement\n\n" .
+                    'This Direct Primary Care Membership Agreement (the "Agreement") is entered into between the patient identified below (the "Member") and the Practice for participation in a direct primary care membership program ("Membership"). By signing this Agreement, the Member agrees to be bound by its terms and acknowledges receipt of all included exhibits and entitlements.' . "\n\n" .
+                    "## 1. Membership Services\n" .
+                    'The Practice agrees to provide the Member with the medical services and amenities listed in the **Plan Entitlements** table at the end of this Agreement. Services are delivered directly by the Practice without billing the Member\'s health insurance for those covered by the Membership. Services not covered by the Membership are billed separately at the rates listed in the practice fee schedule.' . "\n\n" .
+                    "## 2. Membership Fee\n" .
+                    'The Member agrees to pay the recurring Membership Fee at the frequency and amount stated in the Plan Entitlements table. The fee is charged automatically to the payment method on file at the start of each billing period. The Member is responsible for keeping a valid payment method on file. Membership fees are exclusive of one-time enrollment or intake fees, which are charged at the start of Membership and are non-refundable except as required by law.' . "\n\n" .
+                    "## 3. Term and Termination\n" .
+                    "This Agreement begins on the Member's enrollment date and continues month-to-month (or for the elected annual term). The Member may cancel at any time consistent with the cancellation terms in the Plan Entitlements table — typically end-of-period cancellation. The Practice may terminate this Agreement for non-payment, breach of this Agreement, behavior that endangers staff or other patients, or for any reason allowed by applicable law.\n\n" .
+                    "## 4. Not Health Insurance\n" .
+                    'The Member acknowledges that **this Membership is NOT health insurance**. The Membership does not satisfy any individual mandate requirements for health insurance under federal or state law. The Practice does not bill health insurance for services covered under the Membership. The Member is responsible for maintaining appropriate health insurance for hospital care, emergency services, specialist care, prescription medications, diagnostic imaging, laboratory services not included in the Membership, and any care not provided directly by the Practice. The Member acknowledges that the Practice has advised the Member to obtain or maintain comprehensive health insurance.' . "\n\n" .
+                    "## 5. Scope of Care\n" .
+                    'The Practice provides primary care services and the specific services listed in the Plan Entitlements table. The Practice does not provide emergency care, specialty care outside its scope of license, hospital services, or services that the Practice has determined are outside its clinical capability. In emergencies, the Member should call 911 or go to the nearest emergency department.' . "\n\n" .
+                    "## 6. Fees, Refunds, and Disputes\n" .
+                    'Recurring Membership fees are non-refundable for periods already provided. Disputed charges must be raised in writing within thirty (30) days of the charge. The Practice will investigate and respond within a reasonable time. The Member agrees to attempt good-faith resolution of any disputes with the Practice before pursuing other remedies.' . "\n\n" .
+                    "## 7. Privacy and Records\n" .
+                    'The Member\'s health information is protected by HIPAA and applicable state law. The separate **Notice of Privacy Practices** describes how the Practice uses and discloses health information. By signing this Agreement, the Member acknowledges receipt of the Notice of Privacy Practices.' . "\n\n" .
+                    "## 8. Changes to This Agreement\n" .
+                    'The Practice may modify the terms of this Agreement upon thirty (30) days\' written notice (which may be delivered electronically). The Member\'s continued payment of Membership fees after the effective date of the change constitutes acceptance of the new terms. The Member may terminate the Membership before the change takes effect if they do not agree.' . "\n\n" .
+                    "## 9. Governing Law\n" .
+                    'This Agreement is governed by the laws of the state in which the Practice is licensed, without regard to conflict of law principles. Any dispute arising out of or related to this Agreement will be resolved in the state and federal courts located in that state.' . "\n\n" .
+                    "## 10. Entire Agreement\n" .
+                    'This Agreement, together with the Plan Entitlements table and the Notice of Privacy Practices, constitutes the entire agreement between the Member and the Practice with respect to the Membership and supersedes any prior agreements or understandings.' . "\n\n" .
+                    'By signing below, the Member acknowledges that they have read this Agreement in full, have had an opportunity to ask questions, understand that the Membership is not health insurance, and agree to be bound by all of its terms. The Plan Entitlements table is incorporated into this Agreement by reference.',
+            ],
         ];
 
         foreach ($templates as $template) {
