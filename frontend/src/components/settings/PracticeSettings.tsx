@@ -29,6 +29,9 @@ import {
   Globe,
   Wallet,
   Sparkles,
+  Stethoscope,
+  Trash2,
+  FileText,
 } from "lucide-react";
 import { PaymentSetup } from "./PaymentSetup";
 import { BrandedWidgets } from "./BrandedWidgets";
@@ -67,6 +70,7 @@ type PracticeTab =
   | "scheduling"
   | "membership"
   | "payments"
+  | "clinical"
   | "notifications"
   | "team"
   | "compliance"
@@ -101,6 +105,7 @@ const TAB_CONFIG: { id: PracticeTab; label: string; icon: React.ElementType }[] 
   { id: "scheduling", label: "Scheduling", icon: Calendar },
   { id: "membership", label: "Membership", icon: CreditCard },
   { id: "payments", label: "Payments", icon: Wallet },
+  { id: "clinical", label: "Clinical Config", icon: Stethoscope },
   { id: "notifications", label: "Notifications", icon: Bell },
   { id: "team", label: "Team", icon: Users },
   { id: "compliance", label: "Compliance", icon: Shield },
@@ -348,6 +353,104 @@ function CopyableInput({ label, value, helper }: { label: string; value: string;
   );
 }
 
+function ChipListEditor({
+  items,
+  placeholder,
+  onAdd,
+  onRemove,
+}: {
+  items: string[];
+  placeholder: string;
+  onAdd: (v: string) => void;
+  onRemove: (idx: number) => void;
+}) {
+  const [draft, setDraft] = useState("");
+  const submit = () => {
+    const v = draft.trim();
+    if (!v) return;
+    if (items.some((it) => it.toLowerCase() === v.toLowerCase())) {
+      setDraft("");
+      return;
+    }
+    onAdd(v);
+    setDraft("");
+  };
+  return (
+    <div>
+      <div className="flex flex-wrap gap-2 mb-3">
+        {items.length === 0 ? (
+          <p className="text-xs italic" style={{ color: C.slate400 }}>None configured yet.</p>
+        ) : (
+          items.map((it, idx) => (
+            <span
+              key={`${it}-${idx}`}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium"
+              style={{ backgroundColor: C.slate100, color: C.navy800 }}
+            >
+              {it}
+              <button
+                onClick={() => onRemove(idx)}
+                className="p-0.5 rounded-full hover:bg-slate-200 transition-colors"
+                title={`Remove ${it}`}
+              >
+                <Trash2 className="w-3 h-3" style={{ color: C.red500 }} />
+              </button>
+            </span>
+          ))
+        )}
+      </div>
+      <div className="flex gap-2">
+        <input
+          type="text"
+          value={draft}
+          placeholder={placeholder}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); submit(); } }}
+          className="flex-1 px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2"
+          style={{ borderColor: C.slate200, color: C.navy900 }}
+        />
+        <button
+          onClick={submit}
+          className="px-3 py-2 rounded-lg text-sm font-medium text-white transition-colors flex items-center gap-1.5"
+          style={{ backgroundColor: C.teal500 }}
+        >
+          <Plus className="w-4 h-4" /> Add
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function DocumentTemplateAdder({ onAdd }: { onAdd: (name: string) => void }) {
+  const [draft, setDraft] = useState("");
+  const submit = () => {
+    const v = draft.trim();
+    if (!v) return;
+    onAdd(v);
+    setDraft("");
+  };
+  return (
+    <div className="flex gap-2 mt-3 pt-3 border-t" style={{ borderColor: C.slate200 }}>
+      <input
+        type="text"
+        value={draft}
+        placeholder="e.g. Release of Information"
+        onChange={(e) => setDraft(e.target.value)}
+        onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); submit(); } }}
+        className="flex-1 px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2"
+        style={{ borderColor: C.slate200, color: C.navy900 }}
+      />
+      <button
+        onClick={submit}
+        className="px-3 py-2 rounded-lg text-sm font-medium text-white transition-colors flex items-center gap-1.5"
+        style={{ backgroundColor: C.teal500 }}
+      >
+        <Plus className="w-4 h-4" /> Add Template
+      </button>
+    </div>
+  );
+}
+
 function Badge({ text, color, bg }: { text: string; color: string; bg: string }) {
   return (
     <span
@@ -534,6 +637,60 @@ export function PracticeSettings({ initialTab }: { initialTab?: string }) {
   // ─── Compliance State ────────────────────────────────────────────────────
   const [dataRetention, setDataRetention] = useState("7");
   const [auditRetention, setAuditRetention] = useState("3");
+
+  // ─── Clinical Config State (ported from EnnHealth's SystemSettings) ──────
+  // Each section is a list of named items the practice can curate. EnnHealth
+  // stores these in component state and persists nothing — we mirror that
+  // for now and will move to a backend table in a follow-up.
+  const [appointmentTypes, setAppointmentTypes] = useState<string[]>([
+    "Initial Consultation", "Follow-up", "Medication Management",
+    "Therapy Session", "Crisis Intervention",
+  ]);
+  const [visitStatuses, setVisitStatuses] = useState<string[]>([
+    "Scheduled", "Confirmed", "In Progress", "Completed",
+    "No Show", "Cancelled", "Rescheduled",
+  ]);
+  const [visitReasons, setVisitReasons] = useState<string[]>([
+    "Depression", "Anxiety", "Bipolar", "PTSD", "ADHD",
+    "Substance Use", "Sleep Disorders", "Eating Disorders",
+  ]);
+  const [providerTypes, setProviderTypes] = useState<string[]>([
+    "MD", "DO", "NP", "PA", "Therapist", "Counselor",
+  ]);
+  const [providerSpecialties, setProviderSpecialties] = useState<string[]>([
+    "Psychiatry", "Family Medicine", "Internal Medicine",
+    "Pediatrics", "Behavioral Health",
+  ]);
+  const [providerLanguages, setProviderLanguages] = useState<string[]>([
+    "English", "Spanish", "French", "Haitian Creole",
+  ]);
+  const [clinicalConditions, setClinicalConditions] = useState<string[]>([
+    "Major Depressive Disorder", "Generalized Anxiety Disorder",
+    "Bipolar Disorder", "PTSD", "ADHD", "OCD",
+  ]);
+  const [clinicalModalities, setClinicalModalities] = useState<string[]>([
+    "CBT", "DBT", "Supportive Therapy", "EMDR",
+    "Medication Management", "Family Therapy",
+  ]);
+  const [patientPopulations, setPatientPopulations] = useState<string[]>([
+    "Adults", "Adolescents", "Geriatric", "LGBTQ+",
+    "Veterans", "Perinatal",
+  ]);
+  const [noteTemplates, setNoteTemplates] = useState<string[]>([
+    "SOAP — Med Management", "SOAP — Therapy Session",
+    "Initial Psychiatric Evaluation", "Follow-up Visit",
+    "Wellness Assessment",
+  ]);
+  // Document templates carry an extra "auto-request" flag.
+  const [documentTemplates, setDocumentTemplates] = useState<
+    Array<{ name: string; autoRequest: boolean }>
+  >([
+    { name: "Intake Form", autoRequest: true },
+    { name: "HIPAA Consent", autoRequest: true },
+    { name: "Treatment Consent", autoRequest: true },
+    { name: "Insurance Card", autoRequest: false },
+    { name: "Photo ID", autoRequest: false },
+  ]);
 
   // ─── Helpers for tracked onChange ────────────────────────────────────────
   function set<T>(setter: React.Dispatch<React.SetStateAction<T>>) {
@@ -1503,6 +1660,208 @@ export function PracticeSettings({ initialTab }: { initialTab?: string }) {
     );
   }
 
+  // ─── Tab: Clinical Config (ported from EnnHealth) ────────────────────────
+  //
+  // Each sub-section is a curated list of strings (or string+flag for
+  // documents). EnnHealth's UI used a heavier dialog-per-add pattern; we
+  // simplify with an inline "+" input row + chip list with delete, since
+  // the items are short labels not full forms.
+
+  function renderChipList({
+    title,
+    helper,
+    items,
+    onAdd,
+    onRemove,
+    placeholder,
+  }: {
+    title: string;
+    helper: string;
+    items: string[];
+    onAdd: (v: string) => void;
+    onRemove: (idx: number) => void;
+    placeholder: string;
+  }) {
+    return (
+      <SectionCard title={title}>
+        <p className="text-xs mb-3" style={{ color: C.slate500 }}>{helper}</p>
+        <ChipListEditor
+          items={items}
+          placeholder={placeholder}
+          onAdd={(v) => { onAdd(v); markChanged(); }}
+          onRemove={(i) => { onRemove(i); markChanged(); }}
+        />
+      </SectionCard>
+    );
+  }
+
+  function renderClinical() {
+    return (
+      <>
+        {/* Appointment Configuration */}
+        <div className="mb-2">
+          <h2 className="text-sm font-semibold uppercase tracking-wider mb-3" style={{ color: C.slate500 }}>
+            Appointments
+          </h2>
+        </div>
+        {renderChipList({
+          title: "Appointment Types",
+          helper: "Visit types providers can choose when scheduling.",
+          items: appointmentTypes,
+          placeholder: "e.g. Annual Physical",
+          onAdd: (v) => setAppointmentTypes([...appointmentTypes, v]),
+          onRemove: (i) => setAppointmentTypes(appointmentTypes.filter((_, idx) => idx !== i)),
+        })}
+        {renderChipList({
+          title: "Visit Statuses",
+          helper: "Lifecycle states an appointment can move through.",
+          items: visitStatuses,
+          placeholder: "e.g. Waiting Room",
+          onAdd: (v) => setVisitStatuses([...visitStatuses, v]),
+          onRemove: (i) => setVisitStatuses(visitStatuses.filter((_, idx) => idx !== i)),
+        })}
+        {renderChipList({
+          title: "Visit Reasons",
+          helper: "Common chief complaints used in intake and reporting.",
+          items: visitReasons,
+          placeholder: "e.g. Sleep Disorders",
+          onAdd: (v) => setVisitReasons([...visitReasons, v]),
+          onRemove: (i) => setVisitReasons(visitReasons.filter((_, idx) => idx !== i)),
+        })}
+
+        {/* Provider Configuration */}
+        <div className="mt-8 mb-2">
+          <h2 className="text-sm font-semibold uppercase tracking-wider mb-3" style={{ color: C.slate500 }}>
+            Providers
+          </h2>
+        </div>
+        {renderChipList({
+          title: "Provider Types",
+          helper: "Credentials and roles your practice supports.",
+          items: providerTypes,
+          placeholder: "e.g. PMHNP",
+          onAdd: (v) => setProviderTypes([...providerTypes, v]),
+          onRemove: (i) => setProviderTypes(providerTypes.filter((_, idx) => idx !== i)),
+        })}
+        {renderChipList({
+          title: "Specialties",
+          helper: "Used for matching patients with providers and listing on the booking widget.",
+          items: providerSpecialties,
+          placeholder: "e.g. Geriatric Psychiatry",
+          onAdd: (v) => setProviderSpecialties([...providerSpecialties, v]),
+          onRemove: (i) => setProviderSpecialties(providerSpecialties.filter((_, idx) => idx !== i)),
+        })}
+        {renderChipList({
+          title: "Languages",
+          helper: "Languages your providers can practice in.",
+          items: providerLanguages,
+          placeholder: "e.g. Mandarin",
+          onAdd: (v) => setProviderLanguages([...providerLanguages, v]),
+          onRemove: (i) => setProviderLanguages(providerLanguages.filter((_, idx) => idx !== i)),
+        })}
+
+        {/* Clinical Taxonomy */}
+        <div className="mt-8 mb-2">
+          <h2 className="text-sm font-semibold uppercase tracking-wider mb-3" style={{ color: C.slate500 }}>
+            Clinical Taxonomy
+          </h2>
+        </div>
+        {renderChipList({
+          title: "Conditions",
+          helper: "Diagnosable conditions your practice treats — feeds the chart and screenings.",
+          items: clinicalConditions,
+          placeholder: "e.g. Persistent Depressive Disorder",
+          onAdd: (v) => setClinicalConditions([...clinicalConditions, v]),
+          onRemove: (i) => setClinicalConditions(clinicalConditions.filter((_, idx) => idx !== i)),
+        })}
+        {renderChipList({
+          title: "Treatment Modalities",
+          helper: "Therapeutic approaches used in encounters.",
+          items: clinicalModalities,
+          placeholder: "e.g. Mindfulness-Based CBT",
+          onAdd: (v) => setClinicalModalities([...clinicalModalities, v]),
+          onRemove: (i) => setClinicalModalities(clinicalModalities.filter((_, idx) => idx !== i)),
+        })}
+        {renderChipList({
+          title: "Patient Populations",
+          helper: "Populations your practice serves — surfaces in matching and outreach.",
+          items: patientPopulations,
+          placeholder: "e.g. First Responders",
+          onAdd: (v) => setPatientPopulations([...patientPopulations, v]),
+          onRemove: (i) => setPatientPopulations(patientPopulations.filter((_, idx) => idx !== i)),
+        })}
+
+        {/* Templates */}
+        <div className="mt-8 mb-2">
+          <h2 className="text-sm font-semibold uppercase tracking-wider mb-3" style={{ color: C.slate500 }}>
+            Templates
+          </h2>
+        </div>
+        {renderChipList({
+          title: "Note Templates",
+          helper: "Active SOAP/progress note templates available in the encounter editor.",
+          items: noteTemplates,
+          placeholder: "e.g. Initial Substance Use Assessment",
+          onAdd: (v) => setNoteTemplates([...noteTemplates, v]),
+          onRemove: (i) => setNoteTemplates(noteTemplates.filter((_, idx) => idx !== i)),
+        })}
+
+        <SectionCard title="Document Templates">
+          <p className="text-xs mb-4" style={{ color: C.slate500 }}>
+            Documents collected at intake or before specific appointments.
+            Toggle <strong>Auto-request</strong> to send the request automatically
+            after a patient enrolls.
+          </p>
+          <div className="space-y-2">
+            {documentTemplates.map((doc, idx) => (
+              <div
+                key={idx}
+                className="flex items-center justify-between rounded-lg border px-3 py-2.5"
+                style={{ borderColor: C.slate200 }}
+              >
+                <div className="flex items-center gap-2.5">
+                  <FileText className="w-4 h-4" style={{ color: C.slate400 }} />
+                  <span className="text-sm" style={{ color: C.navy900 }}>{doc.name}</span>
+                </div>
+                <div className="flex items-center gap-3">
+                  <label className="flex items-center gap-1.5 text-xs cursor-pointer" style={{ color: C.slate500 }}>
+                    <input
+                      type="checkbox"
+                      checked={doc.autoRequest}
+                      onChange={(e) => {
+                        const next = [...documentTemplates];
+                        next[idx] = { ...doc, autoRequest: e.target.checked };
+                        setDocumentTemplates(next);
+                        markChanged();
+                      }}
+                    />
+                    Auto-request
+                  </label>
+                  <button
+                    onClick={() => {
+                      setDocumentTemplates(documentTemplates.filter((_, i) => i !== idx));
+                      markChanged();
+                    }}
+                    className="p-1 rounded hover:bg-slate-100"
+                    title="Remove"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" style={{ color: C.red500 }} />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+          <DocumentTemplateAdder
+            onAdd={(name) => {
+              setDocumentTemplates([...documentTemplates, { name, autoRequest: false }]);
+              markChanged();
+            }}
+          />
+        </SectionCard>
+      </>
+    );
+  }
+
   // ─── Tab Router ────────────────────────────────────────────────────────────
 
   function renderTabContent() {
@@ -1513,6 +1872,7 @@ export function PracticeSettings({ initialTab }: { initialTab?: string }) {
       case "scheduling": return renderScheduling();
       case "membership": return renderMembership();
       case "payments": return <PaymentSetup />;
+      case "clinical": return renderClinical();
       case "notifications": return renderNotifications();
       case "team": return renderTeam();
       case "compliance": return renderCompliance();
