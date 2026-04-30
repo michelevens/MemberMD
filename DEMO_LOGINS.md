@@ -1,161 +1,169 @@
-# Demo Logins
+# Demo & Test Logins
 
-Test credentials for clicking through the live application as each role.
-All demo data is seeded by `DemoSeeder.php`.
+Reference for QA, demos, and walkthroughs. **All scenarios are test-mode
+only — no real money, no real patients.** Each scenario produces its own
+tenant; tenants coexist without interfering.
 
-## Run the seeder
-
-```bash
-cd laravel-backend
-SEED_DEMO=1 php artisan db:seed
-```
-
-The seeder is **idempotent** — safe to re-run. It wipes its own tenant
-(`tenant_code = CLRSTN`) before re-seeding, so prior demo data doesn't
-accumulate.
-
-To wipe and re-seed from scratch on Railway:
+## Quick start
 
 ```bash
-SEED_DEMO=1 php artisan db:seed --force
+# List available scenarios
+php artisan demo:scenario --list
+
+# Seed one
+php artisan demo:scenario --name=clearstone
+
+# Seed every scenario at once
+php artisan demo:scenario --all
+
+# Wipe one
+php artisan demo:reset --name=churn
+
+# Wipe everything
+php artisan demo:reset --all
 ```
 
-`--force` is required in production (Railway) to skip the interactive prompt.
+On Railway:
+
+```bash
+railway ssh --service MemberMD
+cd /app && php artisan demo:scenario --list
+```
 
 ---
 
-## Logins
-
-All demo passwords are `demo` (except superadmin which keeps the existing
-`MemberMD2026` for compatibility with the original DatabaseSeeder).
-
-### Superadmin
-
-Sees the platform-wide dashboard, all practices, Tier 1 SaaS billing.
+## Universal logins
 
 | Field | Value |
 |---|---|
-| Email | `super@membermd.io` |
-| Password | `MemberMD2026` |
-| Role | superadmin |
+| **Superadmin** (platform-wide) | `super@membermd.io` / `MemberMD2026` |
+| **Practice admin** (per scenario) | `admin@<tenant>.test` / `demo` |
+| **Provider** (per scenario) | `provider@<tenant>.test` / `demo` |
+| **Staff** (per scenario) | `staff@<tenant>.test` / `demo` |
+| **Patient** (per scenario, where seeded) | usually `<first>.<last>@<tenant>.test` / `demo` |
 
-### Practice Admin
-
-Sees the entire Clearstone Psychiatry tenant — clinical, billing, team,
-settings.
-
-| Field | Value |
-|---|---|
-| Email | `admin@clearstone.test` |
-| Password | `demo` |
-| Role | practice_admin |
-
-### Provider
-
-Clinical-only surface — encounters, prescriptions, screenings, vitals.
-No billing or team management.
-
-| Field | Value |
-|---|---|
-| Email | `provider@clearstone.test` |
-| Password | `demo` |
-| Role | provider |
-
-### Staff
-
-Operational — appointments, intakes, communications, activity log.
-No clinical surface, no billing.
-
-| Field | Value |
-|---|---|
-| Email | `staff@clearstone.test` |
-| Password | `demo` |
-| Role | staff |
-
-### Patient
-
-Patient portal for **James Wilson** — appointments, billing tab, health
-records, messages.
-
-| Field | Value |
-|---|---|
-| Email | `patient1@clearstone.test` |
-| Password | `demo` |
-| Role | patient |
+Each scenario has its own email domain — e.g. `admin@clrstn.test`, `admin@dunn1.test`, etc.
 
 ---
 
-## What's seeded
+## Test scenarios
 
-**Practice:** Clearstone Psychiatry (`tenant_code = CLRSTN`).
+| Key | Tenant code | Domain | Description |
+|---|---|---|---|
+| `clearstone` | `CLRSTN` | `clrstn.test` | Broad walkthrough — 30 patients across every lifecycle state, family, employer, billing history. **Stripe Connect already wired** (`acct_1TRxkEINgfqoMqMa`). |
+| `fresh` | `FRESH1` | `fresh1.test` | Brand-new tenant — admin only, no plans, no patients. Tests practice onboarding flow. |
+| `dunning` | `DUNN1` | `dunn1.test` | Heavy past_due cohort + active dunning events. Tests dunning executor, retry flows, smart retry. |
+| `churn` | `CHURN1` | `churn1.test` | Mass cancellations split voluntary/involuntary + 2 trial abandonments. Tests churn analytics. |
+| `employer` | `EMP1` | `emp1.test` | Acme Co with mixed tenure: long-time employees, mid-cycle joiners, terminations, retroactive corrections. |
+| `family` | `FAM1` | `fam1.test` | Primaries with 0/1/2/3/4/5 dependents. Tests family cascades, quantity adjustments. |
+| `trial` | `TRIAL1` | `trial1.test` | All members mid-trial at varying days remaining (13/10/7/5/3/1). |
+| `refund` | `REFUND` | `refund.test` | Patients with full / partial / multi-refund states + active credits on file. |
+| `versions` | `PVFLUX` | `pvflux.test` | Members locked at plan v1 prices while plan v2 is current. Tests price-snapshot integrity. |
+| `scheduled` | `SCHED1` | `sched1.test` | Members with future-dated cancels/downgrades + one overdue scheduled change. |
 
-**Plans:**
-- **Starter** — $79/mo, 14-day trial, 2 visits/mo
-- **Wellness** — $99/mo, 4 visits/mo
-- **Complete** — $199/mo, 12 visits/mo, family-eligible
-- **Concierge** — $399/mo, unlimited visits, family-eligible
-- **Family** — $349/mo, 24 shared visits/mo
+---
 
-**Patients (~30):**
-- 12 active individual members at various plan tiers, billing frequencies
-- 2 family primaries, 4 dependents (Marco/Sofia Garcia, Diego/Isabella Martinez)
-- 4 trial members (mid-trial, days 5-9 of 14)
-- 3 past_due (failed last invoice, dunning will pick them up)
-- 3 cancelled (cost / moved / dunning_non_payment)
-- 2 paused
-- 4 employer-sponsored (Acme Co)
+## Registration / enrollment wizards (already in app)
 
-**Employer:** Acme Co with 4 active employees, eligibility periods open
-since 4 months ago.
+### Practice registration (Tier 1 — practice signs up to MemberMD)
 
-**Clinical history (per active patient):**
-- 4-6 encounters with SOAP notes signed by Dr. Sarah Chen
-- 1 active Sertraline 100mg prescription
-- 6-month PHQ-9 trend (18 → 6, improving)
+- **Route:** [https://app.membermd.io/#/register](https://app.membermd.io/#/register)
+- **Frontend:** `frontend/src/components/auth/PracticeRegistration.tsx`
+- **Backend:** `AuthController::register` (POST `/register`) — creates Practice + first admin User with `onboarding_completed=false`
+- **Tests with:** `fresh` scenario (or just register a new tenant from scratch)
 
-**Billing history (per non-trial active patient):**
-- 6 months of paid invoices + payments at the plan's monthly price
-- Past_due patients have one open pending invoice 8 days overdue
+### Patient enrollment (Tier 2 — patient enrolls in a practice's DPC)
 
-**Pending state:**
-- 1 scheduled cancel (effective +2 months, "committed_period_ending")
-- 1 scheduled plan change (Complete → Wellness, effective +1 month)
-- 2 unapplied membership credits ($50 comp, $25 write-off)
+- **Route:** `https://app.membermd.io/#/enroll/<TENANT_CODE>` (e.g. `/enroll/CLRSTN`)
+- **Frontend:** `frontend/src/components/widgets/EnrollmentWidget.tsx` — 6-step widget
+- **Backend:** `ExternalController::enroll` (POST `/external/enroll/{tenantCode}`)
+- **Idempotency:** wrapped in `IdempotencyService` — double-clicks coalesce
+- **Active-membership uniqueness:** unique partial index on `(tenant_id, patient_id)` where `status='active'` — prevents duplicate active enrollments
+- **Tests with:** any seeded scenario's tenant code, or via the public widget
 
 ---
 
 ## Walking through a demo
 
-A natural flow:
+### Quickest path (5 min)
 
-1. **Login as `admin@clearstone.test`** → see dashboard with MRR, member counts
-2. Go to **Patient Roster** — 30 patients across all states
-3. Click **James Wilson** → see his chart (encounters, screenings, billing)
-4. Click **Recent Activity** tab → vertical timeline across all patients
-5. Go to **Calendar** → drag-and-drop appointments between days
-6. Go to **Settings → Practice Settings** → 11 tabs including Clinical Config
-7. Logout, **login as `patient1@clearstone.test`** → see the patient portal
-8. Click **Billing & Account** → trial banner if applicable, plan card with
-   visits-used progress, invoice history, "Manage Cards" + "Cancel" actions
+```bash
+# Seed everything
+php artisan demo:scenario --all
+
+# See dashboards across role separation
+# Login: admin@clrstn.test / demo → practice admin
+# Login: super@membermd.io / MemberMD2026 → superadmin (sees all 10 tenants)
+```
+
+### Specific test paths
+
+| Goal | Steps |
+|---|---|
+| Test enrollment widget | Visit `https://app.membermd.io/#/enroll/CLRSTN` |
+| Test practice signup | Visit `https://app.membermd.io/#/register`; fill form |
+| Test dunning flow | `demo:scenario --name=dunning` → login as `admin@dunn1.test` → run `php artisan dunning:process` → see emails sent + statuses change |
+| Test trial countdown | `demo:scenario --name=trial` → login as `patient1@trial1.test` → see Billing tab countdown |
+| Test family cascades | `demo:scenario --name=family` → login as `admin@fam1.test` → cancel a primary, see dependents cascade |
+| Test refund + credit | `demo:scenario --name=refund` → admin issues a refund via patient detail → see ledger entry |
+| Test plan version flux | `demo:scenario --name=versions` → see v1 members keep their old price while plan shows v2 |
+| Test scheduled changes | `demo:scenario --name=scheduled` → run `php artisan memberships:process-scheduled-changes` → see overdue change apply |
+| Test churn analytics | `demo:scenario --name=churn` → check `/api/reports/membership` for breakdown |
+| Test mid-cycle employer billing | `demo:scenario --name=employer` → run sponsor invoice generator → see prorated headcount |
+
+---
+
+## Default patient logins per scenario
+
+Most scenarios designate one patient with a portal login (password `demo`):
+
+| Scenario | Patient login |
+|---|---|
+| `clearstone` | `james.wilson@clrstn.test` (active member) |
+| `dunning` | `pastdue1.test@dunn1.test` (past_due) |
+| `family` | `primary2deps.family@fam1.test` (primary with 2 deps) |
+| `trial` | `trial7days.left@trial1.test` (mid-trial, 7 days remaining) |
+| `refund` | `credit.holder@refund.test` (has $75 in credits) |
+| `versions` | `v2member1.latest@pvflux.test` (v2 enrollee) |
+| `scheduled` | `scheduled.cancel@sched1.test` (cancel pending) |
+
+For scenarios without a designated patient login, all patient records exist
+in the DB but you'll need to manually assign one a portal login (or use
+the practice admin to view their portal-side data).
+
+---
+
+## Stripe (test mode)
+
+- **Stripe account**: shared across all scenarios (test mode, single keypair)
+- **Connect account for Clearstone**: `acct_1TRxkEINgfqoMqMa`
+- **Stripe price IDs**: populated for Clearstone's 5 plans only — run `php artisan demo:wire-stripe --tenant=<CODE>` to wire each additional scenario's plans into Stripe
+- **Webhooks**: Platform `we_1TRxmuIu9HZ5QC9gqHCmYAn2`, Connect `we_1TRxnIIu9HZ5QC9gJpRvBnS8`
+- **Test cards**: `4242 4242 4242 4242` (succeeds) / `4000 0000 0000 9995` (declines) / `4000 0000 0000 0341` (succeeds then fails on renewal — for dunning testing). Full reference: [STRIPE_SETUP.md](STRIPE_SETUP.md).
+
+Full Stripe setup runbook: [STRIPE_SETUP.md](STRIPE_SETUP.md).
+
+---
+
+## Adding a new scenario
+
+1. Add a class extending `BaseScenario` in `laravel-backend/app/Services/Testing/Scenarios.php`
+2. Implement `tenantCode()`, `tenantName()`, `description()`, `seed(ScenarioRunner $r)`
+3. Register in `ScenarioRegistry::all()` at the bottom of that file
+4. Add a row to the **Test scenarios** table above
+
+The scenario gets its own tenant_code, its own logins, its own data shape — fully isolated.
 
 ---
 
 ## Troubleshooting
 
-**Seeder fails with FK violation:** Run migrations first:
+**"Could not open input file: artisan"** on Railway — the artisan binary lives at `/app/artisan` (not `/app/laravel-backend/artisan`). When SSH'd in: `cd /app && php artisan ...`.
+
+**Seeder fails with FK violation** — run migrations first: `php artisan migrate`.
+
+**Need to wipe everything and start over:**
 ```bash
-php artisan migrate
+php artisan demo:reset --all --force
+php artisan demo:scenario --all
 ```
-
-**Seeder runs but app shows nothing:** Confirm you logged in as a user with
-`tenant_id` matching the seeded practice. Patient logins are scoped to their
-own data only.
-
-**Need to wipe and start over:**
-```bash
-php artisan migrate:fresh --seed
-SEED_DEMO=1 php artisan db:seed
-```
-
-`migrate:fresh` drops all tables; `db:seed` re-runs the master-data
-seeders. The second `db:seed` with `SEED_DEMO=1` adds the demo tenant.
