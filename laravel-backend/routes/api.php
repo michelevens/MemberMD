@@ -14,6 +14,7 @@ use App\Http\Controllers\Api\ScreeningController;
 use App\Http\Controllers\Api\MessageController;
 use App\Http\Controllers\Api\InvoiceController;
 use App\Http\Controllers\Api\PaymentController;
+use App\Http\Controllers\Api\PaymentMethodController;
 use App\Http\Controllers\Api\DocumentController;
 use App\Http\Controllers\Api\ProviderController;
 use App\Http\Controllers\Api\CouponController;
@@ -239,6 +240,13 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
     Route::post('/payments/{id}/refund', [PaymentController::class, 'refund']);
     Route::get('/payments', [PaymentController::class, 'index']);
     Route::post('/payments', [PaymentController::class, 'store']);
+
+    // Patient self-service: rotate the card on file (Tier 2 only — Stripe
+    // call lands on the practice's connected account). All three endpoints
+    // are patient-role; controllers enforce ownership.
+    Route::get('/payment-methods', [PaymentMethodController::class, 'index']);
+    Route::post('/payment-methods/setup-intent', [PaymentMethodController::class, 'createSetupIntent']);
+    Route::post('/payment-methods/attach', [PaymentMethodController::class, 'attach']);
 
     // ===== Branded Widgets — custom domains, theming, analytics =====
     Route::prefix('tenant-domains')->group(function () {

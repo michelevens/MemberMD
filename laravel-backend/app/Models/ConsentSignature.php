@@ -16,14 +16,17 @@ class ConsentSignature extends Model
 
     protected $fillable = [
         'tenant_id', 'patient_id', 'template_id',
+        'template_version', 'membership_id',
         'signature_type', 'signature_data', 'signature_image_url',
         'signed_at', 'ip_address', 'user_agent',
     ];
 
     protected $casts = [
         'signed_at' => 'datetime',
+        'template_version' => 'integer',
     ];
 
     public function patient(): BelongsTo { return $this->belongsTo(Patient::class); }
     public function template(): BelongsTo { return $this->belongsTo(ConsentTemplate::class, 'template_id'); }
+    public function membership(): BelongsTo { return $this->belongsTo(PatientMembership::class, 'membership_id'); }
 }

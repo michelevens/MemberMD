@@ -490,6 +490,19 @@ class MembershipController extends Controller
 
     /**
      * Change plan for a membership (upgrade/downgrade) with proration.
+     *
+     * Flow:
+     *   1. Call Stripe::changePlan to update the subscription with
+     *      proration_behavior=create_prorations — Stripe handles the actual
+     *      proration on the next invoice (the source of truth).
+     *   2. Apply the local ProrationService for an immediate snapshot
+     *      invoice the practice can show the patient. This is a UX nicety,
+     *      not the actual charge — webhooks reconcile from Stripe later.
+     *   3. Flip plan_id locally; new entitlement period kicks in from there.
+     *
+     * If Stripe isn't wired up (subscription_id is null or call fails) we
+     * fall back to local-only proration so the feature still works in
+     * dev/demo without Stripe configured.
      */
     public function changePlan(Request $request, string $id): JsonResponse
     {
@@ -506,26 +519,49 @@ class MembershipController extends Controller
 
         $validated = $request->validate([
             'plan_id' => 'required|uuid|exists:membership_plans,id',
+            'billing_frequency' => 'nullable|in:monthly,annual',
         ]);
 
         $newPlan = MembershipPlan::where('tenant_id', $user->tenant_id)
             ->where('is_active', true)
             ->findOrFail($validated['plan_id']);
 
-        if ($membership->plan_id === $newPlan->id) {
-            return response()->json(['message' => 'Member is already on this plan.'], 422);
+        if ($membership->plan_id === $newPlan->id
+            && (!isset($validated['billing_frequency']) || $validated['billing_frequency'] === $membership->billing_frequency)) {
+            return response()->json(['message' => 'Member is already on this plan and frequency.'], 422);
+        }
+
+        $newFrequency = $validated['billing_frequency'] ?? $membership->billing_frequency;
+
+        $stripeWarning = null;
+        if (!empty($membership->stripe_subscription_id)) {
+            try {
+                $this->subscriptions->changePlan($membership, $newPlan, $newFrequency);
+            } catch (\Throwable $e) {
+                Log::warning('Stripe changePlan failed; falling back to local-only proration', [
+                    'membership_id' => $membership->id,
+                    'error' => $e->getMessage(),
+                ]);
+                $stripeWarning = 'Stripe could not be updated — local proration applied. Reconcile manually before next billing cycle.';
+            }
         }
 
         $prorationService = app(ProrationService::class);
         $result = $prorationService->applyProration($membership, $newPlan);
 
-        return response()->json([
+        // Flip frequency locally if it changed; ProrationService handles plan_id.
+        if ($newFrequency !== $membership->billing_frequency) {
+            $membership->update(['billing_frequency' => $newFrequency]);
+        }
+
+        return response()->json(array_filter([
             'data' => $result['membership'],
             'proration' => $result['proration'],
             'invoice' => $result['invoice'],
+            'stripe_warning' => $stripeWarning,
             'message' => $result['proration']['is_upgrade']
                 ? "Plan upgraded with prorated charge of \${$result['proration']['net']}"
                 : "Plan downgraded with prorated credit of \$" . abs($result['proration']['net']),
-        ]);
+        ]));
     }
 }

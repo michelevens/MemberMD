@@ -130,6 +130,24 @@ class StripeSubscriptionService
             ],
         ];
 
+        // Honor the plan's trial window (if any). Trial happens on Stripe's
+        // side via trial_period_days; we mirror trial_ends_at locally below
+        // so the patient portal can render a countdown without an extra API
+        // call.
+        $trialDays = (int) ($plan->trial_days ?? 0);
+        if ($trialDays > 0) {
+            $params['trial_period_days'] = $trialDays;
+
+            // If the plan does NOT require a payment method during trial,
+            // tell Stripe so the trial doesn't fail-to-start without a card.
+            // (Plan default is true — most practices want card up front.)
+            if (!$plan->trial_requires_payment_method) {
+                $params['trial_settings'] = [
+                    'end_behavior' => ['missing_payment_method' => 'pause'],
+                ];
+            }
+        }
+
         if ($defaultPaymentMethodId) {
             $params['default_payment_method'] = $defaultPaymentMethodId;
         }
@@ -156,6 +174,9 @@ class StripeSubscriptionService
             'current_period_end' => $subscription->current_period_end
                 ? now()->setTimestamp($subscription->current_period_end)
                 : $membership->current_period_end,
+            'trial_ends_at' => $subscription->trial_end
+                ? now()->setTimestamp($subscription->trial_end)
+                : null,
         ]);
 
         $this->audit($practice, $membership, 'subscription_created', [

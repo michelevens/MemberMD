@@ -18,7 +18,7 @@ class PatientMembership extends Model
         'tenant_id', 'patient_id', 'member_number', 'plan_id', 'program_id',
         'status', 'billing_frequency',
         'stripe_subscription_id', 'stripe_customer_id',
-        'started_at', 'paused_at', 'cancelled_at', 'expires_at',
+        'started_at', 'trial_ends_at', 'paused_at', 'cancelled_at', 'expires_at',
         'cancel_reason',
         'current_period_start', 'current_period_end',
     ];
@@ -37,6 +37,7 @@ class PatientMembership extends Model
 
     protected $casts = [
         'started_at' => 'datetime',
+        'trial_ends_at' => 'datetime',
         'paused_at' => 'datetime',
         'cancelled_at' => 'datetime',
         'expires_at' => 'datetime',

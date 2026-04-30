@@ -3,6 +3,8 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\ConsentSignature;
+use App\Models\ConsentTemplate;
 use App\Models\MembershipPlan;
 use App\Models\Patient;
 use App\Models\PatientMembership;
@@ -148,6 +150,13 @@ class ExternalController extends Controller
             ]],
             'is_active' => true,
         ]);
+        // Trial mirroring: if the plan declares trial_days, set trial_ends_at
+        // locally so the patient portal can render the countdown even before
+        // Stripe acks. The Stripe subscription create below also sets it via
+        // trial_period_days; whichever lands first wins.
+        $trialDays = (int) ($plan->trial_days ?? 0);
+        $trialEndsAt = $trialDays > 0 ? now()->addDays($trialDays) : null;
+
         $membership = PatientMembership::create([
             'tenant_id' => $practice->id,
             'patient_id' => $patient->id,
@@ -155,11 +164,42 @@ class ExternalController extends Controller
             'status' => 'active',
             'billing_frequency' => $validated['billing_frequency'],
             'started_at' => now(),
+            'trial_ends_at' => $trialEndsAt,
             'current_period_start' => now(),
             'current_period_end' => $validated['billing_frequency'] === 'annual'
                 ? now()->addYear()
                 : now()->addMonth(),
         ]);
+
+        // Persist a ConsentSignature row per acknowledged consent. We snapshot
+        // the template's current `version` so future template edits don't
+        // retroactively rewrite what the patient agreed to. The signature
+        // string is the raw typed name from the widget — replace with a real
+        // esignature service later, but the audit fields are correct now.
+        $consentTypes = (array) $validated['consents'];
+        $templates = ConsentTemplate::where('tenant_id', $practice->id)
+            ->whereIn('category', $consentTypes)
+            ->where('is_active', true)
+            ->get()
+            ->keyBy('category');
+        foreach ($consentTypes as $category) {
+            $template = $templates->get($category);
+            if (!$template) {
+                continue; // practice hasn't published this template yet — skip rather than block enrollment
+            }
+            ConsentSignature::create([
+                'tenant_id' => $practice->id,
+                'patient_id' => $patient->id,
+                'template_id' => $template->id,
+                'template_version' => $template->version,
+                'membership_id' => $membership->id,
+                'signature_type' => 'typed',
+                'signature_data' => (string) $validated['signature_data'],
+                'signed_at' => now(),
+                'ip_address' => $request->ip(),
+                'user_agent' => substr((string) $request->userAgent(), 0, 255),
+            ]);
+        }
 
         // Tier 2 Stripe subscription on the practice's connected account.
         // Best-effort: if Stripe isn't configured for this practice yet, we

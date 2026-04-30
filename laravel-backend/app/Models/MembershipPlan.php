@@ -17,6 +17,7 @@ class MembershipPlan extends Model
     protected $fillable = [
         'tenant_id', 'program_id', 'name', 'description', 'badge_text',
         'monthly_price', 'annual_price',
+        'trial_days', 'trial_requires_payment_method',
         'stripe_monthly_price_id', 'stripe_annual_price_id',
         'visits_per_month', 'telehealth_included', 'messaging_included',
         'messaging_response_sla_hours', 'crisis_support',
@@ -33,6 +34,8 @@ class MembershipPlan extends Model
     protected $casts = [
         'monthly_price' => 'decimal:2',
         'annual_price' => 'decimal:2',
+        'trial_days' => 'integer',
+        'trial_requires_payment_method' => 'boolean',
         'visits_per_month' => 'integer',
         'telehealth_included' => 'boolean',
         'messaging_included' => 'boolean',

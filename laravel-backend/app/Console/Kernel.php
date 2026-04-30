@@ -48,6 +48,19 @@ class Kernel extends ConsoleKernel
             ->onFailure(function () {
                 \Log::error('Tier 2 dunning processing failed');
             });
+
+        // Roll unused visits at period-end for plans with visit_rollover.
+        // Runs daily so a membership ending on any day gets its new period
+        // seeded the morning after — patients see the carry forward in the
+        // portal without a perceptible lag.
+        $schedule->command('entitlements:rollover')
+            ->daily()
+            ->at('02:30')
+            ->name('entitlement_rollover')
+            ->withoutOverlapping()
+            ->onFailure(function () {
+                \Log::error('Entitlement rollover failed');
+            });
     }
 
     /**
