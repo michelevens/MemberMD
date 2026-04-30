@@ -52,14 +52,19 @@ class DemoSeeder extends Seeder
     {
         $this->command->info('🌱 DemoSeeder starting...');
 
-        DB::transaction(function () {
-            $this->cleanupPriorRun();
-            $this->seedPractice();
-            $this->seedTeam();
-            $this->seedPlans();
-            $this->seedEmployer();
-            $this->seedPatients();
-        });
+        // Deliberately NOT wrapped in DB::transaction(). The seeder's
+        // try/catch blocks for clinical/billing data assume failures are
+        // recoverable, but Postgres aborts the WHOLE transaction on any
+        // statement error and refuses subsequent queries until ROLLBACK.
+        // A wrapping transaction therefore turns one column-mismatch
+        // warning into a cascade failure. Partial-state on a dev-only
+        // seeder is acceptable; cleanupPriorRun handles re-runs cleanly.
+        $this->cleanupPriorRun();
+        $this->seedPractice();
+        $this->seedTeam();
+        $this->seedPlans();
+        $this->seedEmployer();
+        $this->seedPatients();
 
         $this->command->info('✅ Demo seed complete.');
         $this->command->info('   Practice tenant_code: ' . $this->tenantCode);
@@ -444,9 +449,15 @@ class DemoSeeder extends Seeder
         $providerId = $this->provider->id;
         $months = max(1, $monthsAgo);
 
-        // Encounters — 1 per month roughly
+        // Encounters — 1 per month roughly. Wrap each create in a savepoint
+        // so a column-mismatch failure (the schema may have drifted from the
+        // model's expected fields) doesn't poison the outer transaction.
+        // PostgreSQL aborts the whole txn on the first error and rejects all
+        // subsequent statements until ROLLBACK; savepoints give per-row
+        // recovery without that cascade.
         for ($i = 0; $i < min($months, 6); $i++) {
             try {
+                DB::beginTransaction();
                 Encounter::create([
                     'tenant_id' => $this->practice->id,
                     'patient_id' => $patient->id,
@@ -461,7 +472,9 @@ class DemoSeeder extends Seeder
                     'status' => 'signed',
                     'signed_at' => now()->subMonths($i),
                 ]);
+                DB::commit();
             } catch (\Throwable $e) {
+                DB::rollBack();
                 // Encounter schema may differ in the migration; skip silently
                 // if a column doesn't match — clinical history is decorative.
             }
@@ -469,6 +482,7 @@ class DemoSeeder extends Seeder
 
         // Active prescription — Sertraline is the demo standard
         try {
+            DB::beginTransaction();
             Prescription::create([
                 'tenant_id' => $this->practice->id,
                 'patient_id' => $patient->id,
@@ -481,12 +495,15 @@ class DemoSeeder extends Seeder
                 'status' => 'active',
                 'prescribed_at' => now()->subMonths(min($months, 4)),
             ]);
+            DB::commit();
         } catch (\Throwable $e) {
+            DB::rollBack();
             // schema variance — non-fatal
         }
 
         // PHQ-9 trend across visits
         try {
+            DB::beginTransaction();
             $template = ScreeningTemplate::where('tenant_id', $this->practice->id)
                 ->where('code', 'phq9')
                 ->first();
@@ -505,7 +522,9 @@ class DemoSeeder extends Seeder
                     ]);
                 }
             }
+            DB::commit();
         } catch (\Throwable $e) {
+            DB::rollBack();
             // schema variance — non-fatal
         }
     }
