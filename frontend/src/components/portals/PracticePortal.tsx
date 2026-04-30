@@ -11,6 +11,7 @@ import { PortalShell, type NavSection as ShellNavSection, type PortalColor } fro
 import { CommandPalette, useCommandPaletteShortcut } from "../shared/CommandPalette";
 import { AddAllergyDialog, type AllergyEntry } from "../clinical/AddAllergyDialog";
 import { AddMeasureDialog } from "../clinical/AddMeasureDialog";
+import { AIDocumentationAssistant } from "../clinical/AIDocumentationAssistant";
 import { PracticeSettings } from "../settings/PracticeSettings";
 import { CalendarView } from "../shared/CalendarView";
 import { AppointmentBookingWidget } from "../widgets/AppointmentBookingWidget";
@@ -49,6 +50,7 @@ import {
   Bell,
   Settings,
   Palette,
+  Sparkles,
   X,
   DollarSign,
   TrendingUp,
@@ -676,6 +678,9 @@ export function PracticePortal() {
   const [allergyDialogOpen, setAllergyDialogOpen] = useState(false);
   // Add-measure (PHQ-9 / GAD-7 / etc.) dialog — patient detail Screenings tab.
   const [measureDialogOpen, setMeasureDialogOpen] = useState(false);
+  // Documentation Assistant — opens from inside the SOAP editor; generates
+  // a draft from a few quick prompts and inserts it back into soapForm.
+  const [docAssistantOpen, setDocAssistantOpen] = useState(false);
   const [patientDetailTab, setPatientDetailTab] = useState("demographics");
   const [expandedEncounters, setExpandedEncounters] = useState<string[]>([]);
   const [notificationFilter, setNotificationFilter] = useState<"all" | "members" | "appointments" | "billing" | "system">("all");
@@ -6129,9 +6134,20 @@ export function PracticePortal() {
           <div className="glass rounded-xl p-6 space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="font-semibold text-slate-800">SOAP Note Editor</h3>
-              <button onClick={() => setEditingEncounterId(null)} className="p-1.5 rounded-md hover:bg-slate-100 text-slate-400">
-                <X className="w-4 h-4" />
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setDocAssistantOpen(true)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white transition-all hover:opacity-90"
+                  style={{ background: "linear-gradient(135deg, #27ab83, #147d64)" }}
+                  title="Open the documentation assistant"
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  Documentation Assistant
+                </button>
+                <button onClick={() => setEditingEncounterId(null)} className="p-1.5 rounded-md hover:bg-slate-100 text-slate-400">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
             </div>
             <div>
               <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Chief Complaint</label>
@@ -8406,6 +8422,24 @@ export function PracticePortal() {
           }}
         />
       )}
+
+      {/* Documentation Assistant — opens from inside the SOAP editor.
+          Inserts the generated draft directly into soapForm so the
+          provider can edit further before saving. */}
+      <AIDocumentationAssistant
+        open={docAssistantOpen}
+        onClose={() => setDocAssistantOpen(false)}
+        onInsert={(draft) => {
+          setSoapForm((f) => ({
+            ...f,
+            subjective: draft.subjective,
+            objective: draft.objective,
+            assessment: draft.assessment,
+            plan: draft.plan,
+          }));
+          setToast({ message: "Draft inserted — review before signing.", type: "success" });
+        }}
+      />
     </>
   );
 }
