@@ -9,6 +9,7 @@ import { useAuth } from "../../contexts/AuthContext";
 import { dashboardService, membershipPlanService, messageService, patientService, appointmentService, encounterService, prescriptionService, invoiceService, programService, telehealthService, screeningService, couponService, providerService, paymentService, notificationService, apiFetch, billingEnhancedService } from "../../lib/api";
 import { PortalShell, type NavSection as ShellNavSection, type PortalColor } from "../shared/PortalShell";
 import { CommandPalette, useCommandPaletteShortcut } from "../shared/CommandPalette";
+import { AddAllergyDialog, type AllergyEntry } from "../clinical/AddAllergyDialog";
 import { PracticeSettings } from "../settings/PracticeSettings";
 import { CalendarView } from "../shared/CalendarView";
 import { AppointmentBookingWidget } from "../widgets/AppointmentBookingWidget";
@@ -670,6 +671,8 @@ export function PracticePortal() {
   // Reset-link modal — admin tool for "the patient never got the
   // password-reset email, give me the link directly."
   const [resetLinkModal, setResetLinkModal] = useState<{ url: string; patientName: string } | null>(null);
+  // Add-allergy dialog — opened from the patient detail Medical tab.
+  const [allergyDialogOpen, setAllergyDialogOpen] = useState(false);
   const [patientDetailTab, setPatientDetailTab] = useState("demographics");
   const [expandedEncounters, setExpandedEncounters] = useState<string[]>([]);
   const [notificationFilter, setNotificationFilter] = useState<"all" | "members" | "appointments" | "billing" | "system">("all");
@@ -3232,6 +3235,7 @@ export function PracticePortal() {
                   style={{ backgroundColor: "#27ab83" }}
                   onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#147d64")}
                   onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "#27ab83")}
+                  onClick={() => setAllergyDialogOpen(true)}
                 >
                   <Plus className="w-3.5 h-3.5" /> Add Allergy
                 </button>
@@ -8366,6 +8370,25 @@ export function PracticePortal() {
         items={paletteItems}
         onSelect={(id) => setActiveTab(id as TabId)}
       />
+
+      {/* Add Allergy dialog — opened from patient detail Medical tab. */}
+      {selectedPatient && (
+        <AddAllergyDialog
+          open={allergyDialogOpen}
+          onClose={() => setAllergyDialogOpen(false)}
+          patientId={selectedPatient.id}
+          patientName={selectedPatient.name}
+          existingAllergies={(selectedPatient.allergies || []) as AllergyEntry[]}
+          onSaved={(merged) => {
+            // Optimistic local update so the table reflects the new
+            // allergy without a full reload. loadPracticeData() in the
+            // background re-syncs from the API.
+            setSelectedPatient({ ...selectedPatient, allergies: merged });
+            loadPracticeData();
+            setToast({ message: "Allergy added.", type: "success" });
+          }}
+        />
+      )}
     </>
   );
 }
