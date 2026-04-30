@@ -92,8 +92,8 @@ import {
   Radio,
   Trash2,
   Megaphone,
-  RefreshCw,
 } from "lucide-react";
+import { RefreshButton } from "../shared/RefreshButton";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -2404,14 +2404,7 @@ export function PracticePortal() {
                 onBlur={(e) => (e.currentTarget.style.borderColor = "")}
               />
             </div>
-            <button
-              className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors shrink-0"
-              onClick={() => loadPracticeData()}
-              title="Refresh roster — pulls the latest patients from the server"
-            >
-              <RefreshCw className="w-4 h-4" />
-              <span className="hidden sm:inline">Refresh</span>
-            </button>
+            <RefreshButton onRefresh={loadPracticeData} title="Refresh roster" />
             <button
               className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors shrink-0"
               style={{ backgroundColor: "#27ab83" }}

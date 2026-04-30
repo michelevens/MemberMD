@@ -7,6 +7,7 @@ import { ProgramTemplatesTab } from "./ProgramTemplatesTab";
 import { HeaderToolbar } from "../shared/HeaderToolbar";
 import { PlatformSettings } from "../settings/PlatformSettings";
 import { UserSettingsDropdown } from "../shared/UserSettingsDropdown";
+import { RefreshButton } from "../shared/RefreshButton";
 import { ProfilePage } from "../profile/ProfilePage";
 import {
   LayoutDashboard,
@@ -1622,6 +1623,7 @@ export function SuperAdminPortal() {
                 className="pl-9 pr-4 py-2 rounded-lg border border-slate-200 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-teal-400 w-64"
               />
             </div>
+            <RefreshButton onRefresh={loadData} title="Refresh practices list" />
             <button className="flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-200 text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors">
               <Filter className="w-4 h-4" />
               Filter

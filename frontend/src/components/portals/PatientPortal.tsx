@@ -12,6 +12,7 @@ import { AppointmentBookingWidget } from "../widgets/AppointmentBookingWidget";
 import { ProfilePage } from "../profile/ProfilePage";
 import { PortalShell, type NavItem } from "../shared/PortalShell";
 import { CommandPalette, useCommandPaletteShortcut } from "../shared/CommandPalette";
+import { RefreshButton } from "../shared/RefreshButton";
 import { BillingTab } from "./patient/BillingTab";
 import {
   familyService,
@@ -574,14 +575,13 @@ export function PatientPortal() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [apiDocuments, setApiDocuments] = useState<any[] | null>(null);
 
-  useEffect(() => {
-    async function loadPatientData() {
-      // In production we MUST avoid leaving the api* state slots null
-      // when the API rejects — the useMemo fallbacks below would then
-      // serve fictional demo PHI to a real patient (audit B6 regression
-      // path). Default each slot to [] up front so a network failure
-      // shows an empty section, not Wilson's records.
-      const isDemo = isUsingMockData();
+  const loadPatientData = useCallback(async () => {
+    // In production we MUST avoid leaving the api* state slots null
+    // when the API rejects — the useMemo fallbacks below would then
+    // serve fictional demo PHI to a real patient (audit B6 regression
+    // path). Default each slot to [] up front so a network failure
+    // shows an empty section, not Wilson's records.
+    const isDemo = isUsingMockData();
       if (!isDemo) {
         setApiUpcoming([]);
         setApiPast([]);
@@ -731,9 +731,9 @@ export function PatientPortal() {
       } catch {
         // keep mock data on network failure
       }
-    }
-    loadPatientData();
   }, []);
+
+  useEffect(() => { loadPatientData(); }, [loadPatientData]);
 
   // ─── Resolved data ───────────────────────────────────────────────────────
   // Mock fallbacks are demo-only. In production, real users with empty data
@@ -1091,13 +1091,16 @@ export function PatientPortal() {
         <h1 className="text-xl font-bold" style={{ color: COLORS.navy800 }}>
           Appointments
         </h1>
-        <button
-          onClick={() => setShowBookingWidget(true)}
-          className="px-4 py-2 rounded-xl text-sm font-semibold text-white shadow-lg transition-all hover:-translate-y-0.5"
-          style={{ backgroundColor: COLORS.teal500 }}
-        >
-          + Book Appointment
-        </button>
+        <div className="flex items-center gap-2">
+          <RefreshButton onRefresh={loadPatientData} title="Refresh appointments" />
+          <button
+            onClick={() => setShowBookingWidget(true)}
+            className="px-4 py-2 rounded-xl text-sm font-semibold text-white shadow-lg transition-all hover:-translate-y-0.5"
+            style={{ backgroundColor: COLORS.teal500 }}
+          >
+            + Book Appointment
+          </button>
+        </div>
       </div>
 
       {/* Upcoming */}
@@ -1267,12 +1270,15 @@ export function PatientPortal() {
             <h1 className="text-xl font-bold" style={{ color: COLORS.navy800 }}>
               Messages
             </h1>
-            <button
-              className="px-3 py-1.5 rounded-lg text-sm font-semibold text-white"
-              style={{ backgroundColor: COLORS.teal500 }}
-            >
-              + New Message
-            </button>
+            <div className="flex items-center gap-2">
+              <RefreshButton onRefresh={loadPatientData} title="Refresh messages" />
+              <button
+                className="px-3 py-1.5 rounded-lg text-sm font-semibold text-white"
+                style={{ backgroundColor: COLORS.teal500 }}
+              >
+                + New Message
+              </button>
+            </div>
           </div>
           <div className="space-y-2">
             {messageThreads.map((thread) => (

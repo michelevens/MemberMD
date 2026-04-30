@@ -20,6 +20,7 @@ import {
 } from "../../lib/api";
 import { OperatorNetworkDashboard } from "./operator/OperatorNetworkDashboard";
 import { OperatorPlanTemplates } from "./operator/OperatorPlanTemplates";
+import { RefreshButton } from "../shared/RefreshButton";
 import {
   LayoutDashboard,
   Building2,
@@ -538,16 +539,19 @@ function OperatorUsersTab({ me }: { me: OperatorMe }) {
         <p className="text-sm" style={{ color: C.slate500 }}>
           {users.length} operator {users.length === 1 ? "member" : "members"}
         </p>
-        {me.canManageUsers && (
-          <button
-            onClick={() => setShowAdd(true)}
-            className="inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold text-white shadow-sm transition-opacity hover:opacity-95"
-            style={{ background: `linear-gradient(135deg, ${C.teal500}, ${C.teal600})` }}
-          >
-            <Plus className="w-4 h-4" />
-            Add user
-          </button>
-        )}
+        <div className="flex items-center gap-2">
+          <RefreshButton onRefresh={load} title="Refresh operator users" />
+          {me.canManageUsers && (
+            <button
+              onClick={() => setShowAdd(true)}
+              className="inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold text-white shadow-sm transition-opacity hover:opacity-95"
+              style={{ background: `linear-gradient(135deg, ${C.teal500}, ${C.teal600})` }}
+            >
+              <Plus className="w-4 h-4" />
+              Add user
+            </button>
+          )}
+        </div>
       </div>
 
       <div
