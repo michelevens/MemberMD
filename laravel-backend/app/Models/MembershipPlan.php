@@ -58,6 +58,41 @@ class MembershipPlan extends Model
         'template_last_synced_at' => 'datetime',
     ];
 
+    /**
+     * Bump version on any price- or entitlement-affecting edit. Without this
+     * the locked_plan_version snapshot on patient_memberships is meaningless
+     * — the plan is always "v1" forever (QA scenario #8).
+     *
+     * Fields that bump version: pricing, visit allowances, included features.
+     * Cosmetic edits (description, badge_text, sort_order) don't bump.
+     */
+    protected static function booted(): void
+    {
+        static::updating(function (self $plan) {
+            $versioned = [
+                'monthly_price', 'annual_price',
+                'visits_per_month', 'overage_fee',
+                'family_member_price', 'min_commitment_months',
+                'telehealth_included', 'messaging_included',
+                'crisis_support', 'lab_discount_pct',
+                'prescription_management', 'specialist_referrals',
+                'care_plan_included', 'visit_rollover',
+                'trial_days', 'trial_requires_payment_method',
+                'stripe_monthly_price_id', 'stripe_annual_price_id',
+            ];
+            $changed = false;
+            foreach ($versioned as $f) {
+                if ($plan->isDirty($f)) {
+                    $changed = true;
+                    break;
+                }
+            }
+            if ($changed) {
+                $plan->version = (int) ($plan->getOriginal('version') ?? 1) + 1;
+            }
+        });
+    }
+
     public function program(): BelongsTo { return $this->belongsTo(Program::class); }
     public function memberships(): HasMany { return $this->hasMany(PatientMembership::class, 'plan_id'); }
     public function addons(): HasMany { return $this->hasMany(PlanAddon::class, 'plan_id'); }

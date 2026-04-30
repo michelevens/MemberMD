@@ -143,6 +143,40 @@ class EmployerPortalController extends Controller
         // for ghost employees.
         $diff = $this->roster->diff($employer, $request->roster);
 
+        // ─── Mass-termination guard (QA scenario #5) ─────────────────────
+        // A typo or a partial CSV upload could implicitly terminate every
+        // employee. Hard-gate any large termination behind an explicit
+        // confirm_terminations=true flag so the operator has to look at the
+        // diff first. dry_run=true short-circuits to "here's what would
+        // happen" without mutating anything — used by the upload preview.
+        $termCount = count($diff['term_patient_ids']);
+        $threshold = max(5, (int) ceil($currentCount * 0.10)); // >5 or >10% of current
+        $confirmed = $request->boolean('confirm_terminations');
+        $dryRun = $request->boolean('dry_run');
+
+        if ($dryRun) {
+            return response()->json(['data' => [
+                'dry_run' => true,
+                'will_add' => count($diff['adds']),
+                'will_terminate' => $termCount,
+                'unchanged' => $diff['unchanged_count'],
+                'term_patient_ids' => $diff['term_patient_ids'],
+                'requires_confirmation' => $termCount > $threshold,
+                'threshold' => $threshold,
+            ]]);
+        }
+
+        if ($termCount > $threshold && !$confirmed) {
+            return response()->json([
+                'message' => "This upload would terminate {$termCount} employees (threshold: {$threshold}). "
+                    . "Pass confirm_terminations=true to proceed, or dry_run=true to preview.",
+                'requires_confirmation' => true,
+                'will_add' => count($diff['adds']),
+                'will_terminate' => $termCount,
+                'threshold' => $threshold,
+            ], 409);
+        }
+
         // Snapshot the upload for replay/audit. Persisted as JSONB so we
         // can reconstruct any past state.
         DB::table('employer_roster_snapshots')->insert([

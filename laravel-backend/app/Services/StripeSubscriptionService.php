@@ -7,6 +7,7 @@ use App\Models\MembershipPlan;
 use App\Models\Patient;
 use App\Models\PatientMembership;
 use App\Models\Practice;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use RuntimeException;
 use Stripe\Exception\ApiErrorException;
@@ -55,31 +56,50 @@ class StripeSubscriptionService
     {
         $this->assertPracticeReady($practice);
 
-        if (!empty($patient->stripe_customer_id)) {
-            return $patient->stripe_customer_id;
-        }
+        // Race-safe customer creation (QA scenario #15). Two concurrent
+        // requests (enroll + payment-method-setup from another tab) both
+        // saw stripe_customer_id = null and each created a new Stripe
+        // customer. Last write won locally; the other customer became an
+        // orphan that future webhooks couldn't resolve. We now lock the
+        // patient row inside a transaction — the second caller blocks
+        // until the first commits, then sees the populated customer_id.
+        return DB::transaction(function () use ($practice, $patient) {
+            $locked = Patient::where('id', $patient->id)
+                ->lockForUpdate()
+                ->first();
 
-        try {
-            $customer = $this->stripe()->customers->create(
-                [
-                    'email' => $patient->email,
-                    'name' => trim($patient->first_name . ' ' . $patient->last_name),
-                    'phone' => $patient->phone,
-                    'metadata' => [
-                        'patient_id' => $patient->id,
-                        'tenant_id' => $practice->id,
-                        'platform' => 'membermd',
+            if (!empty($locked->stripe_customer_id)) {
+                return $locked->stripe_customer_id;
+            }
+
+            try {
+                $customer = $this->stripe()->customers->create(
+                    [
+                        'email' => $locked->email,
+                        'name' => trim($locked->first_name . ' ' . $locked->last_name),
+                        'phone' => $locked->phone,
+                        'metadata' => [
+                            'patient_id' => $locked->id,
+                            'tenant_id' => $practice->id,
+                            'platform' => 'membermd',
+                        ],
                     ],
-                ],
-                ['stripe_account' => $practice->stripe_account_id],
-            );
-        } catch (ApiErrorException $e) {
-            throw new RuntimeException("Failed to create Stripe customer: {$e->getMessage()}", 0, $e);
-        }
+                    [
+                        'stripe_account' => $practice->stripe_account_id,
+                        // Stripe-side idempotency too — same patient retry
+                        // hitting Stripe directly returns the existing
+                        // customer instead of creating a second one.
+                        'idempotency_key' => "membermd-customer-{$locked->id}",
+                    ],
+                );
+            } catch (ApiErrorException $e) {
+                throw new RuntimeException("Failed to create Stripe customer: {$e->getMessage()}", 0, $e);
+            }
 
-        $patient->update(['stripe_customer_id' => $customer->id]);
+            $locked->update(['stripe_customer_id' => $customer->id]);
 
-        return $customer->id;
+            return $customer->id;
+        });
     }
 
     /**
@@ -257,6 +277,12 @@ class StripeSubscriptionService
             );
 
             $currentItemId = $sub->items->data[0]->id ?? null;
+            // Preserve quantity across plan change (QA scenario #14). Without
+            // this, a primary with N family members has its quantity silently
+            // reset to default when the plan price ID is swapped — Stripe
+            // would then bill for one seat covering N people, and dependents
+            // get free coverage until next renewal exposes the mismatch.
+            $currentQuantity = (int) ($sub->items->data[0]->quantity ?? 1);
             if (!$currentItemId) {
                 throw new RuntimeException('Subscription has no items.');
             }
@@ -267,6 +293,7 @@ class StripeSubscriptionService
                     'items' => [[
                         'id' => $currentItemId,
                         'price' => $newPriceId,
+                        'quantity' => $currentQuantity,
                     ]],
                     'proration_behavior' => 'create_prorations',
                 ],

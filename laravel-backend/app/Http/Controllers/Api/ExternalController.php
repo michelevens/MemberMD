@@ -140,6 +140,29 @@ class ExternalController extends Controller
             ->where('is_active', true)
             ->findOrFail($validated['plan_id']);
 
+        // Pre-flight check for active membership (QA scenario #1). The DB
+        // unique partial index will reject this anyway, but checking here
+        // gives the user a clean message instead of a 500.
+        $emailHash = Patient::blindHash($validated['email']);
+        if ($emailHash) {
+            $existingPatient = Patient::where('tenant_id', $practice->id)
+                ->where('email_blind_index', $emailHash)
+                ->first();
+            if ($existingPatient) {
+                $existingActive = PatientMembership::where('tenant_id', $practice->id)
+                    ->where('patient_id', $existingPatient->id)
+                    ->where('status', 'active')
+                    ->whereNull('parent_membership_id')
+                    ->exists();
+                if ($existingActive) {
+                    return response()->json([
+                        'message' => 'A membership for this email is already active. Please sign in to your portal or contact the practice.',
+                        'code' => 'duplicate_active_membership',
+                    ], 409);
+                }
+            }
+        }
+
         // Create user account for patient
         $user = User::create([
             'tenant_id' => $practice->id,

@@ -10,6 +10,7 @@ use App\Models\PaymentRefund;
 use App\Models\PatientMembership;
 use App\Models\Practice;
 use App\Models\StripeConnectEvent;
+use App\Services\MembershipCreditService;
 use App\Services\MembershipStateMachine;
 use App\Services\StripeConnectService;
 use Illuminate\Http\JsonResponse;
@@ -37,6 +38,7 @@ class StripeWebhookController extends Controller
     public function __construct(
         private readonly StripeConnectService $connect,
         private readonly MembershipStateMachine $states,
+        private readonly MembershipCreditService $credits,
     ) {
     }
 
@@ -315,6 +317,18 @@ class StripeWebhookController extends Controller
             $this->states->transition($membership->fresh(), 'active');
         }
         $this->states->stampStripeEventAt($membership->fresh(), $event->created ?? null);
+
+        // Reconcile any membership credits this invoice consumed (QA
+        // scenario #10). starting_balance / ending_balance on the Stripe
+        // invoice tell us how much customer-balance credit was applied.
+        // This is the read-side bookkeeping; the actual offset to the
+        // charge already happened on Stripe via the customer balance.
+        $this->credits->reconcileFromInvoice(
+            $membership->fresh(),
+            $stripeInvoice->id,
+            $stripeInvoice->starting_balance ?? null,
+            $stripeInvoice->ending_balance ?? null,
+        );
 
         $this->audit($practice, 'tier2_invoice_paid', [
             'membership_id' => $membership->id,
