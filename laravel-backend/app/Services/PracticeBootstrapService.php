@@ -5,8 +5,6 @@ namespace App\Services;
 use App\Models\AppointmentType;
 use App\Models\ConsentTemplate;
 use App\Models\MasterSpecialty;
-use App\Models\MembershipPlan;
-use App\Models\PlanAddon;
 use App\Models\PracticeSetting;
 use App\Models\Practice;
 use App\Models\ScreeningTemplate;
@@ -30,69 +28,15 @@ class PracticeBootstrapService
             return;
         }
 
-        $this->createDefaultPlans($practice, $specialty);
+        // Plans are intentionally NOT auto-seeded. Each practice owns its own
+        // pricing under the two-tier billing model and creates plans from the
+        // Practice Portal. Specialty default_plan_templates remain in the DB
+        // as a future opt-in "starter pack" the practice can apply manually.
         $this->createDefaultAppointmentTypes($practice, $specialty);
         $this->seedEntitlementTypes($practice);
         $this->copyScreeningTemplates($practice, $specialty);
         $this->copyConsentTemplates($practice);
         $this->createDefaultSettings($practice);
-    }
-
-    /**
-     * Create default membership plans from the specialty's plan templates.
-     */
-    protected function createDefaultPlans(Practice $practice, MasterSpecialty $specialty): void
-    {
-        $planTemplates = $specialty->default_plan_templates ?? [];
-
-        foreach ($planTemplates as $index => $template) {
-            $plan = MembershipPlan::updateOrCreate(
-                [
-                    'tenant_id' => $practice->id,
-                    'name' => $template['name'],
-                ],
-                [
-                    'monthly_price' => $template['monthly_price'],
-                    'annual_price' => $template['annual_price'] ?? null,
-                    'visits_per_month' => $template['visits_per_month'],
-                    'telehealth_included' => $template['telehealth_included'] ?? true,
-                    'messaging_included' => $template['messaging_included'] ?? true,
-                    'messaging_response_sla_hours' => $template['messaging_response_sla_hours'] ?? 24,
-                    'crisis_support' => $template['crisis_support'] ?? false,
-                    'badge_text' => $template['badge_text'] ?? null,
-                    'sort_order' => $index + 1,
-                    'is_active' => true,
-                ]
-            );
-
-            // Create add-ons and link to the first plan (or the plan with matching index)
-            if ($index === 0) {
-                $this->createDefaultAddons($practice, $plan, $specialty);
-            }
-        }
-    }
-
-    /**
-     * Create default add-ons linked to a plan.
-     */
-    protected function createDefaultAddons(Practice $practice, MembershipPlan $plan, MasterSpecialty $specialty): void
-    {
-        $addons = $specialty->default_addons ?? [];
-
-        foreach ($addons as $addon) {
-            PlanAddon::updateOrCreate(
-                [
-                    'tenant_id' => $practice->id,
-                    'plan_id' => $plan->id,
-                    'name' => $addon['name'],
-                ],
-                [
-                    'price' => $addon['price'],
-                    'billing_type' => $addon['billing_type'],
-                    'is_active' => true,
-                ]
-            );
-        }
     }
 
     /**

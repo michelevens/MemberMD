@@ -59,7 +59,12 @@ class MembershipPlanController extends Controller
             'badge_text' => 'nullable|string|max:30',
             'monthly_price' => 'required|numeric|min:0',
             'annual_price' => 'nullable|numeric|min:0',
-            'visits_per_month' => 'required|integer|min:0',
+            // visits_per_month: positive int = limit, 0 = no visits (rare),
+            // -1 = unlimited (concierge). Optional because the minimal
+            // "Create Plan" modal in the practice portal doesn't surface
+            // it; the more advanced plan-builder does. Defaults to
+            // unlimited when omitted so a basic plan creates successfully.
+            'visits_per_month' => 'nullable|integer|min:-1',
             'telehealth_included' => 'sometimes|boolean',
             'messaging_included' => 'sometimes|boolean',
             'messaging_response_sla_hours' => 'nullable|integer|min:1',
@@ -80,6 +85,12 @@ class MembershipPlanController extends Controller
 
         $validated['tenant_id'] = $user->tenant_id;
         $validated['is_active'] = true;
+        // Default visits to unlimited when the minimal Create Plan form
+        // didn't ask. Practice can edit to a limit later via the
+        // advanced plan-builder.
+        if (!array_key_exists('visits_per_month', $validated)) {
+            $validated['visits_per_month'] = -1;
+        }
 
         $plan = MembershipPlan::create($validated);
 
