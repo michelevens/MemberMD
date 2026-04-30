@@ -36,6 +36,18 @@ class Kernel extends ConsoleKernel
             ->onFailure(function () {
                 \Log::error('Appointment reminders processing failed');
             });
+
+        // Walk dunning policies once a day. Practices configure step.day
+        // offsets in their policy; this job is what actually advances them.
+        // Daily cadence matches step granularity (steps are day-keyed).
+        $schedule->command('dunning:process')
+            ->daily()
+            ->at('06:00')
+            ->name('tier2_dunning')
+            ->withoutOverlapping()
+            ->onFailure(function () {
+                \Log::error('Tier 2 dunning processing failed');
+            });
     }
 
     /**

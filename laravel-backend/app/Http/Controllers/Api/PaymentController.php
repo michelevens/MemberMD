@@ -3,10 +3,17 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Models\Payment;
+use App\Models\AuditLog;
 use App\Models\Invoice;
+use App\Models\Payment;
+use App\Models\Practice;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
+use RuntimeException;
+use Stripe\Exception\ApiErrorException;
+use Stripe\StripeClient;
 
 class PaymentController extends Controller
 {
@@ -86,15 +93,60 @@ class PaymentController extends Controller
 
         $validated = $request->validate([
             'refund_amount' => 'required|numeric|min:0.01|max:' . $payment->amount,
+            'reason' => 'nullable|in:duplicate,fraudulent,requested_by_customer',
+            'notes' => 'nullable|string|max:500',
         ]);
 
+        // Real Stripe refund call (Tier 2 — practice's connected account).
+        // Local rows reflect the Stripe truth, not the other way around: if
+        // the API call fails, the local Payment stays 'completed' and we
+        // surface the error so the admin can retry or fall back to manual.
+        $stripeRefundId = null;
+        if (!empty($payment->stripe_payment_id)) {
+            $practice = Practice::find($user->tenant_id);
+            if (!$practice || empty($practice->stripe_account_id)) {
+                return response()->json([
+                    'message' => 'Practice is not connected to Stripe. Cannot issue refund.',
+                ], 422);
+            }
+
+            try {
+                $stripeRefund = $this->stripe()->refunds->create(
+                    array_filter([
+                        'charge' => $payment->stripe_payment_id,
+                        'amount' => (int) round(((float) $validated['refund_amount']) * 100),
+                        'reason' => $validated['reason'] ?? null,
+                        'metadata' => [
+                            'payment_id' => $payment->id,
+                            'tenant_id' => $payment->tenant_id,
+                            'issued_by' => $user->id,
+                            'notes' => $validated['notes'] ?? '',
+                        ],
+                    ]),
+                    ['stripe_account' => $practice->stripe_account_id],
+                );
+                $stripeRefundId = $stripeRefund->id;
+            } catch (ApiErrorException $e) {
+                Log::error('Stripe refund failed', [
+                    'payment_id' => $payment->id,
+                    'tenant_id' => $payment->tenant_id,
+                    'error' => $e->getMessage(),
+                ]);
+                return response()->json([
+                    'message' => 'Refund failed at Stripe: ' . $e->getMessage(),
+                ], 502);
+            }
+        }
+
+        // The charge.refunded webhook will also reconcile this; we apply
+        // the local update inline so the response carries the new state.
+        $isFull = (float) $validated['refund_amount'] >= (float) $payment->amount;
         $payment->update([
-            'status' => 'refunded',
+            'status' => $isFull ? 'refunded' : $payment->status,
             'refund_amount' => $validated['refund_amount'],
             'refunded_at' => now(),
         ]);
 
-        // If linked to an invoice, revert invoice status
         if ($payment->invoice_id) {
             $invoice = Invoice::find($payment->invoice_id);
             $totalPaid = $invoice->payments()
@@ -105,6 +157,38 @@ class PaymentController extends Controller
             }
         }
 
-        return response()->json(['data' => $payment->fresh()->load(['patient', 'invoice'])]);
+        try {
+            AuditLog::create([
+                'id' => (string) Str::uuid(),
+                'tenant_id' => $user->tenant_id,
+                'user_id' => $user->id,
+                'action' => 'payment_refunded',
+                'resource' => 'Payment',
+                'resource_id' => $payment->id,
+                'metadata' => [
+                    'amount' => $validated['refund_amount'],
+                    'full' => $isFull,
+                    'stripe_refund_id' => $stripeRefundId,
+                    'reason' => $validated['reason'] ?? null,
+                    'notes' => $validated['notes'] ?? null,
+                ],
+            ]);
+        } catch (\Throwable $e) {
+            Log::warning('Audit write failed for refund', ['error' => $e->getMessage()]);
+        }
+
+        return response()->json([
+            'data' => $payment->fresh()->load(['patient', 'invoice']),
+            'stripe_refund_id' => $stripeRefundId,
+        ]);
+    }
+
+    private function stripe(): StripeClient
+    {
+        $secret = (string) config('services.stripe.secret');
+        if ($secret === '') {
+            throw new RuntimeException('Stripe is not configured.');
+        }
+        return new StripeClient($secret);
     }
 }

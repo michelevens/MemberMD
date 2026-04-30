@@ -8,11 +8,18 @@ use App\Models\PatientMembership;
 use App\Models\PatientEntitlement;
 use App\Models\MembershipPlan;
 use App\Services\ProrationService;
+use App\Services\StripeSubscriptionService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 
 class MembershipController extends Controller
 {
+    public function __construct(
+        private readonly StripeSubscriptionService $subscriptions,
+    ) {
+    }
+
     public function index(Request $request): JsonResponse
     {
         $user = $request->user();
@@ -338,7 +345,11 @@ class MembershipController extends Controller
     }
 
     /**
-     * Cancel a membership (with optional retention outcome tracking).
+     * Cancel a membership (admin/staff initiated).
+     *
+     * Defaults to end-of-period (so the patient keeps coverage they paid for);
+     * pass `immediately=true` for hard cuts (e.g., fraud / comp removal).
+     * Stripe subscription is updated alongside the local row.
      */
     public function cancel(Request $request, string $id): JsonResponse
     {
@@ -347,10 +358,8 @@ class MembershipController extends Controller
 
         $membership = PatientMembership::where('tenant_id', $user->tenant_id)->findOrFail($id);
 
-        if (in_array($membership->status, ['cancelled'])) {
-            return response()->json([
-                'message' => 'Membership is already cancelled.',
-            ], 422);
+        if ($membership->status === 'cancelled') {
+            return response()->json(['message' => 'Membership is already cancelled.'], 422);
         }
 
         $validated = $request->validate([
@@ -358,8 +367,75 @@ class MembershipController extends Controller
             'reason_notes' => 'nullable|string|max:500',
             'retention_offered' => 'nullable|boolean',
             'retention_declined' => 'nullable|string|in:pause,downgrade,contact',
+            'immediately' => 'nullable|boolean',
         ]);
 
+        $immediately = (bool) ($validated['immediately'] ?? false);
+
+        $this->cancelStripeSubscription($membership, $immediately);
+        $membership->update($this->buildCancelUpdates($validated, $immediately));
+
+        return response()->json([
+            'data' => $membership->fresh()->load(['patient', 'plan']),
+            'message' => $immediately
+                ? 'Membership cancelled immediately.'
+                : 'Membership will end at the current period close.',
+        ]);
+    }
+
+    /**
+     * Self-service cancellation by the patient. Always end-of-period — the
+     * patient cannot force an immediate cut. Reason capture mirrors admin
+     * cancel so churn analytics stay consistent across channels.
+     */
+    public function selfCancel(Request $request, string $id): JsonResponse
+    {
+        $user = $request->user();
+        abort_if(!$user->isPatient(), 403);
+
+        $membership = PatientMembership::where('tenant_id', $user->tenant_id)
+            ->whereHas('patient', fn ($q) => $q->where('user_id', $user->id))
+            ->findOrFail($id);
+
+        if ($membership->status === 'cancelled') {
+            return response()->json(['message' => 'Membership is already cancelled.'], 422);
+        }
+
+        $validated = $request->validate([
+            'reason' => 'required|string|in:moved,cost,dissatisfied,switching_provider,other',
+            'reason_notes' => 'nullable|string|max:500',
+            'retention_declined' => 'nullable|string|in:pause,downgrade,contact',
+        ]);
+
+        $this->cancelStripeSubscription($membership, false);
+        $membership->update($this->buildCancelUpdates($validated, false));
+
+        return response()->json([
+            'data' => $membership->fresh()->load(['plan']),
+            'message' => 'Your membership will end at the close of your current billing period. You can reactivate any time before then.',
+        ]);
+    }
+
+    private function cancelStripeSubscription(PatientMembership $membership, bool $immediately): void
+    {
+        if (empty($membership->stripe_subscription_id)) {
+            return;
+        }
+        try {
+            $this->subscriptions->cancelSubscription($membership, $immediately);
+        } catch (\Throwable $e) {
+            // Don't block local cancel on Stripe failure — webhook will
+            // eventually reconcile if it succeeds asynchronously, and admins
+            // can manually retry from the membership detail page.
+            Log::warning('Stripe subscription cancel failed', [
+                'membership_id' => $membership->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    private function buildCancelUpdates(array $validated, bool $immediately): array
+    {
         $reasonText = $validated['reason'];
         if (!empty($validated['reason_notes'])) {
             $reasonText .= ': ' . $validated['reason_notes'];
@@ -368,16 +444,14 @@ class MembershipController extends Controller
             $reasonText .= ' [declined retention: ' . $validated['retention_declined'] . ']';
         }
 
-        $membership->update([
+        return [
             'status' => 'cancelled',
             'cancelled_at' => now(),
             'cancel_reason' => $reasonText,
-        ]);
-
-        return response()->json([
-            'data' => $membership->fresh()->load(['patient', 'plan']),
-            'message' => 'Membership cancelled.',
-        ]);
+            // For end-of-period cancels we keep current_period_end as the
+            // effective termination date. For immediate, expires_at = now.
+            'expires_at' => $immediately ? now() : null,
+        ];
     }
 
     /**

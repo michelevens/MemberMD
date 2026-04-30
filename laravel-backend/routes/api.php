@@ -214,6 +214,10 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
     // ===== Memberships (Patient Enrollments) =====
     Route::get('/memberships/{id}/entitlements', [MembershipController::class, 'entitlements']);
     Route::post('/memberships/{id}/record-visit', [MembershipController::class, 'recordVisit']);
+    // Patient-initiated end-of-period cancel (separate from admin/staff cancel
+    // which lives in the practice-admin route group below). Patients can only
+    // cancel their own membership; the controller enforces ownership.
+    Route::post('/memberships/{id}/self-cancel', [MembershipController::class, 'selfCancel']);
     Route::apiResource('memberships', MembershipController::class)->except(['destroy']);
 
     // ===== Screenings =====

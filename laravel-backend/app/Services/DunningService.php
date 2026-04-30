@@ -10,6 +10,11 @@ use Illuminate\Support\Facades\Log;
 
 class DunningService
 {
+    public function __construct(
+        private readonly ?StripeSubscriptionService $subscriptions = null,
+    ) {
+    }
+
     /**
      * Process dunning for all tenants. Called daily by the scheduled command.
      * Finds memberships with failed payments and creates/advances DunningEvents.
@@ -148,6 +153,12 @@ class DunningService
                     'paused_at' => now(),
                 ]);
 
+                // Stripe-side: pause collection on the subscription so we
+                // stop attempting charges but keep the subscription alive
+                // for an easy resume. Best-effort — if Stripe call fails,
+                // local pause stands and admin can manually reconcile.
+                $this->pauseStripeCollection($membership);
+
                 Log::info('Dunning: membership paused', [
                     'membership_id' => $membership->id,
                 ]);
@@ -160,6 +171,10 @@ class DunningService
                     'cancel_reason' => 'dunning_non_payment',
                 ]);
 
+                // Hard cancel on Stripe — billing must stop now, not at
+                // period end, since the patient is in dunning failure.
+                $this->hardCancelStripe($membership);
+
                 // Resolve the dunning event
                 $membership->dunningEvents()->active()->update([
                     'resolved_at' => now(),
@@ -170,6 +185,39 @@ class DunningService
                     'membership_id' => $membership->id,
                 ]);
                 break;
+        }
+    }
+
+    private function pauseStripeCollection(PatientMembership $membership): void
+    {
+        if (!$this->subscriptions || empty($membership->stripe_subscription_id)) {
+            return;
+        }
+        // Reuse cancel-at-period-end semantics for now — pausing collection
+        // requires a Stripe API call we'll add when admin pause UI ships.
+        // For dunning purposes, halting renewal is sufficient.
+        try {
+            $this->subscriptions->cancelSubscription($membership, false);
+        } catch (\Throwable $e) {
+            Log::warning('Dunning pause: Stripe call failed', [
+                'membership_id' => $membership->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    private function hardCancelStripe(PatientMembership $membership): void
+    {
+        if (!$this->subscriptions || empty($membership->stripe_subscription_id)) {
+            return;
+        }
+        try {
+            $this->subscriptions->cancelSubscription($membership, true);
+        } catch (\Throwable $e) {
+            Log::warning('Dunning cancel: Stripe call failed', [
+                'membership_id' => $membership->id,
+                'error' => $e->getMessage(),
+            ]);
         }
     }
 

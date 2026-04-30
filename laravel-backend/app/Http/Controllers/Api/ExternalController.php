@@ -8,13 +8,20 @@ use App\Models\Patient;
 use App\Models\PatientMembership;
 use App\Models\Practice;
 use App\Models\User;
+use App\Services\StripeSubscriptionService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
+use Throwable;
 
 class ExternalController extends Controller
 {
+    public function __construct(private readonly StripeSubscriptionService $subscriptions)
+    {
+    }
+
     /**
      * GET /external/plans/{tenantCode}
      * Public endpoint — returns practice info and active membership plans.
@@ -141,7 +148,7 @@ class ExternalController extends Controller
             ]],
             'is_active' => true,
         ]);
-        PatientMembership::create([
+        $membership = PatientMembership::create([
             'tenant_id' => $practice->id,
             'patient_id' => $patient->id,
             'plan_id' => $plan->id,
@@ -154,11 +161,31 @@ class ExternalController extends Controller
                 : now()->addMonth(),
         ]);
 
-        return response()->json([
+        // Tier 2 Stripe subscription on the practice's connected account.
+        // Best-effort: if Stripe isn't configured for this practice yet, we
+        // still complete enrollment — billing wires up when the practice
+        // finishes Connect onboarding and publishes Stripe prices on plans.
+        // The membership is created in 'active' state regardless; webhook
+        // arrival of the first invoice.paid will reconcile period dates.
+        $stripeWarning = null;
+        try {
+            $paymentMethodId = $request->input('stripe_payment_method_id');
+            $this->subscriptions->createSubscription($membership, $paymentMethodId);
+        } catch (Throwable $e) {
+            Log::warning('Tier 2 subscription creation failed at enrollment', [
+                'membership_id' => $membership->id,
+                'practice_id' => $practice->id,
+                'error' => $e->getMessage(),
+            ]);
+            $stripeWarning = 'Subscription will be set up when Stripe is configured.';
+        }
+
+        return response()->json(array_filter([
             'message' => 'Enrollment successful!',
             'member_id' => $memberId,
             'patient_id' => $patient->id,
-        ], 201);
+            'stripe_warning' => $stripeWarning,
+        ]), 201);
     }
 
     /**

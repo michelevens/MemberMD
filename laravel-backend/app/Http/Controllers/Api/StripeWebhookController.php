@@ -3,6 +3,10 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\AuditLog;
+use App\Models\Invoice;
+use App\Models\Payment;
+use App\Models\PatientMembership;
 use App\Models\Practice;
 use App\Models\StripeConnectEvent;
 use App\Services\StripeConnectService;
@@ -10,6 +14,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 use Stripe\Account;
 use Stripe\Event;
 use Stripe\Exception\SignatureVerificationException;
@@ -169,9 +174,316 @@ class StripeWebhookController extends Controller
                 // UI consumes from there. No additional action.
                 break;
 
+            // ─── Tier 2 subscription / invoice events ─────────────────────
+            case 'invoice.paid':
+            case 'invoice.payment_succeeded':
+                $this->handleInvoicePaid($event, $practice);
+                break;
+
+            case 'invoice.payment_failed':
+                $this->handleInvoicePaymentFailed($event, $practice);
+                break;
+
+            case 'customer.subscription.deleted':
+                $this->handleSubscriptionDeleted($event, $practice);
+                break;
+
+            case 'customer.subscription.updated':
+                $this->handleSubscriptionUpdated($event, $practice);
+                break;
+
+            case 'charge.refunded':
+                $this->handleChargeRefunded($event, $practice);
+                break;
+
             default:
                 // Unknown but valid event — recorded, no-op.
                 break;
+        }
+    }
+
+    // ─── Tier 2 handlers ─────────────────────────────────────────────────────
+
+    /**
+     * Successful periodic charge. Persist a paid Invoice + Payment locally,
+     * extend the membership's current_period_end, and roll entitlements.
+     */
+    private function handleInvoicePaid(Event $event, ?Practice $practice): void
+    {
+        if (!$practice) return;
+
+        $stripeInvoice = $event->data->object;
+        $subscriptionId = $stripeInvoice->subscription ?? null;
+        if (!$subscriptionId) return; // ignore one-off invoices not tied to a sub
+
+        $membership = PatientMembership::where('tenant_id', $practice->id)
+            ->where('stripe_subscription_id', $subscriptionId)
+            ->first();
+        if (!$membership) return;
+
+        $amount = ($stripeInvoice->amount_paid ?? 0) / 100;
+
+        $invoice = Invoice::firstOrCreate(
+            [
+                'tenant_id' => $practice->id,
+                'stripe_invoice_id' => $stripeInvoice->id,
+            ],
+            [
+                'patient_id' => $membership->patient_id,
+                'membership_id' => $membership->id,
+                'amount' => $amount,
+                'tax' => 0,
+                'status' => 'paid',
+                'paid_at' => now(),
+                'pdf_url' => $stripeInvoice->hosted_invoice_url ?? null,
+                'line_items' => $this->extractLineItems($stripeInvoice),
+            ],
+        );
+
+        // Defensive: an existing draft/open invoice flips to paid on subsequent
+        // attempts. Don't double-create payments — match by stripe id.
+        if ($invoice->status !== 'paid') {
+            $invoice->update([
+                'status' => 'paid',
+                'paid_at' => now(),
+            ]);
+        }
+
+        $chargeId = $stripeInvoice->charge ?? null;
+        if ($chargeId) {
+            Payment::firstOrCreate(
+                [
+                    'tenant_id' => $practice->id,
+                    'stripe_payment_id' => $chargeId,
+                ],
+                [
+                    'patient_id' => $membership->patient_id,
+                    'invoice_id' => $invoice->id,
+                    'amount' => $amount,
+                    'method' => 'card',
+                    'status' => 'completed',
+                ],
+            );
+        }
+
+        // Roll the membership period forward and clear any dunning state.
+        $updates = [];
+        if (!empty($stripeInvoice->period_end)) {
+            $updates['current_period_end'] = now()->setTimestamp($stripeInvoice->period_end);
+        }
+        if (!empty($stripeInvoice->period_start)) {
+            $updates['current_period_start'] = now()->setTimestamp($stripeInvoice->period_start);
+        }
+        // If the membership had been suspended for non-payment, this charge
+        // brings it back. Don't touch admin-driven 'paused' or 'cancelled'.
+        if ($membership->status === 'past_due') {
+            $updates['status'] = 'active';
+        }
+        if (!empty($updates)) {
+            $membership->update($updates);
+        }
+
+        $this->audit($practice, 'tier2_invoice_paid', [
+            'membership_id' => $membership->id,
+            'stripe_invoice_id' => $stripeInvoice->id,
+            'amount' => $amount,
+        ]);
+    }
+
+    /**
+     * Charge failed. Mark membership past_due and let the dunning executor
+     * (scheduled job) take it from there per the practice's policy.
+     */
+    private function handleInvoicePaymentFailed(Event $event, ?Practice $practice): void
+    {
+        if (!$practice) return;
+
+        $stripeInvoice = $event->data->object;
+        $subscriptionId = $stripeInvoice->subscription ?? null;
+        if (!$subscriptionId) return;
+
+        $membership = PatientMembership::where('tenant_id', $practice->id)
+            ->where('stripe_subscription_id', $subscriptionId)
+            ->first();
+        if (!$membership) return;
+
+        // Persist an Invoice row so admins can see the open balance.
+        $amount = ($stripeInvoice->amount_due ?? 0) / 100;
+        Invoice::firstOrCreate(
+            [
+                'tenant_id' => $practice->id,
+                'stripe_invoice_id' => $stripeInvoice->id,
+            ],
+            [
+                'patient_id' => $membership->patient_id,
+                'membership_id' => $membership->id,
+                'amount' => $amount,
+                'tax' => 0,
+                'status' => 'pending',
+                'pdf_url' => $stripeInvoice->hosted_invoice_url ?? null,
+                'line_items' => $this->extractLineItems($stripeInvoice),
+            ],
+        );
+
+        // Only flip to past_due from active — don't override paused/cancelled
+        // or trigger another past_due transition needlessly.
+        if ($membership->status === 'active') {
+            $membership->update(['status' => 'past_due']);
+        }
+
+        $this->audit($practice, 'tier2_invoice_payment_failed', [
+            'membership_id' => $membership->id,
+            'stripe_invoice_id' => $stripeInvoice->id,
+            'amount_due' => $amount,
+            'attempt_count' => $stripeInvoice->attempt_count ?? null,
+        ]);
+    }
+
+    /**
+     * Subscription deleted on Stripe (either expired after cancel_at_period_end
+     * or hard-cancelled). Mirror locally; preserve any existing cancel_reason.
+     */
+    private function handleSubscriptionDeleted(Event $event, ?Practice $practice): void
+    {
+        if (!$practice) return;
+
+        $sub = $event->data->object;
+        $membership = PatientMembership::where('tenant_id', $practice->id)
+            ->where('stripe_subscription_id', $sub->id)
+            ->first();
+        if (!$membership) return;
+
+        if ($membership->status !== 'cancelled') {
+            $membership->update([
+                'status' => 'cancelled',
+                'cancelled_at' => $membership->cancelled_at ?? now(),
+                'cancel_reason' => $membership->cancel_reason
+                    ?? 'stripe_subscription_deleted',
+            ]);
+        }
+
+        $this->audit($practice, 'tier2_subscription_deleted', [
+            'membership_id' => $membership->id,
+            'stripe_subscription_id' => $sub->id,
+        ]);
+    }
+
+    /**
+     * Subscription state change (status, period, cancel_at_period_end flag).
+     * Most-useful: track impending cancellation set via the Stripe Dashboard
+     * or a downstream support tool.
+     */
+    private function handleSubscriptionUpdated(Event $event, ?Practice $practice): void
+    {
+        if (!$practice) return;
+
+        $sub = $event->data->object;
+        $membership = PatientMembership::where('tenant_id', $practice->id)
+            ->where('stripe_subscription_id', $sub->id)
+            ->first();
+        if (!$membership) return;
+
+        $updates = [];
+        if (!empty($sub->current_period_end)) {
+            $updates['current_period_end'] = now()->setTimestamp($sub->current_period_end);
+        }
+        if (!empty($sub->current_period_start)) {
+            $updates['current_period_start'] = now()->setTimestamp($sub->current_period_start);
+        }
+
+        // Stripe's status takes precedence for past_due / unpaid; admin-set
+        // 'paused' on our side stays sticky and is not overridden here.
+        $stripeStatus = $sub->status ?? null;
+        if (in_array($stripeStatus, ['past_due', 'unpaid'], true) && $membership->status === 'active') {
+            $updates['status'] = 'past_due';
+        }
+        if ($stripeStatus === 'active' && $membership->status === 'past_due') {
+            $updates['status'] = 'active';
+        }
+
+        if (!empty($updates)) {
+            $membership->update($updates);
+        }
+    }
+
+    /**
+     * A charge was refunded on Stripe — could be from our PaymentController,
+     * the Stripe Dashboard, or a dispute. Reconcile the local Payment row.
+     */
+    private function handleChargeRefunded(Event $event, ?Practice $practice): void
+    {
+        if (!$practice) return;
+
+        $charge = $event->data->object;
+        $payment = Payment::where('tenant_id', $practice->id)
+            ->where('stripe_payment_id', $charge->id)
+            ->first();
+        if (!$payment) return;
+
+        $refundedAmount = ($charge->amount_refunded ?? 0) / 100;
+
+        // Partial vs full: if amount_refunded equals charge amount, mark
+        // refunded; otherwise keep status='completed' with refund_amount > 0.
+        $isFull = ($charge->amount_refunded ?? 0) >= ($charge->amount ?? 0);
+
+        $payment->update([
+            'status' => $isFull ? 'refunded' : $payment->status,
+            'refund_amount' => $refundedAmount,
+            'refunded_at' => now(),
+        ]);
+
+        if ($payment->invoice_id) {
+            $invoice = Invoice::find($payment->invoice_id);
+            if ($invoice) {
+                $totalCompleted = $invoice->payments()
+                    ->where('status', 'completed')
+                    ->sum('amount');
+                if ($totalCompleted < $invoice->amount) {
+                    $invoice->update(['status' => 'pending', 'paid_at' => null]);
+                }
+            }
+        }
+
+        $this->audit($practice, 'tier2_charge_refunded', [
+            'payment_id' => $payment->id,
+            'stripe_charge_id' => $charge->id,
+            'amount_refunded' => $refundedAmount,
+            'full' => $isFull,
+        ]);
+    }
+
+    private function extractLineItems(object $stripeInvoice): array
+    {
+        $items = [];
+        $rows = $stripeInvoice->lines->data ?? [];
+        foreach ($rows as $row) {
+            $items[] = [
+                'description' => $row->description ?? '',
+                'amount' => ($row->amount ?? 0) / 100,
+                'quantity' => $row->quantity ?? 1,
+                'period_start' => $row->period->start ?? null,
+                'period_end' => $row->period->end ?? null,
+            ];
+        }
+        return $items;
+    }
+
+    private function audit(Practice $practice, string $action, array $metadata): void
+    {
+        try {
+            AuditLog::create([
+                'id' => (string) Str::uuid(),
+                'tenant_id' => $practice->id,
+                'action' => $action,
+                'resource' => 'PatientMembership',
+                'resource_id' => $metadata['membership_id'] ?? null,
+                'metadata' => $metadata,
+            ]);
+        } catch (Throwable $e) {
+            Log::warning('Audit write failed for Tier 2 webhook event', [
+                'action' => $action,
+                'error' => $e->getMessage(),
+            ]);
         }
     }
 }
