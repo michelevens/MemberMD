@@ -533,6 +533,10 @@ class DemoSeeder extends Seeder
             ? $this->providerChen
             : $this->providerMichel;
         $providerId = $primary->id;
+        // ScreeningResponse.administered_by FKs to users.id, NOT providers.id —
+        // map back to the User that owns this Provider row so the insert
+        // doesn't silently roll back on FK violation.
+        $administeredByUserId = $primary->user_id;
         $months = max(1, $monthsAgo);
 
         // Encounters — 1 per month roughly. Wrap each create in a savepoint
@@ -601,7 +605,7 @@ class DemoSeeder extends Seeder
                         'patient_id' => $patient->id,
                         'template_id' => $template->id,
                         'administered_at' => now()->subMonths(5 - $i)->toDateString(),
-                        'administered_by' => $providerId,
+                        'administered_by' => $administeredByUserId,
                         'score' => $scores[min($i, count($scores) - 1)],
                         'answers' => [],
                         'severity' => $scores[min($i, count($scores) - 1)] >= 15 ? 'severe' : 'moderate',
