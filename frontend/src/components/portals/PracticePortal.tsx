@@ -7,8 +7,7 @@ import { useNavigate, useLocation } from "react-router-dom";
 import { ProviderDetailPage } from "./ProviderDetailPage";
 import { useAuth } from "../../contexts/AuthContext";
 import { dashboardService, membershipPlanService, messageService, patientService, appointmentService, encounterService, prescriptionService, invoiceService, programService, telehealthService, screeningService, couponService, providerService, paymentService, notificationService, apiFetch, billingEnhancedService } from "../../lib/api";
-import { HeaderToolbar } from "../shared/HeaderToolbar";
-import { UserSettingsDropdown } from "../shared/UserSettingsDropdown";
+import { PortalShell, type NavSection as ShellNavSection, type PortalColor } from "../shared/PortalShell";
 import { PracticeSettings } from "../settings/PracticeSettings";
 import { CalendarView } from "../shared/CalendarView";
 import { AppointmentBookingWidget } from "../widgets/AppointmentBookingWidget";
@@ -47,7 +46,6 @@ import {
   Bell,
   Settings,
   Palette,
-  Menu,
   X,
   DollarSign,
   TrendingUp,
@@ -79,7 +77,6 @@ import {
   BarChart3,
   AlertCircle,
   GitBranch,
-  HeartPulse,
   Crosshair,
   FlaskConical,
   Building2,
@@ -119,7 +116,6 @@ type TabId =
   | "revenue-analytics"
   | "dunning"
   | "referrals"
-  | "engagement"
   | "care-coordination"
   | "lab-orders"
   | "employers"
@@ -128,10 +124,19 @@ type TabId =
   | "activity-log"
   | "a-la-carte";
 
+/** Practice-portal user roles that affect what's visible in the sidebar. */
+type PortalRole = "practice_admin" | "provider" | "staff" | "superadmin";
+
 interface NavItem {
   id: TabId;
   label: string;
   icon: React.ElementType;
+  /**
+   * Roles that can see this nav item. Omit (default) = visible to all
+   * practice-portal roles. Providers see their clinical surface; staff
+   * see operational tabs without billing/settings; admin sees everything.
+   */
+  roles?: PortalRole[];
 }
 
 interface NavSection {
@@ -146,7 +151,8 @@ const NAV_SECTIONS: NavSection[] = [
     title: "Overview",
     items: [
       { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
-      { id: "programs", label: "Programs", icon: Layers },
+      // Programs is admin-only \u2014 providers don't configure DPC programs.
+      { id: "programs", label: "Programs", icon: Layers, roles: ["practice_admin", "superadmin"] },
     ],
   },
   {
@@ -160,48 +166,54 @@ const NAV_SECTIONS: NavSection[] = [
   {
     title: "Clinical",
     items: [
-      { id: "appointments", label: "Appointments", icon: Calendar },
-      { id: "telehealth", label: "Telehealth", icon: Video },
-      { id: "encounters", label: "Encounters", icon: Stethoscope },
-      { id: "prescriptions", label: "Prescriptions", icon: Pill },
-      { id: "screenings", label: "Screenings", icon: Activity },
-      { id: "lab-orders", label: "Lab Orders", icon: FlaskConical },
-      { id: "referrals", label: "Referrals", icon: GitBranch },
-      { id: "care-coordination", label: "Care Coordination", icon: Crosshair },
+      // Clinical surface \u2014 visible to admins and providers, hidden from staff.
+      { id: "appointments", label: "Appointments", icon: Calendar, roles: ["practice_admin", "provider", "superadmin"] },
+      { id: "telehealth", label: "Telehealth", icon: Video, roles: ["practice_admin", "provider", "superadmin"] },
+      { id: "encounters", label: "Encounters", icon: Stethoscope, roles: ["practice_admin", "provider", "superadmin"] },
+      { id: "prescriptions", label: "Prescriptions", icon: Pill, roles: ["practice_admin", "provider", "superadmin"] },
+      { id: "screenings", label: "Screenings", icon: Activity, roles: ["practice_admin", "provider", "superadmin"] },
+      { id: "lab-orders", label: "Lab Orders", icon: FlaskConical, roles: ["practice_admin", "provider", "superadmin"] },
+      { id: "referrals", label: "Referrals", icon: GitBranch, roles: ["practice_admin", "provider", "superadmin"] },
+      { id: "care-coordination", label: "Care Coordination", icon: Crosshair, roles: ["practice_admin", "provider", "superadmin"] },
     ],
   },
   {
     title: "Billing",
     items: [
-      { id: "plans", label: "Membership Plans", icon: CreditCard },
-      { id: "invoices", label: "Invoices", icon: FileText },
-      { id: "payments", label: "Payments", icon: Receipt },
-      { id: "coupons", label: "Coupons", icon: Ticket },
-      { id: "revenue-analytics", label: "Revenue Analytics", icon: BarChart3 },
-      { id: "dunning", label: "Payment Recovery", icon: AlertCircle },
-      { id: "employers", label: "Employers", icon: Building2 },
+      // Billing surface \u2014 admins and staff manage; providers don't.
+      { id: "plans", label: "Membership Plans", icon: CreditCard, roles: ["practice_admin", "staff", "superadmin"] },
+      { id: "invoices", label: "Invoices", icon: FileText, roles: ["practice_admin", "staff", "superadmin"] },
+      { id: "payments", label: "Payments", icon: Receipt, roles: ["practice_admin", "staff", "superadmin"] },
+      { id: "coupons", label: "Coupons", icon: Ticket, roles: ["practice_admin", "staff", "superadmin"] },
+      { id: "revenue-analytics", label: "Revenue Analytics", icon: BarChart3, roles: ["practice_admin", "superadmin"] },
+      { id: "dunning", label: "Payment Recovery", icon: AlertCircle, roles: ["practice_admin", "staff", "superadmin"] },
+      { id: "employers", label: "Employers", icon: Building2, roles: ["practice_admin", "staff", "superadmin"] },
     ],
   },
   {
     title: "Team",
     items: [
-      { id: "providers", label: "Providers", icon: UserCog },
-      { id: "staff", label: "Staff", icon: UsersRound },
+      // Team management \u2014 admin only.
+      { id: "providers", label: "Providers", icon: UserCog, roles: ["practice_admin", "superadmin"] },
+      { id: "staff", label: "Staff", icon: UsersRound, roles: ["practice_admin", "superadmin"] },
     ],
   },
   {
     title: "Operations",
     items: [
-      { id: "inventory", label: "Inventory", icon: Package },
-      { id: "engagement", label: "Patient Engagement", icon: HeartPulse },
-      { id: "communications", label: "Communications", icon: Radio },
-      { id: "activity-log", label: "Activity Log", icon: ClipboardList },
-      { id: "a-la-carte", label: "\u00C0 La Carte", icon: DollarSign },
+      { id: "inventory", label: "Inventory", icon: Package, roles: ["practice_admin", "staff", "superadmin"] },
+      // engagement (Patient Engagement) appeared in BOTH Operations and
+      // Engagement sections originally \u2014 duplicate id was a TS-quietly-
+      // deduped bug. Now lives only in Engagement section below.
+      { id: "communications", label: "Communications", icon: Radio, roles: ["practice_admin", "staff", "superadmin"] },
+      { id: "activity-log", label: "Activity Log", icon: ClipboardList, roles: ["practice_admin", "provider", "staff", "superadmin"] },
+      { id: "a-la-carte", label: "\u00C0 La Carte", icon: DollarSign, roles: ["practice_admin", "staff", "superadmin"] },
     ],
   },
   {
     title: "Communications",
     items: [
+      // All roles need messaging.
       { id: "messages", label: "Messages", icon: MessageSquare },
       { id: "notifications", label: "Notifications", icon: Bell },
     ],
@@ -209,24 +221,41 @@ const NAV_SECTIONS: NavSection[] = [
   {
     title: "Engagement",
     items: [
-      { id: "engagement", label: "Patient Engagement", icon: Megaphone },
-      { id: "analytics", label: "Provider Analytics", icon: BarChart3 },
+      { id: "engagement", label: "Patient Engagement", icon: Megaphone, roles: ["practice_admin", "superadmin"] },
+      { id: "analytics", label: "Provider Analytics", icon: BarChart3, roles: ["practice_admin", "superadmin"] },
     ],
   },
   {
     title: "Compliance",
     items: [
-      { id: "compliance", label: "HIPAA & Audit", icon: Shield },
+      // HIPAA + audit log \u2014 admin/superadmin only.
+      { id: "compliance", label: "HIPAA & Audit", icon: Shield, roles: ["practice_admin", "superadmin"] },
     ],
   },
   {
     title: "Settings",
     items: [
-      { id: "practice-settings", label: "Practice Settings", icon: Settings },
-      { id: "branding", label: "Branding", icon: Palette },
+      // Practice settings \u2014 admin only.
+      { id: "practice-settings", label: "Practice Settings", icon: Settings, roles: ["practice_admin", "superadmin"] },
+      { id: "branding", label: "Branding", icon: Palette, roles: ["practice_admin", "superadmin"] },
     ],
   },
 ];
+
+/**
+ * Filter NAV_SECTIONS to only the items the given role can see, and
+ * drop sections that end up empty. Returns the same shape ready for
+ * PortalShell (after a small transform \u2014 PortalShell expects
+ * { id, label?, items } per section).
+ */
+function navForRole(role: PortalRole): NavSection[] {
+  return NAV_SECTIONS
+    .map((section) => ({
+      title: section.title,
+      items: section.items.filter((it) => !it.roles || it.roles.includes(role)),
+    }))
+    .filter((section) => section.items.length > 0);
+}
 
 // ─── Demo Mode ──────────────────────────────────────────────────────────────
 const isDemoMode = import.meta.env.VITE_DEMO_MODE !== "false";
@@ -633,7 +662,6 @@ export function PracticePortal() {
   const providerDetailMatch = /^\/practice\/providers\/([^/?]+)/.exec(location.pathname);
   const selectedProviderId = providerDetailMatch ? providerDetailMatch[1] : null;
   const [activeTab, setActiveTab] = useState<TabId>("dashboard");
-  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [selectedThread, setSelectedThread] = useState(isDemoMode ? MOCK_THREADS[0].id : "");
   const [searchQuery, setSearchQuery] = useState("");
   const [messageInput, setMessageInput] = useState("");
@@ -2040,10 +2068,6 @@ export function PracticePortal() {
     return () => clearInterval(interval);
   }, [isRealApi]);
 
-  const practiceName = auth.user
-    ? `${auth.user.firstName}'s Practice`
-    : "My Practice";
-
   // ─── Memoized Data ──────────────────────────────────────────────────────
 
   const patients = useMemo(() => apiPatients || (isDemoMode ? MOCK_PATIENTS : []), [apiPatients]);
@@ -2085,100 +2109,10 @@ export function PracticePortal() {
     };
   }, [apiPrescriptions]);
 
-  // ─── Sidebar ────────────────────────────────────────────────────────────
-
-  function renderSidebar() {
-    return (
-      <aside
-        className={`fixed inset-y-0 left-0 z-40 w-64 flex flex-col transition-transform duration-300 lg:translate-x-0 ${
-          sidebarOpen ? "translate-x-0" : "-translate-x-full"
-        }`}
-        style={{ backgroundColor: "#102a43" }}
-      >
-        {/* Header */}
-        <div className="p-5 border-b" style={{ borderColor: "rgba(255,255,255,0.08)" }}>
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3 min-w-0">
-              <div
-                className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0"
-                style={{ backgroundColor: "#27ab83" }}
-              >
-                <Shield className="w-5 h-5 text-white" />
-              </div>
-              <div className="min-w-0">
-                <h2 className="text-sm font-semibold text-white truncate">{practiceName}</h2>
-                <span
-                  className="inline-flex items-center px-1.5 py-0.5 rounded text-xs mt-0.5"
-                  style={{ backgroundColor: "rgba(39,171,131,0.15)", color: "#27ab83" }}
-                >
-                  DPC Practice
-                </span>
-              </div>
-            </div>
-            <button
-              onClick={() => setSidebarOpen(false)}
-              className="lg:hidden p-1 rounded text-slate-400 hover:text-white"
-            >
-              <X className="w-5 h-5" />
-            </button>
-          </div>
-        </div>
-
-        {/* Navigation */}
-        <nav className="flex-1 overflow-y-auto py-3 px-3 space-y-4">
-          {NAV_SECTIONS.map((section) => (
-            <div key={section.title}>
-              <p
-                className="px-3 mb-1 text-xs font-semibold uppercase tracking-wider"
-                style={{ color: "rgba(255,255,255,0.35)" }}
-              >
-                {section.title}
-              </p>
-              <div className="space-y-0.5">
-                {section.items.map((item) => {
-                  const isActive = activeTab === item.id;
-                  return (
-                    <button
-                      key={item.id}
-                      onClick={() => {
-                        setActiveTab(item.id);
-                        setSidebarOpen(false);
-                        setSelectedPatient(null);
-                      }}
-                      className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                        isActive ? "text-white" : "hover:text-white"
-                      }`}
-                      style={
-                        isActive
-                          ? { backgroundColor: "rgba(39,171,131,0.18)", color: "#ffffff" }
-                          : { color: "rgba(255,255,255,0.55)" }
-                      }
-                    >
-                      <item.icon className="w-4 h-4 shrink-0" style={isActive ? { color: "#27ab83" } : {}} />
-                      {item.label}
-                      {item.id === "messages" && unreadCount > 0 && (
-                        <span
-                          className="ml-auto text-xs rounded-full px-1.5 py-0.5 font-semibold"
-                          style={{ backgroundColor: "#ef4444", color: "#ffffff" }}
-                        >
-                          {unreadCount}
-                        </span>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          ))}
-        </nav>
-
-        {/* User section */}
-        <div className="p-4 border-t" style={{ borderColor: "rgba(255,255,255,0.08)" }}>
-          <UserSettingsDropdown variant="practice" onNavigateToProfile={() => setActiveTab("profile")} />
-        </div>
-      </aside>
-    );
-  }
+  // (Old inline renderSidebar removed — PortalShell handles the sidebar
+  // chrome, mobile drawer, and user section now. Tab activation, mobile
+  // close, and selected-patient clearing happen via the onTabChange
+  // callback we pass to PortalShell.)
 
   // ─── Dashboard Tab ──────────────────────────────────────────────────────
 
@@ -7291,62 +7225,66 @@ export function PracticePortal() {
 
   // ─── Render ─────────────────────────────────────────────────────────────
 
+  // Resolve which role drives sidebar filtering. practice_admin sees
+  // everything; provider sees clinical-only; staff sees ops + billing
+  // without practice settings; superadmin same as practice_admin here.
+  const portalRole: PortalRole =
+    auth.user?.role === "provider" ? "provider"
+    : auth.user?.role === "staff" ? "staff"
+    : auth.user?.role === "superadmin" ? "superadmin"
+    : "practice_admin";
+
+  // Sidebar tint per role: admin = sage (matches EnnHealth admin
+  // family); provider = teal (clinician); staff = navy (operations).
+  const portalColor: PortalColor =
+    portalRole === "provider" ? "teal"
+    : portalRole === "staff" ? "navy"
+    : "sage";
+
+  // Convert NAV_SECTIONS -> PortalShell's NavSection shape and filter
+  // by the current role. Empty sections are dropped automatically.
+  const filteredSections: ShellNavSection[] = navForRole(portalRole).map((s) => ({
+    id: s.title.toLowerCase().replace(/\s+/g, "-"),
+    label: s.title,
+    items: s.items.map((it) => ({
+      id: it.id,
+      label: it.label,
+      // ElementType (React.ElementType) is broader than PortalShell's
+      // ComponentType<{className?: string}> but lucide-react icons all
+      // accept className, so the runtime contract is satisfied. Cast
+      // here to keep the existing NavItem type ergonomic.
+      icon: it.icon as React.ComponentType<{ className?: string }>,
+      badge: it.id === "messages" && unreadCount > 0 ? unreadCount : undefined,
+    })),
+  }));
+
+  const fullName = [auth.user?.firstName, auth.user?.lastName].filter(Boolean).join(" ") || "Practice";
+  const userSubtitle =
+    portalRole === "provider" ? "Provider"
+    : portalRole === "staff" ? "Staff"
+    : portalRole === "superadmin" ? "Superadmin"
+    : "Practice Admin";
+
   return (
-    <div className="min-h-screen bg-slate-50">
-      {/* Mobile overlay */}
-      {sidebarOpen && (
-        <div
-          className="fixed inset-0 z-30 lg:hidden"
-          style={{ backgroundColor: "rgba(0,0,0,0.4)" }}
-          onClick={() => setSidebarOpen(false)}
-        />
-      )}
-
-      {/* Sidebar */}
-      {renderSidebar()}
-
-      {/* Main Content */}
-      <div className="lg:ml-64">
-        {/* Top Header */}
-        <header className="sticky top-0 z-20 glass border-b border-slate-200">
-          <div className="flex items-center justify-between px-4 sm:px-6 py-3">
-            <div className="flex items-center gap-3">
-              <button
-                onClick={() => setSidebarOpen(true)}
-                className="lg:hidden p-2 rounded-lg hover:bg-slate-100 text-slate-500"
-              >
-                <Menu className="w-5 h-5" />
-              </button>
-              <div>
-                <h1 className="text-lg font-semibold text-slate-800">{activeLabel}</h1>
-                <p className="text-xs text-slate-400 hidden sm:block">
-                  {new Date().toLocaleDateString("en-US", {
-                    weekday: "long",
-                    year: "numeric",
-                    month: "long",
-                    day: "numeric",
-                  })}
-                </p>
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <HeaderToolbar variant="practice" onNavigate={(tab) => setActiveTab(tab as TabId)} />
-            </div>
-          </div>
-        </header>
-
-        {/* Loading indicator */}
+    <>
+      <PortalShell
+        portalTitle={portalRole === "provider" ? "Provider Portal" : "Practice Portal"}
+        portalColor={portalColor}
+        userName={fullName}
+        userSubtitle={userSubtitle}
+        nav={filteredSections}
+        activeTab={activeTab}
+        onTabChange={(id) => setActiveTab(id as TabId)}
+        onLogout={auth.logout}
+        headerTitle={activeLabel}
+      >
         {dataLoading && (
-          <div className="h-0.5 w-full overflow-hidden" style={{ backgroundColor: "#e6f7f2" }}>
+          <div className="h-0.5 w-full overflow-hidden mb-4 -mt-2" style={{ backgroundColor: "#e6f7f2" }}>
             <div className="h-full animate-pulse" style={{ backgroundColor: "#27ab83", width: "40%", animationDuration: "1s" }} />
           </div>
         )}
-
-        {/* Page Content */}
-        <main className="p-4 sm:p-6 lg:p-8">
-          {renderContent()}
-        </main>
-      </div>
+        {renderContent()}
+      </PortalShell>
 
       {/* ─── Toast Notification ──────────────────────────────────────────── */}
       {toast && (
@@ -8405,6 +8343,6 @@ export function PracticePortal() {
           </div>
         </div>
       )}
-    </div>
+    </>
   );
 }
