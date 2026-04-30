@@ -10,6 +10,7 @@ import { dashboardService, membershipPlanService, messageService, patientService
 import { PortalShell, type NavSection as ShellNavSection, type PortalColor } from "../shared/PortalShell";
 import { CommandPalette, useCommandPaletteShortcut } from "../shared/CommandPalette";
 import { AddAllergyDialog, type AllergyEntry } from "../clinical/AddAllergyDialog";
+import { AddMeasureDialog } from "../clinical/AddMeasureDialog";
 import { PracticeSettings } from "../settings/PracticeSettings";
 import { CalendarView } from "../shared/CalendarView";
 import { AppointmentBookingWidget } from "../widgets/AppointmentBookingWidget";
@@ -673,6 +674,8 @@ export function PracticePortal() {
   const [resetLinkModal, setResetLinkModal] = useState<{ url: string; patientName: string } | null>(null);
   // Add-allergy dialog — opened from the patient detail Medical tab.
   const [allergyDialogOpen, setAllergyDialogOpen] = useState(false);
+  // Add-measure (PHQ-9 / GAD-7 / etc.) dialog — patient detail Screenings tab.
+  const [measureDialogOpen, setMeasureDialogOpen] = useState(false);
   const [patientDetailTab, setPatientDetailTab] = useState("demographics");
   const [expandedEncounters, setExpandedEncounters] = useState<string[]>([]);
   const [notificationFilter, setNotificationFilter] = useState<"all" | "members" | "appointments" | "billing" | "system">("all");
@@ -3536,7 +3539,7 @@ export function PracticePortal() {
                 style={{ backgroundColor: "#27ab83" }}
                 onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#147d64")}
                 onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "#27ab83")}
-                onClick={() => setToast({ message: "Coming soon", type: "success" })}
+                onClick={() => setMeasureDialogOpen(true)}
               >
                 <Plus className="w-3.5 h-3.5" /> Administer Screening
               </button>
@@ -8386,6 +8389,20 @@ export function PracticePortal() {
             setSelectedPatient({ ...selectedPatient, allergies: merged });
             loadPracticeData();
             setToast({ message: "Allergy added.", type: "success" });
+          }}
+        />
+      )}
+
+      {/* Add Measure (PHQ-9, GAD-7, etc.) — patient detail Screenings tab. */}
+      {selectedPatient && (
+        <AddMeasureDialog
+          open={measureDialogOpen}
+          onClose={() => setMeasureDialogOpen(false)}
+          patientId={selectedPatient.id}
+          patientName={selectedPatient.name}
+          onSaved={() => {
+            loadPracticeData();
+            setToast({ message: "Screening recorded.", type: "success" });
           }}
         />
       )}
