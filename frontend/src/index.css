@@ -117,6 +117,37 @@ body {
   border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
+/* ─── EnnHealth-family glass variants ──────────────────────────────────────
+   Adapted from EnnHealth/frontend/src/styles/globals.css so MemberMD
+   surfaces match the EnnHealth product family visually. */
+.glass-subtle {
+  background: rgba(255, 255, 255, 0.5);
+  backdrop-filter: blur(12px) saturate(180%);
+  -webkit-backdrop-filter: blur(12px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.glass-teal {
+  background: linear-gradient(135deg, rgba(39, 171, 131, 0.08), rgba(20, 125, 100, 0.04));
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border: 1px solid rgba(39, 171, 131, 0.15);
+}
+
+.glass-gold {
+  background: linear-gradient(135deg, rgba(212, 168, 85, 0.08), rgba(196, 151, 69, 0.04));
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border: 1px solid rgba(212, 168, 85, 0.15);
+}
+
+.glass-sage {
+  background: linear-gradient(135deg, rgba(74, 124, 111, 0.08), rgba(61, 106, 94, 0.04));
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border: 1px solid rgba(74, 124, 111, 0.15);
+}
+
 /* ─── Hover Lift Effect (from Solarera) ─── */
 .hover-lift {
   transition: transform 300ms ease, box-shadow 300ms ease;
