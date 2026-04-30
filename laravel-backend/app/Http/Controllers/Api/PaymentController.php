@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\AuditLog;
 use App\Models\Invoice;
 use App\Models\Payment;
+use App\Models\PaymentRefund;
 use App\Models\Practice;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -116,6 +117,13 @@ class PaymentController extends Controller
                         'charge' => $payment->stripe_payment_id,
                         'amount' => (int) round(((float) $validated['refund_amount']) * 100),
                         'reason' => $validated['reason'] ?? null,
+                        // CRITICAL: also refund the platform application fee
+                        // and reverse the transfer to the connected account.
+                        // Without these flags Stripe keeps our skim and the
+                        // practice eats the full refund — the practice
+                        // silently loses money on every refund.
+                        'refund_application_fee' => true,
+                        'reverse_transfer' => true,
                         'metadata' => [
                             'payment_id' => $payment->id,
                             'tenant_id' => $payment->tenant_id,
@@ -138,12 +146,26 @@ class PaymentController extends Controller
             }
         }
 
-        // The charge.refunded webhook will also reconcile this; we apply
-        // the local update inline so the response carries the new state.
-        $isFull = (float) $validated['refund_amount'] >= (float) $payment->amount;
+        // Append-only ledger entry — the webhook will see this stripe_refund_id
+        // (if any) and skip its own reconcile to avoid double-recording.
+        PaymentRefund::create([
+            'tenant_id' => $payment->tenant_id,
+            'payment_id' => $payment->id,
+            'amount' => $validated['refund_amount'],
+            'reason' => $validated['reason'] ?? null,
+            'source' => 'manual',
+            'stripe_refund_id' => $stripeRefundId,
+            'issued_by_user_id' => $user->id,
+            'notes' => $validated['notes'] ?? null,
+            'refunded_at' => now(),
+        ]);
+
+        // Refund total = SUM of ledger entries, not the latest single value.
+        $totalRefunded = (float) PaymentRefund::where('payment_id', $payment->id)->sum('amount');
+        $isFull = $totalRefunded >= (float) $payment->amount - 0.005; // float tolerance
         $payment->update([
             'status' => $isFull ? 'refunded' : $payment->status,
-            'refund_amount' => $validated['refund_amount'],
+            'refund_amount' => $totalRefunded,
             'refunded_at' => now(),
         ]);
 

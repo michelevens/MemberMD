@@ -10,6 +10,7 @@ use App\Models\Patient;
 use App\Models\PatientMembership;
 use App\Models\Practice;
 use App\Models\User;
+use App\Services\IdempotencyService;
 use App\Services\StripeSubscriptionService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -20,8 +21,10 @@ use Throwable;
 
 class ExternalController extends Controller
 {
-    public function __construct(private readonly StripeSubscriptionService $subscriptions)
-    {
+    public function __construct(
+        private readonly StripeSubscriptionService $subscriptions,
+        private readonly IdempotencyService $idempotency,
+    ) {
     }
 
     /**
@@ -61,6 +64,12 @@ class ExternalController extends Controller
     /**
      * POST /external/enroll/{tenantCode}
      * Public endpoint — enrolls a new patient into a practice membership.
+     *
+     * Idempotent: a client double-click or a flaky network retry won't
+     * create two patients / charges. Key is the client-supplied
+     * Idempotency-Key header (preferred) or a hash of (tenant + email +
+     * plan_id + dob) which is unique per intent. 24h window covers any
+     * realistic retry scenario.
      */
     public function enroll(Request $request, string $tenantCode): JsonResponse
     {
@@ -79,6 +88,26 @@ class ExternalController extends Controller
         if (!$practice) {
             return response()->json(['error' => 'Practice not found'], 404);
         }
+
+        $clientKey = $request->header('Idempotency-Key');
+        $derivedKey = hash('sha256', implode('|', [
+            $practice->id,
+            (string) $request->input('email'),
+            (string) $request->input('plan_id'),
+            (string) $request->input('date_of_birth'),
+        ]));
+        $key = $clientKey ?: $derivedKey;
+
+        return $this->idempotency->execute(
+            'external.enroll',
+            $key,
+            $practice->id,
+            fn () => $this->doEnroll($request, $practice),
+        );
+    }
+
+    private function doEnroll(Request $request, Practice $practice): JsonResponse
+    {
 
         $validated = $request->validate([
             'plan_id' => 'required|uuid',
@@ -161,6 +190,13 @@ class ExternalController extends Controller
             'tenant_id' => $practice->id,
             'patient_id' => $patient->id,
             'plan_id' => $plan->id,
+            // Lock in what this patient agreed to pay. Subsequent plan
+            // edits won't retroactively rewrite their bill or their
+            // portal display. Either field can be null if that frequency
+            // isn't offered, but they get the one they chose.
+            'locked_monthly_price' => $plan->monthly_price,
+            'locked_annual_price' => $plan->annual_price,
+            'locked_plan_version' => $plan->version ?? 1,
             'status' => 'active',
             'billing_frequency' => $validated['billing_frequency'],
             'started_at' => now(),

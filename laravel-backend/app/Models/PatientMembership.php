@@ -17,6 +17,7 @@ class PatientMembership extends Model
     protected $fillable = [
         'tenant_id', 'patient_id', 'member_number', 'plan_id', 'program_id',
         'parent_membership_id',
+        'locked_monthly_price', 'locked_annual_price', 'locked_plan_version',
         'status', 'billing_frequency',
         'stripe_subscription_id', 'stripe_customer_id',
         'started_at', 'trial_ends_at', 'paused_at', 'cancelled_at', 'expires_at',
@@ -39,6 +40,9 @@ class PatientMembership extends Model
     protected $casts = [
         'started_at' => 'datetime',
         'trial_ends_at' => 'datetime',
+        'locked_monthly_price' => 'decimal:2',
+        'locked_annual_price' => 'decimal:2',
+        'locked_plan_version' => 'integer',
         'paused_at' => 'datetime',
         'cancelled_at' => 'datetime',
         'expires_at' => 'datetime',

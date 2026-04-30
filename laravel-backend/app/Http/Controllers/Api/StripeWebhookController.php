@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\AuditLog;
 use App\Models\Invoice;
 use App\Models\Payment;
+use App\Models\PaymentRefund;
 use App\Models\PatientMembership;
 use App\Models\Practice;
 use App\Models\StripeConnectEvent;
@@ -420,15 +421,37 @@ class StripeWebhookController extends Controller
             ->first();
         if (!$payment) return;
 
-        $refundedAmount = ($charge->amount_refunded ?? 0) / 100;
+        // Stripe sends one charge.refunded event per charge state change,
+        // and `charge.refunds.data` holds every individual refund. We
+        // upsert each refund row by stripe_refund_id so manual refunds
+        // (already written by PaymentController) and dashboard/dispute
+        // refunds all land here exactly once.
+        $refunds = $charge->refunds->data ?? [];
+        foreach ($refunds as $r) {
+            if (empty($r->id)) continue;
+            $existing = PaymentRefund::where('stripe_refund_id', $r->id)->first();
+            if ($existing) continue; // already recorded (manual or earlier webhook)
 
-        // Partial vs full: if amount_refunded equals charge amount, mark
-        // refunded; otherwise keep status='completed' with refund_amount > 0.
-        $isFull = ($charge->amount_refunded ?? 0) >= ($charge->amount ?? 0);
+            PaymentRefund::create([
+                'tenant_id' => $practice->id,
+                'payment_id' => $payment->id,
+                'amount' => ($r->amount ?? 0) / 100,
+                'reason' => $r->reason ?? null,
+                'source' => 'webhook',
+                'stripe_refund_id' => $r->id,
+                'refunded_at' => $r->created
+                    ? now()->setTimestamp($r->created)
+                    : now(),
+            ]);
+        }
+
+        // Refund total = SUM of ledger, not the latest single value.
+        $totalRefunded = (float) PaymentRefund::where('payment_id', $payment->id)->sum('amount');
+        $isFull = $totalRefunded >= (float) $payment->amount - 0.005;
 
         $payment->update([
             'status' => $isFull ? 'refunded' : $payment->status,
-            'refund_amount' => $refundedAmount,
+            'refund_amount' => $totalRefunded,
             'refunded_at' => now(),
         ]);
 
@@ -447,7 +470,7 @@ class StripeWebhookController extends Controller
         $this->audit($practice, 'tier2_charge_refunded', [
             'payment_id' => $payment->id,
             'stripe_charge_id' => $charge->id,
-            'amount_refunded' => $refundedAmount,
+            'total_refunded' => $totalRefunded,
             'full' => $isFull,
         ]);
     }

@@ -67,21 +67,43 @@ class ProrationService
     }
 
     /**
-     * Apply proration: switch the plan and create a proration invoice.
+     * Apply proration: switch the plan and OPTIONALLY create a local invoice.
+     *
+     * When Stripe is the system of record (the primary case), Stripe handles
+     * the actual proration via subscription update with
+     * proration_behavior=create_prorations — and that proration shows up on
+     * the next invoice.paid webhook. Persisting a separate "paid" local
+     * invoice creates double-counting in MRR/revenue reports and risks
+     * actual double-billing in some edge cases.
+     *
+     * `$persistInvoice = false` (default when Stripe is wired) writes nothing
+     * to the invoices table — the proration fields come back as a preview
+     * the UI can show, but they do not participate in payment reconciliation.
+     *
+     * `$persistInvoice = true` is for the local-only fallback when the
+     * Stripe call failed and we need a paper trail of the price change.
      */
     public function applyProration(
         PatientMembership $membership,
         MembershipPlan $newPlan,
+        bool $persistInvoice = false,
     ): array {
         $oldPlan = $membership->plan;
         $proration = $this->calculateProration($membership, $oldPlan, $newPlan);
 
-        // Switch the plan
-        $membership->update(['plan_id' => $newPlan->id]);
+        // Switch the plan + snapshot the new locked prices/version.
+        $membership->update([
+            'plan_id' => $newPlan->id,
+            'locked_monthly_price' => $newPlan->monthly_price,
+            'locked_annual_price' => $newPlan->annual_price,
+            'locked_plan_version' => $newPlan->version ?? 1,
+        ]);
 
-        // Create proration invoice if there's a net amount
+        // Optionally write a local invoice. Skipped by default when Stripe
+        // owns the proration — its invoice.paid webhook will land the right
+        // numbers without our help.
         $invoice = null;
-        if (abs($proration['net']) >= 0.01) {
+        if ($persistInvoice && abs($proration['net']) >= 0.01) {
             $lineItems = [];
 
             if ($proration['credit'] > 0) {
@@ -109,7 +131,7 @@ class ProrationService
                 'amount' => max($proration['net'], 0),
                 'tax' => 0,
                 'status' => $proration['net'] > 0 ? 'open' : 'paid',
-                'description' => $proration['description'],
+                'description' => $proration['description'] . ' (local fallback — Stripe was unavailable)',
                 'line_items' => $lineItems,
                 'due_date' => now()->addDays(7),
             ]);
@@ -118,6 +140,7 @@ class ProrationService
         return [
             'proration' => $proration,
             'invoice' => $invoice,
+            'preview_only' => !$persistInvoice,
             'membership' => $membership->fresh()->load(['patient', 'plan']),
         ];
     }

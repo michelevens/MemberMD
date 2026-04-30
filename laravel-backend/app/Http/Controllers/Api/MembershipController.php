@@ -535,21 +535,31 @@ class MembershipController extends Controller
 
         $newFrequency = $validated['billing_frequency'] ?? $membership->billing_frequency;
 
+        // Stripe is the source of truth for proration when wired. We only
+        // persist a local fallback invoice if the Stripe call fails — that's
+        // the only scenario where double-billing isn't a risk because Stripe
+        // never charged the proration.
         $stripeWarning = null;
+        $stripeSucceeded = false;
         if (!empty($membership->stripe_subscription_id)) {
             try {
                 $this->subscriptions->changePlan($membership, $newPlan, $newFrequency);
+                $stripeSucceeded = true;
             } catch (\Throwable $e) {
                 Log::warning('Stripe changePlan failed; falling back to local-only proration', [
                     'membership_id' => $membership->id,
                     'error' => $e->getMessage(),
                 ]);
-                $stripeWarning = 'Stripe could not be updated — local proration applied. Reconcile manually before next billing cycle.';
+                $stripeWarning = 'Stripe could not be updated — local proration invoice created as fallback. Reconcile manually before next billing cycle.';
             }
         }
 
         $prorationService = app(ProrationService::class);
-        $result = $prorationService->applyProration($membership, $newPlan);
+        // Only persist a local invoice when there's NO Stripe sub or the
+        // Stripe call failed. Otherwise the proration is preview-only and
+        // Stripe's webhook lands the real numbers.
+        $persistInvoice = empty($membership->stripe_subscription_id) || !$stripeSucceeded;
+        $result = $prorationService->applyProration($membership, $newPlan, $persistInvoice);
 
         // Flip frequency locally if it changed; ProrationService handles plan_id.
         if ($newFrequency !== $membership->billing_frequency) {
