@@ -16,6 +16,7 @@ class PatientMembership extends Model
 
     protected $fillable = [
         'tenant_id', 'patient_id', 'member_number', 'plan_id', 'program_id',
+        'parent_membership_id',
         'status', 'billing_frequency',
         'stripe_subscription_id', 'stripe_customer_id',
         'started_at', 'trial_ends_at', 'paused_at', 'cancelled_at', 'expires_at',
@@ -47,9 +48,16 @@ class PatientMembership extends Model
 
     public function patient(): BelongsTo { return $this->belongsTo(Patient::class); }
     public function plan(): BelongsTo { return $this->belongsTo(MembershipPlan::class, 'plan_id'); }
+
+    /** Primary family membership this row hangs off of (null on the primary itself). */
+    public function parent(): BelongsTo { return $this->belongsTo(PatientMembership::class, 'parent_membership_id'); }
+    /** Dependents on this primary membership. */
+    public function dependents() { return $this->hasMany(PatientMembership::class, 'parent_membership_id'); }
+
     public function program(): BelongsTo { return $this->belongsTo(Program::class); }
     public function entitlements(): HasMany { return $this->hasMany(PatientEntitlement::class, 'membership_id'); }
     public function dunningEvents(): HasMany { return $this->hasMany(DunningEvent::class, 'membership_id'); }
     public function invoices(): HasMany { return $this->hasMany(Invoice::class, 'membership_id'); }
     public function usageRecords(): HasMany { return $this->hasMany(EntitlementUsage::class, 'patient_membership_id'); }
+    public function lifecycleEvents(): HasMany { return $this->hasMany(MembershipLifecycleEvent::class, 'membership_id'); }
 }

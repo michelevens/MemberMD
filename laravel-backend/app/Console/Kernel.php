@@ -61,6 +61,29 @@ class Kernel extends ConsoleKernel
             ->onFailure(function () {
                 \Log::error('Entitlement rollover failed');
             });
+
+        // Lifecycle nudges: first-visit (day 7 post-enroll, no encounter) and
+        // win-back (day 14 post-cancel with auto-coupon). Daily cadence is
+        // sufficient — these aren't time-sensitive within the day.
+        $schedule->command('lifecycle:process')
+            ->daily()
+            ->at('09:00')
+            ->name('membership_lifecycle')
+            ->withoutOverlapping()
+            ->onFailure(function () {
+                \Log::error('Lifecycle email processing failed');
+            });
+
+        // Usage threshold alerts (75 / 90 / 100% of visits_allowed). Daily
+        // is generous; tighten to hourly only if practices ask for it.
+        $schedule->command('entitlements:usage-alerts')
+            ->daily()
+            ->at('09:30')
+            ->name('usage_alerts')
+            ->withoutOverlapping()
+            ->onFailure(function () {
+                \Log::error('Usage alerts failed');
+            });
     }
 
     /**

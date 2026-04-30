@@ -284,6 +284,60 @@ class StripeSubscriptionService
     }
 
     /**
+     * Bump the primary subscription's quantity by `delta` (positive = add a
+     * dependent, negative = remove one). Stripe's invoice math handles the
+     * pricing — each `quantity` unit charges at the plan's price-per-seat.
+     *
+     * For practices that price family members at a different rate than the
+     * primary, we swap to a per-seat price model in a follow-up — for now the
+     * simplifying assumption is that the family_member_price equals the main
+     * plan price (each seat charged once).
+     */
+    public function adjustSubscriptionQuantity(PatientMembership $primaryMembership, int $delta): void
+    {
+        if (empty($primaryMembership->stripe_subscription_id) || $delta === 0) {
+            return;
+        }
+
+        $practice = $primaryMembership->tenant ?? Practice::findOrFail($primaryMembership->tenant_id);
+        $stripeOpts = ['stripe_account' => $practice->stripe_account_id];
+
+        try {
+            $sub = $this->stripe()->subscriptions->retrieve(
+                $primaryMembership->stripe_subscription_id,
+                [],
+                $stripeOpts,
+            );
+
+            $itemId = $sub->items->data[0]->id ?? null;
+            $currentQty = (int) ($sub->items->data[0]->quantity ?? 1);
+            $newQty = max(1, $currentQty + $delta);
+            if (!$itemId) {
+                throw new RuntimeException('Subscription has no items.');
+            }
+
+            $this->stripe()->subscriptions->update(
+                $primaryMembership->stripe_subscription_id,
+                [
+                    'items' => [[
+                        'id' => $itemId,
+                        'quantity' => $newQty,
+                    ]],
+                    'proration_behavior' => 'create_prorations',
+                ],
+                $stripeOpts,
+            );
+        } catch (ApiErrorException $e) {
+            throw new RuntimeException("Failed to adjust subscription quantity: {$e->getMessage()}", 0, $e);
+        }
+
+        $this->audit($practice, $primaryMembership, 'subscription_quantity_adjusted', [
+            'delta' => $delta,
+            'new_quantity_target' => $currentQty + $delta,
+        ]);
+    }
+
+    /**
      * Pay an open invoice immediately — used by manual "Retry now" admin actions
      * and the dunning executor's retry steps.
      */

@@ -4,6 +4,8 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreMembershipRequest;
+use App\Models\Patient;
+use App\Models\PatientFamilyMember;
 use App\Models\PatientMembership;
 use App\Models\PatientEntitlement;
 use App\Models\MembershipPlan;
@@ -562,6 +564,151 @@ class MembershipController extends Controller
             'message' => $result['proration']['is_upgrade']
                 ? "Plan upgraded with prorated charge of \${$result['proration']['net']}"
                 : "Plan downgraded with prorated credit of \$" . abs($result['proration']['net']),
+        ]));
+    }
+
+    /**
+     * Add a family dependent to an existing primary membership.
+     *
+     * Creates (or links) a Patient record for the dependent, a child
+     * PatientMembership with parent_membership_id pointing at the primary,
+     * and increments the Stripe subscription quantity so the next invoice
+     * captures the additional seat with proration.
+     */
+    public function addDependent(Request $request, string $id): JsonResponse
+    {
+        $user = $request->user();
+        abort_if(!in_array($user->role, ['practice_admin', 'staff']), 403);
+
+        $primary = PatientMembership::where('tenant_id', $user->tenant_id)
+            ->with('plan')
+            ->findOrFail($id);
+
+        if (!$primary->plan || !$primary->plan->family_eligible) {
+            return response()->json(['message' => "This plan doesn't support family members."], 422);
+        }
+        if ($primary->status !== 'active') {
+            return response()->json(['message' => 'Primary membership must be active to add a dependent.'], 422);
+        }
+        // Don't allow nesting families.
+        if (!empty($primary->parent_membership_id)) {
+            return response()->json(['message' => 'Cannot add a dependent to a dependent membership.'], 422);
+        }
+
+        $validated = $request->validate([
+            'first_name' => 'required|string|max:100',
+            'last_name' => 'required|string|max:100',
+            'date_of_birth' => 'required|date|before:today',
+            'relationship' => 'required|string|in:spouse,child,parent,other',
+            'email' => 'nullable|email',
+            'phone' => 'nullable|string|max:30',
+            // Optionally link an existing patient (e.g., spouse who's already
+            // in the roster) instead of creating a new record.
+            'existing_patient_id' => 'nullable|uuid',
+        ]);
+
+        // Resolve the dependent's Patient record.
+        if (!empty($validated['existing_patient_id'])) {
+            $dependent = Patient::where('tenant_id', $user->tenant_id)
+                ->findOrFail($validated['existing_patient_id']);
+        } else {
+            $dependent = Patient::create([
+                'tenant_id' => $user->tenant_id,
+                'first_name' => $validated['first_name'],
+                'last_name' => $validated['last_name'],
+                'date_of_birth' => $validated['date_of_birth'],
+                'email' => $validated['email'] ?? null,
+                'phone' => $validated['phone'] ?? '',
+                'is_active' => true,
+            ]);
+        }
+
+        // Link the family relationship.
+        PatientFamilyMember::firstOrCreate([
+            'tenant_id' => $user->tenant_id,
+            'primary_patient_id' => $primary->patient_id,
+            'member_patient_id' => $dependent->id,
+        ], [
+            'relationship' => $validated['relationship'],
+        ]);
+
+        // Create the dependent membership row. status='active', no Stripe sub
+        // of its own — billing rolls up to the primary.
+        $dependentMembership = PatientMembership::create([
+            'tenant_id' => $user->tenant_id,
+            'patient_id' => $dependent->id,
+            'plan_id' => $primary->plan_id,
+            'parent_membership_id' => $primary->id,
+            'status' => 'active',
+            'billing_frequency' => $primary->billing_frequency,
+            'started_at' => now(),
+            'current_period_start' => $primary->current_period_start,
+            'current_period_end' => $primary->current_period_end,
+        ]);
+
+        // Bump primary's Stripe subscription quantity for billing.
+        $stripeWarning = null;
+        if (!empty($primary->stripe_subscription_id)) {
+            try {
+                $this->subscriptions->adjustSubscriptionQuantity($primary, +1);
+            } catch (\Throwable $e) {
+                Log::warning('Stripe quantity bump failed on addDependent', [
+                    'membership_id' => $primary->id,
+                    'error' => $e->getMessage(),
+                ]);
+                $stripeWarning = 'Stripe subscription quantity could not be updated. Reconcile manually.';
+            }
+        }
+
+        return response()->json(array_filter([
+            'data' => $dependentMembership->fresh()->load(['patient', 'plan']),
+            'message' => 'Dependent added.',
+            'stripe_warning' => $stripeWarning,
+        ]), 201);
+    }
+
+    /**
+     * Remove a dependent — cancels their (sub-)membership immediately and
+     * decrements the primary's Stripe subscription quantity.
+     */
+    public function removeDependent(Request $request, string $id, string $dependentId): JsonResponse
+    {
+        $user = $request->user();
+        abort_if(!in_array($user->role, ['practice_admin', 'staff']), 403);
+
+        $primary = PatientMembership::where('tenant_id', $user->tenant_id)->findOrFail($id);
+        $dependent = PatientMembership::where('tenant_id', $user->tenant_id)
+            ->where('parent_membership_id', $primary->id)
+            ->findOrFail($dependentId);
+
+        if ($dependent->status === 'cancelled') {
+            return response()->json(['message' => 'Dependent membership is already cancelled.'], 422);
+        }
+
+        $dependent->update([
+            'status' => 'cancelled',
+            'cancelled_at' => now(),
+            'cancel_reason' => 'family_dependent_removed',
+            'expires_at' => now(),
+        ]);
+
+        $stripeWarning = null;
+        if (!empty($primary->stripe_subscription_id)) {
+            try {
+                $this->subscriptions->adjustSubscriptionQuantity($primary, -1);
+            } catch (\Throwable $e) {
+                Log::warning('Stripe quantity decrement failed on removeDependent', [
+                    'membership_id' => $primary->id,
+                    'error' => $e->getMessage(),
+                ]);
+                $stripeWarning = 'Stripe subscription quantity could not be updated. Reconcile manually.';
+            }
+        }
+
+        return response()->json(array_filter([
+            'data' => $dependent->fresh(),
+            'message' => 'Dependent removed.',
+            'stripe_warning' => $stripeWarning,
         ]));
     }
 }

@@ -460,6 +460,8 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
         Route::get('/revenue', [ReportController::class, 'revenue']);
         Route::get('/membership', [ReportController::class, 'membership']);
         Route::get('/financial', [ReportController::class, 'financial']);
+        Route::get('/cohorts', [ReportController::class, 'cohorts']);
+        Route::get('/churn-by-plan', [ReportController::class, 'churnByPlan']);
         Route::get('/export', [ReportController::class, 'export']);
     });
 
@@ -551,6 +553,11 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
         Route::get('/employees', [EmployerPortalController::class, 'employees']);
         Route::get('/invoices', [EmployerPortalController::class, 'invoices']);
         Route::post('/enroll-roster', [EmployerPortalController::class, 'enrollRoster']);
+        // CSV-based bulk enroll (multipart upload). Accepts file with header
+        // row first_name,last_name,email,date_of_birth. 1000-row cap per upload.
+        Route::post('/enroll-roster-csv', [EmployerPortalController::class, 'enrollRosterCsv']);
+        // Materialize a sponsor invoice from active member count × contract fee.
+        Route::post('/sponsor-invoice', [EmployerPortalController::class, 'generateSponsorInvoice']);
     });
 
     // ===== Chart Templates =====
@@ -609,6 +616,9 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
     Route::post('memberships/{id}/cancel', [MembershipController::class, 'cancel']);
     Route::post('memberships/{id}/preview-plan-change', [MembershipController::class, 'previewPlanChange']);
     Route::post('memberships/{id}/change-plan', [MembershipController::class, 'changePlan']);
+    // Family management — admin/staff only. Patient self-service may follow.
+    Route::post('memberships/{id}/dependents', [MembershipController::class, 'addDependent']);
+    Route::delete('memberships/{id}/dependents/{dependentId}', [MembershipController::class, 'removeDependent']);
 
     // ===== Activity Logger =====
     Route::prefix('activity-log')->group(function () {
