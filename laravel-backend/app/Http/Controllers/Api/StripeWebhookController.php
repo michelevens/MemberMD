@@ -10,6 +10,7 @@ use App\Models\PaymentRefund;
 use App\Models\PatientMembership;
 use App\Models\Practice;
 use App\Models\StripeConnectEvent;
+use App\Services\MembershipStateMachine;
 use App\Services\StripeConnectService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -33,21 +34,42 @@ use Throwable;
  */
 class StripeWebhookController extends Controller
 {
-    public function __construct(private readonly StripeConnectService $connect)
-    {
+    public function __construct(
+        private readonly StripeConnectService $connect,
+        private readonly MembershipStateMachine $states,
+    ) {
     }
 
     public function platform(Request $request): JsonResponse
     {
-        // Reserved for platform-account events (subscription lifecycle on the
-        // platform itself, e.g., MemberMD's own billing of operators). Stub
-        // returns 200 so Stripe stops retrying; real handlers ship with
-        // subscription billing work.
+        // Tier 1 platform events (Practice→Superadmin SaaS billing). We
+        // persist every received event for replay/audit even though most
+        // handlers haven't been written yet — it's the audit trail that
+        // matters; specific handlers light up as Tier 1 features ship.
+        $secret = (string) config('services.stripe.webhook_secret');
+        if ($secret === '') {
+            Log::error('STRIPE_WEBHOOK_SECRET not configured');
+            return response()->json(['error' => 'webhook_not_configured'], 500);
+        }
+
         try {
-            $this->verifyAndConstructEvent($request, (string) config('services.stripe.webhook_secret'));
-        } catch (SignatureVerificationException $e) {
+            $event = $this->verifyAndConstructEvent($request, $secret);
+        } catch (SignatureVerificationException) {
             return response()->json(['error' => 'invalid_signature'], 400);
         }
+
+        // firstOrCreate gives us idempotency: a duplicate Stripe delivery
+        // returns the existing row without re-inserting.
+        DB::table('stripe_platform_events')->updateOrInsert(
+            ['stripe_event_id' => $event->id],
+            [
+                'event_type' => $event->type,
+                'payload' => json_encode($event->toArray()),
+                'processing_status' => 'received',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+        );
 
         return response()->json(['received' => true]);
     }
@@ -222,6 +244,13 @@ class StripeWebhookController extends Controller
             ->first();
         if (!$membership) return;
 
+        // Reject stale events — Stripe doesn't guarantee delivery order, so
+        // an old event arriving late could overwrite fresher state. Compare
+        // event.created against the membership's last-processed timestamp.
+        if (!$this->states->ifStripeEventNewerThanLast($membership, $event->created ?? null)) {
+            return;
+        }
+
         $amount = ($stripeInvoice->amount_paid ?? 0) / 100;
 
         $invoice = Invoice::firstOrCreate(
@@ -275,14 +304,17 @@ class StripeWebhookController extends Controller
         if (!empty($stripeInvoice->period_start)) {
             $updates['current_period_start'] = now()->setTimestamp($stripeInvoice->period_start);
         }
-        // If the membership had been suspended for non-payment, this charge
-        // brings it back. Don't touch admin-driven 'paused' or 'cancelled'.
-        if ($membership->status === 'past_due') {
-            $updates['status'] = 'active';
-        }
         if (!empty($updates)) {
             $membership->update($updates);
         }
+        // If the membership had been past_due, this charge brings it back.
+        // Routed through the state machine so an admin-driven 'paused' or
+        // 'cancelled' is preserved (those transitions aren't allowed back to
+        // active via this path).
+        if ($membership->status === 'past_due') {
+            $this->states->transition($membership->fresh(), 'active');
+        }
+        $this->states->stampStripeEventAt($membership->fresh(), $event->created ?? null);
 
         $this->audit($practice, 'tier2_invoice_paid', [
             'membership_id' => $membership->id,
@@ -308,6 +340,10 @@ class StripeWebhookController extends Controller
             ->first();
         if (!$membership) return;
 
+        if (!$this->states->ifStripeEventNewerThanLast($membership, $event->created ?? null)) {
+            return;
+        }
+
         // Persist an Invoice row so admins can see the open balance.
         $amount = ($stripeInvoice->amount_due ?? 0) / 100;
         Invoice::firstOrCreate(
@@ -326,11 +362,10 @@ class StripeWebhookController extends Controller
             ],
         );
 
-        // Only flip to past_due from active — don't override paused/cancelled
-        // or trigger another past_due transition needlessly.
-        if ($membership->status === 'active') {
-            $membership->update(['status' => 'past_due']);
-        }
+        // Routed through the state machine — only legal transitions apply,
+        // so an admin-paused or cancelled membership is left alone.
+        $this->states->transition($membership, 'past_due');
+        $this->states->stampStripeEventAt($membership->fresh(), $event->created ?? null);
 
         $this->audit($practice, 'tier2_invoice_payment_failed', [
             'membership_id' => $membership->id,
@@ -354,14 +389,17 @@ class StripeWebhookController extends Controller
             ->first();
         if (!$membership) return;
 
-        if ($membership->status !== 'cancelled') {
-            $membership->update([
-                'status' => 'cancelled',
-                'cancelled_at' => $membership->cancelled_at ?? now(),
-                'cancel_reason' => $membership->cancel_reason
-                    ?? 'stripe_subscription_deleted',
-            ]);
+        if (!$this->states->ifStripeEventNewerThanLast($membership, $event->created ?? null)) {
+            return;
         }
+
+        // State machine takes care of the cascade to dependents and rejects
+        // the no-op when already cancelled.
+        $this->states->transition($membership, 'cancelled', [
+            'cancelled_at' => $membership->cancelled_at ?? now(),
+            'cancel_reason' => $membership->cancel_reason ?? 'stripe_subscription_deleted',
+        ]);
+        $this->states->stampStripeEventAt($membership->fresh(), $event->created ?? null);
 
         $this->audit($practice, 'tier2_subscription_deleted', [
             'membership_id' => $membership->id,
@@ -384,6 +422,11 @@ class StripeWebhookController extends Controller
             ->first();
         if (!$membership) return;
 
+        if (!$this->states->ifStripeEventNewerThanLast($membership, $event->created ?? null)) {
+            return;
+        }
+
+        // Field updates that don't affect status (period dates).
         $updates = [];
         if (!empty($sub->current_period_end)) {
             $updates['current_period_end'] = now()->setTimestamp($sub->current_period_end);
@@ -391,20 +434,19 @@ class StripeWebhookController extends Controller
         if (!empty($sub->current_period_start)) {
             $updates['current_period_start'] = now()->setTimestamp($sub->current_period_start);
         }
-
-        // Stripe's status takes precedence for past_due / unpaid; admin-set
-        // 'paused' on our side stays sticky and is not overridden here.
-        $stripeStatus = $sub->status ?? null;
-        if (in_array($stripeStatus, ['past_due', 'unpaid'], true) && $membership->status === 'active') {
-            $updates['status'] = 'past_due';
-        }
-        if ($stripeStatus === 'active' && $membership->status === 'past_due') {
-            $updates['status'] = 'active';
-        }
-
         if (!empty($updates)) {
             $membership->update($updates);
         }
+
+        // Status changes via the state machine — admin-set 'paused' stays
+        // sticky because past_due isn't a legal transition out of paused.
+        $stripeStatus = $sub->status ?? null;
+        if (in_array($stripeStatus, ['past_due', 'unpaid'], true)) {
+            $this->states->transition($membership->fresh(), 'past_due');
+        } elseif ($stripeStatus === 'active') {
+            $this->states->transition($membership->fresh(), 'active');
+        }
+        $this->states->stampStripeEventAt($membership->fresh(), $event->created ?? null);
     }
 
     /**

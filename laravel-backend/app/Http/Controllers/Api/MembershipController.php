@@ -9,6 +9,7 @@ use App\Models\PatientFamilyMember;
 use App\Models\PatientMembership;
 use App\Models\PatientEntitlement;
 use App\Models\MembershipPlan;
+use App\Services\MembershipStateMachine;
 use App\Services\ProrationService;
 use App\Services\StripeSubscriptionService;
 use Illuminate\Http\JsonResponse;
@@ -19,6 +20,7 @@ class MembershipController extends Controller
 {
     public function __construct(
         private readonly StripeSubscriptionService $subscriptions,
+        private readonly MembershipStateMachine $states,
     ) {
     }
 
@@ -375,7 +377,14 @@ class MembershipController extends Controller
         $immediately = (bool) ($validated['immediately'] ?? false);
 
         $this->cancelStripeSubscription($membership, $immediately);
-        $membership->update($this->buildCancelUpdates($validated, $immediately));
+        // Routed through the state machine so an illegal transition (e.g.
+        // cancelling an already-cancelled membership) is caught and the
+        // dependents cascade fires automatically.
+        $this->states->transition(
+            $membership,
+            'cancelled',
+            $this->buildCancelExtras($validated, $immediately),
+        );
 
         return response()->json([
             'data' => $membership->fresh()->load(['patient', 'plan']),
@@ -410,7 +419,11 @@ class MembershipController extends Controller
         ]);
 
         $this->cancelStripeSubscription($membership, false);
-        $membership->update($this->buildCancelUpdates($validated, false));
+        $this->states->transition(
+            $membership,
+            'cancelled',
+            $this->buildCancelExtras($validated, false),
+        );
 
         return response()->json([
             'data' => $membership->fresh()->load(['plan']),
@@ -436,7 +449,8 @@ class MembershipController extends Controller
         }
     }
 
-    private function buildCancelUpdates(array $validated, bool $immediately): array
+    /** Extras (everything but `status`) that accompany a cancel transition. */
+    private function buildCancelExtras(array $validated, bool $immediately): array
     {
         $reasonText = $validated['reason'];
         if (!empty($validated['reason_notes'])) {
@@ -447,7 +461,6 @@ class MembershipController extends Controller
         }
 
         return [
-            'status' => 'cancelled',
             'cancelled_at' => now(),
             'cancel_reason' => $reasonText,
             // For end-of-period cancels we keep current_period_end as the

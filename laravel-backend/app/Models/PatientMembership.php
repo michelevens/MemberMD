@@ -23,6 +23,7 @@ class PatientMembership extends Model
         'started_at', 'trial_ends_at', 'paused_at', 'cancelled_at', 'expires_at',
         'cancel_reason',
         'current_period_start', 'current_period_end',
+        'last_stripe_event_at', 'last_state_change_at',
     ];
 
     protected static function booted(): void
@@ -48,6 +49,8 @@ class PatientMembership extends Model
         'expires_at' => 'datetime',
         'current_period_start' => 'datetime',
         'current_period_end' => 'datetime',
+        'last_stripe_event_at' => 'datetime',
+        'last_state_change_at' => 'datetime',
     ];
 
     public function patient(): BelongsTo { return $this->belongsTo(Patient::class); }

@@ -9,6 +9,8 @@ use App\Models\EmployerInvoice;
 use App\Models\Patient;
 use App\Models\PatientMembership;
 use App\Models\User;
+use App\Services\EmployerRosterService;
+use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -18,6 +20,11 @@ use Illuminate\Support\Facades\Validator;
 
 class EmployerPortalController extends Controller
 {
+    public function __construct(
+        private readonly EmployerRosterService $roster = new EmployerRosterService(),
+    ) {
+    }
+
     /**
      * Get the employer associated with the current employer_admin user.
      */
@@ -129,12 +136,44 @@ class EmployerPortalController extends Controller
             ], 422);
         }
 
+        // Compute the delta against the currently-eligible roster BEFORE we
+        // mutate state. Anything in our records but not in this upload is
+        // implicitly terminated (with effective date = today). Without this
+        // an employer who accidentally drops 5 names from a CSV keeps paying
+        // for ghost employees.
+        $diff = $this->roster->diff($employer, $request->roster);
+
+        // Snapshot the upload for replay/audit. Persisted as JSONB so we
+        // can reconstruct any past state.
+        DB::table('employer_roster_snapshots')->insert([
+            'id' => (string) Str::uuid(),
+            'tenant_id' => $employer->tenant_id,
+            'employer_id' => $employer->id,
+            'uploaded_by_user_id' => $request->user()?->id,
+            'source' => $request->input('_source', 'api'),
+            'roster' => json_encode($request->roster),
+            'add_count' => count($diff['adds']),
+            'term_count' => count($diff['term_patient_ids']),
+            'unchanged_count' => $diff['unchanged_count'],
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
         $enrolled = [];
         $errors = [];
+        $terminated = [];
 
         DB::beginTransaction();
 
         try {
+            // First: terminate employees who fell off the roster.
+            foreach ($diff['term_patient_ids'] as $tpId) {
+                $tp = Patient::find($tpId);
+                if (!$tp) continue;
+                $this->roster->closePeriod($tp, null, 'roster_removed');
+                $terminated[] = ['patient_id' => $tpId];
+            }
+
             foreach ($request->roster as $index => $row) {
                 try {
                     // Check if patient already exists by email in this tenant.
@@ -147,6 +186,17 @@ class EmployerPortalController extends Controller
                         // Link existing patient to employer if not already linked
                         if (!$existingPatient->employer_id) {
                             $existingPatient->update(['employer_id' => $employer->id]);
+                        }
+                        // Re-open eligibility period if previously terminated
+                        // (re-hire scenario). openPeriod is idempotent against
+                        // already-open periods because we only insert when no
+                        // open one exists for this patient.
+                        $hasOpen = DB::table('employer_employee_periods')
+                            ->where('patient_id', $existingPatient->id)
+                            ->whereNull('eligibility_end_at')
+                            ->exists();
+                        if (!$hasOpen) {
+                            $this->roster->openPeriod($employer, $existingPatient);
                         }
                         $enrolled[] = [
                             'email' => $row['email'],
@@ -166,6 +216,7 @@ class EmployerPortalController extends Controller
                         'employer_id' => $employer->id,
                         'is_active' => true,
                     ]);
+                    $this->roster->openPeriod($employer, $patient);
 
                     // Create membership enrollment
                     PatientMembership::create([
@@ -201,8 +252,10 @@ class EmployerPortalController extends Controller
 
         return response()->json(['data' => [
             'enrolled' => $enrolled,
+            'terminated' => $terminated,
             'errors' => $errors,
             'total_processed' => count($enrolled),
+            'total_terminated' => count($terminated),
             'total_errors' => count($errors),
         ]], 201);
     }
@@ -311,13 +364,10 @@ class EmployerPortalController extends Controller
             ], 422);
         }
 
-        $activeCount = Patient::where('tenant_id', $employer->tenant_id)
-            ->where('employer_id', $employer->id)
-            ->where('is_active', true)
-            ->count();
-
-        $periodStart = now()->startOfMonth()->toDateString();
-        $periodEnd = now()->endOfMonth()->toDateString();
+        $periodStartCarbon = now()->startOfMonth();
+        $periodEndCarbon = now()->endOfMonth();
+        $periodStart = $periodStartCarbon->toDateString();
+        $periodEnd = $periodEndCarbon->toDateString();
         $dueDate = now()->endOfMonth()->addDays(15)->toDateString();
 
         // Idempotency: don't create two invoices for the same employer/period.
@@ -332,7 +382,14 @@ class EmployerPortalController extends Controller
             ], 409);
         }
 
-        $subtotal = round($activeCount * $pepmRate, 2);
+        // Pro-rated headcount based on actual eligibility periods overlapping
+        // [periodStart, periodEnd]. Mid-cycle adds and terms get day-precise
+        // billing instead of full-month overcharge.
+        $usage = $this->roster->activeDaysInPeriod($employer, $periodStartCarbon, $periodEndCarbon);
+        $effectiveHeadcount = $usage['effective_headcount'];
+        $activeCount = (int) ceil($effectiveHeadcount); // for the enrolled_count column (whole number expected)
+
+        $subtotal = round($effectiveHeadcount * $pepmRate, 2);
 
         $invoice = EmployerInvoice::create([
             'tenant_id' => $employer->tenant_id,
