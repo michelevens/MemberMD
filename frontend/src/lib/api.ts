@@ -765,6 +765,62 @@ export const membershipService = {
     if (useMockData()) return mockUpdate<PatientMembership>({ id, status: "active" });
     return apiFetch<PatientMembership>(`/memberships/${id}`, { method: "PUT", body: JSON.stringify({ status: "active" }) });
   },
+  /**
+   * Patient self-service cancel — always end-of-period. The patient
+   * keeps coverage they paid for; Stripe subscription is cancelled at
+   * period close. Reason capture mirrors the admin cancel flow so churn
+   * analytics stay consistent across channels.
+   */
+  selfCancel: async (
+    id: string,
+    body: {
+      reason: "moved" | "cost" | "dissatisfied" | "switching_provider" | "other";
+      reason_notes?: string;
+      retention_declined?: "pause" | "downgrade" | "contact";
+    },
+  ): Promise<ApiResponse<PatientMembership>> => {
+    if (useMockData()) return mockUpdate<PatientMembership>({ id, status: "canceled" });
+    return apiFetch<PatientMembership>(`/memberships/${id}/self-cancel`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  },
+};
+
+/**
+ * Tier 2 card-on-file management — calls into the practice's connected
+ * Stripe account. createSetupIntent returns a client_secret that the
+ * frontend uses with Stripe Elements / confirmCardSetup; once that
+ * resolves, attach() saves the card as the customer default and
+ * updates active subscriptions to use it.
+ */
+export const paymentMethodService = {
+  list: async (): Promise<ApiResponse<Array<{
+    id: string;
+    brand: string | null;
+    last4: string | null;
+    exp_month: number | null;
+    exp_year: number | null;
+    is_default: boolean;
+  }>>> => {
+    if (useMockData()) return { data: [] };
+    return apiFetch("/payment-methods");
+  },
+  createSetupIntent: async (): Promise<ApiResponse<{
+    client_secret: string;
+    stripe_publishable_key: string;
+    stripe_account_id: string;
+  }>> => {
+    if (useMockData()) return { data: { client_secret: "mock", stripe_publishable_key: "mock", stripe_account_id: "mock" } };
+    return apiFetch("/payment-methods/setup-intent", { method: "POST" });
+  },
+  attach: async (paymentMethodId: string): Promise<ApiResponse<{ message: string }>> => {
+    if (useMockData()) return { data: { message: "Mocked." } };
+    return apiFetch("/payment-methods/attach", {
+      method: "POST",
+      body: JSON.stringify({ payment_method_id: paymentMethodId }),
+    });
+  },
 };
 
 // ─── Entitlements ───────────────────────────────────────────────────────────

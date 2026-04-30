@@ -12,6 +12,7 @@ import { AppointmentBookingWidget } from "../widgets/AppointmentBookingWidget";
 import { ProfilePage } from "../profile/ProfilePage";
 import { PortalShell, type NavItem } from "../shared/PortalShell";
 import { CommandPalette, useCommandPaletteShortcut } from "../shared/CommandPalette";
+import { BillingTab } from "./patient/BillingTab";
 import {
   familyService,
   appointmentService,
@@ -1653,64 +1654,11 @@ export function PatientPortal() {
         </div>
       </div>
 
-      {/* Membership */}
-      <div className="glass rounded-2xl p-5">
-        <h3 className="text-sm font-semibold mb-4" style={{ color: COLORS.navy800 }}>
-          My Membership
-        </h3>
-        <div
-          className="rounded-xl p-4 mb-4"
-          style={{ background: `linear-gradient(135deg, ${COLORS.navy800}, ${COLORS.teal600})` }}
-        >
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="text-white font-bold">{patient.planName}</span>
-                <Star className="w-4 h-4" style={{ color: COLORS.gold }} />
-              </div>
-              <p className="text-white/60 text-xs mt-1">
-                Billed {patient.billingFrequency}
-              </p>
-            </div>
-            <span className="text-white text-2xl font-bold">${patient.planPrice}</span>
-          </div>
-        </div>
-        <div className="space-y-3">
-          <div className="flex items-center justify-between text-sm">
-            <span style={{ color: COLORS.slate500 }}>Next Payment</span>
-            <span className="font-medium" style={{ color: COLORS.navy800 }}>
-              {formatDate(patient.nextPaymentDate)}
-            </span>
-          </div>
-          <div className="flex items-center justify-between text-sm">
-            <span style={{ color: COLORS.slate500 }}>Payment Method</span>
-            <span className="font-medium flex items-center gap-1" style={{ color: COLORS.navy800 }}>
-              <CreditCard className="w-4 h-4" style={{ color: COLORS.slate400 }} />
-              {patient.paymentMethod}
-            </span>
-          </div>
-        </div>
-        <div className="flex items-center gap-2 mt-4 pt-3 border-t" style={{ borderColor: COLORS.slate200 }}>
-          <button
-            className="flex-1 py-2 rounded-lg text-sm font-medium border"
-            style={{ borderColor: COLORS.teal500, color: COLORS.teal600 }}
-          >
-            Change Plan
-          </button>
-          <button
-            className="flex-1 py-2 rounded-lg text-sm font-medium border"
-            style={{ borderColor: COLORS.slate300, color: COLORS.slate600 }}
-          >
-            Update Payment
-          </button>
-        </div>
-        <button
-          className="w-full mt-2 py-2 rounded-lg text-sm font-medium"
-          style={{ color: COLORS.red500 }}
-        >
-          Cancel Membership
-        </button>
-      </div>
+      {/* Membership / Billing — backed by real API endpoints. Trial countdown,
+          plan card, visits-this-period meter, card-on-file rotation via Stripe
+          Elements, invoice history, and self-service end-of-period cancel all
+          live in BillingTab. */}
+      <BillingTab />
 
       {/* Emergency Contact */}
       <div className="glass rounded-2xl p-5">
