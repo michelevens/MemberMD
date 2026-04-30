@@ -54,5 +54,11 @@ class DatabaseSeeder extends Seeder
             ChartTemplateSeeder::class,
             EntitlementTypeSeeder::class,
         ]);
+
+        // Demo data — only when explicitly requested via SEED_DEMO=1 so a
+        // production fresh-install doesn't accidentally get a fake practice.
+        if (env('SEED_DEMO', false)) {
+            $this->call(DemoSeeder::class);
+        }
     }
 }
