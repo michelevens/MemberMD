@@ -69,6 +69,15 @@ class DemoSeeder extends Seeder
         // seeder is acceptable; cleanupPriorRun handles re-runs cleanly.
         $this->cleanupPriorRun();
         $this->seedPractice();
+        // Run the same bootstrap pipeline that fires on real registrations
+        // — seeds screening + consent templates, entitlement types, etc.
+        // Safe to call here because createDefaultPlans was removed; this
+        // path is now plan-neutral.
+        try {
+            (new \App\Services\PracticeBootstrapService())->bootstrap($this->practice);
+        } catch (\Throwable $e) {
+            $this->command->warn('  ↳ bootstrap skip: ' . $e->getMessage());
+        }
         $this->seedTeam();
         $this->seedProviders();
         $this->seedPlans();
@@ -406,22 +415,28 @@ class DemoSeeder extends Seeder
             'is_active' => true,
         ]);
 
-        // Patient login user — only seed for one canonical patient so the
-        // demo team has a stable test login (patient1@clearstone.test).
-        if ($idx === 0) {
-            $patientUser = User::create([
-                'tenant_id' => $this->practice->id,
-                'email' => 'patient1@clearstone.test',
-                'name' => "{$first} {$last}",
-                'first_name' => $first,
-                'last_name' => $last,
-                'password' => Hash::make('demo'),
-                'role' => 'patient',
-                'status' => 'active',
-                'onboarding_completed' => true,
-            ]);
-            $patient->update(['user_id' => $patientUser->id, 'email' => 'patient1@clearstone.test']);
-        }
+        // Patient login user — every patient gets one so downstream
+        // seeders (messaging, notifications) have a User they can target.
+        // Patient #0 keeps the canonical patient1@clearstone.test login;
+        // the rest get unique deterministic emails so collisions don't
+        // block re-runs.
+        $patientEmail = $idx === 0
+            ? 'patient1@clearstone.test'
+            : "patient" . ($idx + 1) . "+{$first}.{$last}@clearstone.test";
+        $patientEmail = strtolower(preg_replace('/[^a-z0-9@+.]/i', '', $patientEmail));
+
+        $patientUser = User::create([
+            'tenant_id' => $this->practice->id,
+            'email' => $patientEmail,
+            'name' => "{$first} {$last}",
+            'first_name' => $first,
+            'last_name' => $last,
+            'password' => Hash::make('demo'),
+            'role' => 'patient',
+            'status' => 'active',
+            'onboarding_completed' => true,
+        ]);
+        $patient->update(['user_id' => $patientUser->id, 'email' => $patientEmail]);
 
         $plan = $this->plans[$planKey];
         $startedAt = now()->subMonths($monthsAgo);
