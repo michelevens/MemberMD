@@ -2480,9 +2480,25 @@ export function PracticePortal() {
     const pt = selectedPatient;
     if (!pt) return null;
 
-    const detailTabs = [
-      "demographics", "medical", "medications", "appointments",
-      "encounters", "screenings", "billing", "documents", "messages",
+    // EnnHealth-style two-row tab nav: primary clinical tabs above,
+    // secondary admin/notes tabs below. Each tab carries its own icon.
+    const primaryDetailTabs: Array<{ id: string; label: string; icon: typeof Stethoscope }> = [
+      { id: "demographics", label: "Demographics", icon: UserCog },
+      { id: "appointments", label: "Appointments", icon: Calendar },
+      { id: "medical", label: "Medical History", icon: Stethoscope },
+      { id: "medications", label: "Medications", icon: Pill },
+      { id: "labs", label: "Labs", icon: FlaskConical },
+      { id: "vitals", label: "Vitals", icon: Activity },
+      { id: "consents", label: "Consents", icon: Shield },
+    ];
+    const secondaryDetailTabs: Array<{ id: string; label: string; icon: typeof Stethoscope }> = [
+      { id: "encounters", label: "Notes", icon: FileText },
+      { id: "screenings", label: "Measures", icon: ClipboardList },
+      { id: "wellness", label: "Wellness", icon: Heart },
+      { id: "care-team", label: "Care Team", icon: UsersRound },
+      { id: "billing", label: "Billing", icon: CreditCard },
+      { id: "documents", label: "Documents", icon: FileText },
+      { id: "messages", label: "Messages", icon: MessageSquare },
     ];
 
     // Mock encounters for this patient
@@ -2627,32 +2643,77 @@ export function PracticePortal() {
       );
     };
 
+    // ─── Patient initials for the avatar (mirrors EnnHealth's gradient avatar) ──
+    const patientInitials = (pt.name || "?")
+      .split(" ")
+      .map((n) => n[0])
+      .filter(Boolean)
+      .slice(0, 2)
+      .join("")
+      .toUpperCase();
+
     return (
       <div className="space-y-6">
-        {/* ── Header ──────────────────────────────────────────────────── */}
-        <div className="flex flex-col sm:flex-row items-start gap-4">
+        {/* ── Header (EnnHealth-style gradient card with avatar) ─────── */}
+        <div className="flex items-center gap-2">
           <button
             onClick={() => { setSelectedPatient(null); setPatientUtilization(null); setPatientActivities([]); setShowQuickActivityLog(false); }}
             className="p-2 rounded-lg hover:bg-slate-100 text-slate-500 transition-colors shrink-0"
           >
             <ArrowLeft className="w-5 h-5" />
           </button>
-          <div className="flex-1 min-w-0">
-            <div className="flex flex-wrap items-center gap-3">
-              <h1 className="text-2xl font-bold text-slate-800">
-                {pt.name}
-                {pt.preferredName && (
-                  <span className="text-lg font-normal text-slate-400 ml-2">({pt.preferredName})</span>
-                )}
-              </h1>
-              <PlanBadge plan={pt.plan} />
-              <StatusBadge status={pt.status} />
+          <span className="text-sm text-slate-400">Back to roster</span>
+        </div>
+
+        <div
+          className="rounded-2xl shadow-xl border border-slate-200/40 overflow-hidden"
+          style={{ background: "linear-gradient(135deg, #ffffff 0%, #f8fafc 100%)" }}
+        >
+          <div className="p-6 sm:p-8 flex flex-col md:flex-row items-start gap-6">
+            {/* Avatar */}
+            <div
+              className="w-24 h-24 rounded-full ring-4 ring-white shadow-lg flex items-center justify-center text-white text-2xl font-semibold shrink-0"
+              style={{ background: "linear-gradient(135deg, #334e68 0%, #d97706 100%)" }}
+            >
+              {patientInitials}
             </div>
-            {pt.memberSince && (
-              <p className="text-sm text-slate-400 mt-1">Member since {pt.memberSince}</p>
-            )}
-          </div>
-          <div className="flex items-center gap-2 shrink-0">
+
+            <div className="flex-1 min-w-0 space-y-4">
+              <div>
+                <div className="flex flex-wrap items-center gap-3 mb-2">
+                  <h1 className="text-3xl font-semibold text-slate-900">
+                    {pt.name}
+                    {pt.preferredName && (
+                      <span className="text-lg font-normal text-slate-400 ml-2">({pt.preferredName})</span>
+                    )}
+                  </h1>
+                  <PlanBadge plan={pt.plan} />
+                  <StatusBadge status={pt.status} />
+                </div>
+                <div className="flex flex-wrap gap-x-5 gap-y-1.5 text-sm text-slate-500">
+                  {pt.memberId && (
+                    <div className="flex items-center gap-1.5">
+                      <Shield className="w-4 h-4" />
+                      <span className="font-mono">{pt.memberId}</span>
+                    </div>
+                  )}
+                  {pt.memberSince && (
+                    <div className="flex items-center gap-1.5">
+                      <Calendar className="w-4 h-4" />
+                      <span>Member since {pt.memberSince}</span>
+                    </div>
+                  )}
+                  {pt.lastVisit && (
+                    <div className="flex items-center gap-1.5">
+                      <Activity className="w-4 h-4" />
+                      <span>Last visit: {pt.lastVisit}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Quick action buttons */}
+              <div className="flex flex-wrap gap-2">
             <button
               className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium text-white transition-colors"
               style={{ backgroundColor: "#27ab83" }}
@@ -2707,6 +2768,8 @@ export function PracticePortal() {
             >
               <Download className="w-4 h-4" /> Download Records
             </button>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -3084,29 +3147,54 @@ export function PracticePortal() {
           );
         })()}
 
-        {/* ── Detail Tab Bar ──────────────────────────────────────────── */}
-        <div className="border-b border-slate-200 overflow-x-auto">
-          <div className="flex gap-0 min-w-max">
-            {detailTabs.map((tab) => (
-              <button
-                key={tab}
-                onClick={() => setPatientDetailTab(tab)}
-                className="px-4 py-2.5 text-sm font-medium capitalize transition-colors whitespace-nowrap"
-                style={
-                  patientDetailTab === tab
-                    ? { color: "#27ab83", borderBottom: "2px solid #27ab83" }
-                    : { color: "#64748b", borderBottom: "2px solid transparent" }
-                }
-                onMouseEnter={(e) => {
-                  if (patientDetailTab !== tab) e.currentTarget.style.color = "#334e68";
-                }}
-                onMouseLeave={(e) => {
-                  if (patientDetailTab !== tab) e.currentTarget.style.color = "#64748b";
-                }}
-              >
-                {tab}
-              </button>
-            ))}
+        {/* ── Detail Tab Bar (EnnHealth-style two-row icon pills) ─── */}
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-200/60 overflow-hidden">
+          {/* Primary row: clinical chart sections */}
+          <div className="flex items-center gap-1 border-b border-slate-200 px-3 overflow-x-auto">
+            {primaryDetailTabs.map((tab) => {
+              const Icon = tab.icon;
+              const active = patientDetailTab === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  onClick={() => setPatientDetailTab(tab.id)}
+                  className="flex items-center gap-2 px-4 py-3 text-sm transition-all whitespace-nowrap"
+                  style={{
+                    color: active ? "#147d64" : "#64748b",
+                    borderBottom: active ? "2px solid #147d64" : "2px solid transparent",
+                  }}
+                  onMouseEnter={(e) => { if (!active) e.currentTarget.style.color = "#334e68"; }}
+                  onMouseLeave={(e) => { if (!active) e.currentTarget.style.color = "#64748b"; }}
+                >
+                  <Icon className="w-4 h-4" />
+                  <span className="font-medium">{tab.label}</span>
+                </button>
+              );
+            })}
+          </div>
+          {/* Secondary row: notes / measures / admin */}
+          <div className="flex items-center gap-1 px-3 overflow-x-auto" style={{ backgroundColor: "#f8fafc" }}>
+            {secondaryDetailTabs.map((tab) => {
+              const Icon = tab.icon;
+              const active = patientDetailTab === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  onClick={() => setPatientDetailTab(tab.id)}
+                  className="flex items-center gap-2 px-4 py-3 text-sm transition-all whitespace-nowrap"
+                  style={{
+                    color: active ? "#147d64" : "#64748b",
+                    backgroundColor: active ? "#ffffff" : "transparent",
+                    borderBottom: active ? "2px solid #147d64" : "2px solid transparent",
+                  }}
+                  onMouseEnter={(e) => { if (!active) e.currentTarget.style.color = "#334e68"; }}
+                  onMouseLeave={(e) => { if (!active) e.currentTarget.style.color = "#64748b"; }}
+                >
+                  <Icon className="w-4 h-4" />
+                  <span className="font-medium">{tab.label}</span>
+                </button>
+              );
+            })}
           </div>
         </div>
 
@@ -3733,6 +3821,231 @@ export function PracticePortal() {
                 </div>
                 <span className="px-2 py-0.5 rounded-full text-xs font-medium" style={{ backgroundColor: "#e6f7f2", color: "#147d64" }}>Default</span>
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* Vitals — ported from EnnHealth's vitals tab; data source not yet wired. */}
+        {patientDetailTab === "vitals" && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="font-semibold text-slate-800">Vital Signs</h3>
+              <button
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white transition-colors"
+                style={{ backgroundColor: "#27ab83" }}
+                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#147d64")}
+                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "#27ab83")}
+                onClick={() => setToast({ message: "Record Vitals dialog — coming soon.", type: "success" })}
+              >
+                <Plus className="w-3.5 h-3.5" /> Record Vitals
+              </button>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+              {[
+                { label: "Blood Pressure", value: "—", unit: "mmHg", icon: Heart, color: "#dc2626" },
+                { label: "Heart Rate", value: "—", unit: "bpm", icon: Activity, color: "#7c3aed" },
+                { label: "Temperature", value: "—", unit: "°F", icon: Activity, color: "#d97706" },
+                { label: "Respiratory Rate", value: "—", unit: "/min", icon: Activity, color: "#147d64" },
+                { label: "O₂ Saturation", value: "—", unit: "%", icon: Activity, color: "#1d4ed8" },
+                { label: "Weight", value: "—", unit: "lbs", icon: Activity, color: "#334e68" },
+                { label: "Height", value: "—", unit: "in", icon: Activity, color: "#334e68" },
+                { label: "BMI", value: "—", unit: "", icon: Activity, color: "#27ab83" },
+              ].map((v) => {
+                const VIcon = v.icon;
+                return (
+                  <div key={v.label} className="glass rounded-xl p-4">
+                    <div className="flex items-center gap-2 mb-2">
+                      <VIcon className="w-4 h-4" style={{ color: v.color }} />
+                      <p className="text-xs font-medium text-slate-500">{v.label}</p>
+                    </div>
+                    <p className="text-2xl font-bold text-slate-800">{v.value}</p>
+                    {v.unit && <p className="text-xs text-slate-400">{v.unit}</p>}
+                  </div>
+                );
+              })}
+            </div>
+            <div className="glass rounded-xl p-6 text-center">
+              <Activity className="w-10 h-10 mx-auto mb-2 text-slate-300" />
+              <p className="text-sm text-slate-500">No vitals recorded yet for {pt.name}.</p>
+              <p className="text-xs text-slate-400 mt-1">Click "Record Vitals" to add the first reading.</p>
+            </div>
+          </div>
+        )}
+
+        {/* Labs — placeholder list; backend lab orders endpoint TBD. */}
+        {patientDetailTab === "labs" && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="font-semibold text-slate-800">Lab Results</h3>
+              <button
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white transition-colors"
+                style={{ backgroundColor: "#27ab83" }}
+                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#147d64")}
+                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "#27ab83")}
+                onClick={() => setToast({ message: "Order Lab dialog — coming soon.", type: "success" })}
+              >
+                <Plus className="w-3.5 h-3.5" /> Order Lab
+              </button>
+            </div>
+            <div className="glass rounded-xl p-8 text-center">
+              <FlaskConical className="w-12 h-12 mx-auto mb-3 text-slate-300" />
+              <p className="text-sm text-slate-500">No lab results on file for {pt.name}.</p>
+              <p className="text-xs text-slate-400 mt-1">Lab orders and results will appear here once integrated.</p>
+            </div>
+          </div>
+        )}
+
+        {/* Wellness — index card pattern from EnnHealth. */}
+        {patientDetailTab === "wellness" && (
+          <div className="space-y-4">
+            <h3 className="font-semibold text-slate-800">Wellness Index</h3>
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+              <div
+                className="rounded-xl p-6 text-white"
+                style={{ background: "linear-gradient(135deg, #27ab83, #147d64)" }}
+              >
+                <div className="flex items-center gap-2 mb-3">
+                  <Heart className="w-5 h-5" />
+                  <p className="text-sm font-medium opacity-90">Overall Wellness</p>
+                </div>
+                <p className="text-5xl font-bold mb-1">—</p>
+                <p className="text-xs opacity-75">out of 100 — no data yet</p>
+              </div>
+              {[
+                { label: "Physical Activity", value: "—", icon: Activity },
+                { label: "Sleep Quality", value: "—", icon: Activity },
+                { label: "Treatment Adherence", value: "—", icon: Pill },
+                { label: "Mindfulness", value: "—", icon: Heart },
+                { label: "Social Connection", value: "—", icon: UsersRound },
+              ].map((w) => {
+                const WIcon = w.icon;
+                return (
+                  <div key={w.label} className="glass rounded-xl p-4">
+                    <div className="flex items-center gap-2 mb-2">
+                      <WIcon className="w-4 h-4" style={{ color: "#147d64" }} />
+                      <p className="text-xs font-medium text-slate-500">{w.label}</p>
+                    </div>
+                    <p className="text-2xl font-bold text-slate-800">{w.value}</p>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="glass rounded-xl p-6">
+              <h4 className="font-semibold text-slate-800 mb-2">Recent Activities</h4>
+              <p className="text-sm text-slate-400 text-center py-6">No wellness activities logged yet.</p>
+            </div>
+          </div>
+        )}
+
+        {/* Consents — placeholder list with request flow. */}
+        {patientDetailTab === "consents" && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="font-semibold text-slate-800">Consents & Authorizations</h3>
+              <button
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white transition-colors"
+                style={{ backgroundColor: "#27ab83" }}
+                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#147d64")}
+                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "#27ab83")}
+                onClick={() => setToast({ message: "Request Consent flow — coming soon.", type: "success" })}
+              >
+                <Send className="w-3.5 h-3.5" /> Request Consent
+              </button>
+            </div>
+            <div className="glass rounded-xl divide-y divide-slate-100">
+              {[
+                { name: "HIPAA Authorization", status: "signed", date: pt.memberSince || "—" },
+                { name: "Telehealth Consent", status: "signed", date: pt.memberSince || "—" },
+                { name: "Treatment Consent", status: "signed", date: pt.memberSince || "—" },
+                { name: "Release of Information", status: "pending", date: "—" },
+                { name: "Financial Responsibility", status: "signed", date: pt.memberSince || "—" },
+              ].map((c, idx) => {
+                const isSigned = c.status === "signed";
+                return (
+                  <div key={idx} className="flex items-center justify-between p-4 hover:bg-slate-50 transition-colors">
+                    <div className="flex items-center gap-3">
+                      <div
+                        className="w-9 h-9 rounded-lg flex items-center justify-center"
+                        style={{ backgroundColor: isSigned ? "#ecf9ec" : "#fffbeb" }}
+                      >
+                        <Shield className="w-4 h-4" style={{ color: isSigned ? "#2f8132" : "#d97706" }} />
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium text-slate-700">{c.name}</p>
+                        <p className="text-xs text-slate-400">
+                          {isSigned ? `Signed ${c.date}` : "Awaiting patient signature"}
+                        </p>
+                      </div>
+                    </div>
+                    <span
+                      className="px-2.5 py-1 rounded text-xs font-semibold"
+                      style={
+                        isSigned
+                          ? { backgroundColor: "#ecf9ec", color: "#2f8132" }
+                          : { backgroundColor: "#fffbeb", color: "#d97706" }
+                      }
+                    >
+                      {isSigned ? "Signed" : "Pending"}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Care Team — assigned providers + external contacts. */}
+        {patientDetailTab === "care-team" && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="font-semibold text-slate-800">Care Team</h3>
+              <button
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white transition-colors"
+                style={{ backgroundColor: "#27ab83" }}
+                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#147d64")}
+                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "#27ab83")}
+                onClick={() => setToast({ message: "Add Team Member dialog — coming soon.", type: "success" })}
+              >
+                <UserPlus className="w-3.5 h-3.5" /> Add Member
+              </button>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {(() => {
+                const primaryEc = pt.emergencyContacts?.[0];
+                const members: Array<{ name: string; role: string; color: string; sub?: string }> = [
+                  { name: pt.provider || "Unassigned", role: "Primary Provider", color: "#147d64" },
+                  { name: "—", role: "Care Coordinator", color: "#1d4ed8" },
+                  {
+                    name: primaryEc?.name || "—",
+                    role: primaryEc?.relationship ? `Emergency Contact — ${primaryEc.relationship}` : "Emergency Contact",
+                    color: "#dc2626",
+                    sub: primaryEc?.phone,
+                  },
+                  {
+                    name: pt.referringProvider?.name || "—",
+                    role: "Referring Provider",
+                    color: "#7c3aed",
+                    sub: pt.referringProvider?.phone,
+                  },
+                ];
+                return members.map((m, idx) => (
+                  <div key={idx} className="glass rounded-xl p-4 flex items-center gap-3">
+                    <div
+                      className="w-11 h-11 rounded-full flex items-center justify-center text-white font-semibold shrink-0"
+                      style={{ backgroundColor: m.color }}
+                    >
+                      {m.name && m.name !== "—"
+                        ? m.name.split(" ").map((n: string) => n[0]).filter(Boolean).slice(0, 2).join("").toUpperCase()
+                        : "?"}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-semibold text-slate-800 truncate">{m.name}</p>
+                      <p className="text-xs text-slate-400">{m.role}</p>
+                      {m.sub && <p className="text-xs text-slate-500 mt-0.5">{m.sub}</p>}
+                    </div>
+                  </div>
+                ));
+              })()}
             </div>
           </div>
         )}
