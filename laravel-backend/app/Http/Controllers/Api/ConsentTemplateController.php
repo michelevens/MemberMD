@@ -26,13 +26,14 @@ class ConsentTemplateController extends Controller
     // ─── Public ──────────────────────────────────────────────────────────────
 
     /**
-     * GET /external/consent-templates/{tenantCode}?plan_id=...
+     * GET /external/consent-templates/{tenantCode}
      *
      * Returns active templates the patient must view + sign during enrollment.
-     * Includes the plan's bound membership agreement (if plan_id provided)
-     * plus all required consents for the tenant. Sorted by display_order.
+     * Sorted by display_order. (Plan-specific filtering via ?plan_id= will
+     * be re-introduced once practices customize agreement_template_id per
+     * plan; currently all required consents apply across plans.)
      */
-    public function publicForEnrollment(Request $request, string $tenantCode): JsonResponse
+    public function publicForEnrollment(string $tenantCode): JsonResponse
     {
         $practice = Practice::where('tenant_code', $tenantCode)
             ->where('is_active', true)
@@ -51,10 +52,18 @@ class ConsentTemplateController extends Controller
 
         $tenantSlugs = $tenantTemplates->pluck('slug')->filter()->all();
 
+        // Platform-wide fallbacks: only include templates whose slug isn't
+        // already shadowed by a tenant fork. Postgres `NOT IN` excludes NULL
+        // via 3-valued logic, so coalesce slug to type when filtering.
         $platformTemplates = ConsentTemplate::whereNull('tenant_id')
             ->where('is_active', true)
             ->whereNull('superseded_at')
-            ->whereNotIn('slug', $tenantSlugs ?: [''])
+            ->when($tenantSlugs, function ($q) use ($tenantSlugs) {
+                $q->where(function ($qq) use ($tenantSlugs) {
+                    $qq->whereNull('slug')
+                       ->orWhereNotIn('slug', $tenantSlugs);
+                });
+            })
             ->get();
 
         $all = $tenantTemplates->merge($platformTemplates)
