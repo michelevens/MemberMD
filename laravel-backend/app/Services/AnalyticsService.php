@@ -79,45 +79,74 @@ class AnalyticsService
         $likes = collect($involuntaryReasons)->map(fn ($r) => "%{$r}%")->all();
         $placeholders = implode(',', array_fill(0, count($likes), '?'));
 
+        // Trial abandonment != churn (QA #12). A patient who signs up for a
+        // trial and cancels before the trial ends never paid us anything —
+        // counting them as a "churned customer" inflates voluntary churn at
+        // exactly the rate of trial signups, hiding the real product/price
+        // signal. We split them out: trial_abandonment_count tracks them
+        // separately, and they're EXCLUDED from voluntary/involuntary
+        // numerators AND denominators.
+        //
+        // "Was in trial when cancelled" = cancelled_at < trial_ends_at.
         $result = DB::selectOne("
             SELECT
                 COUNT(*) FILTER (
                     WHERE pm.status = 'cancelled'
                       AND pm.cancelled_at BETWEEN ? AND ?
+                      AND pm.trial_ends_at IS NOT NULL
+                      AND pm.cancelled_at < pm.trial_ends_at
+                ) AS trial_abandonments,
+                COUNT(*) FILTER (
+                    WHERE pm.status = 'cancelled'
+                      AND pm.cancelled_at BETWEEN ? AND ?
+                      AND (pm.trial_ends_at IS NULL OR pm.cancelled_at >= pm.trial_ends_at)
                       AND COALESCE(pm.cancel_reason, '') ILIKE ANY (ARRAY[{$placeholders}])
                 ) AS involuntary,
                 COUNT(*) FILTER (
                     WHERE pm.status = 'cancelled'
                       AND pm.cancelled_at BETWEEN ? AND ?
+                      AND (pm.trial_ends_at IS NULL OR pm.cancelled_at >= pm.trial_ends_at)
                       AND NOT (COALESCE(pm.cancel_reason, '') ILIKE ANY (ARRAY[{$placeholders}]))
                 ) AS voluntary,
-                COUNT(*) AS total
+                COUNT(*) FILTER (
+                    WHERE pm.trial_ends_at IS NULL OR pm.trial_ends_at <= NOW()
+                ) AS post_trial_total
             FROM patient_memberships pm
             WHERE pm.tenant_id = ?
               AND pm.started_at <= ?
               AND pm.parent_membership_id IS NULL
         ", [
+            $periodStart, $periodEnd,
             $periodStart, $periodEnd, ...$likes,
             $periodStart, $periodEnd, ...$likes,
             $tenantId, $periodEnd,
         ]);
 
-        $total = (int) $result->total;
-        if ($total === 0) {
-            return ['rate' => 0.0, 'voluntary_rate' => 0.0, 'involuntary_rate' => 0.0,
-                    'voluntary_count' => 0, 'involuntary_count' => 0, 'total' => 0];
-        }
-
+        // Denominator is the post-trial cohort — members who actually entered
+        // the paying lifecycle. Trial-only signups don't get to dilute the
+        // churn rate.
+        $denom = (int) $result->post_trial_total;
         $vol = (int) $result->voluntary;
         $invol = (int) $result->involuntary;
+        $trialAbandonments = (int) $result->trial_abandonments;
+
+        if ($denom === 0) {
+            return [
+                'rate' => 0.0, 'voluntary_rate' => 0.0, 'involuntary_rate' => 0.0,
+                'voluntary_count' => 0, 'involuntary_count' => 0,
+                'trial_abandonment_count' => $trialAbandonments,
+                'total' => 0,
+            ];
+        }
 
         return [
-            'rate' => round((($vol + $invol) / $total) * 100, 2),
-            'voluntary_rate' => round(($vol / $total) * 100, 2),
-            'involuntary_rate' => round(($invol / $total) * 100, 2),
+            'rate' => round((($vol + $invol) / $denom) * 100, 2),
+            'voluntary_rate' => round(($vol / $denom) * 100, 2),
+            'involuntary_rate' => round(($invol / $denom) * 100, 2),
             'voluntary_count' => $vol,
             'involuntary_count' => $invol,
-            'total' => $total,
+            'trial_abandonment_count' => $trialAbandonments,
+            'total' => $denom,
         ];
     }
 

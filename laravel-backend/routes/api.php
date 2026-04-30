@@ -558,6 +558,10 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
         Route::post('/enroll-roster-csv', [EmployerPortalController::class, 'enrollRosterCsv']);
         // Materialize a sponsor invoice from active member count × contract fee.
         Route::post('/sponsor-invoice', [EmployerPortalController::class, 'generateSponsorInvoice']);
+        // Backdated termination of a single employee + invoice regeneration
+        // for historical correctness when HR delivers the news late.
+        Route::post('/terminate-employee', [EmployerPortalController::class, 'terminateEmployee']);
+        Route::post('/sponsor-invoice/{invoiceId}/regenerate', [EmployerPortalController::class, 'regenerateSponsorInvoice']);
     });
 
     // ===== Chart Templates =====

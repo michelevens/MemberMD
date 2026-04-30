@@ -30,44 +30,61 @@ class ScheduledChangeExecutor
     ) {
     }
 
+    /**
+     * Drain the queue in chunks until empty (or safety cap is hit).
+     *
+     * QA #9: a previous version capped at 500 rows per run, so a mass
+     * scheduled change for >500 members landed half-on-time and half a day
+     * late. We now chunk through the whole due set. The MAX_RUNTIME_SEC
+     * safety net stops a runaway job from hogging the cron slot — anything
+     * not finished spills into tomorrow's run instead of blocking.
+     */
+    private const CHUNK = 200;
+    private const MAX_RUNTIME_SEC = 600; // 10 minutes
+
     public function processDue(): array
     {
         $stats = ['applied' => 0, 'failed' => 0, 'skipped' => 0];
+        $started = microtime(true);
 
-        $due = MembershipScheduledChange::where('status', 'pending')
-            ->where('effective_at', '<=', now()->toDateString())
-            ->orderBy('effective_at')
-            ->limit(500)
-            ->get();
+        while (microtime(true) - $started < self::MAX_RUNTIME_SEC) {
+            $due = MembershipScheduledChange::where('status', 'pending')
+                ->where('effective_at', '<=', now()->toDateString())
+                ->orderBy('effective_at')
+                ->limit(self::CHUNK)
+                ->get();
 
-        foreach ($due as $change) {
-            try {
-                DB::transaction(function () use ($change, &$stats) {
-                    $membership = PatientMembership::find($change->membership_id);
-                    if (!$membership) {
-                        $change->update(['status' => 'failed', 'error_message' => 'membership not found']);
-                        $stats['failed']++;
-                        return;
-                    }
+            if ($due->isEmpty()) break;
 
-                    match ($change->change_type) {
-                        'plan_change' => $this->applyPlanChange($membership, $change),
-                        'cancel'      => $this->applyCancel($membership, $change),
-                        'pause'       => $this->applyPause($membership, $change),
-                        'resume'      => $this->applyResume($membership, $change),
-                        default       => throw new \RuntimeException("unknown change_type {$change->change_type}"),
-                    };
+            foreach ($due as $change) {
+                try {
+                    DB::transaction(function () use ($change, &$stats) {
+                        $membership = PatientMembership::find($change->membership_id);
+                        if (!$membership) {
+                            $change->update(['status' => 'failed', 'error_message' => 'membership not found']);
+                            $stats['failed']++;
+                            return;
+                        }
 
-                    $change->update(['status' => 'applied', 'applied_at' => now()]);
-                    $stats['applied']++;
-                });
-            } catch (\Throwable $e) {
-                Log::error('Scheduled change failed', [
-                    'change_id' => $change->id,
-                    'error' => $e->getMessage(),
-                ]);
-                $change->update(['status' => 'failed', 'error_message' => $e->getMessage()]);
-                $stats['failed']++;
+                        match ($change->change_type) {
+                            'plan_change' => $this->applyPlanChange($membership, $change),
+                            'cancel'      => $this->applyCancel($membership, $change),
+                            'pause'       => $this->applyPause($membership, $change),
+                            'resume'      => $this->applyResume($membership, $change),
+                            default       => throw new \RuntimeException("unknown change_type {$change->change_type}"),
+                        };
+
+                        $change->update(['status' => 'applied', 'applied_at' => now()]);
+                        $stats['applied']++;
+                    });
+                } catch (\Throwable $e) {
+                    Log::error('Scheduled change failed', [
+                        'change_id' => $change->id,
+                        'error' => $e->getMessage(),
+                    ]);
+                    $change->update(['status' => 'failed', 'error_message' => $e->getMessage()]);
+                    $stats['failed']++;
+                }
             }
         }
 

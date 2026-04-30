@@ -425,6 +425,9 @@ class EmployerPortalController extends Controller
 
         $subtotal = round($effectiveHeadcount * $pepmRate, 2);
 
+        // The original-create path. Used for the first-time invoice for
+        // this period. A subsequent regenerate (for retroactive roster
+        // corrections) goes through regenerateSponsorInvoice below.
         $invoice = EmployerInvoice::create([
             'tenant_id' => $employer->tenant_id,
             'employer_id' => $employer->id,
@@ -442,5 +445,126 @@ class EmployerPortalController extends Controller
         ]);
 
         return response()->json(['data' => $invoice], 201);
+    }
+
+    /**
+     * Backdated termination of a single employee (QA scenario #6).
+     *
+     * Used when HR realizes after the fact that an employee actually left
+     * weeks earlier. Closes the eligibility period at the correct date
+     * instead of today, which feeds correctly into the next sponsor
+     * invoice's prorated active-days calculation. Existing invoices for
+     * periods that overlap the corrected date stay incorrect until
+     * regenerateSponsorInvoice is called for that period.
+     */
+    public function terminateEmployee(Request $request): JsonResponse
+    {
+        $employer = $this->getEmployerForUser($request);
+
+        $validated = $request->validate([
+            'patient_id' => 'required|uuid',
+            'effective_date' => 'required|date',
+            'reason' => 'nullable|in:roster_removed,eligibility_lost,manual_term,resignation,termination',
+        ]);
+
+        $patient = Patient::where('tenant_id', $employer->tenant_id)
+            ->where('employer_id', $employer->id)
+            ->findOrFail($validated['patient_id']);
+
+        $effective = Carbon::parse($validated['effective_date']);
+        if ($effective->isFuture()) {
+            return response()->json([
+                'message' => 'Effective date must be today or earlier. For future-dated terminations, use scheduled changes.',
+            ], 422);
+        }
+
+        $this->roster->closePeriod(
+            $patient,
+            $effective->toImmutable(),
+            $validated['reason'] ?? 'manual_term',
+        );
+
+        return response()->json([
+            'data' => ['patient_id' => $patient->id, 'effective_date' => $effective->toDateString()],
+            'message' => 'Employee terminated. Sponsor invoices covering periods that include this date should be regenerated for accuracy.',
+        ]);
+    }
+
+    /**
+     * Void an existing sponsor invoice and reissue a corrected one for the
+     * same billing period (QA scenario #6 — historical correctness).
+     *
+     * The original invoice is marked status='void' (preserves audit trail).
+     * The new invoice references the active eligibility periods AS THEY
+     * EXIST NOW, which means any retroactive terminations applied since the
+     * original invoice flow through automatically.
+     */
+    public function regenerateSponsorInvoice(Request $request, string $invoiceId): JsonResponse
+    {
+        $employer = $this->getEmployerForUser($request);
+
+        $original = EmployerInvoice::where('tenant_id', $employer->tenant_id)
+            ->where('employer_id', $employer->id)
+            ->findOrFail($invoiceId);
+
+        // Don't regenerate paid invoices without a refund-credit flow — would
+        // strand the original payment. Practice should void+refund first.
+        if ($original->status === 'paid') {
+            return response()->json([
+                'message' => 'Cannot regenerate a paid invoice. Issue a refund or credit first.',
+            ], 422);
+        }
+
+        $contract = EmployerContract::where('tenant_id', $employer->tenant_id)
+            ->where('employer_id', $employer->id)
+            ->where('status', 'active')
+            ->first();
+        abort_if(!$contract, 422, 'No active contract found for this employer.');
+
+        $pepmRate = (float) ($contract->pepm_rate ?? 0);
+        $periodStart = Carbon::parse($original->period_start);
+        $periodEnd = Carbon::parse($original->period_end);
+
+        $usage = $this->roster->activeDaysInPeriod($employer, $periodStart, $periodEnd);
+        $effectiveHeadcount = $usage['effective_headcount'];
+        $newSubtotal = round($effectiveHeadcount * $pepmRate, 2);
+        $delta = round($newSubtotal - (float) $original->subtotal, 2);
+
+        DB::transaction(function () use ($original, $employer, $contract, $effectiveHeadcount, $pepmRate, $newSubtotal, $delta, $periodStart, $periodEnd) {
+            // Void the original; preserve as audit trail with a note.
+            $original->update([
+                'status' => 'void',
+                'notes' => trim(($original->notes ?? '') . " | Voided and regenerated. Delta: \${$delta}."),
+            ]);
+
+            // New invoice with corrected headcount.
+            EmployerInvoice::create([
+                'tenant_id' => $employer->tenant_id,
+                'employer_id' => $employer->id,
+                'contract_id' => $contract->id,
+                'invoice_number' => 'INV-EMP-' . now()->format('Ym') . '-' . substr($employer->id, 0, 6) . '-R',
+                'period_start' => $periodStart->toDateString(),
+                'period_end' => $periodEnd->toDateString(),
+                'enrolled_count' => (int) ceil($effectiveHeadcount),
+                'pepm_rate' => $pepmRate,
+                'subtotal' => $newSubtotal,
+                'adjustments' => 0,
+                'total' => $newSubtotal,
+                'status' => 'draft',
+                'due_date' => now()->endOfMonth()->addDays(15)->toDateString(),
+                'notes' => "Regenerated from voided invoice {$original->invoice_number}. Original subtotal: \${$original->subtotal}. Delta: \${$delta}.",
+            ]);
+        });
+
+        return response()->json([
+            'data' => [
+                'voided_invoice' => $original->fresh(),
+                'delta' => $delta,
+                'new_effective_headcount' => $effectiveHeadcount,
+            ],
+            'message' => $delta < 0
+                ? "Invoice regenerated. Sponsor was overcharged by \$" . abs($delta) . "."
+                : ($delta > 0 ? "Invoice regenerated with \${$delta} additional charge." : 'Invoice regenerated; no net change.'),
+        ]);
     }
 }

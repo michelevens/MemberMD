@@ -8,6 +8,7 @@ use App\Models\Invoice;
 use App\Models\Payment;
 use App\Models\PaymentRefund;
 use App\Models\Practice;
+use App\Services\IdempotencyService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -18,6 +19,11 @@ use Stripe\StripeClient;
 
 class PaymentController extends Controller
 {
+    public function __construct(
+        private readonly IdempotencyService $idempotency,
+    ) {
+    }
+
     public function index(Request $request): JsonResponse
     {
         $user = $request->user();
@@ -98,6 +104,32 @@ class PaymentController extends Controller
             'notes' => 'nullable|string|max:500',
         ]);
 
+        // Idempotency wrapper (QA #4) — a flaky network or impatient admin
+        // double-clicking would issue two refunds for the same intent. The
+        // key bins by minute so genuine retries within the minute coalesce,
+        // but a deliberate second click 90 seconds later (different intent)
+        // gets a fresh refund. Client can also pass Idempotency-Key for
+        // tighter control.
+        $clientKey = $request->header('Idempotency-Key');
+        $derivedKey = hash('sha256', implode('|', [
+            $payment->id,
+            (string) $validated['refund_amount'],
+            $user->id,
+            now()->format('YmdHi'),
+        ]));
+        $key = $clientKey ?: $derivedKey;
+
+        return $this->idempotency->execute(
+            'payments.refund',
+            $key,
+            $user->tenant_id,
+            fn () => $this->doRefund($request, $user, $payment, $validated),
+        );
+    }
+
+    private function doRefund(Request $request, $user, Payment $payment, array $validated): JsonResponse
+    {
+
         // Real Stripe refund call (Tier 2 — practice's connected account).
         // Local rows reflect the Stripe truth, not the other way around: if
         // the API call fails, the local Payment stays 'completed' and we
@@ -109,6 +141,46 @@ class PaymentController extends Controller
                 return response()->json([
                     'message' => 'Practice is not connected to Stripe. Cannot issue refund.',
                 ], 422);
+            }
+
+            // Pre-flight refund state check (QA #11). A dispute or a Stripe
+            // Dashboard refund may already have refunded part or all of this
+            // charge — pulling the current state from Stripe before issuing
+            // a new refund avoids the opaque API error and surfaces what
+            // already happened.
+            try {
+                $charge = $this->stripe()->charges->retrieve(
+                    $payment->stripe_payment_id,
+                    [],
+                    ['stripe_account' => $practice->stripe_account_id],
+                );
+                $alreadyRefundedCents = (int) ($charge->amount_refunded ?? 0);
+                $chargeAmountCents = (int) ($charge->amount ?? 0);
+                $remainingCents = max(0, $chargeAmountCents - $alreadyRefundedCents);
+                $requestedCents = (int) round(((float) $validated['refund_amount']) * 100);
+
+                if ($remainingCents <= 0) {
+                    return response()->json([
+                        'message' => 'Charge has already been fully refunded on Stripe.',
+                        'already_refunded' => $alreadyRefundedCents / 100,
+                        'charge_amount' => $chargeAmountCents / 100,
+                    ], 409);
+                }
+                if ($requestedCents > $remainingCents) {
+                    return response()->json([
+                        'message' => 'Refund amount exceeds the unrefunded balance on Stripe.',
+                        'already_refunded' => $alreadyRefundedCents / 100,
+                        'remaining_refundable' => $remainingCents / 100,
+                    ], 409);
+                }
+            } catch (ApiErrorException $e) {
+                // If the pre-flight fails we still try the refund — the
+                // refunds.create call will reject if there's a real problem.
+                // We just lose the friendly error.
+                Log::warning('Refund pre-flight charge fetch failed', [
+                    'payment_id' => $payment->id,
+                    'error' => $e->getMessage(),
+                ]);
             }
 
             try {
