@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Mail\MembershipActivated;
 use App\Models\ConsentSignature;
 use App\Models\ConsentTemplate;
 use App\Models\MembershipPlan;
@@ -16,6 +17,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Str;
 use Throwable;
 
@@ -283,6 +285,23 @@ class ExternalController extends Controller
                 'error' => $e->getMessage(),
             ]);
             $stripeWarning = 'Subscription will be set up when Stripe is configured.';
+        }
+
+        // Welcome email — fire after enrollment lands. Best-effort: a Resend
+        // outage shouldn't block enrollment (the patient is already enrolled
+        // and can hit the portal directly if email never arrives). Log and
+        // continue if the send fails. CLAUDE.md claimed this was wired but
+        // it wasn't — fixed 2026-04-30.
+        try {
+            if ($validated['email'] ?? null) {
+                Mail::to($validated['email'])->send(new MembershipActivated($membership));
+            }
+        } catch (Throwable $e) {
+            Log::warning('Welcome email failed to send', [
+                'membership_id' => $membership->id,
+                'email' => $validated['email'] ?? null,
+                'error' => $e->getMessage(),
+            ]);
         }
 
         return response()->json(array_filter([
