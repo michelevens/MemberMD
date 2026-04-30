@@ -17,7 +17,6 @@ import { useState, useEffect, useRef, type ReactNode } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import {
   LogOut,
-  Bell,
   ChevronDown,
   UserCircle,
   HelpCircle,
@@ -26,6 +25,7 @@ import {
   X,
   Search,
 } from "lucide-react";
+import { NotificationBell } from "./NotificationBell";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -147,7 +147,8 @@ export function PortalShell({
   activeTab,
   onTabChange,
   onLogout,
-  notificationCount = 0,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  notificationCount: _unused = 0,
   children,
   headerTitle,
   headerActions,
@@ -353,18 +354,11 @@ export function PortalShell({
 
             {headerActions}
 
-            {/* Notifications */}
-            <button
-              className="relative p-2 rounded-xl hover:bg-gray-100 transition-colors"
-              aria-label="Notifications"
-            >
-              <Bell className="w-5 h-5 text-gray-500" />
-              {notificationCount > 0 && (
-                <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 bg-red-500 text-white text-[10px] rounded-full flex items-center justify-center font-bold ring-2 ring-white">
-                  {notificationCount > 99 ? "99+" : notificationCount}
-                </span>
-              )}
-            </button>
+            {/* Notifications — self-contained: polls unread count and
+                manages its own popover. The legacy notificationCount
+                prop is ignored (kept on the interface for callers that
+                still pass it; the bell now reads from the API). */}
+            <NotificationBell />
 
             {/* User dropdown */}
             <div className="relative" ref={userMenuRef}>

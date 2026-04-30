@@ -1487,9 +1487,9 @@ export const notificationService = {
     const query = params ? "?" + new URLSearchParams(params).toString() : "";
     return apiFetch<NotificationPreference[]>(`/notifications${query}`);
   },
-  getUnreadCount: async (): Promise<ApiResponse<{ count: number }>> => {
-    if (useMockData()) return { data: { count: 0 } };
-    return apiFetch<{ count: number }>("/notifications/unread-count");
+  getUnreadCount: async (): Promise<ApiResponse<{ unread_count: number }>> => {
+    if (useMockData()) return { data: { unread_count: 0 } };
+    return apiFetch<{ unread_count: number }>("/notifications/unread-count");
   },
   markRead: async (id: string): Promise<ApiResponse<void>> => {
     if (useMockData()) return { data: undefined };

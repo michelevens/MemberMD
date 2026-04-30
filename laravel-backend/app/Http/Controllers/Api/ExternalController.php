@@ -304,6 +304,72 @@ class ExternalController extends Controller
             ]);
         }
 
+        // In-app + email notification to practice owners/admins, plus an
+        // in-app welcome receipt for the new member. Each block is
+        // independently best-effort so a single failure (missing admin
+        // user, mail outage) doesn't cascade.
+        try {
+            $plan = $membership->plan ?? \App\Models\MembershipPlan::find($membership->plan_id);
+            $planName = $plan?->name ?? 'a membership';
+            $patientName = trim(($validated['first_name'] ?? '') . ' ' . ($validated['last_name'] ?? ''));
+
+            $admins = \App\Models\User::where('tenant_id', $practice->id)
+                ->whereIn('role', ['practice_admin', 'staff'])
+                ->where('status', 'active')
+                ->get();
+
+            foreach ($admins as $admin) {
+                try {
+                    $admin->notify(new \App\Notifications\NewMemberEnrolled(
+                        membership: $membership,
+                        patientName: $patientName,
+                        patientEmail: $validated['email'] ?? '',
+                        planName: $planName,
+                    ));
+                } catch (Throwable $e) {
+                    Log::warning('NewMemberEnrolled in-app notify failed', [
+                        'admin_id' => $admin->id,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+
+                try {
+                    if ($admin->email) {
+                        Mail::to($admin->email)->send(new \App\Mail\NewMemberEnrolledMail(
+                            membership: $membership,
+                            patientName: $patientName,
+                            patientEmail: $validated['email'] ?? '',
+                            planName: $planName,
+                        ));
+                    }
+                } catch (Throwable $e) {
+                    Log::warning('NewMemberEnrolled email failed', [
+                        'admin_email' => $admin->email,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+            }
+
+            // In-app welcome for the new member (email already sent above).
+            try {
+                $user->notify(new \App\Notifications\MembershipWelcome(
+                    membership: $membership,
+                    planName: $planName,
+                    practiceName: $practice->name,
+                ));
+            } catch (Throwable $e) {
+                Log::warning('MembershipWelcome in-app notify failed', [
+                    'user_id' => $user->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        } catch (Throwable $e) {
+            Log::warning('Enrollment notifications block failed', [
+                'membership_id' => $membership->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
         return response()->json(array_filter([
             'message' => 'Enrollment successful!',
             'member_id' => $memberId,
