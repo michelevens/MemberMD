@@ -741,7 +741,14 @@ export function PatientPortal() {
   // patient's PHI (audit finding B6, 2026-04-28).
   const demoMode = useMemo(() => isUsingMockData(), []);
   const patient = useMemo(
-    () => apiPatient || (demoMode ? PATIENT : buildEmptyPatientFromAuth(user)),
+    () => {
+      // Always merge API data on top of a safe base so nested objects
+      // (emergencyContact, pharmacy) are guaranteed present. Without
+      // this, JSX like patient.emergencyContact.name crashes when the
+      // API response doesn't carry those fields.
+      const base = demoMode ? PATIENT : buildEmptyPatientFromAuth(user);
+      return apiPatient ? { ...base, ...apiPatient } : base;
+    },
     [apiPatient, demoMode, user]
   );
   const upcomingAppointments = useMemo(
