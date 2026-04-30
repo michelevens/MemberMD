@@ -975,6 +975,12 @@ export function SuperAdminPortal() {
   const [apiPractices, setApiPractices] = useState<MockPractice[] | null>(null);
   const [apiStats, setApiStats] = useState<Record<string, number> | null>(null);
   const [selectedPractice, setSelectedPractice] = useState<MockPractice | null>(null);
+  // Detail payload fetched when a practice row is opened. Shape:
+  //   { plans, members, providers, activity }
+  // Each is null until loaded; the detail renderer falls back to
+  // mock data while loading or if the API errors out (demo mode).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [practiceDetail, setPracticeDetail] = useState<any>(null);
   const [pendingPractices, setPendingPractices] = useState<MockPendingPractice[]>(isDemoMode ? MOCK_PENDING_PRACTICES : []);
   const [approvalMessage, setApprovalMessage] = useState<string | null>(null);
   const [expandedScreening, setExpandedScreening] = useState<string | null>(null);
@@ -1117,6 +1123,29 @@ export function SuperAdminPortal() {
   }, []);
 
   useEffect(() => { loadData(); }, [loadData]);
+
+  // Load full detail (plans, members, providers, activity) whenever a
+  // practice row is opened. Without this the detail page renders mocks.
+  useEffect(() => {
+    if (!selectedPractice) {
+      setPracticeDetail(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await adminService.getPractice(selectedPractice.id);
+        if (cancelled) return;
+        const data = r.data as Record<string, unknown> | undefined;
+        if (data && (data.plans || data.members || data.providers)) {
+          setPracticeDetail(data);
+        }
+      } catch {
+        // Keep null — detail renderer falls back to mocks gracefully.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [selectedPractice]);
 
   const practices = useMemo(() => apiPractices || (isDemoMode ? MOCK_PRACTICES : []), [apiPractices, isDemoMode]);
 
@@ -2235,10 +2264,71 @@ export function SuperAdminPortal() {
   function renderPracticeDetail() {
     if (!selectedPractice) return null;
     const p = selectedPractice;
-    const plans = getMockPlans(p.specialty);
-    const members = getMockMembers(p.name, p.specialty);
-    const providers = getMockProviders(p.name, p.providers);
-    const activity = getMockActivity(p.name);
+
+    // Real data from /admin/practices/{id} when available; mock fallbacks
+    // keep the page populated during loading and in pure demo mode.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const detail = practiceDetail as any;
+
+    type PlanCard = { name: string; price: number; visits: number; features: string[] };
+    const plans: PlanCard[] = detail?.plans?.length
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ? detail.plans.map((pl: any): PlanCard => ({
+          name: pl.name,
+          price: Number(pl.monthly_price ?? 0),
+          visits: pl.visits_per_month === -1 ? 999 : (pl.visits_per_month ?? 0),
+          features: Array.isArray(pl.features_list)
+            ? (pl.features_list as string[])
+            : ([
+                pl.telehealth_included ? "Telehealth" : null,
+                pl.messaging_included ? "Messaging" : null,
+              ].filter(Boolean) as string[]),
+        }))
+      : getMockPlans(p.specialty);
+
+    const members: MockMember[] = (detail?.members?.length
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ? detail.members.map((m: any) => {
+          const u = m.user || {};
+          const first = u.first_name || u.firstName || "";
+          const last = u.last_name || u.lastName || "";
+          const am = m.active_membership || m.activeMembership;
+          const planName = am?.plan?.name || "—";
+          const status = am ? "active" : "pending";
+          return {
+            id: m.id,
+            name: `${first} ${last}`.trim() || u.email || "Member",
+            plan: planName,
+            status: status as "active" | "inactive" | "pending",
+            joined: m.created_at || m.createdAt || "",
+            lastVisit: "-",
+          };
+        })
+      : getMockMembers(p.name, p.specialty));
+
+    const providers: MockProvider[] = (detail?.providers?.length
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ? detail.providers.map((pr: any) => ({
+          id: pr.id,
+          name: `Dr. ${pr.first_name || ""} ${pr.last_name || ""}`.trim(),
+          credentials: pr.credentials || pr.title || "",
+          npi: "—",
+          panelCapacity: pr.panel_capacity || 0,
+          panelCurrent: pr.panel_current || 0,
+          panelStatus: (pr.panel_status === "closed" ? "closed" : "open") as "open" | "closed",
+        }))
+      : getMockProviders(p.name, p.providers));
+
+    const activity: MockActivityEvent[] = (detail?.activity?.length
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ? detail.activity.map((a: any) => ({
+          id: a.id,
+          event: a.description || a.event_type || "Activity",
+          timestamp: a.created_at ? new Date(a.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "",
+          icon: Activity,
+          color: "#0369a1",
+        }))
+      : getMockActivity(p.name));
 
     return (
       <div className="animate-page-in space-y-6">

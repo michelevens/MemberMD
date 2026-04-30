@@ -424,9 +424,16 @@ export const adminService = {
     const qs = params?.search ? `?search=${encodeURIComponent(params.search)}` : "";
     return apiFetch<Practice[]>(`/admin/practices${qs}`);
   },
-  getPractice: async (id: string): Promise<ApiResponse<Practice>> => {
-    if (useMockData()) return { data: MOCK_PRACTICE };
-    return apiFetch<Practice>(`/admin/practices/${id}`);
+  /**
+   * SuperAdmin practice detail. Returns a richer payload than the list:
+   *   { practice, plans, members, providers, activity }
+   * The detail page uses this single fetch to render every section
+   * with real tenant data instead of mocks.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  getPractice: async (id: string): Promise<ApiResponse<any>> => {
+    if (useMockData()) return { data: { practice: MOCK_PRACTICE, plans: [], members: [], providers: [], activity: [] } };
+    return apiFetch<unknown>(`/admin/practices/${id}`);
   },
   getStats: async (): Promise<ApiResponse<DashboardStats>> => {
     if (useMockData()) return { data: MOCK_DASHBOARD };

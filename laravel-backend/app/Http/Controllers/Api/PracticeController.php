@@ -44,7 +44,9 @@ class PracticeController extends Controller
         return response()->json(['data' => $practices]);
     }
 
-    // SuperAdmin: show single practice
+    // SuperAdmin: show single practice — returns the practice with the
+    // satellite collections the superadmin detail page needs to render
+    // real data instead of mocks (plans, members, providers, activity).
     public function show(Request $request, string $id): JsonResponse
     {
         abort_if($request->user()->role !== 'superadmin', 403);
@@ -52,7 +54,53 @@ class PracticeController extends Controller
         $practice = Practice::withCount(['users', 'patients', 'providers', 'membershipPlans'])
             ->findOrFail($id);
 
-        return response()->json(['data' => $practice]);
+        $plans = \App\Models\MembershipPlan::where('tenant_id', $practice->id)
+            ->where('is_active', true)
+            ->orderBy('sort_order')
+            ->orderBy('monthly_price')
+            ->get([
+                'id', 'name', 'monthly_price', 'annual_price',
+                'visits_per_month', 'features_list', 'badge_text',
+                'telehealth_included', 'messaging_included',
+            ]);
+
+        // Recent members — newest 25 with their active membership + plan
+        $members = \App\Models\Patient::where('tenant_id', $practice->id)
+            ->with(['activeMembership.plan:id,name', 'user:id,first_name,last_name,email'])
+            ->orderByDesc('created_at')
+            ->limit(25)
+            ->get(['id', 'tenant_id', 'user_id', 'created_at']);
+
+        // panel_current is computed from distinct patients seen in
+        // appointments — this practice's providers don't have a direct
+        // patient FK, so we count from the appointments table.
+        $providers = \App\Models\Provider::where('tenant_id', $practice->id)
+            ->get([
+                'id', 'first_name', 'last_name', 'title', 'credentials',
+                'panel_capacity', 'panel_status', 'status',
+            ])
+            ->map(function ($prov) {
+                $prov->panel_current = \DB::table('appointments')
+                    ->where('provider_id', $prov->id)
+                    ->distinct('patient_id')
+                    ->count('patient_id');
+                return $prov;
+            });
+
+        // Recent activity — last 20 membership lifecycle events
+        $activity = \DB::table('membership_lifecycle_events')
+            ->where('tenant_id', $practice->id)
+            ->orderByDesc('created_at')
+            ->limit(20)
+            ->get(['id', 'event_type', 'description', 'created_at']);
+
+        return response()->json(['data' => [
+            'practice' => $practice,
+            'plans' => $plans,
+            'members' => $members,
+            'providers' => $providers,
+            'activity' => $activity,
+        ]]);
     }
 
     // SuperAdmin: platform stats
