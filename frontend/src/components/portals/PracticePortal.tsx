@@ -14,6 +14,7 @@ import { AddMeasureDialog } from "../clinical/AddMeasureDialog";
 import { AIDocumentationAssistant } from "../clinical/AIDocumentationAssistant";
 import { CareTimeline, generateDemoTimelineEvents } from "../clinical/CareTimeline";
 import { PatientConsentsTab } from "./practice/PatientConsentsTab";
+import { MedicationAutocomplete } from "../shared/MedicationAutocomplete";
 import { PracticeSettings } from "../settings/PracticeSettings";
 import { CalendarView } from "../shared/CalendarView";
 import { AppointmentBookingWidget } from "../widgets/AppointmentBookingWidget";
@@ -8161,10 +8162,13 @@ export function PracticePortal() {
                   {(apiPatients || (isDemoMode ? MOCK_PATIENTS : [])).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                 </select>
               </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Medication Name *</label>
-                <input className="w-full border rounded-lg px-3 py-2 text-sm" value={rxForm.medicationName} onChange={e => setRxForm(f => ({ ...f, medicationName: e.target.value }))} placeholder="e.g. Sertraline" />
-              </div>
+              <MedicationAutocomplete
+                label="Medication Name *"
+                value={rxForm.medicationName}
+                placeholder="Type a medication name (e.g. Sertraline)..."
+                helper="Pick a match from RxNorm (NIH) for a standardized name."
+                onChange={(text) => setRxForm(f => ({ ...f, medicationName: text }))}
+              />
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Dosage *</label>

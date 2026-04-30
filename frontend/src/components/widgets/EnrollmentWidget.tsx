@@ -8,6 +8,8 @@ import { Check, ChevronLeft, ChevronRight, ArrowRight, FileText, X } from "lucid
 import { useWidgetTheme } from "../../hooks/useWidgetTheme";
 import { widgetAnalyticsService, consentService, type PublicConsentTemplate } from "../../lib/api";
 import { AgreementBody } from "../shared/AgreementBody";
+import { AddressAutocomplete } from "../shared/AddressAutocomplete";
+import { MedicationAutocomplete, type RxNormConcept } from "../shared/MedicationAutocomplete";
 
 // ─── Config ─────────────────────────────────────────────────────────────────
 
@@ -666,7 +668,20 @@ export function EnrollmentWidget() {
         </div>
 
         <div className="mt-4 grid grid-cols-1 gap-4">
-          <FormField label="Address" value={form.address} onChange={(v) => updateField("address", v)} />
+          <AddressAutocomplete
+            label="Address"
+            value={form.address}
+            helper="Start typing — we'll auto-fill city, state, and ZIP."
+            onChange={(text, parsed) => {
+              setForm((prev) => ({
+                ...prev,
+                address: parsed?.street || text,
+                ...(parsed
+                  ? { city: parsed.city, state: parsed.state, zip: parsed.zip }
+                  : {}),
+              }));
+            }}
+          />
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <FormField label="City" value={form.city} onChange={(v) => updateField("city", v)} />
             <div>
@@ -716,14 +731,34 @@ export function EnrollmentWidget() {
 
         <div className="space-y-4">
           <div>
+            <MedicationAutocomplete
+              label="Search medications"
+              value=""
+              placeholder="Type a medication name (e.g. sertraline)..."
+              helper="Pick a match to add it to your list below. Free-form notes also OK."
+              onChange={(_text, concept: RxNormConcept | null) => {
+                if (concept) {
+                  // Append the canonical RxNorm name to the textarea, one
+                  // per line. Helps practices reconcile meds against a
+                  // standardized vocabulary.
+                  setForm((prev) => {
+                    const existing = (prev.medications || "").trim();
+                    const next = existing ? `${existing}\n${concept.name}` : concept.name;
+                    return { ...prev, medications: next };
+                  });
+                }
+              }}
+            />
+          </div>
+          <div>
             <label className="block text-sm font-medium mb-1.5" style={{ color: C.navy800 }}>
               Current Medications
             </label>
             <textarea
               value={form.medications}
               onChange={(e) => updateField("medications", e.target.value)}
-              rows={3}
-              placeholder="List any medications you currently take..."
+              rows={4}
+              placeholder="Use the search above or type any medications you currently take..."
               className="w-full px-3 py-2.5 rounded-lg border text-sm outline-none resize-none"
               style={{ borderColor: C.slate200, color: C.navy900 }}
             />

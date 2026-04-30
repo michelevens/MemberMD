@@ -10,6 +10,7 @@ import {
   Building2, User, Lock, ClipboardList, Sparkles, ChevronRight, Layers,
   Search, Plus, Trash2, Copy, AlertTriangle,
 } from "lucide-react";
+import { AddressAutocomplete } from "../shared/AddressAutocomplete";
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || "/api";
 
@@ -792,13 +793,20 @@ export function PracticeRegistration() {
                   </div>
 
                   <div>
-                    <label className={labelClass}>Address</label>
-                    <input
-                      type="text"
+                    <AddressAutocomplete
+                      label="Address"
                       value={practiceInfo.address}
-                      onChange={e => updatePractice("address", e.target.value)}
-                      className={inputClass}
-                      placeholder="123 Main Street, Suite 200"
+                      placeholder="Start typing your practice address..."
+                      helper="We'll auto-fill city, state, and ZIP — or fill them manually below."
+                      onChange={(text, parsed) => {
+                        setPracticeInfo((prev) => ({
+                          ...prev,
+                          address: parsed?.street || text,
+                          ...(parsed
+                            ? { city: parsed.city, state: parsed.state, zip: parsed.zip }
+                            : {}),
+                        }));
+                      }}
                     />
                   </div>
 
