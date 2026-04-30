@@ -18,7 +18,14 @@ class PracticeBootstrapService
      */
     public function bootstrap(Practice $practice): void
     {
-        $specialty = MasterSpecialty::where('code', $practice->specialty)->first();
+        // Practice.specialty can hold either the master code (e.g.
+        // "psychiatry") or the display name (e.g. "Psychiatry") — the
+        // registration form passes the display label and the seeder
+        // historically did too. Try both so screening / consent
+        // templates always copy correctly.
+        $specialty = MasterSpecialty::where('code', $practice->specialty)
+            ->orWhere('name', $practice->specialty)
+            ->first();
 
         if (!$specialty) {
             // Fallback: still seed entitlements, copy universal consents and create default settings
