@@ -1,13 +1,23 @@
 // ===== CalendarView =====
-// Day / Week / Month calendar with appointment blocks
-// Color-coded by type, telehealth indicators, click-to-view
+// Day / Week / Month / List calendar with appointment blocks.
+// Color-coded by status (mirrors EnnHealth's status palette).
+// Drag-and-drop reschedule between days (week + month views).
+//
+// Drag-drop powered by react-dnd. The component wraps its content in a
+// DndProvider so callers don't have to.
 
-import { useState, useMemo } from "react";
+import { useState, useCallback } from "react";
+import { DndProvider, useDrag, useDrop } from "react-dnd";
+import { HTML5Backend } from "react-dnd-html5-backend";
 import {
   ChevronLeft,
   ChevronRight,
   Video,
   Clock,
+  Building2,
+  GripVertical,
+  CalendarDays,
+  List,
 } from "lucide-react";
 
 // ─── Colors ──────────────────────────────────────────────────────────────────
@@ -33,7 +43,32 @@ const C = {
   amber500: "#f59e0b",
 };
 
-// ─── Mock Calendar Appointments ──────────────────────────────────────────────
+// ─── Status Colors (ported from EnnHealth) ──────────────────────────────────
+//
+// EnnHealth's CalendarView color-codes blocks by *status*, not by visit type.
+// We mirror that — the visit-type tint becomes a thin left border on each
+// block so providers still see type at a glance.
+
+const STATUS_COLORS: Record<
+  string,
+  { bg: string; border: string; text: string; label: string }
+> = {
+  confirmed:    { bg: "#dcfce7", border: "#16a34a", text: "#15803d", label: "Confirmed" },
+  scheduled:    { bg: "#fef3c7", border: "#d97706", text: "#92400e", label: "Scheduled" },
+  pending:      { bg: "#fef3c7", border: "#d97706", text: "#92400e", label: "Pending" },
+  checked_in:   { bg: "#dbeafe", border: "#2563eb", text: "#1d4ed8", label: "Checked In" },
+  in_session:   { bg: "#e0e7ff", border: "#4f46e5", text: "#4338ca", label: "In Session" },
+  completed:    { bg: "#dbeafe", border: "#2563eb", text: "#1d4ed8", label: "Completed" },
+  cancelled:    { bg: "#fee2e2", border: "#dc2626", text: "#b91c1c", label: "Cancelled" },
+  no_show:      { bg: "#fee2e2", border: "#dc2626", text: "#b91c1c", label: "No Show" },
+  blocked:      { bg: "#f1f5f9", border: "#64748b", text: "#475569", label: "Blocked" },
+};
+
+function getStatusStyle(status: string) {
+  return STATUS_COLORS[status] || STATUS_COLORS.scheduled;
+}
+
+// ─── Types ───────────────────────────────────────────────────────────────────
 
 interface CalendarAppointment {
   id: string;
@@ -45,9 +80,21 @@ interface CalendarAppointment {
   startMinute: number;
   durationMinutes: number;
   isTeleHealth: boolean;
+  /** Type-color tint shown as a thin left border on the block. */
   color: string;
   status: string;
 }
+
+type ViewMode = "day" | "week" | "month" | "list";
+
+interface CalendarViewProps {
+  onAppointmentClick?: (appointmentId: string) => void;
+  onBookNew?: () => void;
+  /** Optional: notify caller when an appointment is rescheduled via drag-drop. */
+  onReschedule?: (appointmentId: string, newDate: Date) => void;
+}
+
+// ─── Mock Calendar Appointments ──────────────────────────────────────────────
 
 function generateMockAppointments(): CalendarAppointment[] {
   const today = new Date();
@@ -57,33 +104,33 @@ function generateMockAppointments(): CalendarAppointment[] {
 
   return [
     { id: "ca1", patientName: "Sarah Johnson", providerName: "Dr. Michel", typeName: "Psychiatric Eval", date: new Date(y, m, d), startHour: 9, startMinute: 0, durationMinutes: 60, isTeleHealth: true, color: "#7c3aed", status: "confirmed" },
-    { id: "ca2", patientName: "James Williams", providerName: "Dr. Michel", typeName: "Med Management", date: new Date(y, m, d), startHour: 10, startMinute: 30, durationMinutes: 30, isTeleHealth: true, color: "#2563eb", status: "confirmed" },
+    { id: "ca2", patientName: "James Williams", providerName: "Dr. Michel", typeName: "Med Management", date: new Date(y, m, d), startHour: 10, startMinute: 30, durationMinutes: 30, isTeleHealth: true, color: "#2563eb", status: "checked_in" },
     { id: "ca3", patientName: "Emily Davis", providerName: "Dr. Chen", typeName: "Annual Wellness", date: new Date(y, m, d), startHour: 11, startMinute: 0, durationMinutes: 45, isTeleHealth: false, color: "#059669", status: "scheduled" },
-    { id: "ca4", patientName: "Michael Brown", providerName: "Dr. Kim", typeName: "Well-Child Check", date: new Date(y, m, d), startHour: 14, startMinute: 0, durationMinutes: 30, isTeleHealth: false, color: "#f59e0b", status: "confirmed" },
-    { id: "ca5", patientName: "Lisa Anderson", providerName: "Dr. Chen", typeName: "Sick Visit", date: new Date(y, m, d), startHour: 15, startMinute: 0, durationMinutes: 20, isTeleHealth: false, color: "#dc2626", status: "checked_in" },
+    { id: "ca4", patientName: "Michael Brown", providerName: "Dr. Kim", typeName: "Well-Child Check", date: new Date(y, m, d), startHour: 14, startMinute: 0, durationMinutes: 30, isTeleHealth: false, color: "#f59e0b", status: "completed" },
+    { id: "ca5", patientName: "Lisa Anderson", providerName: "Dr. Chen", typeName: "Sick Visit", date: new Date(y, m, d), startHour: 15, startMinute: 0, durationMinutes: 20, isTeleHealth: false, color: "#dc2626", status: "in_session" },
     { id: "ca6", patientName: "Robert Taylor", providerName: "Dr. Michel", typeName: "Therapy Follow-up", date: new Date(y, m, d + 1), startHour: 9, startMinute: 30, durationMinutes: 45, isTeleHealth: true, color: "#0891b2", status: "scheduled" },
-    { id: "ca7", patientName: "Anna Martinez", providerName: "Dr. Kim", typeName: "Immunization", date: new Date(y, m, d + 1), startHour: 10, startMinute: 0, durationMinutes: 15, isTeleHealth: false, color: "#10b981", status: "scheduled" },
+    { id: "ca7", patientName: "Anna Martinez", providerName: "Dr. Kim", typeName: "Immunization", date: new Date(y, m, d + 1), startHour: 10, startMinute: 0, durationMinutes: 15, isTeleHealth: false, color: "#10b981", status: "confirmed" },
     { id: "ca8", patientName: "David Wilson", providerName: "Dr. Chen", typeName: "Telehealth Consult", date: new Date(y, m, d + 2), startHour: 13, startMinute: 0, durationMinutes: 30, isTeleHealth: true, color: "#7c3aed", status: "scheduled" },
+    { id: "ca9", patientName: "Karen Thomas", providerName: "Dr. Michel", typeName: "Crisis Intervention", date: new Date(y, m, d - 1), startHour: 16, startMinute: 0, durationMinutes: 60, isTeleHealth: false, color: "#dc2626", status: "no_show" },
+    { id: "ca10", patientName: "Mark Adams", providerName: "Dr. Kim", typeName: "Med Management", date: new Date(y, m, d - 2), startHour: 11, startMinute: 0, durationMinutes: 30, isTeleHealth: true, color: "#2563eb", status: "cancelled" },
   ];
-}
-
-// ─── Types ───────────────────────────────────────────────────────────────────
-
-type ViewMode = "day" | "week" | "month";
-
-interface CalendarViewProps {
-  onAppointmentClick?: (appointmentId: string) => void;
-  onBookNew?: () => void;
 }
 
 // ─── Time Helpers ────────────────────────────────────────────────────────────
 
 const HOURS = Array.from({ length: 13 }, (_, i) => i + 7); // 7 AM to 7 PM
+const DRAG_TYPE = "calendar-appointment";
 
 function formatHour(h: number): string {
   if (h === 0 || h === 12) return "12 PM";
   if (h < 12) return `${h} AM`;
   return `${h - 12} PM`;
+}
+
+function formatTime(h: number, min: number): string {
+  const ampm = h >= 12 ? "PM" : "AM";
+  const hour = h % 12 === 0 ? 12 : h % 12;
+  return `${hour}:${min.toString().padStart(2, "0")} ${ampm}`;
 }
 
 function isSameDay(a: Date, b: Date): boolean {
@@ -113,19 +160,133 @@ function getMonthDays(date: Date): (Date | null)[] {
   return result;
 }
 
+// ─── Drag Source ────────────────────────────────────────────────────────────
+
+interface DragItem {
+  id: string;
+  originalDate: Date;
+}
+
+function isDraggable(status: string): boolean {
+  // Mirror EnnHealth: completed / cancelled / blocked / no-show are locked.
+  return !["completed", "cancelled", "blocked", "no_show"].includes(status);
+}
+
+function DraggableBlock({
+  appointment,
+  children,
+  onClick,
+}: {
+  appointment: CalendarAppointment;
+  children: React.ReactNode;
+  onClick?: () => void;
+}) {
+  const draggable = isDraggable(appointment.status);
+  const [{ isDragging }, drag] = useDrag(
+    () => ({
+      type: DRAG_TYPE,
+      item: { id: appointment.id, originalDate: appointment.date } as DragItem,
+      canDrag: draggable,
+      collect: (monitor) => ({ isDragging: monitor.isDragging() }),
+    }),
+    [appointment.id, appointment.date, draggable]
+  );
+
+  return (
+    <div
+      ref={(node) => {
+        if (node) drag(node);
+      }}
+      onClick={onClick}
+      style={{
+        opacity: isDragging ? 0.4 : 1,
+        cursor: draggable ? "grab" : "pointer",
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+function DropDay({
+  date,
+  onDrop,
+  children,
+}: {
+  date: Date;
+  onDrop: (item: DragItem, newDate: Date) => void;
+  children: React.ReactNode;
+}) {
+  const [{ isOver, canDrop }, drop] = useDrop(
+    () => ({
+      accept: DRAG_TYPE,
+      drop: (item: DragItem) => onDrop(item, date),
+      canDrop: (item: DragItem) => !isSameDay(item.originalDate, date),
+      collect: (monitor) => ({
+        isOver: monitor.isOver(),
+        canDrop: monitor.canDrop(),
+      }),
+    }),
+    [date, onDrop]
+  );
+
+  return (
+    <div
+      ref={(node) => {
+        if (node) drop(node);
+      }}
+      style={{
+        backgroundColor: isOver && canDrop ? "rgba(39, 171, 131, 0.08)" : "transparent",
+        outline: isOver && canDrop ? `2px dashed ${C.teal500}` : "none",
+        outlineOffset: "-2px",
+        height: "100%",
+        position: "relative",
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
 // ─── Component ───────────────────────────────────────────────────────────────
 
-export function CalendarView({ onAppointmentClick, onBookNew }: CalendarViewProps) {
+function CalendarViewInner({ onAppointmentClick, onBookNew, onReschedule }: CalendarViewProps) {
   const [viewMode, setViewMode] = useState<ViewMode>("week");
   const [currentDate, setCurrentDate] = useState(new Date());
-  const appointments = useMemo(generateMockAppointments, []);
+  const [appointments, setAppointments] = useState<CalendarAppointment[]>(
+    () => generateMockAppointments()
+  );
+
+  // ─── Reschedule Handler ────────────────────────────────────────────────────
+  const handleDrop = useCallback(
+    (item: DragItem, newDate: Date) => {
+      setAppointments((prev) =>
+        prev.map((a) =>
+          a.id === item.id
+            ? {
+                ...a,
+                date: new Date(
+                  newDate.getFullYear(),
+                  newDate.getMonth(),
+                  newDate.getDate(),
+                  a.startHour,
+                  a.startMinute
+                ),
+              }
+            : a
+        )
+      );
+      onReschedule?.(item.id, newDate);
+    },
+    [onReschedule]
+  );
 
   // ─── Navigation ────────────────────────────────────────────────────────────
 
   function navigate(dir: -1 | 1) {
     const d = new Date(currentDate);
     if (viewMode === "day") d.setDate(d.getDate() + dir);
-    else if (viewMode === "week") d.setDate(d.getDate() + dir * 7);
+    else if (viewMode === "week" || viewMode === "list") d.setDate(d.getDate() + dir * 7);
     else d.setMonth(d.getMonth() + dir);
     setCurrentDate(d);
   }
@@ -152,7 +313,7 @@ export function CalendarView({ onAppointmentClick, onBookNew }: CalendarViewProp
     if (viewMode === "day") {
       return currentDate.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" });
     }
-    if (viewMode === "week") {
+    if (viewMode === "week" || viewMode === "list") {
       const week = getWeekDays(currentDate);
       const start = week[0];
       const end = week[6];
@@ -164,38 +325,62 @@ export function CalendarView({ onAppointmentClick, onBookNew }: CalendarViewProp
     return currentDate.toLocaleDateString("en-US", { month: "long", year: "numeric" });
   }
 
-  // ─── Appointment Block ────────────────────────────────────────────────────
+  // ─── Appointment Block (status-colored) ────────────────────────────────────
 
   function renderAppointmentBlock(apt: CalendarAppointment, slim = false) {
     const topPercent = ((apt.startHour * 60 + apt.startMinute - 7 * 60) / (13 * 60)) * 100;
     const heightPercent = (apt.durationMinutes / (13 * 60)) * 100;
+    const status = getStatusStyle(apt.status);
 
     return (
-      <button
+      <DraggableBlock
         key={apt.id}
+        appointment={apt}
         onClick={() => onAppointmentClick?.(apt.id)}
-        className="absolute left-1 right-1 rounded-lg overflow-hidden text-left transition-all hover:opacity-90 cursor-pointer z-10"
-        style={{
-          top: `${topPercent}%`,
-          height: `${Math.max(heightPercent, 2.5)}%`,
-          backgroundColor: apt.color,
-          opacity: 0.9,
-        }}
       >
-        <div className="p-1.5 h-full flex flex-col">
-          <p className="text-xs font-semibold text-white truncate leading-tight">
-            {slim ? apt.patientName.split(" ")[0] : apt.patientName}
-          </p>
-          {!slim && (
-            <p className="text-xs text-white truncate leading-tight" style={{ opacity: 0.85 }}>
-              {apt.typeName}
-            </p>
-          )}
-          {apt.isTeleHealth && (
-            <Video className="w-3 h-3 text-white mt-auto" style={{ opacity: 0.85 }} />
-          )}
+        <div
+          className="absolute left-1 right-1 rounded-lg overflow-hidden text-left transition-all hover:opacity-90 z-10"
+          style={{
+            top: `${topPercent}%`,
+            height: `${Math.max(heightPercent, 3)}%`,
+            backgroundColor: status.bg,
+            borderLeft: `3px solid ${apt.color}`,
+            boxShadow: `0 1px 2px rgba(0,0,0,0.05)`,
+          }}
+        >
+          <div className="p-1.5 h-full flex flex-col">
+            <div className="flex items-start justify-between gap-1">
+              <p
+                className="text-xs font-semibold truncate leading-tight"
+                style={{ color: status.text }}
+              >
+                {slim ? apt.patientName.split(" ")[0] : apt.patientName}
+              </p>
+              {isDraggable(apt.status) && (
+                <GripVertical
+                  className="w-3 h-3 shrink-0 opacity-50"
+                  style={{ color: status.text }}
+                />
+              )}
+            </div>
+            {!slim && (
+              <p
+                className="text-xs truncate leading-tight"
+                style={{ color: status.text, opacity: 0.7 }}
+              >
+                {apt.typeName}
+              </p>
+            )}
+            <div className="flex items-center gap-1.5 mt-auto">
+              {apt.isTeleHealth ? (
+                <Video className="w-3 h-3" style={{ color: status.text, opacity: 0.7 }} />
+              ) : (
+                <Building2 className="w-3 h-3" style={{ color: status.text, opacity: 0.7 }} />
+              )}
+            </div>
+          </div>
         </div>
-      </button>
+      </DraggableBlock>
     );
   }
 
@@ -207,7 +392,6 @@ export function CalendarView({ onAppointmentClick, onBookNew }: CalendarViewProp
     return (
       <div className="glass rounded-xl overflow-hidden">
         <div className="relative" style={{ height: "700px" }}>
-          {/* Time grid */}
           {HOURS.map((h) => (
             <div
               key={h}
@@ -224,20 +408,20 @@ export function CalendarView({ onAppointmentClick, onBookNew }: CalendarViewProp
             </div>
           ))}
 
-          {/* Appointments */}
           <div className="absolute left-16 right-0 top-0 bottom-0">
-            {dayAppts.map((apt) => renderAppointmentBlock(apt))}
+            <DropDay date={currentDate} onDrop={handleDrop}>
+              {dayAppts.map((apt) => renderAppointmentBlock(apt))}
 
-            {/* Current time indicator */}
-            {isSameDay(currentDate, now) && timeIndicatorTop >= 0 && timeIndicatorTop <= 100 && (
-              <div
-                className="absolute left-0 right-0 z-20 flex items-center"
-                style={{ top: `${timeIndicatorTop}%` }}
-              >
-                <div className="w-2 h-2 rounded-full" style={{ backgroundColor: C.red500 }} />
-                <div className="flex-1 h-px" style={{ backgroundColor: C.red500 }} />
-              </div>
-            )}
+              {isSameDay(currentDate, now) && timeIndicatorTop >= 0 && timeIndicatorTop <= 100 && (
+                <div
+                  className="absolute left-0 right-0 z-20 flex items-center"
+                  style={{ top: `${timeIndicatorTop}%` }}
+                >
+                  <div className="w-2 h-2 rounded-full" style={{ backgroundColor: C.red500 }} />
+                  <div className="flex-1 h-px" style={{ backgroundColor: C.red500 }} />
+                </div>
+              )}
+            </DropDay>
           </div>
         </div>
       </div>
@@ -251,7 +435,6 @@ export function CalendarView({ onAppointmentClick, onBookNew }: CalendarViewProp
 
     return (
       <div className="glass rounded-xl overflow-hidden">
-        {/* Day headers */}
         <div className="flex" style={{ borderBottom: `1px solid ${C.slate200}` }}>
           <div className="w-16 shrink-0" />
           {weekDays.map((day) => {
@@ -267,9 +450,7 @@ export function CalendarView({ onAppointmentClick, onBookNew }: CalendarViewProp
                 </p>
                 <p
                   className="text-sm font-bold mt-0.5"
-                  style={{
-                    color: isToday ? C.teal500 : C.navy800,
-                  }}
+                  style={{ color: isToday ? C.teal500 : C.navy800 }}
                 >
                   {day.getDate()}
                 </p>
@@ -278,7 +459,6 @@ export function CalendarView({ onAppointmentClick, onBookNew }: CalendarViewProp
           })}
         </div>
 
-        {/* Time grid */}
         <div className="relative" style={{ height: "650px" }}>
           {HOURS.map((h) => (
             <div
@@ -296,7 +476,6 @@ export function CalendarView({ onAppointmentClick, onBookNew }: CalendarViewProp
             </div>
           ))}
 
-          {/* Day columns with appointments */}
           <div className="absolute left-16 right-0 top-0 bottom-0 flex">
             {weekDays.map((day) => {
               const dayAppts = getAppointmentsForDay(day);
@@ -306,16 +485,17 @@ export function CalendarView({ onAppointmentClick, onBookNew }: CalendarViewProp
                   className="flex-1 relative"
                   style={{ borderLeft: `1px solid ${C.slate100}` }}
                 >
-                  {dayAppts.map((apt) => renderAppointmentBlock(apt, true))}
+                  <DropDay date={day} onDrop={handleDrop}>
+                    {dayAppts.map((apt) => renderAppointmentBlock(apt, true))}
+                  </DropDay>
                 </div>
               );
             })}
           </div>
 
-          {/* Current time indicator */}
           {timeIndicatorTop >= 0 && timeIndicatorTop <= 100 && (
             <div
-              className="absolute left-16 right-0 z-20 flex items-center"
+              className="absolute left-16 right-0 z-20 flex items-center pointer-events-none"
               style={{ top: `${timeIndicatorTop}%` }}
             >
               <div className="w-2 h-2 rounded-full" style={{ backgroundColor: C.red500 }} />
@@ -334,7 +514,6 @@ export function CalendarView({ onAppointmentClick, onBookNew }: CalendarViewProp
 
     return (
       <div className="glass rounded-xl overflow-hidden">
-        {/* Day headers */}
         <div className="grid grid-cols-7" style={{ borderBottom: `1px solid ${C.slate200}` }}>
           {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => (
             <div key={d} className="text-center py-2 text-xs font-medium" style={{ color: C.slate400 }}>
@@ -343,7 +522,6 @@ export function CalendarView({ onAppointmentClick, onBookNew }: CalendarViewProp
           ))}
         </div>
 
-        {/* Day cells */}
         <div className="grid grid-cols-7">
           {days.map((day, i) => {
             if (!day) return <div key={`empty-${i}`} className="min-h-24 border-b border-r" style={{ borderColor: C.slate100 }} />;
@@ -353,45 +531,174 @@ export function CalendarView({ onAppointmentClick, onBookNew }: CalendarViewProp
             const overflow = dayAppts.length - maxVisible;
 
             return (
-              <button
+              <div
                 key={day.toISOString()}
-                onClick={() => {
-                  setCurrentDate(day);
-                  setViewMode("day");
-                }}
-                className="min-h-24 p-1.5 text-left border-b border-r transition-colors hover:bg-slate-50"
+                className="min-h-24 border-b border-r relative"
                 style={{ borderColor: C.slate100 }}
               >
-                <p
-                  className="text-xs font-medium mb-1"
-                  style={{
-                    color: isToday ? C.teal500 : C.slate600,
-                    fontWeight: isToday ? 700 : 500,
-                  }}
-                >
-                  {day.getDate()}
-                </p>
-                <div className="space-y-0.5">
-                  {dayAppts.slice(0, maxVisible).map((apt) => (
-                    <div
-                      key={apt.id}
-                      className="flex items-center gap-1 px-1 py-0.5 rounded text-white truncate"
-                      style={{ backgroundColor: apt.color, fontSize: "10px" }}
+                <DropDay date={day} onDrop={handleDrop}>
+                  <button
+                    onClick={() => {
+                      setCurrentDate(day);
+                      setViewMode("day");
+                    }}
+                    className="w-full h-full p-1.5 text-left transition-colors hover:bg-slate-50"
+                  >
+                    <p
+                      className="text-xs mb-1"
+                      style={{
+                        color: isToday ? C.teal500 : C.slate600,
+                        fontWeight: isToday ? 700 : 500,
+                      }}
                     >
-                      {apt.isTeleHealth && <Video className="w-2.5 h-2.5 shrink-0" />}
-                      <span className="truncate">{apt.patientName.split(" ")[0]}</span>
-                    </div>
-                  ))}
-                  {overflow > 0 && (
-                    <p className="text-xs font-medium px-1" style={{ color: C.slate400, fontSize: "10px" }}>
-                      +{overflow} more
+                      {day.getDate()}
                     </p>
-                  )}
-                </div>
-              </button>
+                    <div className="space-y-0.5">
+                      {dayAppts.slice(0, maxVisible).map((apt) => {
+                        const status = getStatusStyle(apt.status);
+                        return (
+                          <div
+                            key={apt.id}
+                            className="flex items-center gap-1 px-1 py-0.5 rounded truncate"
+                            style={{
+                              backgroundColor: status.bg,
+                              color: status.text,
+                              borderLeft: `2px solid ${apt.color}`,
+                              fontSize: "10px",
+                            }}
+                          >
+                            {apt.isTeleHealth ? (
+                              <Video className="w-2.5 h-2.5 shrink-0" />
+                            ) : (
+                              <Building2 className="w-2.5 h-2.5 shrink-0" />
+                            )}
+                            <span className="truncate">{apt.patientName.split(" ")[0]}</span>
+                          </div>
+                        );
+                      })}
+                      {overflow > 0 && (
+                        <p className="text-xs font-medium px-1" style={{ color: C.slate400, fontSize: "10px" }}>
+                          +{overflow} more
+                        </p>
+                      )}
+                    </div>
+                  </button>
+                </DropDay>
+              </div>
             );
           })}
         </div>
+      </div>
+    );
+  }
+
+  // ─── List View ─────────────────────────────────────────────────────────────
+  // Paginated week-at-a-time list of appointments — useful when providers want
+  // to scan everything coming up without the visual grid.
+
+  function renderListView() {
+    const weekDays = getWeekDays(currentDate);
+    const weekAppts = appointments
+      .filter((a) => weekDays.some((d) => isSameDay(d, a.date)))
+      .sort((a, b) => {
+        const dayDiff = a.date.getTime() - b.date.getTime();
+        if (dayDiff !== 0) return dayDiff;
+        return a.startHour * 60 + a.startMinute - (b.startHour * 60 + b.startMinute);
+      });
+
+    if (weekAppts.length === 0) {
+      return (
+        <div className="glass rounded-xl p-12 text-center">
+          <CalendarDays className="w-10 h-10 mx-auto mb-3" style={{ color: C.slate300 }} />
+          <p className="text-sm" style={{ color: C.slate500 }}>No appointments this week.</p>
+        </div>
+      );
+    }
+
+    // Group by date
+    const grouped: Record<string, CalendarAppointment[]> = {};
+    for (const apt of weekAppts) {
+      const key = apt.date.toDateString();
+      if (!grouped[key]) grouped[key] = [];
+      grouped[key].push(apt);
+    }
+
+    return (
+      <div className="glass rounded-xl divide-y" style={{ borderColor: C.slate100 }}>
+        {Object.entries(grouped).map(([dateKey, appts]) => {
+          const date = new Date(dateKey);
+          const isToday = isSameDay(date, now);
+          return (
+            <div key={dateKey} className="p-4">
+              <div className="flex items-center gap-2 mb-3">
+                <p
+                  className="text-sm font-semibold"
+                  style={{ color: isToday ? C.teal500 : C.navy800 }}
+                >
+                  {date.toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" })}
+                </p>
+                {isToday && (
+                  <span
+                    className="px-2 py-0.5 rounded text-xs font-semibold"
+                    style={{ backgroundColor: C.teal50, color: C.teal600 }}
+                  >
+                    Today
+                  </span>
+                )}
+              </div>
+              <div className="space-y-2">
+                {appts.map((apt) => {
+                  const status = getStatusStyle(apt.status);
+                  return (
+                    <button
+                      key={apt.id}
+                      onClick={() => onAppointmentClick?.(apt.id)}
+                      className="w-full flex items-center gap-3 p-3 rounded-lg text-left transition-colors hover:bg-slate-50"
+                      style={{ border: `1px solid ${C.slate200}` }}
+                    >
+                      <div
+                        className="w-1 self-stretch rounded-full"
+                        style={{ backgroundColor: apt.color }}
+                      />
+                      <div className="w-20 shrink-0">
+                        <p className="text-sm font-semibold" style={{ color: C.navy800 }}>
+                          {formatTime(apt.startHour, apt.startMinute)}
+                        </p>
+                        <p className="text-xs" style={{ color: C.slate400 }}>
+                          {apt.durationMinutes} min
+                        </p>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold truncate" style={{ color: C.navy800 }}>
+                          {apt.patientName}
+                        </p>
+                        <p className="text-xs truncate" style={{ color: C.slate500 }}>
+                          {apt.typeName} · {apt.providerName}
+                        </p>
+                      </div>
+                      <span
+                        className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium shrink-0"
+                        style={{
+                          backgroundColor: apt.isTeleHealth ? "#ede9fe" : C.slate100,
+                          color: apt.isTeleHealth ? "#7c3aed" : C.slate600,
+                        }}
+                      >
+                        {apt.isTeleHealth ? <Video className="w-3 h-3" /> : <Building2 className="w-3 h-3" />}
+                        {apt.isTeleHealth ? "Telehealth" : "On-Site"}
+                      </span>
+                      <span
+                        className="px-2 py-1 rounded text-xs font-semibold shrink-0"
+                        style={{ backgroundColor: status.bg, color: status.text }}
+                      >
+                        {status.label}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
       </div>
     );
   }
@@ -432,16 +739,17 @@ export function CalendarView({ onAppointmentClick, onBookNew }: CalendarViewProp
         <div className="flex items-center gap-2">
           {/* View Mode Tabs */}
           <div className="flex rounded-lg overflow-hidden" style={{ border: `1px solid ${C.slate200}` }}>
-            {(["day", "week", "month"] as ViewMode[]).map((mode) => (
+            {(["day", "week", "month", "list"] as ViewMode[]).map((mode) => (
               <button
                 key={mode}
                 onClick={() => setViewMode(mode)}
-                className="px-3 py-1.5 text-xs font-medium capitalize transition-colors"
+                className="px-3 py-1.5 text-xs font-medium capitalize transition-colors flex items-center gap-1"
                 style={{
                   backgroundColor: viewMode === mode ? C.teal500 : C.white,
                   color: viewMode === mode ? C.white : C.slate500,
                 }}
               >
+                {mode === "list" && <List className="w-3 h-3" />}
                 {mode}
               </button>
             ))}
@@ -463,20 +771,49 @@ export function CalendarView({ onAppointmentClick, onBookNew }: CalendarViewProp
       {viewMode === "day" && renderDayView()}
       {viewMode === "week" && renderWeekView()}
       {viewMode === "month" && renderMonthView()}
+      {viewMode === "list" && renderListView()}
 
-      {/* Legend */}
-      <div className="flex flex-wrap items-center gap-4 text-xs" style={{ color: C.slate400 }}>
-        <span className="flex items-center gap-1.5">
-          <Video className="w-3 h-3" /> Telehealth
-        </span>
-        <span className="flex items-center gap-1.5">
-          <Clock className="w-3 h-3" /> Duration shown by block height
-        </span>
-        <span className="flex items-center gap-1.5">
-          <div className="w-3 h-0.5 rounded" style={{ backgroundColor: C.red500 }} />
-          Current time
-        </span>
+      {/* Status legend */}
+      <div className="glass rounded-xl p-3">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs">
+          <span className="font-semibold" style={{ color: C.slate600 }}>Status:</span>
+          {Object.entries(STATUS_COLORS).map(([key, s]) => (
+            <span key={key} className="flex items-center gap-1.5" style={{ color: C.slate500 }}>
+              <span
+                className="inline-block w-3 h-3 rounded"
+                style={{ backgroundColor: s.bg, borderLeft: `2px solid ${s.border}` }}
+              />
+              {s.label}
+            </span>
+          ))}
+        </div>
+        <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs" style={{ color: C.slate400 }}>
+          <span className="flex items-center gap-1.5">
+            <Video className="w-3 h-3" /> Telehealth
+          </span>
+          <span className="flex items-center gap-1.5">
+            <Building2 className="w-3 h-3" /> On-Site
+          </span>
+          <span className="flex items-center gap-1.5">
+            <Clock className="w-3 h-3" /> Block height = duration
+          </span>
+          <span className="flex items-center gap-1.5">
+            <GripVertical className="w-3 h-3" /> Drag to reschedule
+          </span>
+          <span className="flex items-center gap-1.5">
+            <div className="w-3 h-0.5 rounded" style={{ backgroundColor: C.red500 }} />
+            Current time
+          </span>
+        </div>
       </div>
     </div>
+  );
+}
+
+export function CalendarView(props: CalendarViewProps) {
+  return (
+    <DndProvider backend={HTML5Backend}>
+      <CalendarViewInner {...props} />
+    </DndProvider>
   );
 }

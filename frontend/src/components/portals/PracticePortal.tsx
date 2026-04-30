@@ -12,6 +12,7 @@ import { CommandPalette, useCommandPaletteShortcut } from "../shared/CommandPale
 import { AddAllergyDialog, type AllergyEntry } from "../clinical/AddAllergyDialog";
 import { AddMeasureDialog } from "../clinical/AddMeasureDialog";
 import { AIDocumentationAssistant } from "../clinical/AIDocumentationAssistant";
+import { CareTimeline, generateDemoTimelineEvents } from "../clinical/CareTimeline";
 import { PracticeSettings } from "../settings/PracticeSettings";
 import { CalendarView } from "../shared/CalendarView";
 import { AppointmentBookingWidget } from "../widgets/AppointmentBookingWidget";
@@ -127,6 +128,7 @@ type TabId =
   | "inventory"
   | "communications"
   | "activity-log"
+  | "recent-activity"
   | "a-la-carte";
 
 /** Practice-portal user roles that affect what's visible in the sidebar. */
@@ -180,6 +182,7 @@ const NAV_SECTIONS: NavSection[] = [
       { id: "lab-orders", label: "Lab Orders", icon: FlaskConical, roles: ["practice_admin", "provider", "superadmin"] },
       { id: "referrals", label: "Referrals", icon: GitBranch, roles: ["practice_admin", "provider", "superadmin"] },
       { id: "care-coordination", label: "Care Coordination", icon: Crosshair, roles: ["practice_admin", "provider", "superadmin"] },
+      { id: "recent-activity", label: "Recent Activity", icon: Clock, roles: ["practice_admin", "provider", "superadmin"] },
     ],
   },
   {
@@ -2135,6 +2138,36 @@ export function PracticePortal() {
     { name: "RPM", enrolled: 30, mrr: 1700, utilization: 72, color: "#7c3aed", bgColor: "#f3e8ff", icon: Activity },
     { name: "Employer Wellness", enrolled: 500, mrr: 10000, utilization: 42, color: "#d97706", bgColor: "#fffbeb", icon: UsersRound },
   ];
+
+  // ─── Recent Activity (Care Timeline) ────────────────────────────────────
+  // Practice-wide chronological feed. Demo data only for now — real
+  // version pulls from encounters / prescriptions / screenings / labs /
+  // vitals / referrals services.
+  function renderRecentActivity() {
+    const events = isDemoMode ? generateDemoTimelineEvents() : [];
+    return (
+      <div className="space-y-4">
+        <div>
+          <h3 className="text-lg font-semibold text-slate-800">Recent Activity</h3>
+          <p className="text-sm text-slate-400 mt-0.5">
+            Practice-wide clinical feed. Filter by event type. Click any row to open the patient.
+          </p>
+        </div>
+        <CareTimeline
+          events={events}
+          onEventClick={(ev) => {
+            const match = patients.find((p) => p.name === ev.patientName);
+            if (match) {
+              setSelectedPatient(match);
+              setPatientDetailTab("demographics");
+            } else {
+              setToast({ message: `${ev.patientName} not found in roster.`, type: "error" });
+            }
+          }}
+        />
+      </div>
+    );
+  }
 
   function renderDashboard() {
     const totalMRR = apiDashStats?.totalMrr ?? (isDemoMode ? 39328 : 0);
@@ -7541,6 +7574,8 @@ export function PracticePortal() {
         return <CommunicationsTab />;
       case "activity-log":
         return <ActivityLoggerTab />;
+      case "recent-activity":
+        return renderRecentActivity();
       case "a-la-carte":
         return <ALaCarteTab />;
       case "practice-settings":
