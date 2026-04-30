@@ -2,10 +2,12 @@
 
 namespace Database\Seeders;
 
+use App\Models\Appointment;
 use App\Models\Employer;
 use App\Models\EmployerContract;
 use App\Models\Encounter;
 use App\Models\Invoice;
+use App\Models\Message;
 use App\Models\MembershipCredit;
 use App\Models\MembershipPlan;
 use App\Models\MembershipScheduledChange;
@@ -16,6 +18,7 @@ use App\Models\PatientMembership;
 use App\Models\Payment;
 use App\Models\Practice;
 use App\Models\Prescription;
+use App\Models\Provider;
 use App\Models\ScreeningResponse;
 use App\Models\ScreeningTemplate;
 use App\Models\User;
@@ -47,6 +50,11 @@ class DemoSeeder extends Seeder
     private User $provider;
     private User $staff;
     private User $superadmin;
+    /** Provider model rows (FK target for encounters/prescriptions/appointments) */
+    private Provider $providerMichel;
+    private Provider $providerChen;
+    /** Active patient/membership pairs collected during seedPatients for downstream enrichment */
+    private array $activePairs = [];
 
     public function run(): void
     {
@@ -62,9 +70,13 @@ class DemoSeeder extends Seeder
         $this->cleanupPriorRun();
         $this->seedPractice();
         $this->seedTeam();
+        $this->seedProviders();
         $this->seedPlans();
         $this->seedEmployer();
         $this->seedPatients();
+        $this->seedAppointments();
+        $this->seedMessaging();
+        $this->seedLifecycleEvents();
 
         $this->command->info('✅ Demo seed complete.');
         $this->command->info('   Practice tenant_code: ' . $this->tenantCode);
@@ -173,6 +185,59 @@ class DemoSeeder extends Seeder
                 'status' => 'active',
                 'onboarding_completed' => true,
             ]);
+    }
+
+    // ─── Providers ───────────────────────────────────────────────────────────
+    // Encounter / Prescription / Appointment all FK provider_id → providers.id
+    // (NOT users.id), so we need real Provider rows for the clinical team.
+
+    private function seedProviders(): void
+    {
+        $this->providerMichel = Provider::create([
+            'tenant_id' => $this->practice->id,
+            'user_id' => $this->admin->id,
+            'first_name' => 'Nageley',
+            'last_name' => 'Michel',
+            'email' => $this->admin->email,
+            'phone' => '(555) 100-0101',
+            'title' => 'DNP, PMHNP-BC',
+            'credentials' => 'DNP, PMHNP-BC',
+            'specialty' => 'Psychiatry',
+            'specialties' => ['Psychiatry', 'Telepsychiatry'],
+            'languages' => ['English', 'French', 'Haitian Creole'],
+            'npi' => '1100200300',
+            'license_number' => 'NC-PMH-22310',
+            'license_state' => 'NC',
+            'licensed_states' => ['NC', 'SC', 'FL'],
+            'panel_capacity' => 250,
+            'panel_status' => 'open',
+            'status' => 'active',
+            'accepts_new_patients' => true,
+            'telehealth_enabled' => true,
+        ]);
+
+        $this->providerChen = Provider::create([
+            'tenant_id' => $this->practice->id,
+            'user_id' => $this->provider->id,
+            'first_name' => 'Sarah',
+            'last_name' => 'Chen',
+            'email' => $this->provider->email,
+            'phone' => '(555) 100-0102',
+            'title' => 'MD',
+            'credentials' => 'MD',
+            'specialty' => 'Psychiatry',
+            'specialties' => ['Psychiatry', 'Adult ADHD'],
+            'languages' => ['English', 'Mandarin'],
+            'npi' => '1100200400',
+            'license_number' => 'NC-MD-44820',
+            'license_state' => 'NC',
+            'licensed_states' => ['NC', 'VA'],
+            'panel_capacity' => 200,
+            'panel_status' => 'open',
+            'status' => 'active',
+            'accepts_new_patients' => true,
+            'telehealth_enabled' => true,
+        ]);
     }
 
     // ─── Plans ───────────────────────────────────────────────────────────────
@@ -431,8 +496,10 @@ class DemoSeeder extends Seeder
             'rollover_visits' => 0,
         ]);
 
-        // Clinical history for active members
+        // Track active patient/membership for downstream enrichment
+        // (appointments, messaging threads, lifecycle events).
         if (in_array($status, ['active', 'past_due', 'paused'])) {
+            $this->activePairs[] = ['patient' => $patient, 'membership' => $membership, 'started_at' => $startedAt];
             $this->seedClinical($patient, $monthsAgo);
         }
 
@@ -444,7 +511,13 @@ class DemoSeeder extends Seeder
 
     private function seedClinical(Patient $patient, int $monthsAgo): void
     {
-        $providerId = $this->provider->id;
+        // Provider rows (not Users) are the FK target for encounters /
+        // prescriptions. Alternate primary clinician per patient so the
+        // panel feels populated for both providers.
+        $primary = $patient->id[0] >= 'a' && $patient->id[0] <= 'h'
+            ? $this->providerChen
+            : $this->providerMichel;
+        $providerId = $primary->id;
         $months = max(1, $monthsAgo);
 
         // Encounters — 1 per month roughly. Wrap each create in a savepoint
@@ -708,6 +781,119 @@ class DemoSeeder extends Seeder
                 'expires_at' => now()->addDays(90)->toDateString(),
                 'created_by_user_id' => $this->admin->id,
             ]);
+        }
+    }
+
+    // ─── Appointments ────────────────────────────────────────────────────────
+    // Two past completed + one upcoming scheduled per active patient,
+    // alternating providers so both panels are populated.
+
+    private function seedAppointments(): void
+    {
+        foreach ($this->activePairs as $idx => $pair) {
+            $patient = $pair['patient'];
+            $primary = $idx % 2 === 0 ? $this->providerMichel : $this->providerChen;
+
+            try {
+                Appointment::create([
+                    'tenant_id' => $this->practice->id,
+                    'patient_id' => $patient->id,
+                    'provider_id' => $primary->id,
+                    'scheduled_at' => now()->subDays(45)->setTime(10, 0),
+                    'duration_minutes' => 30,
+                    'status' => 'completed',
+                    'is_telehealth' => true,
+                    'completed_at' => now()->subDays(45)->setTime(10, 30),
+                ]);
+                Appointment::create([
+                    'tenant_id' => $this->practice->id,
+                    'patient_id' => $patient->id,
+                    'provider_id' => $primary->id,
+                    'scheduled_at' => now()->subDays(15)->setTime(14, 0),
+                    'duration_minutes' => 30,
+                    'status' => 'completed',
+                    'is_telehealth' => true,
+                    'completed_at' => now()->subDays(15)->setTime(14, 30),
+                ]);
+                Appointment::create([
+                    'tenant_id' => $this->practice->id,
+                    'patient_id' => $patient->id,
+                    'provider_id' => $primary->id,
+                    'scheduled_at' => now()->addDays(7 + ($idx % 14))->setTime(11, 0),
+                    'duration_minutes' => 30,
+                    'status' => 'scheduled',
+                    'is_telehealth' => true,
+                ]);
+            } catch (\Throwable $e) {
+                $this->command->warn('  ↳ appointment skip: ' . $e->getMessage());
+            }
+        }
+    }
+
+    // ─── Messaging ───────────────────────────────────────────────────────────
+    // One short provider↔patient thread per active patient, spread across
+    // the two providers. Bodies are encrypted casts on the model.
+
+    private function seedMessaging(): void
+    {
+        foreach ($this->activePairs as $idx => $pair) {
+            $patient = $pair['patient'];
+            $patientUser = $patient->user;
+            if (!$patientUser) continue;
+            $providerUser = $idx % 2 === 0 ? $this->admin : $this->provider;
+
+            $threadId = (string) Str::uuid();
+            try {
+                Message::create([
+                    'tenant_id' => $this->practice->id,
+                    'thread_id' => $threadId,
+                    'sender_id' => $patientUser->id,
+                    'recipient_id' => $providerUser->id,
+                    'body' => 'Hi — quick question about my prescription refill, can we increase to 90 days?',
+                    'channel' => 'in_app',
+                    'delivery_status' => 'delivered',
+                    'created_at' => now()->subDays(3),
+                ]);
+                Message::create([
+                    'tenant_id' => $this->practice->id,
+                    'thread_id' => $threadId,
+                    'sender_id' => $providerUser->id,
+                    'recipient_id' => $patientUser->id,
+                    'body' => 'Yes — I will update the Rx today. You will see it in your pharmacy by tomorrow afternoon.',
+                    'channel' => 'in_app',
+                    'delivery_status' => 'delivered',
+                    'read_at' => now()->subDays(2),
+                    'created_at' => now()->subDays(2),
+                ]);
+            } catch (\Throwable $e) {
+                $this->command->warn('  ↳ message skip: ' . $e->getMessage());
+            }
+        }
+    }
+
+    // ─── Lifecycle events ────────────────────────────────────────────────────
+    // Uses the nudge-idempotency table as an activity log: one
+    // first_visit_nudge per active membership marks the enrollment.
+    // The (membership_id, event_type) unique key prevents duplicates.
+
+    private function seedLifecycleEvents(): void
+    {
+        foreach ($this->activePairs as $pair) {
+            $membership = $pair['membership'];
+            try {
+                DB::table('membership_lifecycle_events')->insert([
+                    'id' => (string) Str::uuid(),
+                    'tenant_id' => $this->practice->id,
+                    'membership_id' => $membership->id,
+                    'event_type' => 'first_visit_nudge',
+                    'outcome' => 'sent',
+                    'metadata' => json_encode(['source' => 'demo_seeder']),
+                    'created_at' => $pair['started_at'],
+                    'updated_at' => $pair['started_at'],
+                ]);
+            } catch (\Throwable $e) {
+                $this->command->warn('  ↳ lifecycle event skip: ' . $e->getMessage());
+            }
         }
     }
 }
