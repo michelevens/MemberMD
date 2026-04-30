@@ -11,17 +11,27 @@ class AnalyticsService
      */
     public function calculateMRR(string $tenantId): float
     {
+        // Three correctness fixes:
+        //   1. Use locked_*_price snapshots (the real per-member price)
+        //      with COALESCE back to plan price for legacy rows.
+        //   2. Exclude memberships still inside a trial — no money has
+        //      been collected, including them inflates MRR.
+        //   3. Exclude dependent rows (parent_membership_id IS NOT NULL)
+        //      because the primary's price already covers them.
         $result = DB::selectOne("
             SELECT COALESCE(SUM(
                 CASE
-                    WHEN pm.billing_frequency = 'annual' THEN mp.annual_price / 12
-                    ELSE mp.monthly_price
+                    WHEN pm.billing_frequency = 'annual'
+                        THEN COALESCE(pm.locked_annual_price, mp.annual_price) / 12
+                    ELSE COALESCE(pm.locked_monthly_price, mp.monthly_price)
                 END
             ), 0) AS mrr
             FROM patient_memberships pm
             JOIN membership_plans mp ON mp.id = pm.plan_id
             WHERE pm.tenant_id = ?
               AND pm.status = 'active'
+              AND pm.parent_membership_id IS NULL
+              AND (pm.trial_ends_at IS NULL OR pm.trial_ends_at <= NOW())
         ", [$tenantId]);
 
         return round((float) $result->mrr, 2);
@@ -29,27 +39,86 @@ class AnalyticsService
 
     /**
      * Calculate churn rate: cancellations / total members in a period.
+     * Aggregate (voluntary + involuntary). Use churnRateBreakdown() for
+     * the split, which is the metric you actually want for product
+     * decisions.
      */
     public function calculateChurnRate(string $tenantId, ?string $periodStart = null, ?string $periodEnd = null): float
+    {
+        $b = $this->churnRateBreakdown($tenantId, $periodStart, $periodEnd);
+        return $b['rate'];
+    }
+
+    /**
+     * Voluntary vs involuntary churn split.
+     *
+     * Voluntary  = patient chose to leave (moved, cost, switched provider, ...)
+     * Involuntary = card failed, dunning cancelled, fraud reversal
+     *
+     * Mixing them was hiding a critical signal: a 5% churn that's all
+     * involuntary means a payment-method problem (card-update emails fix
+     * it), while 5% voluntary means a product/price problem (different fix).
+     */
+    public function churnRateBreakdown(string $tenantId, ?string $periodStart = null, ?string $periodEnd = null): array
     {
         $periodStart = $periodStart ?? now()->subDays(30)->toDateTimeString();
         $periodEnd = $periodEnd ?? now()->toDateTimeString();
 
+        $involuntaryReasons = [
+            'dunning_non_payment',
+            'stripe_subscription_deleted',
+            'card_expired',
+            'fraud',
+            'roster_removed',
+            'eligibility_lost',
+        ];
+
+        // SQL ANY() for the array predicate. Reasons are stored as freeform
+        // text starting with the canonical reason; LIKE-prefix match keeps
+        // it tolerant of the appended notes/retention markers.
+        $likes = collect($involuntaryReasons)->map(fn ($r) => "%{$r}%")->all();
+        $placeholders = implode(',', array_fill(0, count($likes), '?'));
+
         $result = DB::selectOne("
             SELECT
-                COUNT(*) FILTER (WHERE pm.status = 'cancelled' AND pm.cancelled_at BETWEEN ? AND ?) AS cancelled,
+                COUNT(*) FILTER (
+                    WHERE pm.status = 'cancelled'
+                      AND pm.cancelled_at BETWEEN ? AND ?
+                      AND COALESCE(pm.cancel_reason, '') ILIKE ANY (ARRAY[{$placeholders}])
+                ) AS involuntary,
+                COUNT(*) FILTER (
+                    WHERE pm.status = 'cancelled'
+                      AND pm.cancelled_at BETWEEN ? AND ?
+                      AND NOT (COALESCE(pm.cancel_reason, '') ILIKE ANY (ARRAY[{$placeholders}]))
+                ) AS voluntary,
                 COUNT(*) AS total
             FROM patient_memberships pm
             WHERE pm.tenant_id = ?
               AND pm.started_at <= ?
-        ", [$periodStart, $periodEnd, $tenantId, $periodEnd]);
+              AND pm.parent_membership_id IS NULL
+        ", [
+            $periodStart, $periodEnd, ...$likes,
+            $periodStart, $periodEnd, ...$likes,
+            $tenantId, $periodEnd,
+        ]);
 
         $total = (int) $result->total;
         if ($total === 0) {
-            return 0.0;
+            return ['rate' => 0.0, 'voluntary_rate' => 0.0, 'involuntary_rate' => 0.0,
+                    'voluntary_count' => 0, 'involuntary_count' => 0, 'total' => 0];
         }
 
-        return round(((int) $result->cancelled / $total) * 100, 2);
+        $vol = (int) $result->voluntary;
+        $invol = (int) $result->involuntary;
+
+        return [
+            'rate' => round((($vol + $invol) / $total) * 100, 2),
+            'voluntary_rate' => round(($vol / $total) * 100, 2),
+            'involuntary_rate' => round(($invol / $total) * 100, 2),
+            'voluntary_count' => $vol,
+            'involuntary_count' => $invol,
+            'total' => $total,
+        ];
     }
 
     /**

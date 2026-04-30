@@ -84,6 +84,18 @@ class Kernel extends ConsoleKernel
             ->onFailure(function () {
                 \Log::error('Usage alerts failed');
             });
+
+        // Apply future-dated membership changes (scheduled cancels, plan
+        // switches at renewal, etc.). Runs early so the day's effective
+        // changes land before any other reporting reads state.
+        $schedule->command('memberships:process-scheduled-changes')
+            ->daily()
+            ->at('00:30')
+            ->name('scheduled_changes')
+            ->withoutOverlapping()
+            ->onFailure(function () {
+                \Log::error('Scheduled change executor failed');
+            });
     }
 
     /**

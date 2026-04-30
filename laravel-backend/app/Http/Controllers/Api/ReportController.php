@@ -54,7 +54,9 @@ class ReportController extends Controller
             WHERE pm.tenant_id = ?
         ", [$thirtyDaysAgo, $thirtyDaysAgo, $tenantId]);
 
-        $churnRate = $this->analytics->calculateChurnRate($tenantId);
+        // churn_rate retained for back-compat; churn_breakdown is the
+        // metric callers should pivot to (voluntary vs involuntary).
+        $churnBreakdown = $this->analytics->churnRateBreakdown($tenantId);
         $membersByPlan = $this->analytics->membersByPlan($tenantId);
         $growthTrend = $this->analytics->membershipGrowth($tenantId);
 
@@ -63,7 +65,8 @@ class ReportController extends Controller
                 'total_members' => (int) $stats->total_members,
                 'new_enrollments' => (int) $stats->new_enrollments,
                 'cancellations' => (int) $stats->cancellations,
-                'churn_rate' => $churnRate,
+                'churn_rate' => $churnBreakdown['rate'],
+                'churn_breakdown' => $churnBreakdown,
                 'members_by_plan' => $membersByPlan,
                 'growth_trend' => $growthTrend,
             ],
@@ -120,15 +123,32 @@ class ReportController extends Controller
         $tenantId = $user->tenant_id;
         $horizon = max(1, min(24, (int) $request->input('horizon', 12)));
 
-        // Pull enrollment month + cancel month for every membership ever.
+        // Cohort by the FIRST membership per patient — reactivations join
+        // their original cohort instead of starting a new one. Without
+        // this, a customer who churns and re-enrolls counts as a new
+        // logo and inflates "growth" while inflating churn at the same
+        // time. We use the patient's overall lifecycle: earliest
+        // started_at, latest cancelled_at (or null if currently active).
         $rows = DB::select("
+            WITH per_patient AS (
+                SELECT
+                    patient_id,
+                    MIN(started_at) AS first_started_at,
+                    MAX(CASE WHEN status = 'cancelled' THEN cancelled_at END) AS final_cancelled_at,
+                    BOOL_OR(status = 'active') AS has_active_now
+                FROM patient_memberships
+                WHERE tenant_id = ?
+                  AND started_at IS NOT NULL
+                  AND parent_membership_id IS NULL
+                GROUP BY patient_id
+            )
             SELECT
-                date_trunc('month', started_at)::date AS cohort_month,
-                date_trunc('month', cancelled_at)::date AS churn_month
-            FROM patient_memberships
-            WHERE tenant_id = ?
-              AND started_at IS NOT NULL
-              AND parent_membership_id IS NULL
+                date_trunc('month', first_started_at)::date AS cohort_month,
+                CASE
+                    WHEN has_active_now THEN NULL
+                    ELSE date_trunc('month', final_cancelled_at)::date
+                END AS churn_month
+            FROM per_patient
         ", [$tenantId]);
 
         // Bucket by cohort.
