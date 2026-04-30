@@ -1,14 +1,16 @@
 // ===== Patient Portal =====
-// Member-facing portal — what patients see when they log into their DPC membership
-// Premium health app feel (One Medical / Forward inspired)
-// Mobile-first: top header + bottom nav (no sidebar)
+// Member-facing portal — what patients see when they log into their DPC membership.
+// Now uses the shared PortalShell so it visually matches the EnnHealth
+// product family: vertical sidebar at >=lg, mobile slide-out drawer below
+// (replacing the older top-bar + bottom-nav layout). Same rendering
+// functions and data hooks as before — just the chrome is different.
 
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../contexts/AuthContext";
-import { HeaderToolbar } from "../shared/HeaderToolbar";
 import { AppointmentBookingWidget } from "../widgets/AppointmentBookingWidget";
 import { ProfilePage } from "../profile/ProfilePage";
+import { PortalShell, type NavItem } from "../shared/PortalShell";
 import {
   familyService,
   appointmentService,
@@ -767,132 +769,23 @@ export function PatientPortal() {
   const firstName = user?.firstName || patient.firstName || patient.firstName;
   const lastName = user?.lastName || patient.lastName || patient.lastName;
 
-  const desktopNavItems: { id: TabId; label: string }[] = [
-    { id: "home", label: "Home" },
-    { id: "appointments", label: "Appointments" },
-    { id: "messages", label: "Messages" },
-    { id: "health", label: "Health Records" },
-    { id: "account", label: "My Account" },
-  ];
-
-  const mobileNavItems: { id: TabId; label: string; icon: React.ElementType }[] = [
-    { id: "home", label: "Home", icon: Home },
-    { id: "appointments", label: "Appts", icon: Calendar },
-    { id: "messages", label: "Messages", icon: MessageSquare },
-    { id: "health", label: "Health", icon: Heart },
-    { id: "account", label: "Account", icon: User },
+  // Sidebar nav for the patient portal — single flat list since the
+  // patient surface only has a handful of areas. Layout matches the
+  // pattern EnnHealth ClientPortalV3 uses (Dashboard, Appointments,
+  // Records, Messages, etc.). Badges show unread message + upcoming
+  // appointment counts so they're visible without entering the tab.
+  const sidebarNav: NavItem[] = [
+    { id: "home", label: "Dashboard", icon: Home },
+    { id: "appointments", label: "Appointments", icon: Calendar },
+    { id: "messages", label: "Messages", icon: MessageSquare, badge: messageThreads.filter((t) => t.unread).length || undefined },
+    { id: "health", label: "Health Records", icon: Heart },
+    { id: "account", label: "Billing & Account", icon: CreditCard },
+    { id: "profile", label: "Profile", icon: User },
   ];
 
   const unreadCount = useMemo(() => messageThreads.filter((t) => t.unread).length, [messageThreads]);
 
-  // ─── Header ──────────────────────────────────────────────────────────────
-
-  const renderHeader = () => (
-    <header
-      className="sticky top-0 z-50 border-b"
-      style={{
-        backgroundColor: "rgba(255,255,255,0.85)",
-        backdropFilter: "blur(12px)",
-        WebkitBackdropFilter: "blur(12px)",
-        borderColor: COLORS.slate200,
-      }}
-    >
-      <div className="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between">
-        {/* Logo */}
-        <div className="flex items-center gap-2">
-          <div
-            className="w-8 h-8 rounded-lg flex items-center justify-center"
-            style={{ background: `linear-gradient(135deg, ${COLORS.navy800}, ${COLORS.teal500})` }}
-          >
-            <Shield className="w-4 h-4 text-white" />
-          </div>
-          <span className="text-lg font-bold" style={{ color: COLORS.navy800 }}>
-            MemberMD
-          </span>
-        </div>
-
-        {/* Desktop Nav */}
-        <nav className="hidden lg:flex items-center gap-1">
-          {desktopNavItems.map((item) => (
-            <button
-              key={item.id}
-              onClick={() => setActiveTab(item.id)}
-              className="px-3 py-2 text-sm font-medium rounded-lg transition-colors relative"
-              style={{
-                color: activeTab === item.id ? COLORS.teal600 : COLORS.slate500,
-              }}
-            >
-              {item.label}
-              {activeTab === item.id && (
-                <div
-                  className="absolute bottom-0 left-3 right-3 h-0.5 rounded-full"
-                  style={{ backgroundColor: COLORS.teal500 }}
-                />
-              )}
-            </button>
-          ))}
-        </nav>
-
-        {/* Right actions */}
-        <div className="flex items-center gap-2">
-          <HeaderToolbar variant="patient" onNavigate={(tab) => setActiveTab(tab as TabId)} />
-        </div>
-      </div>
-    </header>
-  );
-
-  // ─── Bottom Mobile Nav ─────────────────────────────────────────────────
-
-  const renderMobileNav = () => (
-    <nav
-      className="fixed bottom-0 left-0 right-0 z-50 lg:hidden border-t"
-      style={{
-        backgroundColor: "rgba(255,255,255,0.9)",
-        backdropFilter: "blur(16px)",
-        WebkitBackdropFilter: "blur(16px)",
-        borderColor: COLORS.slate200,
-      }}
-    >
-      <div className="flex items-center justify-around h-16 max-w-lg mx-auto">
-        {mobileNavItems.map((item) => {
-          const Icon = item.icon;
-          const isActive = activeTab === item.id;
-          return (
-            <button
-              key={item.id}
-              onClick={() => setActiveTab(item.id)}
-              className="flex flex-col items-center gap-0.5 py-1 px-3 relative"
-            >
-              <div className="relative">
-                <Icon
-                  className="w-5 h-5 transition-colors"
-                  style={{ color: isActive ? COLORS.teal500 : COLORS.slate400 }}
-                />
-                {item.id === "messages" && unreadCount > 0 && (
-                  <span
-                    className="absolute -top-1 -right-1 w-3 h-3 rounded-full"
-                    style={{ backgroundColor: COLORS.red500 }}
-                  />
-                )}
-              </div>
-              <span
-                className="text-xs font-medium transition-colors"
-                style={{ color: isActive ? COLORS.teal500 : COLORS.slate400 }}
-              >
-                {item.label}
-              </span>
-              {isActive && (
-                <div
-                  className="absolute -top-0.5 left-1/2 -translate-x-1/2 w-8 h-0.5 rounded-full"
-                  style={{ backgroundColor: COLORS.teal500 }}
-                />
-              )}
-            </button>
-          );
-        })}
-      </div>
-    </nav>
-  );
+  // Header / sidebar / mobile drawer are all rendered by PortalShell now.
 
   // ─── Home Tab ──────────────────────────────────────────────────────────
 
@@ -1957,19 +1850,44 @@ export function PatientPortal() {
 
   // ─── Render ────────────────────────────────────────────────────────────
 
+  // Title shown in the header — mirrors the active tab so the user
+  // always knows where they are.
+  const headerTitleByTab: Record<TabId, string> = {
+    home: "Dashboard",
+    appointments: "Appointments",
+    messages: "Messages",
+    health: "Health Records",
+    account: "Billing & Account",
+    profile: "Profile",
+  };
+
+  const fullName = [user?.firstName, user?.lastName].filter(Boolean).join(" ")
+    || patient.firstName
+    || "Member";
+
   return (
-    <div className="min-h-screen" style={{ backgroundColor: COLORS.slate50 }}>
-      {renderHeader()}
-      <main className="max-w-2xl mx-auto px-4 py-6 pb-24 lg:pb-6">
+    <>
+      <PortalShell
+        portalTitle="Patient Portal"
+        portalIcon={Heart}
+        portalColor="teal"
+        userName={fullName}
+        userSubtitle={user?.email || patient.email || undefined}
+        nav={sidebarNav}
+        activeTab={activeTab}
+        onTabChange={(id) => setActiveTab(id as TabId)}
+        onLogout={logout}
+        notificationCount={unreadCount}
+        headerTitle={headerTitleByTab[activeTab] ?? "Dashboard"}
+      >
         {renderContent()}
-      </main>
-      {renderMobileNav()}
+      </PortalShell>
       {showBookingWidget && (
         <AppointmentBookingWidget
           onClose={() => setShowBookingWidget(false)}
           onBooked={() => setShowBookingWidget(false)}
         />
       )}
-    </div>
+    </>
   );
 }
