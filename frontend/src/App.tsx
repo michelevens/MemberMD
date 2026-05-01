@@ -9,6 +9,7 @@ import { ThemeProvider } from "./contexts/ThemeContext";
 import { LoginScreen } from "./components/auth/LoginScreen";
 import { ForgotPasswordScreen } from "./components/auth/ForgotPasswordScreen";
 import { ResetPasswordScreen } from "./components/auth/ResetPasswordScreen";
+import { InstallPrompt } from "./components/shared/InstallPrompt";
 
 // ─── Error Boundary ─────────────────────────────────────────────────────────────
 
@@ -235,6 +236,7 @@ export default function App() {
           <HashRouter>
             <AuthProvider>
               <AuthGate />
+              <InstallPrompt />
             </AuthProvider>
           </HashRouter>
         </QueryClientProvider>

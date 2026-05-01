@@ -264,6 +264,20 @@ export function PracticeRegistration() {
   const [selectedPrograms, setSelectedPrograms] = useState<string[]>([]);
   const [programsLoading, setProgramsLoading] = useState(false);
 
+  // Step 3 (companion): Starter plan templates preview by specialty
+  type StarterPlan = {
+    id: string;
+    name: string;
+    monthly_price: number | null;
+    annual_price: number | null;
+    visits_per_month: number | null;
+    telehealth_included: boolean;
+    messaging_included: boolean;
+    badge_text: string | null;
+  };
+  const [starterPlans, setStarterPlans] = useState<StarterPlan[]>([]);
+  const [starterPlansLoading, setStarterPlansLoading] = useState(false);
+
   // Step 4: Practice Model
   const [selectedModel, setSelectedModel] = useState("");
 
@@ -324,6 +338,32 @@ export function PracticeRegistration() {
       fetchProgramTemplates();
     }
   }, [step, programTemplates.length, fetchProgramTemplates]);
+
+  // Fetch specialty-specific starter plan blueprints — preview only,
+  // server-side provisioning forks them on registration.
+  const fetchStarterPlans = useCallback(async (specialtyCode: string) => {
+    if (!specialtyCode) return;
+    setStarterPlansLoading(true);
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/public/plan-templates?specialty=${encodeURIComponent(specialtyCode)}`,
+        { headers: { Accept: "application/json" } },
+      );
+      if (response.ok) {
+        const json = await response.json();
+        setStarterPlans(Array.isArray(json.data) ? json.data : []);
+      }
+    } catch {
+      // Silent — preview is non-blocking
+    }
+    setStarterPlansLoading(false);
+  }, []);
+
+  useEffect(() => {
+    if (step === 3 && selectedSpecialty) {
+      fetchStarterPlans(selectedSpecialty);
+    }
+  }, [step, selectedSpecialty, fetchStarterPlans]);
 
   // Filter programs by selected specialty
   const filteredPrograms = programTemplates.filter((p) => {
@@ -1019,6 +1059,56 @@ export function PracticeRegistration() {
                 {selectedPrograms.length > 0 && (
                   <div className="mt-4 px-4 py-2.5 rounded-xl bg-teal-50 border border-teal-100 text-sm text-teal-700">
                     {selectedPrograms.length} program{selectedPrograms.length !== 1 ? "s" : ""} selected
+                  </div>
+                )}
+
+                {/* ─── Starter membership plans preview ─────────────────── */}
+                {(starterPlansLoading || starterPlans.length > 0) && (
+                  <div className="mt-8">
+                    <div className="flex items-baseline justify-between mb-3">
+                      <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                        Starter membership plans
+                      </p>
+                      <span className="text-[11px] text-slate-400">
+                        Pre-configured for {SPECIALTIES.find(s => s.id === selectedSpecialty)?.name || "your specialty"} — fully editable after signup
+                      </span>
+                    </div>
+                    {starterPlansLoading ? (
+                      <div className="rounded-xl border border-slate-200 bg-white p-6 flex items-center justify-center text-sm text-slate-400">
+                        <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                        Loading starter plans…
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        {starterPlans.map(plan => (
+                          <div
+                            key={plan.id}
+                            className="rounded-xl border border-slate-200 bg-white p-4 relative"
+                          >
+                            {plan.badge_text && (
+                              <span
+                                className="absolute -top-2 right-3 px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wider"
+                                style={{ backgroundColor: "#635bff", color: "white" }}
+                              >
+                                {plan.badge_text}
+                              </span>
+                            )}
+                            <div className="text-sm font-semibold text-slate-900 mb-1">{plan.name}</div>
+                            <div className="text-xl font-semibold tracking-tight text-slate-900 tabular-nums mb-2">
+                              {plan.monthly_price !== null ? `$${plan.monthly_price.toFixed(0)}` : "—"}
+                              <span className="text-xs font-normal text-slate-500">/mo</span>
+                            </div>
+                            <ul className="text-xs text-slate-600 space-y-1">
+                              {plan.visits_per_month !== null && (
+                                <li>{plan.visits_per_month === -1 ? "Unlimited visits" : `${plan.visits_per_month} visit${plan.visits_per_month !== 1 ? "s" : ""}/mo`}</li>
+                              )}
+                              {plan.telehealth_included && <li>Telehealth included</li>}
+                              {plan.messaging_included && <li>Provider messaging</li>}
+                            </ul>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

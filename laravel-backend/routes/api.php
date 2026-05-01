@@ -38,6 +38,7 @@ use App\Http\Controllers\Api\OperatorController;
 use App\Http\Controllers\Api\OperatorAnalyticsController;
 use App\Http\Controllers\Api\OperatorMemberController;
 use App\Http\Controllers\Api\MasterPlanTemplateController;
+use App\Http\Controllers\Api\PublicPlanTemplateController;
 use App\Http\Controllers\Api\TenantDomainController;
 use App\Http\Controllers\Api\WidgetThemeController;
 use App\Http\Controllers\Api\WidgetAnalyticsController;
@@ -132,6 +133,14 @@ Route::prefix('kiosk')->middleware('throttle:30,1')->group(function () {
     Route::post('/check-in', [KioskController::class, 'checkIn']);
     Route::get('/{tenantCode}/patient/{patientId}/screenings', [KioskController::class, 'screenings']);
     Route::get('/{tenantCode}/patient/{patientId}/consents', [KioskController::class, 'consents']);
+});
+
+// ===== Public Plan Template Catalog (no auth) =====
+// Used by PracticeRegistration to preview specialty-specific starter
+// plan blueprints during signup.
+Route::prefix('public')->middleware('throttle:60,1')->group(function () {
+    Route::get('/specialties', [PublicPlanTemplateController::class, 'specialties']);
+    Route::get('/plan-templates', [PublicPlanTemplateController::class, 'templates']);
 });
 
 // ===== Public Widget Endpoints (no auth) =====
