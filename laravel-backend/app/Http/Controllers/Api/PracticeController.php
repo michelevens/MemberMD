@@ -6,8 +6,11 @@ use App\Http\Controllers\Controller;
 use App\Models\Practice;
 use App\Models\User;
 use App\Models\PatientMembership;
+use App\Services\PracticeBootstrapService;
+use App\Services\PracticeProvisioningService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 
 class PracticeController extends Controller
 {
@@ -159,5 +162,63 @@ class PracticeController extends Controller
         $practice->update(['branding' => $merged]);
 
         return response()->json(['data' => $practice->fresh()]);
+    }
+
+    /**
+     * Re-run bootstrap + provisioning for the current practice.
+     *
+     * Practices that signed up before specific seeders (e.g. EntitlementType)
+     * existed end up with an empty catalog and a broken Add Entitlement UI.
+     * Both services are idempotent (updateOrCreate / existence checks), so
+     * triggering this is safe even on healthy practices.
+     *
+     * Practice admins re-bootstrap their own practice; superadmin can target
+     * any practice via ?practice_id=...
+     */
+    public function rebootstrap(
+        Request $request,
+        PracticeBootstrapService $bootstrap,
+        PracticeProvisioningService $provisioning,
+    ): JsonResponse {
+        $user = $request->user();
+        abort_if(!$user->isPracticeAdmin() && !$user->isSuperAdmin(), 403);
+
+        $practiceId = $request->input('practice_id');
+        if ($practiceId && !$user->isSuperAdmin()) {
+            abort(403, 'Only superadmin can target another practice.');
+        }
+        $practice = Practice::findOrFail($practiceId ?: $user->tenant_id);
+
+        $errors = [];
+        try {
+            $bootstrap->bootstrap($practice);
+        } catch (\Throwable $e) {
+            $errors[] = 'Bootstrap: ' . $e->getMessage();
+            Log::error('rebootstrap: bootstrap failed', [
+                'practice_id' => $practice->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        $summary = [];
+        try {
+            $summary = $provisioning->provisionPractice($practice);
+        } catch (\Throwable $e) {
+            $errors[] = 'Provisioning: ' . $e->getMessage();
+            Log::error('rebootstrap: provisioning failed', [
+                'practice_id' => $practice->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        return response()->json([
+            'data' => [
+                'practice_id' => $practice->id,
+                'practice_name' => $practice->name,
+                'provisioning' => $summary,
+                'status' => empty($errors) ? 'success' : 'partial',
+                'errors' => $errors,
+            ],
+        ], empty($errors) ? 200 : 207);
     }
 }

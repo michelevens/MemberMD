@@ -4,8 +4,11 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\EntitlementType;
+use App\Models\Practice;
+use Database\Seeders\EntitlementTypeSeeder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 
 class EntitlementTypeController extends Controller
 {
@@ -32,6 +35,33 @@ class EntitlementTypeController extends Controller
         }
 
         $types = $query->orderBy('sort_order')->orderBy('name')->get();
+
+        // Self-heal: practices that signed up before EntitlementType seeding
+        // existed (or whose bootstrap silently failed) end up with an empty
+        // catalog and a broken "Add Entitlement" UI. On first GET when the
+        // catalog is empty, run the seeder for this tenant and re-query.
+        // Idempotent — if seeding doesn't insert anything, we just return [].
+        if ($types->isEmpty() && !$request->filled('category') && !$request->filled('program_type')) {
+            try {
+                $practice = Practice::find($user->tenant_id);
+                if ($practice) {
+                    EntitlementTypeSeeder::seedForPractice(
+                        $practice,
+                        null,
+                        $practice->practice_model ?? null,
+                    );
+                    $types = EntitlementType::where('tenant_id', $user->tenant_id)
+                        ->orderBy('sort_order')
+                        ->orderBy('name')
+                        ->get();
+                }
+            } catch (\Throwable $e) {
+                Log::warning('EntitlementType auto-seed on empty catalog failed', [
+                    'tenant_id' => $user->tenant_id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
 
         return response()->json(['data' => $types]);
     }

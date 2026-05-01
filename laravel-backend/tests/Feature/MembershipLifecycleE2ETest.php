@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Events\MembershipStateChanged;
+use App\Models\Invoice;
 use App\Models\MembershipPlan;
 use App\Models\Patient;
 use App\Models\PatientEntitlement;
@@ -224,6 +225,22 @@ class MembershipLifecycleE2ETest extends TestCase
         $resp->assertSuccessful();
         $resp->assertJsonPath('overage', true);
         $resp->assertJsonPath('overage_fee', 50);
+
+        // Local Invoice row must be written even though Stripe isn't
+        // configured in tests — the practice's books are the source of
+        // truth, Stripe is just the transport.
+        $invoiceId = $resp->json('overage_invoice_id');
+        $this->assertNotEmpty($invoiceId, 'Overage must produce a local invoice id.');
+
+        $invoice = Invoice::find($invoiceId);
+        $this->assertNotNull($invoice);
+        $this->assertSame($membership->id, $invoice->membership_id);
+        $this->assertSame($patient->id, $invoice->patient_id);
+        $this->assertEquals(50.00, (float) $invoice->amount);
+        $this->assertSame('pending', $invoice->status);
+        // Stripe wasn't configured in tests so the stripe_invoice_id stays null.
+        $this->assertNull($invoice->stripe_invoice_id,
+            'Without Stripe creds the local invoice should remain unsynced — dunning will pick it up.');
     }
 
     /** @test */

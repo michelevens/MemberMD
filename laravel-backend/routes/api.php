@@ -188,6 +188,7 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
 
     // Practice: own practice
     Route::get('/practice/me', [PracticeController::class, 'myPractice']);
+    Route::post('/practice/rebootstrap', [PracticeController::class, 'rebootstrap']);
     Route::put('/practice/branding', [PracticeController::class, 'updateBranding']);
 
     // Master Data (SuperAdmin)
@@ -234,6 +235,7 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
 
     // ===== Memberships (Patient Enrollments) =====
     Route::get('/memberships/{id}/entitlements', [MembershipController::class, 'entitlements']);
+    Route::get('/memberships/{id}/history', [MembershipController::class, 'history']);
     Route::post('/memberships/{id}/record-visit', [MembershipController::class, 'recordVisit']);
     // Patient-initiated end-of-period cancel (separate from admin/staff cancel
     // which lives in the practice-admin route group below). Patients can only

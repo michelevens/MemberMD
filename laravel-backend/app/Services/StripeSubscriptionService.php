@@ -395,6 +395,106 @@ class StripeSubscriptionService
         return (bool) ($invoice->paid ?? false);
     }
 
+    /**
+     * Record an overage charge on a membership.
+     *
+     * Always writes a local Invoice row first (`status='pending'`) so the
+     * practice has a record even if Stripe isn't reachable or the
+     * practice hasn't finished Connect onboarding. If Stripe is wired up,
+     * we also create an InvoiceItem on the practice's connected account
+     * which Stripe will roll into the patient's next subscription
+     * invoice — no separate charge attempt, no surprise card prompt.
+     *
+     * Returns the local Invoice row. The `stripe_invoice_id` field is
+     * populated only when Stripe accepted the InvoiceItem.
+     */
+    public function recordOverageCharge(
+        PatientMembership $membership,
+        float $amount,
+        string $description,
+        array $metadata = [],
+    ): \App\Models\Invoice {
+        $practice = Practice::findOrFail($membership->tenant_id);
+
+        // Always write the local row — practice's records are the source
+        // of truth for "what is owed", Stripe is the transport.
+        $invoice = \App\Models\Invoice::create([
+            'tenant_id' => $practice->id,
+            'patient_id' => $membership->patient_id,
+            'membership_id' => $membership->id,
+            'amount' => $amount,
+            'tax' => 0,
+            'status' => 'pending',
+            'description' => $description,
+            'line_items' => [[
+                'description' => $description,
+                'amount' => $amount,
+                'quantity' => 1,
+                'metadata' => $metadata,
+            ]],
+            'due_date' => now()->addDays(30)->toDateString(),
+        ]);
+
+        // Best-effort Stripe push. Failure is non-fatal — the local row
+        // remains, dunning can pick it up later, the practice can manually
+        // sync if needed.
+        if (empty($practice->stripe_account_id)
+            || empty($membership->stripe_customer_id)
+            || empty($membership->stripe_subscription_id)
+            || (string) config('services.stripe.secret') === '') {
+            $this->audit($practice, $membership, 'overage_recorded_local_only', [
+                'invoice_id' => $invoice->id,
+                'amount' => $amount,
+                'reason' => 'stripe_not_configured_or_missing_subscription',
+            ]);
+            return $invoice;
+        }
+
+        try {
+            $item = $this->stripe()->invoiceItems->create(
+                [
+                    'customer' => $membership->stripe_customer_id,
+                    'subscription' => $membership->stripe_subscription_id,
+                    'amount' => (int) round($amount * 100),
+                    'currency' => 'usd',
+                    'description' => $description,
+                    'metadata' => array_merge([
+                        'membership_id' => $membership->id,
+                        'invoice_local_id' => $invoice->id,
+                        'kind' => 'overage',
+                    ], $metadata),
+                ],
+                ['stripe_account' => $practice->stripe_account_id],
+            );
+
+            // Stripe doesn't issue an invoice_id at item creation; that
+            // arrives on the next finalize. Stash the item id so webhook
+            // reconciliation can match it back to this row.
+            $invoice->update([
+                'stripe_invoice_id' => $item->id,
+            ]);
+
+            $this->audit($practice, $membership, 'overage_invoice_item_created', [
+                'invoice_id' => $invoice->id,
+                'stripe_invoice_item_id' => $item->id,
+                'amount' => $amount,
+            ]);
+        } catch (ApiErrorException $e) {
+            Log::warning('Overage Stripe push failed; local invoice retained', [
+                'membership_id' => $membership->id,
+                'invoice_id' => $invoice->id,
+                'error' => $e->getMessage(),
+            ]);
+            $this->audit($practice, $membership, 'overage_stripe_push_failed', [
+                'invoice_id' => $invoice->id,
+                'amount' => $amount,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        return $invoice;
+    }
+
     private function assertPracticeReady(Practice $practice): void
     {
         if (empty($practice->stripe_account_id)) {

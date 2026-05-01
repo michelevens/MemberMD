@@ -3254,17 +3254,23 @@ export function PracticePortal() {
                             style={{ width: `${pct}%`, backgroundColor: colors.bar }}
                           />
                         </div>
-                        {savings > 0 && (
+                        {Number(savings) > 0 && (
                           <p className="text-xs mt-1" style={{ color: colors.text }}>
-                            Savings: ${typeof savings === "number" ? savings.toFixed(2) : savings}
+                            Savings: ${Number(savings).toFixed(2)}
                           </p>
                         )}
                       </div>
                     );
                   })}
-                  {/* Total savings */}
+                  {/* Total savings — Laravel decimal:2 columns serialize as
+                      strings, so we have to coerce every reduction summand
+                      or the running sum becomes a concat ("0" + "5.50" + …)
+                      and .toFixed crashes the entire patient detail render. */}
                   {(() => {
-                    const totalSavings = usageItems.reduce((sum, item) => sum + (item.savings ?? item.savingsAmount ?? 0), 0);
+                    const totalSavings = usageItems.reduce(
+                      (sum, item) => sum + (Number(item.savings ?? item.savingsAmount ?? 0) || 0),
+                      0,
+                    );
                     if (totalSavings <= 0) return null;
                     return (
                       <div className="pt-2 border-t border-slate-200 flex items-center justify-between">
@@ -4738,9 +4744,26 @@ export function PracticePortal() {
                   <span className="text-sm text-slate-400">Loading entitlement types…</span>
                 )}
                 {!entitlementTypesLoading && entitlementTypes.length === 0 && (
-                  <p className="text-sm text-slate-500">
-                    No entitlement types are seeded for this practice yet. Run the practice bootstrap or contact support to populate the catalog.
-                  </p>
+                  <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                    <p className="mb-2">
+                      No entitlement types are seeded for this practice yet.
+                    </p>
+                    <button
+                      onClick={async () => {
+                        const r = await apiFetch("/practice/rebootstrap", { method: "POST" });
+                        if (r.error) {
+                          setToast({ message: r.error, type: "error" });
+                          return;
+                        }
+                        setToast({ message: "Catalog rebuilt — fetching types…", type: "success" });
+                        await fetchEntitlementTypes();
+                      }}
+                      className="px-3 py-1.5 rounded-md text-xs font-medium text-white"
+                      style={{ backgroundColor: "#635bff" }}
+                    >
+                      Repair catalog now
+                    </button>
+                  </div>
                 )}
                 <div className="flex flex-wrap gap-2">
                   {entitlementTypes.map((et: { id: string; name: string; code?: string; category?: string }) => {
@@ -5072,7 +5095,7 @@ export function PracticePortal() {
                               {totalUsed} / {isUnlimited ? "\u221E" : totalAllowed} used
                             </span>
                             <span className="font-semibold" style={{ color: barColor }}>
-                              {isUnlimited ? "—" : `${pct.toFixed(0)}%`}
+                              {isUnlimited ? "—" : `${(Number.isFinite(pct) ? pct : 0).toFixed(0)}%`}
                             </span>
                             {savings !== null && savings !== undefined && (
                               <span style={{ color: "#15803d" }}>

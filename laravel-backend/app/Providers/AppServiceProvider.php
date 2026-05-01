@@ -4,6 +4,7 @@ namespace App\Providers;
 
 use App\Events\MembershipStateChanged;
 use App\Listeners\DispatchMembershipWebhook;
+use App\Listeners\LogMembershipTransition;
 use App\Models\Appointment;
 use App\Models\Encounter;
 use App\Models\Practice;
@@ -36,6 +37,10 @@ class AppServiceProvider extends ServiceProvider
         // out to any practice-registered webhook endpoint subscribed to
         // the resulting event type.
         Event::listen(MembershipStateChanged::class, DispatchMembershipWebhook::class);
+
+        // Lifecycle → durable transition log. Synchronous so the row is
+        // visible to readers immediately after the request returns.
+        Event::listen(MembershipStateChanged::class, LogMembershipTransition::class);
 
         // Per-practice branding for transactional email templates.
         // Pattern adapted from ShiftPulse: a single composer makes

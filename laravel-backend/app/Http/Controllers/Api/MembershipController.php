@@ -10,6 +10,7 @@ use App\Models\PatientMembership;
 use App\Models\PatientEntitlement;
 use App\Models\MembershipPlan;
 use App\Events\MembershipStateChanged;
+use App\Models\MembershipStateTransition;
 use App\Services\MembershipStateMachine;
 use App\Services\ProrationService;
 use App\Services\StripeSubscriptionService;
@@ -198,6 +199,45 @@ class MembershipController extends Controller
         ]);
     }
 
+    /**
+     * GET /api/memberships/{id}/history
+     * Append-only log of every state transition this membership has gone
+     * through. Drives the lifecycle-timeline UI on the membership detail.
+     */
+    public function history(Request $request, string $id): JsonResponse
+    {
+        $user = $request->user();
+        $membership = PatientMembership::where('tenant_id', $user->tenant_id)->findOrFail($id);
+
+        // Patients can only see their own history.
+        if ($user->isPatient()) {
+            abort_if($membership->patient->user_id !== $user->id, 403);
+        }
+
+        $rows = MembershipStateTransition::with('actor:id,name,first_name,last_name')
+            ->where('membership_id', $membership->id)
+            ->orderBy('created_at', 'desc')
+            ->limit((int) $request->query('limit', 200))
+            ->get();
+
+        return response()->json([
+            'data' => $rows->map(fn (MembershipStateTransition $t) => [
+                'id' => $t->id,
+                'from_status' => $t->from_status,
+                'to_status' => $t->to_status,
+                'event_name' => $t->event_name,
+                'source' => $t->source,
+                'metadata' => $t->metadata,
+                'actor' => $t->actor ? [
+                    'id' => $t->actor->id,
+                    'name' => trim(($t->actor->first_name ?? '') . ' ' . ($t->actor->last_name ?? ''))
+                            ?: $t->actor->name,
+                ] : null,
+                'created_at' => $t->created_at,
+            ])->values(),
+        ]);
+    }
+
     public function entitlements(Request $request, string $id): JsonResponse
     {
         $user = $request->user();
@@ -273,10 +313,38 @@ class MembershipController extends Controller
 
         $entitlement->increment('visits_used');
 
+        // When this visit pushed past the cap on a plan that allows overage,
+        // record the charge: a local Invoice row goes in immediately, and a
+        // Stripe InvoiceItem is queued onto the next subscription invoice
+        // when Connect is configured. Failure is non-fatal — the local
+        // row keeps the practice's books straight either way.
+        $invoice = null;
+        if ($overage && $overageFee > 0) {
+            try {
+                $invoice = $this->subscriptions->recordOverageCharge(
+                    $membership,
+                    $overageFee,
+                    "Overage visit ({$entitlement->fresh()->visits_used} of {$effectiveCap} consumed)",
+                    [
+                        'entitlement_id' => $entitlement->id,
+                        'visits_used_at_charge' => $entitlement->fresh()->visits_used,
+                        'effective_cap' => $effectiveCap,
+                        'recorded_by_user_id' => $user->id,
+                    ],
+                );
+            } catch (\Throwable $e) {
+                Log::warning('Overage charge could not be recorded', [
+                    'membership_id' => $membership->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
         return response()->json([
             'data' => $entitlement->fresh(),
             'overage' => $overage,
             'overage_fee' => $overage ? $overageFee : 0,
+            'overage_invoice_id' => $invoice?->id,
         ]);
     }
 
