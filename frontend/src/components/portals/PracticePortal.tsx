@@ -5229,20 +5229,63 @@ export function PracticePortal() {
       Premium: { from: "#d97706", to: "#f59e0b", accent: "#d97706", light: "#fffbeb" },
     };
 
+    const planList = (apiPlans || (isDemoMode ? MOCK_PLANS : []));
+    const totalMembers = planList.reduce((sum: number, p) => sum + (p.membershipsCount ?? p.memberCount ?? p.member_count ?? 0), 0);
+    const totalMrr = planList.reduce((sum: number, p) => {
+      const count = p.membershipsCount ?? p.memberCount ?? p.member_count ?? 0;
+      const price = p.monthlyPrice ?? p.monthly_price ?? 0;
+      return sum + count * price;
+    }, 0);
+
     return (
-      <div className="space-y-6">
-        <div className="flex items-center justify-between">
-          <h2 className="text-xl font-bold text-slate-800">Membership Plans</h2>
+      <div className="space-y-5">
+        {/* Stripe-grade page header */}
+        <div className="flex items-end justify-between gap-4">
+          <div>
+            <h2 className="text-2xl font-semibold text-slate-900 tracking-tight">Membership plans</h2>
+            <p className="text-sm text-slate-500 mt-0.5">
+              {planList.length} {planList.length === 1 ? "plan" : "plans"}
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <RefreshButton onRefresh={loadPracticeData} title="Refresh plans" />
+            <button
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium text-white shadow-sm transition-colors"
+              style={{ backgroundColor: "#635bff" }}
+              onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#544ee0")}
+              onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "#635bff")}
+              onClick={() => setShowCreatePlan(true)}
+            >
+              <Plus className="w-4 h-4" />
+              New plan
+            </button>
+          </div>
+        </div>
+
+        {/* KPI tiles — total plans, total members across plans, MRR rollup */}
+        <div className="grid grid-cols-3 gap-3">
+          {[
+            { label: "Plans", value: planList.length, mono: true },
+            { label: "Members", value: totalMembers, mono: true },
+            { label: "Monthly recurring", value: totalMrr, money: true },
+          ].map((tile) => (
+            <div key={tile.label} className="rounded-xl border border-slate-200 bg-white px-4 py-3">
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">{tile.label}</p>
+              <p className="text-xl font-semibold tabular-nums mt-1 text-slate-900">
+                {tile.money ? <MoneyAmount amount={tile.value} /> : tile.value.toLocaleString()}
+              </p>
+            </div>
+          ))}
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
-          {(apiPlans || (isDemoMode ? MOCK_PLANS : [])).length === 0 && (
+          {planList.length === 0 && (
             <div className="col-span-full py-12 text-center text-slate-400">
               <CreditCard className="w-10 h-10 mx-auto mb-2 opacity-40" />
               <p>No membership plans configured yet.</p>
             </div>
           )}
-          {(apiPlans || (isDemoMode ? MOCK_PLANS : [])).map((plan) => {
+          {planList.map((plan) => {
             const Icon = planIcons[plan.name] || Heart;
             const gradient = planGradients[plan.name] || planGradients.Essential;
             const memberCount = plan.membershipsCount ?? plan.memberCount ?? plan.member_count ?? 0;
