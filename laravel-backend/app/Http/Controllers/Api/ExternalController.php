@@ -45,6 +45,7 @@ class ExternalController extends Controller
 
         $plans = MembershipPlan::where('tenant_id', $practice->id)
             ->where('is_active', true)
+            ->with(['planEntitlements.entitlementType:id,code,name,category,unit_of_measure'])
             ->orderBy('sort_order')
             ->get([
                 'id', 'name', 'description', 'badge_text',

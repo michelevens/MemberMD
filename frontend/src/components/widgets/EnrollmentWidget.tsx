@@ -41,6 +41,19 @@ const C = {
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
+interface PlanEntitlementRow {
+  id?: string;
+  quantity_limit?: number | null;
+  quantityLimit?: number | null;
+  is_unlimited?: boolean;
+  isUnlimited?: boolean;
+  period_type?: string;
+  periodType?: string;
+  sort_order?: number;
+  entitlement_type?: { code: string; name: string; category: string; unit_of_measure?: string };
+  entitlementType?: { code: string; name: string; category: string; unitOfMeasure?: string };
+}
+
 interface Plan {
   id: string;
   name: string;
@@ -55,6 +68,12 @@ interface Plan {
   crisisSupport: boolean;
   labDiscountPct: number;
   prescriptionManagement: boolean;
+  /** New canonical benefits source — server returns the plan's
+      attached PlanEntitlement rows with entitlementType eager-loaded.
+      When present we render this list instead of the legacy boolean
+      flags above. Snake/camel keys both supported. */
+  planEntitlements?: PlanEntitlementRow[];
+  plan_entitlements?: PlanEntitlementRow[];
 }
 
 interface FormData {
@@ -234,6 +253,11 @@ export function EnrollmentWidget() {
             crisisSupport: Boolean(raw.crisis_support),
             labDiscountPct: Number(raw.lab_discount_pct ?? 0),
             prescriptionManagement: Boolean(raw.prescription_management),
+            // Server returns either plan_entitlements (Laravel default
+            // snake-case) or planEntitlements depending on the response
+            // transformer. Pass both through and let the renderer pick.
+            plan_entitlements: (raw.plan_entitlements as PlanEntitlementRow[] | undefined) ?? undefined,
+            planEntitlements: (raw.planEntitlements as PlanEntitlementRow[] | undefined) ?? undefined,
           })
         );
         setPlans(fetchedPlans);
@@ -616,16 +640,56 @@ export function EnrollmentWidget() {
                     </span>
                   </div>
                 </div>
-                {selected && (
-                  <div className="mt-2 pt-2 border-t" style={{ borderColor: C.slate200 }}>
-                    <p className="text-xs" style={{ color: C.slate500 }}>
-                      {plan.visitsPerMonth ? `${plan.visitsPerMonth} visits/mo` : "Unlimited visits"}
-                      {plan.telehealthIncluded ? " • Telehealth" : ""}
-                      {plan.crisisSupport ? " • Crisis support" : ""}
-                      {plan.labDiscountPct > 0 ? ` • ${plan.labDiscountPct}% lab discount` : ""}
-                    </p>
-                  </div>
-                )}
+                {selected && (() => {
+                  // Prefer the canonical plan_entitlements list when the
+                  // server provides one — that's the data source the
+                  // practice configures via the plan-detail Entitlements
+                  // tab. Fall back to the legacy boolean flags if a
+                  // tenant hasn't migrated yet.
+                  const ents = plan.planEntitlements || plan.plan_entitlements || [];
+                  const benefits: string[] = [];
+                  if (ents.length > 0) {
+                    // Show the top 5 entitlements ordered by sort_order.
+                    const sorted = [...ents].sort(
+                      (a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0),
+                    );
+                    for (const e of sorted.slice(0, 5)) {
+                      const t = e.entitlement_type || e.entitlementType;
+                      const name = t?.name ?? "";
+                      if (!name) continue;
+                      const unlimited = e.is_unlimited ?? e.isUnlimited ?? false;
+                      const qty = e.quantity_limit ?? e.quantityLimit ?? null;
+                      const period = (e.period_type ?? e.periodType ?? "per_month")
+                        .replace("per_", "/")
+                        .replace("month", "mo")
+                        .replace("year", "yr");
+                      if (unlimited) {
+                        benefits.push(`Unlimited ${name.toLowerCase()}`);
+                      } else if (typeof qty === "number" && qty > 0) {
+                        benefits.push(`${qty} ${name.toLowerCase()}${period}`);
+                      } else {
+                        benefits.push(name);
+                      }
+                    }
+                    if (ents.length > 5) {
+                      benefits.push(`+${ents.length - 5} more`);
+                    }
+                  } else {
+                    // Legacy fallback for plans without entitlements wired.
+                    if (plan.visitsPerMonth) benefits.push(`${plan.visitsPerMonth} visits/mo`);
+                    else benefits.push("Unlimited visits");
+                    if (plan.telehealthIncluded) benefits.push("Telehealth");
+                    if (plan.crisisSupport) benefits.push("Crisis support");
+                    if (plan.labDiscountPct > 0) benefits.push(`${plan.labDiscountPct}% lab discount`);
+                  }
+                  return (
+                    <div className="mt-2 pt-2 border-t" style={{ borderColor: C.slate200 }}>
+                      <p className="text-xs" style={{ color: C.slate500 }}>
+                        {benefits.join(" • ")}
+                      </p>
+                    </div>
+                  );
+                })()}
               </button>
             );
           })}
