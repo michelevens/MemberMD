@@ -64,4 +64,14 @@ return [
         'connect_refresh_url' => env('STRIPE_CONNECT_REFRESH_URL', env('APP_URL') . '/#/practice/settings/payments?status=refresh'),
     ],
 
+    // VAPID keys for Web Push. Generated via:
+    //   ./vendor/bin/web-push generate
+    // Public key is sent to the browser; private key signs payloads server-side.
+    // Subject must be a mailto: or https: URL identifying the application owner.
+    'webpush' => [
+        'subject' => env('VAPID_SUBJECT', 'mailto:noreply@membermd.io'),
+        'public_key' => env('VAPID_PUBLIC_KEY'),
+        'private_key' => env('VAPID_PRIVATE_KEY'),
+    ],
+
 ];

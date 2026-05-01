@@ -39,6 +39,8 @@ use App\Http\Controllers\Api\OperatorAnalyticsController;
 use App\Http\Controllers\Api\OperatorMemberController;
 use App\Http\Controllers\Api\MasterPlanTemplateController;
 use App\Http\Controllers\Api\PublicPlanTemplateController;
+use App\Http\Controllers\Api\PublicManifestController;
+use App\Http\Controllers\Api\PushSubscriptionController;
 use App\Http\Controllers\Api\TenantDomainController;
 use App\Http\Controllers\Api\WidgetThemeController;
 use App\Http\Controllers\Api\WidgetAnalyticsController;
@@ -141,6 +143,11 @@ Route::prefix('kiosk')->middleware('throttle:30,1')->group(function () {
 Route::prefix('public')->middleware('throttle:60,1')->group(function () {
     Route::get('/specialties', [PublicPlanTemplateController::class, 'specialties']);
     Route::get('/plan-templates', [PublicPlanTemplateController::class, 'templates']);
+
+    // Tenant-aware PWA manifest. Resolves Host header → TenantDomain →
+    // Practice and returns a branded webmanifest. Falls back to the
+    // platform-default MemberMD manifest if no custom domain matches.
+    Route::get('/manifest', [PublicManifestController::class, 'show']);
 });
 
 // ===== Public Widget Endpoints (no auth) =====
@@ -339,6 +346,11 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
     Route::post('/notifications/read-all', [NotificationController::class, 'markAllAsRead']);
     Route::put('/notifications/{id}/read', [NotificationController::class, 'markAsRead']);
     Route::get('/notifications', [NotificationController::class, 'index']);
+
+    // ===== Web Push Subscriptions =====
+    Route::get('/push/vapid-key', [PushSubscriptionController::class, 'vapidKey']);
+    Route::post('/push/subscriptions', [PushSubscriptionController::class, 'store']);
+    Route::delete('/push/subscriptions', [PushSubscriptionController::class, 'destroy']);
 
     // ===== Consent Forms (legacy ConsentFormController) =====
     Route::prefix('consents')->group(function () {

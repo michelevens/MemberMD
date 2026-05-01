@@ -14,6 +14,7 @@ import { PortalShell, type NavItem } from "../shared/PortalShell";
 import { CommandPalette, useCommandPaletteShortcut } from "../shared/CommandPalette";
 import { RefreshButton } from "../shared/RefreshButton";
 import { BillingTab } from "./patient/BillingTab";
+import { usePushNotifications } from "../../hooks/usePushNotifications";
 import {
   familyService,
   appointmentService,
@@ -504,6 +505,7 @@ export function PatientPortal() {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<TabId>("home");
   const [showBookingWidget, setShowBookingWidget] = useState(false);
+  const push = usePushNotifications();
 
   const [activeThread, setActiveThread] = useState<string | null>(null);
   const [messageInput, setMessageInput] = useState("");
@@ -1916,6 +1918,48 @@ export function PatientPortal() {
           </div>
         </div>
       </div>
+
+      {/* Push Notifications — device-level enablement */}
+      {push.status !== "unsupported" && (
+        <div className="rounded-xl border border-slate-200 bg-white p-5">
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0">
+              <h3 className="text-sm font-semibold text-slate-900 mb-1">Push notifications on this device</h3>
+              <p className="text-xs text-slate-500 leading-relaxed">
+                {push.status === "subscribed" && "You'll get instant alerts on this device for appointments, messages, and refills."}
+                {push.status === "granted" && "Notifications are allowed but not yet enabled for this device. Tap Enable to start receiving them."}
+                {push.status === "default" && "Get instant alerts for appointments, messages, and refill approvals — even when your browser is closed."}
+                {push.status === "denied" && "Notifications are blocked. Open your browser's site settings to allow them, then return here."}
+                {push.status === "subscribing" && "Setting up notifications…"}
+                {push.status === "unsubscribing" && "Disabling notifications…"}
+                {push.status === "error" && (push.error || "Something went wrong enabling notifications.")}
+              </p>
+            </div>
+            <div className="shrink-0">
+              {push.status === "subscribed" && (
+                <button
+                  onClick={() => void push.unsubscribe()}
+                  className="px-3 py-1.5 rounded-md text-xs font-medium border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors"
+                >
+                  Disable
+                </button>
+              )}
+              {(push.status === "default" || push.status === "granted" || push.status === "error") && (
+                <button
+                  onClick={() => void push.subscribe()}
+                  className="px-3 py-1.5 rounded-md text-xs font-medium text-white transition-colors"
+                  style={{ backgroundColor: "#635bff" }}
+                >
+                  Enable
+                </button>
+              )}
+              {(push.status === "subscribing" || push.status === "unsubscribing") && (
+                <span className="text-xs text-slate-400">Working…</span>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Notification Preferences */}
       <div className="glass rounded-2xl p-5">
