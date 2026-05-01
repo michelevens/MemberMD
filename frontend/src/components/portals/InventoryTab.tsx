@@ -286,19 +286,22 @@ export function InventoryTab() {
   ];
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
+      {/* Stripe-grade page header */}
+      <div className="flex items-end justify-between gap-4">
+        <div>
+          <h2 className="text-2xl font-semibold text-slate-900 tracking-tight">Inventory</h2>
+          <p className="text-sm text-slate-500 mt-0.5">Medication and supply stock, with dispensing reporting</p>
+        </div>
+      </div>
+
       {/* Low stock alert */}
       {lowStockItems.length > 0 && (
-        <div
-          className="flex items-center gap-3 p-4 rounded-xl"
-          style={{ backgroundColor: "#fffbeb", borderLeft: "4px solid #f59e0b" }}
-        >
-          <AlertTriangle className="w-5 h-5 flex-shrink-0" style={{ color: "#d97706" }} />
-          <div>
-            <p className="text-sm font-semibold" style={{ color: "#92400e" }}>
-              Low Stock Alert
-            </p>
-            <p className="text-sm" style={{ color: "#a16207" }}>
+        <div className="rounded-xl border border-amber-200 bg-amber-50/40 p-3 flex items-start gap-3">
+          <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5 text-amber-600" />
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-semibold text-amber-900">Low stock alert</p>
+            <p className="text-sm text-amber-800 mt-0.5">
               {lowStockItems.length} item{lowStockItems.length !== 1 ? "s" : ""} below reorder point:{" "}
               {lowStockItems.map((i) => i.name).join(", ")}
             </p>
@@ -306,20 +309,25 @@ export function InventoryTab() {
         </div>
       )}
 
-      {/* Sub-tabs */}
-      <div className="flex gap-1 p-1 rounded-lg" style={{ backgroundColor: "#f1f5f9" }}>
-        {subTabs.map((tab) => (
-          <button
-            key={tab.id}
-            onClick={() => setSubTab(tab.id)}
-            className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-              subTab === tab.id ? "bg-white shadow-sm text-slate-800" : "text-slate-500 hover:text-slate-700"
-            }`}
-          >
-            <tab.icon className="w-4 h-4" />
-            {tab.label}
-          </button>
-        ))}
+      {/* Sub-tabs — Stripe-style segmented row */}
+      <div className="flex gap-1 border-b border-slate-200">
+        {subTabs.map((tab) => {
+          const isActive = subTab === tab.id;
+          return (
+            <button
+              key={tab.id}
+              onClick={() => setSubTab(tab.id)}
+              className={`flex items-center gap-2 px-3 py-2 text-[13px] font-medium border-b-2 transition-colors ${
+                isActive
+                  ? "border-[#635bff] text-slate-900"
+                  : "border-transparent text-slate-500 hover:text-slate-700"
+              }`}
+            >
+              <tab.icon className="w-4 h-4" />
+              {tab.label}
+            </button>
+          );
+        })}
       </div>
 
       {/* Error banner */}

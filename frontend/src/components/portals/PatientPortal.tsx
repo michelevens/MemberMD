@@ -930,13 +930,13 @@ export function PatientPortal() {
   // ─── Home Tab ──────────────────────────────────────────────────────────
 
   const renderHome = () => (
-    <div className="space-y-6">
+    <div className="space-y-5">
       {/* Greeting */}
       <div>
-        <h1 className="text-2xl font-bold" style={{ color: COLORS.navy800 }}>
+        <h1 className="text-2xl font-semibold tracking-tight" style={{ color: COLORS.navy800 }}>
           Welcome back, {firstName}
         </h1>
-        <p className="text-sm mt-1" style={{ color: COLORS.slate500 }}>
+        <p className="text-sm mt-0.5" style={{ color: COLORS.slate500 }}>
           Here&apos;s your health summary
         </p>
       </div>
@@ -1218,11 +1218,16 @@ export function PatientPortal() {
   // ─── Appointments Tab ──────────────────────────────────────────────────
 
   const renderAppointments = () => (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-bold" style={{ color: COLORS.navy800 }}>
-          Appointments
-        </h1>
+    <div className="space-y-5">
+      <div className="flex items-end justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight" style={{ color: COLORS.navy800 }}>
+            Appointments
+          </h1>
+          <p className="text-sm mt-0.5" style={{ color: COLORS.slate500 }}>
+            Upcoming and past visits with your care team
+          </p>
+        </div>
         <div className="flex items-center gap-2">
           <RefreshButton onRefresh={loadPatientData} title="Refresh appointments" />
           <button
@@ -1398,10 +1403,15 @@ export function PatientPortal() {
       {!activeThread ? (
         /* Thread List */
         <div>
-          <div className="flex items-center justify-between mb-4">
-            <h1 className="text-xl font-bold" style={{ color: COLORS.navy800 }}>
-              Messages
-            </h1>
+          <div className="flex items-end justify-between gap-4 mb-5">
+            <div>
+              <h1 className="text-2xl font-semibold tracking-tight" style={{ color: COLORS.navy800 }}>
+                Messages
+              </h1>
+              <p className="text-sm mt-0.5" style={{ color: COLORS.slate500 }}>
+                Your conversations with the care team
+              </p>
+            </div>
             <div className="flex items-center gap-2">
               <RefreshButton onRefresh={loadPatientData} title="Refresh messages" />
               <button
@@ -1556,10 +1566,15 @@ export function PatientPortal() {
   // ─── Health Records Tab ────────────────────────────────────────────────
 
   const renderHealth = () => (
-    <div className="space-y-6">
-      <h1 className="text-xl font-bold" style={{ color: COLORS.navy800 }}>
-        Health Records
-      </h1>
+    <div className="space-y-5">
+      <div>
+        <h1 className="text-2xl font-semibold tracking-tight" style={{ color: COLORS.navy800 }}>
+          Health records
+        </h1>
+        <p className="text-sm mt-0.5" style={{ color: COLORS.slate500 }}>
+          Medications, screenings, allergies, and documents on file
+        </p>
+      </div>
 
       {/* Active Medications */}
       <div className="glass rounded-2xl p-5">
@@ -1782,10 +1797,15 @@ export function PatientPortal() {
   // ─── Account Tab ───────────────────────────────────────────────────────
 
   const renderAccount = () => (
-    <div className="space-y-6">
-      <h1 className="text-xl font-bold" style={{ color: COLORS.navy800 }}>
-        My Account
-      </h1>
+    <div className="space-y-5">
+      <div>
+        <h1 className="text-2xl font-semibold tracking-tight" style={{ color: COLORS.navy800 }}>
+          Account
+        </h1>
+        <p className="text-sm mt-0.5" style={{ color: COLORS.slate500 }}>
+          Personal info, billing, and emergency contacts
+        </p>
+      </div>
 
       {/* Personal Info */}
       <div className="glass rounded-2xl p-5">
