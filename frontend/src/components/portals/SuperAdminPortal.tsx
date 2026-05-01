@@ -3044,17 +3044,21 @@ export function SuperAdminPortal() {
 
     if (!detail) {
       return (
-        <div className="animate-page-in space-y-6">
-          <div className="flex items-center gap-3 mb-4">
-            <button
-              onClick={() => setSelectedSpecialtyDetail(null)}
-              className="p-2 rounded-lg hover:bg-slate-100 transition-colors"
-            >
-              <ArrowLeft className="w-5 h-5" style={{ color: "#334e68" }} />
-            </button>
-            <h2 className="text-xl font-bold" style={{ color: "#102a43" }}>{spec.name}</h2>
+        <div className="animate-page-in space-y-5">
+          <button
+            onClick={() => setSelectedSpecialtyDetail(null)}
+            className="inline-flex items-center gap-1.5 text-sm text-slate-600 hover:text-slate-900 transition-colors"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            Back to specialties
+          </button>
+          <div className="flex items-end justify-between gap-4">
+            <div>
+              <h2 className="text-2xl font-semibold text-slate-900 tracking-tight">{spec.name}</h2>
+              <p className="text-sm text-slate-500 mt-0.5">{spec.category}</p>
+            </div>
           </div>
-          <div className="glass rounded-xl p-12 text-center">
+          <div className="rounded-xl border border-slate-200 bg-white p-12 text-center">
             <p className="text-sm text-slate-500">Detail data for this specialty is not yet available.</p>
           </div>
         </div>
@@ -3062,65 +3066,67 @@ export function SuperAdminPortal() {
     }
 
     return (
-      <div className="animate-page-in space-y-6">
-        {/* Header */}
-        <div className="glass rounded-xl p-5">
-          <div className="flex items-center gap-4">
-            <button
-              onClick={() => setSelectedSpecialtyDetail(null)}
-              className="p-2 rounded-lg hover:bg-slate-100 transition-colors shrink-0"
-            >
-              <ArrowLeft className="w-5 h-5" style={{ color: "#334e68" }} />
-            </button>
+      <div className="animate-page-in space-y-5">
+        {/* Back link */}
+        <button
+          onClick={() => setSelectedSpecialtyDetail(null)}
+          className="inline-flex items-center gap-1.5 text-sm text-slate-600 hover:text-slate-900 transition-colors"
+        >
+          <ArrowLeft className="w-4 h-4" />
+          Back to specialties
+        </button>
+
+        {/* Stripe-grade page header */}
+        <div className="flex items-end justify-between gap-4">
+          <div className="flex items-center gap-3 min-w-0">
             <div
-              className="w-12 h-12 rounded-xl flex items-center justify-center shrink-0"
-              style={{ background: "linear-gradient(135deg, rgba(39,171,131,0.15), rgba(20,125,100,0.1))" }}
+              className="w-10 h-10 rounded-md flex items-center justify-center shrink-0 bg-slate-100"
             >
-              <Icon className="w-6 h-6" style={{ color: "#147d64" }} />
+              <Icon className="w-5 h-5 text-slate-700" />
             </div>
-            <div>
-              <div className="flex items-center gap-3">
-                <h2 className="text-xl font-bold" style={{ color: "#102a43" }}>{spec.name}</h2>
-                <span className="text-xs font-mono font-medium px-2 py-0.5 rounded" style={{ backgroundColor: "#f1f5f9", color: "#475569" }}>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <h2 className="text-2xl font-semibold text-slate-900 tracking-tight truncate">{spec.name}</h2>
+                <span className="text-xs font-mono font-medium px-2 py-0.5 rounded bg-slate-100 text-slate-500">
                   {spec.code}
                 </span>
               </div>
               <p className="text-sm text-slate-500 mt-0.5">
-                {spec.category} &middot; {spec.practiceCount} practices &middot; {spec.screeningTools} screening tools
+                {spec.category} · {spec.practiceCount} {spec.practiceCount === 1 ? "practice" : "practices"} · {spec.screeningTools} screening tools
               </p>
             </div>
           </div>
         </div>
 
-        {/* Bootstrap Pack Grid */}
+        {/* Bootstrap Pack Grid — flat border cards */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           {/* Practices */}
-          <div className="glass rounded-xl p-5">
-            <div className="flex items-center gap-2 mb-3">
-              <Building2 className="w-4 h-4" style={{ color: "#334e68" }} />
-              <h3 className="text-sm font-semibold" style={{ color: "#102a43" }}>Practices ({detail.practices.length})</h3>
+          <div className="rounded-xl border border-slate-200 bg-white p-4">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Practices</h3>
+              <span className="text-xs text-slate-400 tabular-nums">{detail.practices.length}</span>
             </div>
-            <div className="space-y-1.5">
+            <div className="space-y-1">
               {detail.practices.map((name) => (
-                <div key={name} className="flex items-center gap-2 py-1.5 px-3 rounded-lg" style={{ backgroundColor: "#f8fafc" }}>
-                  <div className="w-6 h-6 rounded flex items-center justify-center text-xs font-bold text-white shrink-0" style={{ background: "linear-gradient(135deg, #334e68, #243b53)" }}>
+                <div key={name} className="flex items-center gap-2 py-1.5 px-2 rounded-md hover:bg-slate-50">
+                  <div className="w-5 h-5 rounded flex items-center justify-center text-[10px] font-bold text-white shrink-0" style={{ background: "linear-gradient(135deg, #334e68, #243b53)" }}>
                     {name.charAt(0)}
                   </div>
-                  <span className="text-sm" style={{ color: "#102a43" }}>{name}</span>
+                  <span className="text-sm text-slate-700">{name}</span>
                 </div>
               ))}
             </div>
           </div>
 
           {/* Screening Tools */}
-          <div className="glass rounded-xl p-5">
-            <div className="flex items-center gap-2 mb-3">
-              <ClipboardCheck className="w-4 h-4" style={{ color: "#147d64" }} />
-              <h3 className="text-sm font-semibold" style={{ color: "#102a43" }}>Default Screening Tools ({detail.screeningTools.length})</h3>
+          <div className="rounded-xl border border-slate-200 bg-white p-4">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Default screening tools</h3>
+              <span className="text-xs text-slate-400 tabular-nums">{detail.screeningTools.length}</span>
             </div>
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap gap-1.5">
               {detail.screeningTools.map((tool) => (
-                <span key={tool} className="inline-flex items-center px-3 py-1.5 rounded-lg text-xs font-semibold" style={{ backgroundColor: "#e6f7f2", color: "#147d64" }}>
+                <span key={tool} className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium font-mono bg-slate-100 text-slate-700">
                   {tool}
                 </span>
               ))}
@@ -3128,32 +3134,32 @@ export function SuperAdminPortal() {
           </div>
 
           {/* Plan Templates */}
-          <div className="glass rounded-xl p-5">
-            <div className="flex items-center gap-2 mb-3">
-              <CreditCard className="w-4 h-4" style={{ color: "#0369a1" }} />
-              <h3 className="text-sm font-semibold" style={{ color: "#102a43" }}>Default Plan Templates ({detail.planTemplates.length})</h3>
+          <div className="rounded-xl border border-slate-200 bg-white p-4">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Default plan templates</h3>
+              <span className="text-xs text-slate-400 tabular-nums">{detail.planTemplates.length}</span>
             </div>
-            <div className="space-y-2">
+            <div className="divide-y divide-slate-100">
               {detail.planTemplates.map((plan) => (
-                <div key={plan.name} className="flex items-center justify-between py-2 px-3 rounded-lg" style={{ backgroundColor: "#f8fafc" }}>
-                  <span className="text-sm font-medium" style={{ color: "#102a43" }}>{plan.name}</span>
-                  <span className="text-sm font-bold" style={{ color: "#147d64" }}>${plan.price}/mo</span>
+                <div key={plan.name} className="flex items-center justify-between py-2 first:pt-0 last:pb-0">
+                  <span className="text-sm font-medium text-slate-800">{plan.name}</span>
+                  <span className="text-sm font-semibold tabular-nums text-slate-900">${plan.price}<span className="text-xs text-slate-400 font-normal">/mo</span></span>
                 </div>
               ))}
             </div>
           </div>
 
           {/* Appointment Types */}
-          <div className="glass rounded-xl p-5">
-            <div className="flex items-center gap-2 mb-3">
-              <Calendar className="w-4 h-4" style={{ color: "#d97706" }} />
-              <h3 className="text-sm font-semibold" style={{ color: "#102a43" }}>Default Appointment Types ({detail.appointmentTypes.length})</h3>
+          <div className="rounded-xl border border-slate-200 bg-white p-4">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Default appointment types</h3>
+              <span className="text-xs text-slate-400 tabular-nums">{detail.appointmentTypes.length}</span>
             </div>
-            <div className="space-y-1.5">
+            <div className="space-y-1">
               {detail.appointmentTypes.map((apt) => (
-                <div key={apt} className="flex items-center gap-2 py-1.5 px-3 rounded-lg" style={{ backgroundColor: "#f8fafc" }}>
+                <div key={apt} className="flex items-center gap-2 py-1.5 px-2 rounded-md hover:bg-slate-50">
                   <Clock className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                  <span className="text-sm" style={{ color: "#102a43" }}>{apt}</span>
+                  <span className="text-sm text-slate-700">{apt}</span>
                 </div>
               ))}
             </div>
