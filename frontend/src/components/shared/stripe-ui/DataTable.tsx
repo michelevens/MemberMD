@@ -97,7 +97,9 @@ export function DataTable<T>({
                 </th>
               ))}
               {actions && (
-                <th className="px-2 py-2.5 w-10" aria-label="Actions" />
+                <th className="px-2 py-2.5 w-16 text-[11px] font-semibold text-slate-500 uppercase tracking-wider text-right">
+                  Actions
+                </th>
               )}
             </tr>
           </thead>

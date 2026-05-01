@@ -523,6 +523,22 @@ const MOCK_THREADS = [
 // ─── Helper Components ──────────────────────────────────────────────────────
 
 /**
+ * Format a date-of-birth value for display. The API returns ISO strings
+ * like "1988-05-18T00:00:00.000000Z"; we render them as "May 18, 1988".
+ * Defensive against bad inputs (returns "" so the caller's "—" fallback
+ * fires instead of "Invalid Date").
+ */
+function formatDob(value: string | null | undefined): string {
+  if (!value) return "";
+  // Strip time portion if present so timezone shifts don't move the date
+  // by a day (DOB is calendar-day, not an instant).
+  const dateOnly = String(value).slice(0, 10);
+  const d = new Date(dateOnly + "T00:00:00");
+  if (isNaN(d.getTime())) return "";
+  return d.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
+}
+
+/**
  * Small label/value field for the Stripe-style detail drawer. Pattern
  * mirrors Stripe's invoice / customer detail panels: 11px uppercase
  * label, 13-14px slate-800 value, single-line layout that wraps when
@@ -842,6 +858,7 @@ export function PracticePortal() {
   const [entitlementTypes, setEntitlementTypes] = useState<any[]>([]);
   const [entitlementTypesLoading, setEntitlementTypesLoading] = useState(false);
   const [createPlanEntitlements, setCreatePlanEntitlements] = useState<PlanEntitlementRow[]>([]);
+  const [showCreatePlanEntPicker, setShowCreatePlanEntPicker] = useState(false);
   const [editPlanEntitlements, setEditPlanEntitlements] = useState<PlanEntitlementRow[]>([]);
   const [editPlanExistingEntitlementIds, setEditPlanExistingEntitlementIds] = useState<string[]>([]);
 
@@ -1757,6 +1774,7 @@ export function PracticePortal() {
         setShowCreatePlan(false);
         setCreatePlanForm({ name: "", monthlyPrice: "", annualPrice: "", description: "" });
         setCreatePlanEntitlements([]);
+        setShowCreatePlanEntPicker(false);
         loadPracticeData();
       } else {
         setToast({ message: res.error || "Failed to create plan.", type: "error" });
@@ -3524,7 +3542,7 @@ export function PracticePortal() {
                 <h3 className="font-semibold text-slate-800">Personal Information</h3>
                 <div className="grid grid-cols-2 gap-4 text-sm">
                   <div><p className="text-slate-400 text-xs">Full Name</p><p className="text-slate-700 font-medium">{pt.name}</p></div>
-                  <div><p className="text-slate-400 text-xs">Date of Birth</p><p className="text-slate-700 font-medium">{pt.dob || "—"}</p></div>
+                  <div><p className="text-slate-400 text-xs">Date of Birth</p><p className="text-slate-700 font-medium">{formatDob(pt.dob) || "—"}</p></div>
                   <div><p className="text-slate-400 text-xs">Gender</p><p className="text-slate-700 font-medium">{pt.gender || "—"}</p></div>
                   <div><p className="text-slate-400 text-xs">Pronouns</p><p className="text-slate-700 font-medium">{pt.pronouns || "—"}</p></div>
                   <div><p className="text-slate-400 text-xs">Phone</p><p className="text-slate-700 font-medium">{pt.phone}</p></div>
@@ -4056,36 +4074,83 @@ export function PracticePortal() {
         {/* Billing */}
         {patientDetailTab === "billing" && (
           <div className="space-y-6">
-            {/* Membership Card */}
+            {/* Membership Card — renders real data, no demo fallback. */}
             <div className="glass rounded-xl p-6">
               <h3 className="font-semibold text-slate-800 mb-4">Membership</h3>
-              <div className="flex flex-col sm:flex-row items-start gap-4">
-                <div
-                  className="rounded-xl p-5 flex-1"
-                  style={{ background: "linear-gradient(135deg, #147d64, #27ab83)" }}
-                >
-                  <p className="text-white text-sm opacity-80">Current Plan</p>
-                  <p className="text-white text-xl font-bold mt-1">{pt.plan} Plan</p>
-                  <p className="text-white text-lg font-semibold mt-2">${pt.planPrice || 199}/mo</p>
-                  <p className="text-white text-xs opacity-70 mt-2">Next billing: Mar 25, 2026</p>
-                  <p className="text-white text-xs opacity-70">Visa ending 4242</p>
-                </div>
-                <div className="flex flex-col gap-2">
-                  <button
-                    className="px-4 py-2 rounded-lg text-sm font-medium border transition-colors"
-                    style={{ borderColor: "#27ab83", color: "#27ab83" }}
-                    onClick={() => setToast({ message: "Plan change coming soon. Contact support to change plans.", type: "success" })}
+              {pt.plan && pt.plan !== "No Plan" && pt.membershipId ? (
+                <div className="flex flex-col sm:flex-row items-start gap-4">
+                  <div
+                    className="rounded-xl p-5 flex-1"
+                    style={{ background: "linear-gradient(135deg, #334e68, #243b53)" }}
                   >
-                    Change Plan
-                  </button>
+                    <p className="text-white text-sm opacity-80">Current Plan</p>
+                    <p className="text-white text-xl font-bold mt-1">{pt.plan}</p>
+                    {pt.planPrice ? (
+                      <p className="text-white text-lg font-semibold mt-2">
+                        ${Number(pt.planPrice).toLocaleString()}/mo
+                      </p>
+                    ) : null}
+                    {pt.memberId ? (
+                      <p className="text-white text-xs opacity-70 mt-2 font-mono">
+                        Member ID: {pt.memberId}
+                      </p>
+                    ) : null}
+                    {pt.memberSince ? (
+                      <p className="text-white text-xs opacity-70">
+                        Member since {formatDob(pt.memberSince) || pt.memberSince}
+                      </p>
+                    ) : null}
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <button
+                      className="px-4 py-2 rounded-md text-sm font-medium border transition-colors"
+                      style={{ borderColor: "#635bff", color: "#635bff" }}
+                      onClick={() => {
+                        if (!pt.membershipId) return;
+                        setRosterPlanDialog({
+                          patientId: pt.id,
+                          patientName: pt.name,
+                          membershipId: pt.membershipId,
+                          mode: "change",
+                        });
+                        fetchRosterPlans();
+                        setRosterSelectedPlanId(null);
+                      }}
+                    >
+                      Change Plan
+                    </button>
+                    <button
+                      className="px-4 py-2 rounded-md text-sm font-medium border border-slate-200 text-slate-500 hover:bg-slate-50 transition-colors"
+                      onClick={() => setToast({ message: "Payment method updates coming soon — patients can update directly from their portal.", type: "success" })}
+                    >
+                      Update Payment
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="rounded-xl border border-dashed border-slate-300 p-6 text-center">
+                  <CreditCard className="w-8 h-8 mx-auto mb-2 text-slate-300" />
+                  <p className="text-sm font-medium text-slate-700 mb-1">No active membership</p>
+                  <p className="text-xs text-slate-500 mb-4">
+                    {pt.name} hasn't enrolled in a plan yet.
+                  </p>
                   <button
-                    className="px-4 py-2 rounded-lg text-sm font-medium border border-slate-200 text-slate-500 hover:bg-slate-50 transition-colors"
-                    onClick={() => setToast({ message: "Payment method updates coming soon. Use the patient portal.", type: "success" })}
+                    className="px-4 py-2 rounded-md text-sm font-medium text-white"
+                    style={{ backgroundColor: "#635bff" }}
+                    onClick={() => {
+                      setRosterPlanDialog({
+                        patientId: pt.id,
+                        patientName: pt.name,
+                        mode: "enroll",
+                      });
+                      fetchRosterPlans();
+                      setRosterSelectedPlanId(null);
+                    }}
                   >
-                    Update Payment
+                    Enroll in plan
                   </button>
                 </div>
-              </div>
+              )}
             </div>
 
             {/* Invoice History */}
@@ -4106,23 +4171,31 @@ export function PracticePortal() {
                     </tr>
                   </thead>
                   <tbody>
-                    {mockPtInvoices.map((inv) => (
-                      <tr key={inv.id} className="border-t border-slate-100 hover:bg-slate-50 transition-colors">
-                        <td className="px-4 py-3 font-mono text-sm font-medium text-slate-700">{inv.id}</td>
-                        <td className="px-4 py-3 text-slate-500">{inv.date}</td>
-                        <td className="px-4 py-3 font-medium text-slate-800">${Number(inv.amount ?? 0).toFixed(2)}</td>
-                        <td className="px-4 py-3"><StatusBadge status={inv.status} /></td>
-                        <td className="px-4 py-3 text-slate-500 hidden md:table-cell">{inv.description}</td>
-                        <td className="px-4 py-3">
-                          <button
-                            className="p-1 rounded hover:bg-slate-100 text-slate-400 transition-colors"
-                            onClick={() => setToast({ message: "Invoice PDF download coming soon.", type: "success" })}
-                          >
-                            <Download className="w-4 h-4" />
-                          </button>
+                    {mockPtInvoices.length === 0 ? (
+                      <tr>
+                        <td colSpan={6} className="px-4 py-10 text-center text-sm text-slate-400">
+                          No invoices yet for this patient.
                         </td>
                       </tr>
-                    ))}
+                    ) : (
+                      mockPtInvoices.map((inv) => (
+                        <tr key={inv.id} className="border-t border-slate-100 hover:bg-slate-50 transition-colors">
+                          <td className="px-4 py-3 font-mono text-sm font-medium text-slate-700">{inv.id}</td>
+                          <td className="px-4 py-3 text-slate-500">{inv.date}</td>
+                          <td className="px-4 py-3 font-medium text-slate-800">${Number(inv.amount ?? 0).toFixed(2)}</td>
+                          <td className="px-4 py-3"><StatusBadge status={inv.status} /></td>
+                          <td className="px-4 py-3 text-slate-500 hidden md:table-cell">{inv.description}</td>
+                          <td className="px-4 py-3">
+                            <button
+                              className="p-1 rounded hover:bg-slate-100 text-slate-400 transition-colors"
+                              onClick={() => setToast({ message: "Invoice PDF download coming soon.", type: "success" })}
+                            >
+                              <Download className="w-4 h-4" />
+                            </button>
+                          </td>
+                        </tr>
+                      ))
+                    )}
                   </tbody>
                 </table>
               </div>
@@ -5438,7 +5511,7 @@ export function PracticePortal() {
             <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col">
               <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 shrink-0">
                 <h3 className="text-base font-semibold text-slate-800">Create Membership Plan</h3>
-                <button onClick={() => { setShowCreatePlan(false); setCreatePlanEntitlements([]); }} className="p-1.5 rounded hover:bg-slate-100 text-slate-400"><X className="w-4 h-4" /></button>
+                <button onClick={() => { setShowCreatePlan(false); setCreatePlanEntitlements([]); setShowCreatePlanEntPicker(false); }} className="p-1.5 rounded hover:bg-slate-100 text-slate-400"><X className="w-4 h-4" /></button>
               </div>
               <div className="px-6 py-5 space-y-4 overflow-y-auto flex-1">
                 <div>
@@ -5466,50 +5539,81 @@ export function PracticePortal() {
                     <h4 className="text-sm font-semibold text-slate-800">Entitlements</h4>
                     <button
                       type="button"
-                      className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors"
-                      style={{ backgroundColor: "#e6f7f2", color: "#147d64" }}
+                      className="flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors text-white"
+                      style={{ backgroundColor: "#635bff" }}
                       onClick={() => {
-                        fetchEntitlementTypes();
+                        const next = !showCreatePlanEntPicker;
+                        setShowCreatePlanEntPicker(next);
+                        if (next && entitlementTypes.length === 0) {
+                          fetchEntitlementTypes();
+                        }
                       }}
-                      onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "#d1f0e5"; }}
-                      onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "#e6f7f2"; }}
+                      onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "#544ee0"; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "#635bff"; }}
                     >
-                      <Plus className="w-3.5 h-3.5" /> Add Entitlement
+                      <Plus className="w-3.5 h-3.5" /> {showCreatePlanEntPicker ? "Close" : "Add Entitlement"}
                     </button>
                   </div>
 
-                  {/* Entitlement type selector dropdown (shown when types loaded & user wants to add) */}
-                  {entitlementTypes.length > 0 && (
-                    <div className="mb-3 p-2 rounded-lg border border-slate-200" style={{ backgroundColor: "#f8fafc" }}>
-                      <p className="text-xs text-slate-500 mb-1">Select entitlement type:</p>
-                      <div className="flex flex-wrap gap-1">
-                        {entitlementTypesLoading && <span className="text-xs text-slate-400">Loading...</span>}
-                        {entitlementTypes.map((et: { id: string; name: string; code?: string }) => {
-                          const alreadyAdded = createPlanEntitlements.some(e => e.entitlementTypeId === et.id);
-                          return (
-                            <button
-                              key={et.id}
-                              type="button"
-                              disabled={alreadyAdded}
-                              className="px-2 py-1 rounded text-xs font-medium border transition-colors disabled:opacity-40"
-                              style={{ borderColor: "#27ab83", color: alreadyAdded ? "#94a3b8" : "#147d64" }}
-                              onClick={() => {
-                                setCreatePlanEntitlements(prev => [...prev, {
-                                  tempId: `new_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-                                  entitlementTypeId: et.id,
-                                  typeName: et.name,
-                                  quantity: 1,
-                                  unlimited: false,
-                                  period: "monthly",
-                                  overagePolicy: "block",
-                                }]);
-                              }}
-                            >
-                              {et.name}
-                            </button>
-                          );
-                        })}
-                      </div>
+                  {/* Entitlement type picker — shown only when user explicitly clicks the toggle */}
+                  {showCreatePlanEntPicker && (
+                    <div className="mb-3 p-3 rounded-md border border-slate-200" style={{ backgroundColor: "#f8fafc" }}>
+                      {entitlementTypesLoading ? (
+                        <p className="text-xs text-slate-400">Loading entitlement types…</p>
+                      ) : entitlementTypes.length === 0 ? (
+                        <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+                          <p className="mb-2">
+                            No entitlement types are seeded for this practice yet.
+                          </p>
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              const r = await apiFetch("/practice/rebootstrap", { method: "POST" });
+                              if (r.error) {
+                                setToast({ message: r.error, type: "error" });
+                                return;
+                              }
+                              setToast({ message: "Catalog rebuilt — reloading types…", type: "success" });
+                              await fetchEntitlementTypes();
+                            }}
+                            className="px-3 py-1 rounded-md text-xs font-medium text-white"
+                            style={{ backgroundColor: "#635bff" }}
+                          >
+                            Repair catalog now
+                          </button>
+                        </div>
+                      ) : (
+                        <>
+                          <p className="text-xs text-slate-500 mb-2">Select entitlement type:</p>
+                          <div className="flex flex-wrap gap-1">
+                            {entitlementTypes.map((et: { id: string; name: string; code?: string }) => {
+                              const alreadyAdded = createPlanEntitlements.some(e => e.entitlementTypeId === et.id);
+                              return (
+                                <button
+                                  key={et.id}
+                                  type="button"
+                                  disabled={alreadyAdded}
+                                  className="px-2 py-1 rounded text-xs font-medium border transition-colors disabled:opacity-40"
+                                  style={{ borderColor: "#635bff", color: alreadyAdded ? "#94a3b8" : "#544ee0" }}
+                                  onClick={() => {
+                                    setCreatePlanEntitlements(prev => [...prev, {
+                                      tempId: `new_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+                                      entitlementTypeId: et.id,
+                                      typeName: et.name,
+                                      quantity: 1,
+                                      unlimited: false,
+                                      period: "monthly",
+                                      overagePolicy: "block",
+                                    }]);
+                                  }}
+                                >
+                                  {et.name}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </>
+                      )}
                     </div>
                   )}
 
