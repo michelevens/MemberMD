@@ -8,6 +8,13 @@ import { HeaderToolbar } from "../shared/HeaderToolbar";
 import { PlatformSettings } from "../settings/PlatformSettings";
 import { UserSettingsDropdown } from "../shared/UserSettingsDropdown";
 import { RefreshButton } from "../shared/RefreshButton";
+import {
+  DataTable,
+  EntityId,
+  FilterChips,
+  MoneyAmount,
+  StatusPill,
+} from "../shared/stripe-ui";
 import { ProfilePage } from "../profile/ProfilePage";
 import {
   LayoutDashboard,
@@ -973,6 +980,8 @@ export function SuperAdminPortal() {
   const [activeTab, setActiveTab] = useState<TabId>("dashboard");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [practiceSearch, setPracticeSearch] = useState("");
+  // Stripe-style practices view: filter chips alongside the search box.
+  const [practiceFilters, setPracticeFilters] = useState<import("../shared/stripe-ui").ActiveFilter[]>([]);
   const [apiPractices, setApiPractices] = useState<MockPractice[] | null>(null);
   const [apiStats, setApiStats] = useState<Record<string, number> | null>(null);
   const [selectedPractice, setSelectedPractice] = useState<MockPractice | null>(null);
@@ -1598,176 +1607,172 @@ export function SuperAdminPortal() {
   // ─── All Practices Tab ───────────────────────────────────────────────────
 
   function renderPractices() {
-    return (
-      <div className="animate-page-in space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div>
-            <h2
-              className="text-xl font-bold"
-              style={{ color: "#102a43" }}
+    type Pr = typeof filteredPractices[number];
+
+    // Filter facets — derived from current set so we don't show empty options.
+    const specialtyOpts = Array.from(new Set(practices.map((p) => p.specialty).filter(Boolean))).map((s) => ({ value: s, label: s }));
+    const statusOpts = Array.from(new Set(practices.map((p) => p.status))).map((s) => ({
+      value: s,
+      label: s.charAt(0).toUpperCase() + s.slice(1),
+    }));
+    const modelOpts = Array.from(new Set(practices.map((p) => p.model).filter(Boolean))).map((m) => ({ value: m, label: m }));
+    const facets: import("../shared/stripe-ui").FilterFacet[] = [
+      { key: "status", label: "Status", options: statusOpts },
+      { key: "specialty", label: "Specialty", options: specialtyOpts },
+      { key: "model", label: "Model", options: modelOpts },
+    ];
+
+    const filtered = filteredPractices.filter((p) => {
+      for (const f of practiceFilters) {
+        if (f.key === "status" && p.status !== f.value) return false;
+        if (f.key === "specialty" && p.specialty !== f.value) return false;
+        if (f.key === "model" && p.model !== f.value) return false;
+      }
+      return true;
+    });
+
+    const cols: import("../shared/stripe-ui").DataTableColumn<Pr>[] = [
+      {
+        key: "name",
+        header: "Practice",
+        cell: (p) => (
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div
+              className="w-7 h-7 rounded-md flex items-center justify-center shrink-0 text-xs font-bold text-white"
+              style={{ background: "linear-gradient(135deg, #334e68, #243b53)" }}
             >
-              All Practices
-            </h2>
+              {p.name.charAt(0)}
+            </div>
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-slate-800 truncate">{p.name}</p>
+              <p className="text-xs text-slate-400 truncate">{p.city}, {p.state}</p>
+            </div>
+          </div>
+        ),
+      },
+      {
+        key: "specialty",
+        header: "Specialty",
+        cell: (p) => <span className="text-slate-600">{p.specialty}</span>,
+      },
+      {
+        key: "model",
+        header: "Model",
+        hideBelow: "lg",
+        cell: (p) => <span className="text-slate-600">{p.model}</span>,
+      },
+      {
+        key: "providers",
+        header: "Providers",
+        align: "right",
+        hideBelow: "md",
+        cell: (p) => <span className="tabular-nums text-slate-700">{p.providers}</span>,
+      },
+      {
+        key: "members",
+        header: "Members",
+        align: "right",
+        cell: (p) => <span className="tabular-nums text-slate-700 font-medium">{formatNumber(p.members)}</span>,
+      },
+      {
+        key: "mrr",
+        header: "MRR",
+        align: "right",
+        cell: (p) => <MoneyAmount amount={p.mrr} />,
+      },
+      {
+        key: "status",
+        header: "Status",
+        cell: (p) => <StatusPill label={p.status} />,
+      },
+      {
+        key: "payouts",
+        header: "Payouts",
+        hideBelow: "lg",
+        cell: (p) => <PayoutBadge status={p.stripeConnectStatus} chargesEnabled={p.stripeChargesEnabled} />,
+      },
+      {
+        key: "joined",
+        header: "Joined",
+        hideBelow: "lg",
+        cell: (p) => (
+          <span className="text-slate-500">
+            {new Date(p.joinedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+          </span>
+        ),
+      },
+      {
+        key: "id",
+        header: "ID",
+        hideBelow: "xl",
+        cell: (p) => <EntityId prefix="acct" id={p.id} />,
+      },
+    ];
+
+    const rowActions = (p: Pr): import("../shared/stripe-ui").KebabAction[] => [
+      { label: "View practice", onClick: () => setSelectedPractice(p) },
+    ];
+
+    return (
+      <div className="animate-page-in space-y-5">
+        {/* Page header */}
+        <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
+          <div>
+            <h2 className="text-2xl font-semibold text-slate-900 tracking-tight">All practices</h2>
             <p className="text-sm text-slate-500 mt-0.5">
-              {practices.length} practices on the platform
+              {filtered.length === practices.length
+                ? `${practices.length} practices on the platform`
+                : `${filtered.length} of ${practices.length}`}
             </p>
           </div>
-          <div className="flex items-center gap-3">
-            <div className="relative">
-              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-              <input
-                type="text"
-                placeholder="Search practices..."
-                value={practiceSearch}
-                onChange={(e) => setPracticeSearch(e.target.value)}
-                className="pl-9 pr-4 py-2 rounded-lg border border-slate-200 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-teal-400 w-64"
-              />
-            </div>
-            <RefreshButton onRefresh={loadData} title="Refresh practices list" />
-            <button className="flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-200 text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors">
-              <Filter className="w-4 h-4" />
-              Filter
-            </button>
-          </div>
+          <RefreshButton onRefresh={loadData} title="Refresh practices list" />
         </div>
 
-        <div className="glass rounded-xl overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr style={{ backgroundColor: "#f8fafc" }}>
-                  <th className="text-left px-6 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                    Practice
-                  </th>
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                    Specialty
-                  </th>
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                    Model
-                  </th>
-                  <th className="text-right px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                    Providers
-                  </th>
-                  <th className="text-right px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                    Members
-                  </th>
-                  <th className="text-right px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                    MRR
-                  </th>
-                  <th className="text-center px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                    Status
-                  </th>
-                  <th className="text-center px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                    Payouts
-                  </th>
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                    Joined
-                  </th>
-                  <th className="text-center px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                    Actions
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {filteredPractices.length === 0 && (
-                  <tr>
-                    <td colSpan={10} className="px-6 py-12 text-center text-sm text-slate-400">
-                      No practices registered yet
-                    </td>
-                  </tr>
-                )}
-                {filteredPractices.map((practice) => (
-                  <tr
-                    key={practice.id}
-                    className="hover:bg-slate-50/50 transition-colors"
+        {/* Search + filter chips bar */}
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative flex-1 min-w-[240px] max-w-sm">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+            <input
+              type="text"
+              placeholder="Search by name, specialty, owner..."
+              value={practiceSearch}
+              onChange={(e) => setPracticeSearch(e.target.value)}
+              className="w-full pl-9 pr-3 py-1.5 rounded-md border border-slate-200 text-sm bg-white focus:outline-none focus:border-slate-400"
+            />
+          </div>
+          <FilterChips facets={facets} active={practiceFilters} onChange={setPracticeFilters} />
+        </div>
+
+        {/* Stripe-grade data table */}
+        <DataTable
+          columns={cols}
+          rows={filtered}
+          rowKey={(p) => p.id}
+          actions={rowActions}
+          onRowClick={(p) => setSelectedPractice(p)}
+          empty={
+            <div className="text-center py-8">
+              {practices.length === 0 && !practiceSearch && practiceFilters.length === 0 ? (
+                <p className="text-sm text-slate-500">No practices registered yet.</p>
+              ) : (
+                <>
+                  <p className="text-sm text-slate-500 mb-1">No practices match your filters</p>
+                  <button
+                    onClick={() => { setPracticeFilters([]); setPracticeSearch(""); }}
+                    className="text-xs text-blue-600 hover:underline"
                   >
-                    <td className="px-6 py-3.5">
-                      <div className="flex items-center gap-3">
-                        <div
-                          className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0 text-sm font-bold text-white"
-                          style={{
-                            background:
-                              "linear-gradient(135deg, #334e68, #243b53)",
-                          }}
-                        >
-                          {practice.name.charAt(0)}
-                        </div>
-                        <div>
-                          <button
-                            onClick={() => setSelectedPractice(practice)}
-                            className="text-sm font-medium hover:underline text-left"
-                            style={{ color: "#102a43" }}
-                          >
-                            {practice.name}
-                          </button>
-                          <p className="text-xs text-slate-400">
-                            {practice.city}, {practice.state}
-                          </p>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3.5 text-sm text-slate-600">
-                      {practice.specialty}
-                    </td>
-                    <td className="px-4 py-3.5 text-sm text-slate-600">
-                      {practice.model}
-                    </td>
-                    <td className="px-4 py-3.5 text-sm text-right font-medium text-slate-700">
-                      {practice.providers}
-                    </td>
-                    <td className="px-4 py-3.5 text-sm text-right font-medium text-slate-700">
-                      {formatNumber(practice.members)}
-                    </td>
-                    <td className="px-4 py-3.5 text-sm text-right font-medium text-slate-700">
-                      {formatCurrency(practice.mrr)}
-                    </td>
-                    <td className="px-4 py-3.5 text-center">
-                      <StatusBadge status={practice.status} />
-                    </td>
-                    <td className="px-4 py-3.5 text-center">
-                      <PayoutBadge
-                        status={practice.stripeConnectStatus}
-                        chargesEnabled={practice.stripeChargesEnabled}
-                      />
-                    </td>
-                    <td className="px-4 py-3.5 text-sm text-slate-500">
-                      {new Date(practice.joinedAt).toLocaleDateString("en-US", {
-                        month: "short",
-                        day: "numeric",
-                        year: "numeric",
-                      })}
-                    </td>
-                    <td className="px-4 py-3.5">
-                      <div className="flex items-center justify-center gap-1">
-                        <button
-                          onClick={() => setSelectedPractice(practice)}
-                          className="p-1.5 rounded-lg hover:bg-slate-100 transition-colors"
-                          title="View practice"
-                        >
-                          <Eye className="w-4 h-4 text-slate-500" />
-                        </button>
-                        <button
-                          className="p-1.5 rounded-lg hover:bg-slate-100 transition-colors"
-                          title="More actions"
-                        >
-                          <MoreHorizontal className="w-4 h-4 text-slate-500" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          {filteredPractices.length === 0 && (
-            <div className="px-6 py-12 text-center">
-              <p className="text-sm text-slate-500">
-                No practices match your search.
-              </p>
+                    Clear filters
+                  </button>
+                </>
+              )}
             </div>
-          )}
-        </div>
+          }
+          footer={
+            filtered.length > 0
+              ? `Showing ${filtered.length} ${filtered.length === 1 ? "practice" : "practices"}`
+              : null
+          }
+        />
       </div>
     );
   }

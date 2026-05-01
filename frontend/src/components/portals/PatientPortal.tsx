@@ -2001,7 +2001,7 @@ export function PatientPortal() {
       <PortalShell
         portalTitle="Patient Portal"
         portalIcon={Heart}
-        portalColor="teal"
+        portalColor="stripe"
         userName={fullName}
         userSubtitle={user?.email || patient.email || undefined}
         nav={sidebarNav}
