@@ -277,6 +277,7 @@ export function PracticeRegistration() {
   };
   const [starterPlans, setStarterPlans] = useState<StarterPlan[]>([]);
   const [starterPlansLoading, setStarterPlansLoading] = useState(false);
+  const [useStarterPlans, setUseStarterPlans] = useState(true);
 
   // Step 4: Practice Model
   const [selectedModel, setSelectedModel] = useState("");
@@ -579,6 +580,11 @@ export function PracticeRegistration() {
           email: accountInfo.email,
           password: accountInfo.password,
           password_confirmation: accountInfo.confirmPassword,
+          // Opt-in flag: fork the specialty's starter plan blueprints
+          // into real MembershipPlan rows on signup so the practice can
+          // start enrolling members immediately. Default ON; user can
+          // uncheck the preview block if they want to start from scratch.
+          use_starter_plans: useStarterPlans && starterPlans.length > 0,
         }),
       });
       const data = await response.json();
@@ -1108,6 +1114,26 @@ export function PracticeRegistration() {
                           </div>
                         ))}
                       </div>
+                    )}
+
+                    {!starterPlansLoading && starterPlans.length > 0 && (
+                      <label className="mt-4 flex items-start gap-2.5 px-4 py-3 rounded-xl border border-slate-200 bg-white cursor-pointer hover:border-slate-300 transition-colors">
+                        <input
+                          type="checkbox"
+                          checked={useStarterPlans}
+                          onChange={(e) => setUseStarterPlans(e.target.checked)}
+                          className="mt-0.5 w-4 h-4 rounded accent-[#635bff] cursor-pointer"
+                        />
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium text-slate-900">
+                            Create these {starterPlans.length} starter plan{starterPlans.length === 1 ? "" : "s"} for me
+                          </p>
+                          <p className="text-xs text-slate-500 mt-0.5 leading-snug">
+                            Plans are saved as a draft you can edit, rename, or delete after signup.
+                            Uncheck to start with no plans.
+                          </p>
+                        </div>
+                      </label>
                     )}
                   </div>
                 )}

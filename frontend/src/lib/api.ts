@@ -1820,6 +1820,38 @@ export const stripeConnectService = {
   },
 };
 
+// ===== Onboarding Service (first-mile helpers) =====
+// Closes the gap between fresh practice signup and "ready to enroll a
+// patient": fork specialty starter plans, create sample patients to
+// click through the UI, mark the dashboard onboarding banner dismissed.
+
+export const onboardingService = {
+  /** Fork specialty default_plan_templates → real MembershipPlan rows. */
+  forkStarterPlans: async (
+    options: { specialtyCode?: string; planIndices?: number[] } = {},
+  ): Promise<ApiResponse<{ created: number; skipped: number; plans: unknown[] }>> => {
+    return apiFetch("/practice/starter-plans", {
+      method: "POST",
+      body: JSON.stringify(options),
+    });
+  },
+
+  /** Create a Stripe-style sample patient (max 5 per tenant). */
+  createSamplePatient: async (): Promise<ApiResponse<{ patient: unknown; sampleCount: number; isSample: boolean }>> => {
+    return apiFetch("/practice/sample-patient", { method: "POST" });
+  },
+
+  /** Bulk-remove every sample patient for the current tenant. */
+  removeAllSamplePatients: async (): Promise<ApiResponse<{ deleted: number }>> => {
+    return apiFetch("/practice/sample-patients", { method: "DELETE" });
+  },
+
+  /** Dismiss the dashboard onboarding banner. */
+  completeOnboarding: async (): Promise<ApiResponse<{ onboardingCompleted: boolean }>> => {
+    return apiFetch("/practice/onboarding/complete", { method: "POST" });
+  },
+};
+
 // ===== Operator Service (multi-practice operators) =====
 
 export type OperatorRoleApi = "owner" | "admin" | "viewer";

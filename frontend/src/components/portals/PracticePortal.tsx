@@ -6,7 +6,7 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { ProviderDetailPage } from "./ProviderDetailPage";
 import { useAuth } from "../../contexts/AuthContext";
-import { dashboardService, membershipPlanService, messageService, patientService, appointmentService, encounterService, prescriptionService, invoiceService, programService, telehealthService, screeningService, couponService, providerService, paymentService, notificationService, apiFetch, billingEnhancedService, documentService } from "../../lib/api";
+import { dashboardService, membershipPlanService, messageService, patientService, appointmentService, encounterService, prescriptionService, invoiceService, programService, telehealthService, screeningService, couponService, providerService, paymentService, notificationService, apiFetch, billingEnhancedService, documentService, onboardingService } from "../../lib/api";
 import { PortalShell, type NavSection as ShellNavSection, type PortalColor } from "../shared/PortalShell";
 import { CommandPalette, useCommandPaletteShortcut } from "../shared/CommandPalette";
 import { AddAllergyDialog, type AllergyEntry } from "../clinical/AddAllergyDialog";
@@ -91,6 +91,7 @@ import {
   Megaphone,
 } from "lucide-react";
 import { RefreshButton } from "../shared/RefreshButton";
+import { OnboardingChecklist, ConnectSetupBanner } from "../shared/OnboardingChecklist";
 import {
   DataTable,
   DetailDrawer,
@@ -2286,6 +2287,16 @@ export function PracticePortal() {
   function renderDashboard() {
     const totalMRR = apiDashStats?.totalMrr ?? (isDemoMode ? 39328 : 0);
 
+    // Onboarding gate — show the checklist for fresh practices, the
+    // smaller Connect banner once they've dismissed the checklist but
+    // still haven't connected Stripe. Both self-detect their state.
+    let onboardingDismissed = false;
+    try {
+      onboardingDismissed = localStorage.getItem("membermd_onboarding_dismissed") === "1";
+    } catch {
+      onboardingDismissed = false;
+    }
+
     return (
       <div className="space-y-5">
         {/* Stripe-grade page header */}
@@ -2296,6 +2307,17 @@ export function PracticePortal() {
           </div>
           <RefreshButton onRefresh={loadPracticeData} title="Refresh dashboard" />
         </div>
+
+        {/* Onboarding checklist (full) for fresh practices, or compact
+            Connect banner once they've dismissed the checklist. */}
+        {!onboardingDismissed ? (
+          <OnboardingChecklist
+            onNavigate={(tab) => setActiveTab(tab as TabId)}
+            onDismiss={() => loadPracticeData()}
+          />
+        ) : (
+          <ConnectSetupBanner onSetup={() => setActiveTab("practice-settings" as TabId)} />
+        )}
 
         {/* Revenue by Source */}
         <div>
@@ -2615,6 +2637,21 @@ export function PracticePortal() {
           </div>
           <div className="flex items-center gap-2 shrink-0">
             <RefreshButton onRefresh={loadPracticeData} title="Refresh roster" />
+            <button
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium text-slate-600 border border-slate-200 hover:bg-slate-50 transition-colors"
+              onClick={async () => {
+                const r = await onboardingService.createSamplePatient();
+                if (r.error) {
+                  setToast({ message: r.error, type: "error" });
+                  return;
+                }
+                setToast({ message: "Sample patient created.", type: "success" });
+                loadPracticeData();
+              }}
+              title="Create a Stripe-style test patient — useful for clicking through the UI without committing real PHI"
+            >
+              + Sample patient
+            </button>
             <button
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium text-white shadow-sm transition-colors"
               style={{ backgroundColor: "#635bff" }}

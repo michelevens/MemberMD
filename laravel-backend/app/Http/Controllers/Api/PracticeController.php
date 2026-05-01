@@ -165,6 +165,21 @@ class PracticeController extends Controller
     }
 
     /**
+     * Mark the auth user's onboarding checklist as completed. Used to
+     * dismiss the dashboard onboarding banner once the practice has
+     * worked through the first-day setup steps.
+     */
+    public function completeOnboarding(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        $user->update(['onboarding_completed' => true]);
+
+        return response()->json([
+            'data' => ['onboarding_completed' => true],
+        ]);
+    }
+
+    /**
      * Re-run bootstrap + provisioning for the current practice.
      *
      * Practices that signed up before specific seeders (e.g. EntitlementType)

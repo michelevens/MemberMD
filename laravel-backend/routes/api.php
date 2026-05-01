@@ -189,6 +189,20 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
     // Practice: own practice
     Route::get('/practice/me', [PracticeController::class, 'myPractice']);
     Route::post('/practice/rebootstrap', [PracticeController::class, 'rebootstrap']);
+
+    // ===== First-mile onboarding helpers =====
+    // Fork specialty default_plan_templates → real MembershipPlan rows.
+    // Idempotent; skips plans that already exist by name.
+    Route::post('/practice/starter-plans', [\App\Http\Controllers\Api\StarterPlanController::class, 'store']);
+
+    // Sample patient generator — Stripe-style test fixtures so a fresh
+    // practice can click through the UI without committing real PHI.
+    Route::post('/practice/sample-patient', [\App\Http\Controllers\Api\SamplePatientController::class, 'store']);
+    Route::delete('/practice/sample-patients', [\App\Http\Controllers\Api\SamplePatientController::class, 'destroyAll']);
+
+    // Mark the auth user's onboarding checklist as completed (one-shot —
+    // dismissing the dashboard banner / checklist).
+    Route::post('/practice/onboarding/complete', [PracticeController::class, 'completeOnboarding']);
     Route::put('/practice/branding', [PracticeController::class, 'updateBranding']);
 
     // Master Data (SuperAdmin)

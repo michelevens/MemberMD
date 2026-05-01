@@ -136,6 +136,11 @@ class AuthController extends Controller
             'licenses.*.number' => 'required_with:licenses|string|max:50',
             'licenses.*.state' => 'required_with:licenses|string|max:2',
             'bio' => 'nullable|string|max:2000',
+            // Opt-in: fork the specialty's default_plan_templates JSON
+            // blueprints into real MembershipPlan rows on signup. Closes
+            // the first-mile gap where a fresh practice can't enroll a
+            // patient because there are zero plans to enroll into.
+            'use_starter_plans' => 'nullable|boolean',
         ]);
 
         // Create the practice (tenant)
@@ -184,6 +189,49 @@ class AuthController extends Controller
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString(),
             ]);
+        }
+
+        // Opt-in: fork starter plan blueprints from the specialty into
+        // real MembershipPlan rows. Best-effort — failure here doesn't
+        // block registration, the practice can call /practice/starter-plans
+        // later or build their own plans from the Practice Portal.
+        $starterPlanCount = 0;
+        if (!empty($validated['use_starter_plans'])) {
+            try {
+                $specialty = \App\Models\MasterSpecialty::where('code', strtolower((string) $practice->specialty))
+                    ->orWhere('name', $practice->specialty)
+                    ->first();
+                $blueprints = $specialty?->default_plan_templates ?? [];
+                foreach ($blueprints as $tpl) {
+                    if (empty($tpl['name'])) continue;
+                    $exists = \App\Models\MembershipPlan::where('tenant_id', $practice->id)
+                        ->where('name', $tpl['name'])
+                        ->exists();
+                    if ($exists) continue;
+                    \App\Models\MembershipPlan::create([
+                        'tenant_id' => $practice->id,
+                        'name' => $tpl['name'],
+                        'description' => $tpl['description'] ?? null,
+                        'badge_text' => $tpl['badge_text'] ?? null,
+                        'monthly_price' => $tpl['monthly_price'] ?? 0,
+                        'annual_price' => $tpl['annual_price'] ?? null,
+                        'visits_per_month' => $tpl['visits_per_month'] ?? -1,
+                        'telehealth_included' => $tpl['telehealth_included'] ?? true,
+                        'messaging_included' => $tpl['messaging_included'] ?? true,
+                        'messaging_response_sla_hours' => $tpl['messaging_response_sla_hours'] ?? null,
+                        'crisis_support' => $tpl['crisis_support'] ?? false,
+                        'is_active' => true,
+                        'version' => 1,
+                    ]);
+                    $starterPlanCount++;
+                }
+                $provisioningSummary['starter_plans'] = $starterPlanCount;
+            } catch (\Throwable $e) {
+                \Illuminate\Support\Facades\Log::warning('Starter plan fork failed at registration', [
+                    'practice_id' => $practice->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
         }
 
         // Create the practice admin user
