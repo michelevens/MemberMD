@@ -2257,10 +2257,19 @@ export function PracticePortal() {
     const totalMRR = apiDashStats?.totalMrr ?? (isDemoMode ? 39328 : 0);
 
     return (
-      <div className="space-y-6">
+      <div className="space-y-5">
+        {/* Stripe-grade page header */}
+        <div className="flex items-end justify-between gap-4">
+          <div>
+            <h2 className="text-2xl font-semibold text-slate-900 tracking-tight">Dashboard</h2>
+            <p className="text-sm text-slate-500 mt-0.5">Revenue, members, programs, and today's activity</p>
+          </div>
+          <RefreshButton onRefresh={loadPracticeData} title="Refresh dashboard" />
+        </div>
+
         {/* Revenue by Source */}
         <div>
-          <h3 className="text-lg font-semibold text-slate-800 mb-4">Revenue by Source</h3>
+          <h3 className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-3">Revenue by source</h3>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <StatCard
               icon={Heart}
@@ -2324,7 +2333,7 @@ export function PracticePortal() {
 
         {/* Program Performance Cards */}
         <div>
-          <h3 className="text-lg font-semibold text-slate-800 mb-4">Program Performance</h3>
+          <h3 className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-3">Program performance</h3>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {!isDemoMode && MOCK_PROGRAM_STATS.length > 0 && (isDemoMode ? MOCK_PROGRAM_STATS : []).length === 0 && (
               <div className="col-span-full py-8 text-center text-slate-400 text-sm">No program data available yet. Configure programs in the Programs tab.</div>
@@ -2366,7 +2375,7 @@ export function PracticePortal() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Appointments */}
           <div className="lg:col-span-2">
-            <h3 className="text-lg font-semibold text-slate-800 mb-4">Upcoming Appointments</h3>
+            <h3 className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-3">Upcoming appointments</h3>
             <div className="glass rounded-xl overflow-hidden">
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
@@ -2437,7 +2446,7 @@ export function PracticePortal() {
 
           {/* Activity */}
           <div>
-            <h3 className="text-lg font-semibold text-slate-800 mb-4">Recent Activity</h3>
+            <h3 className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-3">Recent activity</h3>
             <div className="glass rounded-xl p-4 space-y-3">
               {(isDemoMode ? MOCK_ACTIVITY : []).map((item) => (
                 <div key={item.id} className="flex items-start gap-3">
@@ -5902,7 +5911,7 @@ export function PracticePortal() {
 
         {/* Today's Telehealth Sessions */}
         <div>
-          <h3 className="text-lg font-semibold text-slate-800 mb-4">Today&apos;s Telehealth Sessions</h3>
+          <h3 className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-3">Today&apos;s telehealth sessions</h3>
           <div className="space-y-3">
             {telehealthAppointments.length === 0 ? (
               <div className="glass rounded-xl p-8 text-center">
