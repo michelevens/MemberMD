@@ -2008,92 +2008,76 @@ export function SuperAdminPortal() {
           </div>
         </div>
 
-        <div className="glass rounded-xl overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr style={{ backgroundColor: "#f8fafc" }}>
-                  <th className="text-left px-6 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                    Timestamp
-                  </th>
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                    User
-                  </th>
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                    Action
-                  </th>
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                    Resource
-                  </th>
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                    IP Address
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {(apiAuditLogs || (isDemoMode ? MOCK_AUDIT_LOGS : [])).length === 0 && (
-                  <tr>
-                    <td colSpan={5} className="px-6 py-12 text-center text-sm text-slate-400">
-                      No audit events recorded yet
-                    </td>
-                  </tr>
-                )}
-                {(apiAuditLogs || (isDemoMode ? MOCK_AUDIT_LOGS : [])).map((log) => {
-                  const actionColor = log.action.includes("suspended")
-                    ? "#dc2626"
-                    : log.action.includes("approved") ||
-                        log.action.includes("created")
-                      ? "#2f8132"
-                      : log.action.includes("expiring")
-                        ? "#d97706"
-                        : "#475569";
-                  return (
-                    <tr
-                      key={log.id}
-                      className="hover:bg-slate-50/50 transition-colors"
-                    >
-                      <td className="px-6 py-3.5">
-                        <span className="text-sm text-slate-600 font-mono">
-                          {log.timestamp}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3.5">
-                        <span
-                          className="text-sm font-medium"
-                          style={{
-                            color:
-                              log.user === "system" ? "#94a3b8" : "#102a43",
-                          }}
-                        >
-                          {log.user}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3.5">
-                        <span
-                          className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold font-mono"
-                          style={{
-                            backgroundColor: `${actionColor}12`,
-                            color: actionColor,
-                          }}
-                        >
-                          {log.action}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3.5 text-sm text-slate-600">
-                        {log.resource}
-                      </td>
-                      <td className="px-4 py-3.5">
-                        <span className="text-sm text-slate-400 font-mono">
-                          {log.ipAddress}
-                        </span>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
+        {(() => {
+          const logs = (apiAuditLogs || (isDemoMode ? MOCK_AUDIT_LOGS : []));
+          type Log = typeof logs[number];
+
+          const actionColor = (action: string) =>
+            action.includes("suspended") ? "#b91c1c"
+            : action.includes("approved") || action.includes("created") ? "#066e54"
+            : action.includes("expiring") ? "#92400e"
+            : "#475569";
+
+          const cols: import("../shared/stripe-ui").DataTableColumn<Log>[] = [
+            {
+              key: "timestamp",
+              header: "Timestamp",
+              cell: (log) => <span className="text-xs text-slate-500 font-mono tabular-nums">{log.timestamp}</span>,
+            },
+            {
+              key: "user",
+              header: "Actor",
+              cell: (log) => (
+                <span
+                  className="text-sm font-medium"
+                  style={{ color: log.user === "system" ? "#94a3b8" : "#0f172a" }}
+                >
+                  {log.user}
+                </span>
+              ),
+            },
+            {
+              key: "action",
+              header: "Action",
+              cell: (log) => {
+                const c = actionColor(log.action);
+                return (
+                  <span
+                    className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium font-mono"
+                    style={{ backgroundColor: `${c}14`, color: c }}
+                  >
+                    {log.action}
+                  </span>
+                );
+              },
+            },
+            {
+              key: "resource",
+              header: "Resource",
+              hideBelow: "md",
+              cell: (log) => <span className="text-slate-600">{log.resource}</span>,
+            },
+            {
+              key: "ip",
+              header: "IP address",
+              hideBelow: "lg",
+              cell: (log) => <span className="text-xs text-slate-400 font-mono tabular-nums">{log.ipAddress}</span>,
+            },
+          ];
+
+          return (
+            <DataTable
+              columns={cols}
+              rows={logs}
+              rowKey={(l) => l.id}
+              empty={
+                <div className="text-center py-8">
+                  <p className="text-sm text-slate-500">No audit events recorded yet</p>
+                </div>
+              }
+            />
+          );
+        })()}
       </div>
     );
   }
@@ -2468,55 +2452,69 @@ export function SuperAdminPortal() {
 
         {/* Members */}
         <div className="glass rounded-xl overflow-hidden">
-          <div className="px-6 py-4 border-b border-slate-200/60">
-            <h3 className="text-base font-semibold" style={{ color: "#102a43" }}>Members</h3>
-            <p className="text-xs text-slate-500 mt-0.5">{members.length} member{members.length !== 1 ? "s" : ""} enrolled</p>
+          <div className="px-4 py-3 border-b border-slate-100">
+            <h3 className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Members</h3>
+            <p className="text-sm text-slate-700 font-medium mt-0.5">
+              {members.length} {members.length === 1 ? "member" : "members"} enrolled
+            </p>
           </div>
-          {members.length === 0 ? (
-            <div className="px-6 py-12 text-center">
-              <Users className="w-10 h-10 mx-auto mb-2 text-slate-300" />
-              <p className="text-sm text-slate-500">No members yet</p>
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr style={{ backgroundColor: "#f8fafc" }}>
-                    <th className="text-left px-6 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Name</th>
-                    <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Plan</th>
-                    <th className="text-center px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Status</th>
-                    <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Joined</th>
-                    <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Last Visit</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {members.map((member) => (
-                    <tr key={member.id} className="hover:bg-slate-50/50 transition-colors">
-                      <td className="px-6 py-3.5">
-                        <div className="flex items-center gap-3">
-                          <div
-                            className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-white shrink-0"
-                            style={{ background: "linear-gradient(135deg, #334e68, #243b53)" }}
-                          >
-                            {member.name.split(" ").map(n => n[0]).join("")}
-                          </div>
-                          <span className="text-sm font-medium" style={{ color: "#102a43" }}>{member.name}</span>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3.5"><PlanBadge plan={member.plan} /></td>
-                      <td className="px-4 py-3.5 text-center"><MemberStatusBadge status={member.status} /></td>
-                      <td className="px-4 py-3.5 text-sm text-slate-500">
-                        {new Date(member.joined).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
-                      </td>
-                      <td className="px-4 py-3.5 text-sm text-slate-500">
-                        {member.lastVisit === "-" ? "-" : new Date(member.lastVisit).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+          {(() => {
+            const cols: import("../shared/stripe-ui").DataTableColumn<MockMember>[] = [
+              {
+                key: "name",
+                header: "Name",
+                cell: (m) => (
+                  <div className="flex items-center gap-2 min-w-0">
+                    <div
+                      className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold text-white shrink-0"
+                      style={{ background: "linear-gradient(135deg, #334e68, #243b53)" }}
+                    >
+                      {m.name.split(" ").map(n => n[0]).join("").slice(0, 2)}
+                    </div>
+                    <span className="text-sm text-slate-800 truncate">{m.name}</span>
+                  </div>
+                ),
+              },
+              { key: "plan", header: "Plan", cell: (m) => <PlanBadge plan={m.plan} /> },
+              { key: "status", header: "Status", cell: (m) => <MemberStatusBadge status={m.status} /> },
+              {
+                key: "joined",
+                header: "Joined",
+                hideBelow: "md",
+                cell: (m) => (
+                  <span className="text-slate-500">
+                    {new Date(m.joined).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                  </span>
+                ),
+              },
+              {
+                key: "lastVisit",
+                header: "Last visit",
+                hideBelow: "md",
+                cell: (m) => (
+                  <span className="text-slate-500">
+                    {m.lastVisit === "-" ? "—" : new Date(m.lastVisit).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                  </span>
+                ),
+              },
+            ];
+            return (
+              <div className="border-t border-slate-100">
+                <DataTable
+                  columns={cols}
+                  rows={members}
+                  rowKey={(m) => m.id}
+                  empty={
+                    <div className="text-center py-8">
+                      <Users className="w-10 h-10 mx-auto mb-2 text-slate-300" />
+                      <p className="text-sm text-slate-500">No members yet</p>
+                    </div>
+                  }
+                  className="border-0 rounded-none"
+                />
+              </div>
+            );
+          })()}
         </div>
 
         {/* Providers */}
