@@ -94,6 +94,14 @@ import {
   Megaphone,
 } from "lucide-react";
 import { RefreshButton } from "../shared/RefreshButton";
+import {
+  DataTable,
+  DetailDrawer,
+  EntityId,
+  FilterChips,
+  MoneyAmount,
+  StatusPill,
+} from "../shared/stripe-ui";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -517,6 +525,23 @@ const MOCK_THREADS = [
 
 // ─── Helper Components ──────────────────────────────────────────────────────
 
+/**
+ * Small label/value field for the Stripe-style detail drawer. Pattern
+ * mirrors Stripe's invoice / customer detail panels: 11px uppercase
+ * label, 13-14px slate-800 value, single-line layout that wraps when
+ * the value is verbose.
+ */
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="grid grid-cols-[140px_1fr] items-start gap-3">
+      <span className="text-[11px] uppercase tracking-wider font-semibold text-slate-400 pt-0.5">
+        {label}
+      </span>
+      <div className="min-w-0 text-sm">{children}</div>
+    </div>
+  );
+}
+
 function StatusBadge({ status }: { status: string }) {
   const config: Record<string, { bg: string; text: string; dot: string }> = {
     active: { bg: "#ecf9ec", text: "#2f8132", dot: "#3f9142" },
@@ -808,7 +833,10 @@ export function PracticePortal() {
   const [inviteStaffLoading, setInviteStaffLoading] = useState(false);
 
   // ─── Inline Invoice Detail ──────────────────────────────────────────
-  const [expandedInvoiceId, setExpandedInvoiceId] = useState<string | null>(null);
+  // Stripe-style invoices view: search box, filter chips, slide-over detail.
+  const [invoiceSearch, setInvoiceSearch] = useState("");
+  const [invoiceFilters, setInvoiceFilters] = useState<import("../shared/stripe-ui").ActiveFilter[]>([]);
+  const [selectedInvoiceId, setSelectedInvoiceId] = useState<string | null>(null);
 
   // ─── Create Plan Modal ─────────────────────────────────────────────
   const [showCreatePlan, setShowCreatePlan] = useState(false);
@@ -6097,116 +6125,318 @@ export function PracticePortal() {
   // ─── Invoices Tab ───────────────────────────────────────────────────────
 
   function renderInvoices() {
+    // Filter facets — populated from the current invoice set so we
+    // never show a facet that has no rows. Status enum from the
+    // Invoice model + Plan from membership.plan.name.
+    const statusOpts = Array.from(new Set(invoices.map((i) => i.status))).map((s) => ({
+      value: s,
+      label: s.charAt(0).toUpperCase() + s.slice(1),
+    }));
+    const planOpts = Array.from(new Set(invoices.map((i) => i.plan).filter(Boolean))).map((p) => ({
+      value: p,
+      label: p,
+    }));
+    const dateOpts = [
+      { value: "7d", label: "Last 7 days" },
+      { value: "30d", label: "Last 30 days" },
+      { value: "90d", label: "Last 90 days" },
+      { value: "ytd", label: "Year to date" },
+    ];
+
+    // Apply active filters + search
+    const filtered = invoices.filter((inv) => {
+      // Search across invoice id, patient name, plan
+      if (invoiceSearch.trim()) {
+        const q = invoiceSearch.toLowerCase();
+        const hay = [inv.id, inv.patient, inv.plan, inv.status].join(" ").toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      for (const f of invoiceFilters) {
+        if (f.key === "status" && inv.status !== f.value) return false;
+        if (f.key === "plan" && inv.plan !== f.value) return false;
+        if (f.key === "date" && inv.date) {
+          const days = f.value === "7d" ? 7 : f.value === "30d" ? 30 : f.value === "90d" ? 90 : 365;
+          const cutoff = Date.now() - days * 86400000;
+          const d = new Date(inv.date).getTime();
+          if (Number.isFinite(d) && d < cutoff) return false;
+        }
+      }
+      return true;
+    });
+
+    const facets: import("../shared/stripe-ui").FilterFacet[] = [
+      { key: "status", label: "Status", options: statusOpts },
+      { key: "plan", label: "Plan", options: planOpts },
+      { key: "date", label: "Created", options: dateOpts },
+    ];
+
+    const cols: import("../shared/stripe-ui").DataTableColumn<typeof invoices[number]>[] = [
+      {
+        key: "amount",
+        header: "Amount",
+        align: "left",
+        cell: (inv) => <MoneyAmount amount={inv.amount} />,
+      },
+      {
+        key: "status",
+        header: "Status",
+        cell: (inv) => <StatusPill label={inv.status} />,
+      },
+      {
+        key: "patient",
+        header: "Customer",
+        cell: (inv) => (
+          <div className="flex items-center gap-2 min-w-0">
+            <div
+              className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold text-white shrink-0"
+              style={{ background: "linear-gradient(135deg, #334e68, #243b53)" }}
+            >
+              {(inv.patient || "?").split(" ").map((n: string) => n[0]).join("").slice(0, 2)}
+            </div>
+            <span className="truncate text-slate-800">{inv.patient}</span>
+          </div>
+        ),
+      },
+      {
+        key: "plan",
+        header: "Plan",
+        hideBelow: "sm",
+        cell: (inv) => (inv.plan ? <PlanBadge plan={inv.plan} /> : <span className="text-slate-300">—</span>),
+      },
+      {
+        key: "date",
+        header: "Created",
+        hideBelow: "md",
+        cell: (inv) => <span className="text-slate-500">{inv.date}</span>,
+      },
+      {
+        key: "id",
+        header: "Invoice",
+        hideBelow: "lg",
+        cell: (inv) => <EntityId prefix="inv" id={inv.id} />,
+      },
+    ];
+
+    const rowActions = (inv: typeof invoices[number]): import("../shared/stripe-ui").KebabAction[] => [
+      { label: "View details", onClick: () => setSelectedInvoiceId(inv.id) },
+      { label: "Download PDF", onClick: () => { const url = billingEnhancedService.getInvoicePdfUrl(inv.id, true); window.open(url, "_blank"); } },
+      ...(inv.status === "open" || inv.status === "overdue" ? [
+        { label: "Send invoice", onClick: () => handleSendInvoice(inv.id) },
+        { label: "Mark as paid", onClick: () => handleMarkInvoicePaid(inv.id) },
+      ] : []),
+      ...(inv.status !== "paid" ? [
+        { label: "Void invoice", danger: true, onClick: () => setConfirmDialog({ title: "Void Invoice", message: `Void invoice ${inv.id}?`, confirmLabel: "Void", danger: true, onConfirm: async () => { try { await invoiceService.void(inv.id); setToast({ message: "Invoice voided.", type: "success" }); loadPracticeData(); } catch { setToast({ message: "Failed.", type: "error" }); } setConfirmDialog(null); } }) },
+      ] : []),
+    ];
+
+    const selectedInvoice = invoices.find((i) => i.id === selectedInvoiceId) ?? null;
+
     return (
-      <div className="space-y-4">
-        <div className="flex items-center justify-between">
-          <h2 className="text-xl font-bold text-slate-800">Invoices</h2>
-          <button
-            className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors"
-            style={{ backgroundColor: "#27ab83" }}
-            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#147d64")}
-            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "#27ab83")}
-            onClick={() => setToast({ message: "Invoice creation coming soon. Use Stripe for now.", type: "success" })}
-          >
-            <Plus className="w-4 h-4" />
-            New Invoice
-          </button>
+      <div className="space-y-5">
+        {/* Page header */}
+        <div className="flex items-end justify-between gap-4">
+          <div>
+            <h2 className="text-2xl font-semibold text-slate-900 tracking-tight">Invoices</h2>
+            <p className="text-sm text-slate-500 mt-0.5">
+              {filtered.length === invoices.length
+                ? `${invoices.length} total`
+                : `${filtered.length} of ${invoices.length}`}
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <RefreshButton onRefresh={loadPracticeData} title="Refresh invoices" />
+            <button
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium text-white shadow-sm transition-colors"
+              style={{ backgroundColor: "#635bff" }}
+              onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#544ee0")}
+              onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "#635bff")}
+              onClick={() => setToast({ message: "Invoice creation coming soon. Use Stripe for now.", type: "success" })}
+            >
+              <Plus className="w-4 h-4" />
+              New invoice
+            </button>
+          </div>
         </div>
 
-        {/* Summary cards */}
+        {/* Summary KPI tiles — Stripe-style: thin border, mono nums, subtle eyebrow */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <div className="glass rounded-lg p-4">
-            <p className="text-xs text-slate-500 mb-1">Total Invoiced</p>
-            <p className="text-xl font-bold text-slate-800">
-              ${invoiceSummary.total.toLocaleString("en-US", { minimumFractionDigits: 2 })}
-            </p>
-          </div>
-          <div className="glass rounded-lg p-4">
-            <p className="text-xs text-slate-500 mb-1">Paid</p>
-            <p className="text-xl font-bold" style={{ color: "#2f8132" }}>
-              ${invoiceSummary.paid.toLocaleString("en-US", { minimumFractionDigits: 2 })}
-            </p>
-          </div>
-          <div className="glass rounded-lg p-4">
-            <p className="text-xs text-slate-500 mb-1">Open</p>
-            <p className="text-xl font-bold" style={{ color: "#334e68" }}>
-              ${invoiceSummary.open.toLocaleString("en-US", { minimumFractionDigits: 2 })}
-            </p>
-          </div>
-          <div className="glass rounded-lg p-4">
-            <p className="text-xs text-slate-500 mb-1">Overdue</p>
-            <p className="text-xl font-bold" style={{ color: "#dc2626" }}>
-              ${invoiceSummary.overdue.toLocaleString("en-US", { minimumFractionDigits: 2 })}
-            </p>
-          </div>
+          {[
+            { label: "Total invoiced", value: invoiceSummary.total, color: "#0f172a" },
+            { label: "Paid", value: invoiceSummary.paid, color: "#066e54" },
+            { label: "Open", value: invoiceSummary.open, color: "#334e68" },
+            { label: "Overdue", value: invoiceSummary.overdue, color: "#b91c1c" },
+          ].map((tile) => (
+            <div key={tile.label} className="rounded-xl border border-slate-200 bg-white px-4 py-3">
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                {tile.label}
+              </p>
+              <p className="text-xl font-semibold tabular-nums mt-1" style={{ color: tile.color }}>
+                <MoneyAmount amount={tile.value} />
+              </p>
+            </div>
+          ))}
         </div>
 
-        <div className="glass rounded-xl overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr style={{ backgroundColor: "rgba(16,42,67,0.03)" }}>
-                  <th className="text-left px-4 py-3 font-medium text-slate-500">Invoice #</th>
-                  <th className="text-left px-4 py-3 font-medium text-slate-500">Patient</th>
-                  <th className="text-left px-4 py-3 font-medium text-slate-500">Amount</th>
-                  <th className="text-left px-4 py-3 font-medium text-slate-500 hidden sm:table-cell">Plan</th>
-                  <th className="text-left px-4 py-3 font-medium text-slate-500">Status</th>
-                  <th className="text-left px-4 py-3 font-medium text-slate-500 hidden md:table-cell">Date</th>
-                  <th className="text-left px-4 py-3 font-medium text-slate-500">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {invoices.map((inv) => (
-                  <tr
-                    key={inv.id}
-                    className="border-t border-slate-100 hover:bg-slate-50 transition-colors"
-                  >
-                    <td className="px-4 py-3 font-mono text-sm font-medium text-slate-700">{inv.id}</td>
-                    <td className="px-4 py-3 text-slate-700">{inv.patient}</td>
-                    <td className="px-4 py-3 font-medium text-slate-800">
-                      ${Number(inv.amount ?? 0).toFixed(2)}
-                    </td>
-                    <td className="px-4 py-3 hidden sm:table-cell">
-                      <PlanBadge plan={inv.plan} />
-                    </td>
-                    <td className="px-4 py-3">
-                      <StatusBadge status={inv.status} />
-                    </td>
-                    <td className="px-4 py-3 text-slate-500 hidden md:table-cell">{inv.date}</td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-1">
-                        <button
-                          className="p-1.5 rounded-md hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors"
-                          title="View invoice"
-                          onClick={() => setExpandedInvoiceId(expandedInvoiceId === inv.id ? null : inv.id)}
-                        >
-                          <Eye className="w-4 h-4" />
-                        </button>
-                        <button
-                          className="p-1.5 rounded-md hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors"
-                          title="Edit invoice"
-                          onClick={() => setToast({ message: "Invoice editing coming soon.", type: "success" })}
-                        >
-                          <Pencil className="w-4 h-4" />
-                        </button>
-                        <MoreActionsDropdown actions={[
-                          { label: "Download PDF", onClick: () => { const url = billingEnhancedService.getInvoicePdfUrl(inv.id, true); window.open(url, "_blank"); } },
-                          ...(inv.status === "open" || inv.status === "overdue" ? [
-                            { label: "Send Invoice", onClick: () => handleSendInvoice(inv.id) },
-                            { label: "Mark as Paid", onClick: () => handleMarkInvoicePaid(inv.id) },
-                          ] : []),
-                          ...(inv.status !== "paid" ? [
-                            { label: "Void Invoice", onClick: () => setConfirmDialog({ title: "Void Invoice", message: `Void invoice ${inv.id}?`, confirmLabel: "Void", danger: true, onConfirm: async () => { try { await invoiceService.void(inv.id); setToast({ message: "Invoice voided.", type: "success" }); loadPracticeData(); } catch { setToast({ message: "Failed.", type: "error" }); } setConfirmDialog(null); } }), danger: true },
-                          ] : []),
-                        ]} />
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+        {/* Search + filter chips bar */}
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative flex-1 min-w-[240px] max-w-sm">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+            <input
+              type="text"
+              placeholder="Search invoices..."
+              value={invoiceSearch}
+              onChange={(e) => setInvoiceSearch(e.target.value)}
+              className="w-full pl-9 pr-3 py-1.5 rounded-md border border-slate-200 text-sm bg-white focus:outline-none focus:border-slate-400"
+            />
           </div>
+          <FilterChips facets={facets} active={invoiceFilters} onChange={setInvoiceFilters} />
         </div>
+
+        {/* Stripe-grade data table */}
+        <DataTable
+          columns={cols}
+          rows={filtered}
+          rowKey={(inv) => inv.id}
+          actions={rowActions}
+          onRowClick={(inv) => setSelectedInvoiceId(inv.id)}
+          highlightRowId={selectedInvoiceId}
+          empty={
+            <div className="text-center py-8">
+              <p className="text-sm text-slate-500 mb-1">No invoices match your filters</p>
+              <button
+                onClick={() => { setInvoiceFilters([]); setInvoiceSearch(""); }}
+                className="text-xs text-blue-600 hover:underline"
+              >
+                Clear filters
+              </button>
+            </div>
+          }
+          footer={
+            filtered.length > 0
+              ? `Showing ${filtered.length} ${filtered.length === 1 ? "invoice" : "invoices"}`
+              : null
+          }
+        />
+
+        {/* Slide-over invoice detail */}
+        <DetailDrawer
+          open={!!selectedInvoice}
+          onClose={() => setSelectedInvoiceId(null)}
+          eyebrow="Invoice"
+          title={
+            selectedInvoice ? (
+              <div className="flex items-center gap-2 min-w-0">
+                <MoneyAmount amount={selectedInvoice.amount} />
+                <StatusPill label={selectedInvoice.status} />
+              </div>
+            ) : ""
+          }
+          width="md"
+          footer={
+            selectedInvoice ? (
+              <>
+                <button
+                  onClick={() => setSelectedInvoiceId(null)}
+                  className="px-3 py-1.5 rounded-md text-sm font-medium border border-slate-200 text-slate-600 hover:bg-slate-50"
+                >
+                  Close
+                </button>
+                <button
+                  onClick={() => { const url = billingEnhancedService.getInvoicePdfUrl(selectedInvoice.id, true); window.open(url, "_blank"); }}
+                  className="px-3 py-1.5 rounded-md text-sm font-medium text-white shadow-sm"
+                  style={{ backgroundColor: "#635bff" }}
+                >
+                  Download PDF
+                </button>
+              </>
+            ) : null
+          }
+        >
+          {selectedInvoice && (
+            <div className="space-y-5">
+              {/* Identity */}
+              <div className="space-y-3">
+                <Field label="Invoice ID">
+                  <EntityId prefix="inv" id={selectedInvoice.id} full />
+                </Field>
+                <Field label="Customer">
+                  <div className="flex items-center gap-2">
+                    <div
+                      className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold text-white shrink-0"
+                      style={{ background: "linear-gradient(135deg, #334e68, #243b53)" }}
+                    >
+                      {(selectedInvoice.patient || "?").split(" ").map((n: string) => n[0]).join("").slice(0, 2)}
+                    </div>
+                    <span className="text-sm text-slate-800">{selectedInvoice.patient}</span>
+                  </div>
+                </Field>
+                <Field label="Plan">
+                  {selectedInvoice.plan ? <PlanBadge plan={selectedInvoice.plan} /> : <span className="text-sm text-slate-400">—</span>}
+                </Field>
+                <Field label="Created">
+                  <span className="text-sm text-slate-700">{selectedInvoice.date || "—"}</span>
+                </Field>
+                <Field label="Status">
+                  <StatusPill label={selectedInvoice.status} />
+                </Field>
+              </div>
+
+              {/* Amount breakdown */}
+              <div className="border-t border-slate-100 pt-4">
+                <p className="text-[11px] uppercase tracking-wider font-semibold text-slate-400 mb-3">
+                  Amount
+                </p>
+                <div className="rounded-lg border border-slate-200 bg-slate-50/60 p-4 space-y-2">
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-slate-600">{selectedInvoice.plan ? `${selectedInvoice.plan} membership` : "Subtotal"}</span>
+                    <MoneyAmount amount={selectedInvoice.amount} />
+                  </div>
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-slate-600">Tax</span>
+                    <span className="text-slate-400 tabular-nums">$0.00</span>
+                  </div>
+                  <div className="flex items-center justify-between pt-2 border-t border-slate-200 text-sm">
+                    <span className="font-semibold text-slate-900">Total</span>
+                    <MoneyAmount amount={selectedInvoice.amount} className="font-semibold text-base" />
+                  </div>
+                </div>
+              </div>
+
+              {/* Quick actions */}
+              <div className="border-t border-slate-100 pt-4">
+                <p className="text-[11px] uppercase tracking-wider font-semibold text-slate-400 mb-3">
+                  Actions
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {(selectedInvoice.status === "open" || selectedInvoice.status === "overdue") && (
+                    <>
+                      <button
+                        onClick={() => handleSendInvoice(selectedInvoice.id)}
+                        className="px-3 py-1.5 rounded-md text-sm font-medium border border-slate-200 text-slate-700 hover:bg-slate-50"
+                      >
+                        Send invoice
+                      </button>
+                      <button
+                        onClick={() => handleMarkInvoicePaid(selectedInvoice.id)}
+                        className="px-3 py-1.5 rounded-md text-sm font-medium border border-emerald-200 text-emerald-700 bg-emerald-50 hover:bg-emerald-100"
+                      >
+                        Mark as paid
+                      </button>
+                    </>
+                  )}
+                  {selectedInvoice.status !== "paid" && (
+                    <button
+                      onClick={() => setConfirmDialog({ title: "Void Invoice", message: `Void invoice ${selectedInvoice.id}?`, confirmLabel: "Void", danger: true, onConfirm: async () => { try { await invoiceService.void(selectedInvoice.id); setToast({ message: "Invoice voided.", type: "success" }); loadPracticeData(); setSelectedInvoiceId(null); } catch { setToast({ message: "Failed.", type: "error" }); } setConfirmDialog(null); } })}
+                      className="px-3 py-1.5 rounded-md text-sm font-medium border border-red-200 text-red-700 hover:bg-red-50"
+                    >
+                      Void invoice
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+        </DetailDrawer>
       </div>
     );
   }
