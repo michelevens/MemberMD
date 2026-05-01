@@ -186,15 +186,15 @@ export function ProviderDetailPage({ providerId, embedded = false, onBack }: Pro
             <ArrowLeft className="w-4 h-4" />
             Back to Providers
           </button>
-          <div className="flex items-start gap-4">
+          <div className="flex items-start gap-3">
             <div
-              className="w-16 h-16 rounded-full flex items-center justify-center text-white text-xl font-bold shrink-0"
-              style={{ backgroundColor: "#334e68" }}
+              className="w-12 h-12 rounded-lg flex items-center justify-center text-white text-base font-bold shrink-0"
+              style={{ background: "linear-gradient(135deg, #334e68, #243b53)" }}
             >
               {fullName.split(" ").map(n => n[0]).filter(Boolean).slice(0, 2).join("").toUpperCase()}
             </div>
             <div className="flex-1 min-w-0">
-              <h1 className="text-2xl font-bold text-slate-900 truncate">
+              <h1 className="text-2xl font-semibold tracking-tight text-slate-900 truncate">
                 {fullName}{credentials && `, ${credentials}`}
               </h1>
               <div className="flex items-center gap-3 mt-1 text-sm text-slate-500">
@@ -218,9 +218,9 @@ export function ProviderDetailPage({ providerId, embedded = false, onBack }: Pro
                 <button
                   key={t.key}
                   onClick={() => setActiveTab(t.key)}
-                  className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
+                  className={`flex items-center gap-2 px-3 py-2 text-[13px] font-medium border-b-2 transition-colors ${
                     isActive
-                      ? "border-teal-500 text-teal-700"
+                      ? "border-[#635bff] text-slate-900"
                       : "border-transparent text-slate-500 hover:text-slate-700"
                   }`}
                 >
