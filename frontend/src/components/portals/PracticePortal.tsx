@@ -3818,7 +3818,7 @@ export function PracticePortal() {
                       <tr key={inv.id} className="border-t border-slate-100 hover:bg-slate-50 transition-colors">
                         <td className="px-4 py-3 font-mono text-sm font-medium text-slate-700">{inv.id}</td>
                         <td className="px-4 py-3 text-slate-500">{inv.date}</td>
-                        <td className="px-4 py-3 font-medium text-slate-800">${inv.amount.toFixed(2)}</td>
+                        <td className="px-4 py-3 font-medium text-slate-800">${Number(inv.amount ?? 0).toFixed(2)}</td>
                         <td className="px-4 py-3"><StatusBadge status={inv.status} /></td>
                         <td className="px-4 py-3 text-slate-500 hidden md:table-cell">{inv.description}</td>
                         <td className="px-4 py-3">
@@ -5934,7 +5934,7 @@ export function PracticePortal() {
                     <td className="px-4 py-3 font-mono text-sm font-medium text-slate-700">{inv.id}</td>
                     <td className="px-4 py-3 text-slate-700">{inv.patient}</td>
                     <td className="px-4 py-3 font-medium text-slate-800">
-                      ${inv.amount.toFixed(2)}
+                      ${Number(inv.amount ?? 0).toFixed(2)}
                     </td>
                     <td className="px-4 py-3 hidden sm:table-cell">
                       <PlanBadge plan={inv.plan} />
@@ -6860,7 +6860,7 @@ export function PracticePortal() {
                     >
                       <td className="px-4 py-3 text-slate-700">{pay.date}</td>
                       <td className="px-4 py-3 font-medium text-slate-700">{pay.patient}</td>
-                      <td className="px-4 py-3 font-medium text-slate-800">${pay.amount.toFixed(2)}</td>
+                      <td className="px-4 py-3 font-medium text-slate-800">${Number(pay.amount ?? 0).toFixed(2)}</td>
                       <td className="px-4 py-3 text-slate-500 hidden md:table-cell capitalize">{pay.method === "card" ? "Card" : "Bank Transfer"}</td>
                       <td className="px-4 py-3">
                         <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium capitalize" style={{ backgroundColor: psc.bg, color: psc.text }}>
@@ -6894,7 +6894,7 @@ export function PracticePortal() {
                           )}
                           <MoreActionsDropdown actions={[
                             { label: "View Details", onClick: () => setToast({ message: "Payment detail view coming soon.", type: "success" }) },
-                            ...(pay.status === "succeeded" ? [{ label: "Refund", onClick: () => setConfirmDialog({ title: "Refund Payment", message: `Refund $${pay.amount.toFixed(2)} to ${pay.patient}?`, confirmLabel: "Refund", danger: true, onConfirm: async () => { try { await paymentService.refund(pay.id); setToast({ message: "Refund processed.", type: "success" }); loadPracticeData(); } catch { setToast({ message: "Refund failed.", type: "error" }); } setConfirmDialog(null); } }), danger: true }] : []),
+                            ...(pay.status === "succeeded" ? [{ label: "Refund", onClick: () => setConfirmDialog({ title: "Refund Payment", message: `Refund $${Number(pay.amount ?? 0).toFixed(2)} to ${pay.patient}?`, confirmLabel: "Refund", danger: true, onConfirm: async () => { try { await paymentService.refund(pay.id); setToast({ message: "Refund processed.", type: "success" }); loadPracticeData(); } catch { setToast({ message: "Refund failed.", type: "error" }); } setConfirmDialog(null); } }), danger: true }] : []),
                           ]} />
                         </div>
                       </td>
