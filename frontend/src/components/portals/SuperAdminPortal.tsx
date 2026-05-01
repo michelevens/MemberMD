@@ -2356,8 +2356,10 @@ export function SuperAdminPortal() {
                     setApprovalMessage(`${p.name} has been approved.`);
                     setPendingPractices((prev) => prev.filter((pp) => pp.id !== p.id));
                   }}
-                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold text-white transition-colors"
-                  style={{ background: "linear-gradient(135deg, #27ab83, #147d64)" }}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium text-white shadow-sm transition-colors"
+                  style={{ backgroundColor: "#635bff" }}
+                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#544ee0")}
+                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "#635bff")}
                 >
                   <CheckCircle2 className="w-4 h-4" />
                   Approve
@@ -2365,8 +2367,7 @@ export function SuperAdminPortal() {
               )}
               {p.status !== "suspended" && (
                 <button
-                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold transition-colors"
-                  style={{ border: "1px solid #ef4444", color: "#dc2626", backgroundColor: "transparent" }}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium border border-red-200 text-red-700 bg-white hover:bg-red-50 transition-colors"
                 >
                   <Shield className="w-4 h-4" />
                   Suspend
@@ -2376,30 +2377,20 @@ export function SuperAdminPortal() {
           </div>
         </div>
 
-        {/* Stats Row */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        {/* Stats Row — Stripe-style border tiles */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           {[
-            { label: "Members", value: formatNumber(p.members), icon: Users, gradient: "linear-gradient(135deg, #334e68, #243b53)" },
-            { label: "Providers", value: formatNumber(p.providers), icon: Stethoscope, gradient: "linear-gradient(135deg, #27ab83, #147d64)" },
-            { label: "Monthly Revenue", value: formatCurrency(p.mrr), icon: DollarSign, gradient: "linear-gradient(135deg, #0369a1, #0c4a6e)" },
-            { label: "Plan", value: p.specialty, subvalue: p.model, icon: FileText, gradient: "linear-gradient(135deg, #7c3aed, #5b21b6)" },
-          ].map((stat) => {
-            const Icon = stat.icon;
-            return (
-              <div key={stat.label} className="glass rounded-xl p-4">
-                <div className="flex items-start justify-between">
-                  <div>
-                    <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">{stat.label}</p>
-                    <p className="text-xl font-bold mt-1" style={{ color: "#102a43" }}>{stat.value}</p>
-                    {stat.subvalue && <p className="text-xs text-slate-400 mt-0.5">{stat.subvalue}</p>}
-                  </div>
-                  <div className="w-9 h-9 rounded-lg flex items-center justify-center" style={{ background: stat.gradient }}>
-                    <Icon className="w-4.5 h-4.5 text-white" />
-                  </div>
-                </div>
-              </div>
-            );
-          })}
+            { label: "Members", value: formatNumber(p.members) },
+            { label: "Providers", value: formatNumber(p.providers) },
+            { label: "Monthly revenue", value: formatCurrency(p.mrr) },
+            { label: "Plan / Model", value: p.specialty, subvalue: p.model },
+          ].map((stat) => (
+            <div key={stat.label} className="rounded-xl border border-slate-200 bg-white px-4 py-3">
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">{stat.label}</p>
+              <p className="text-xl font-semibold tabular-nums mt-1 text-slate-900">{stat.value}</p>
+              {stat.subvalue && <p className="text-xs text-slate-400 mt-0.5">{stat.subvalue}</p>}
+            </div>
+          ))}
         </div>
 
         {/* Practice Info */}
@@ -3409,10 +3400,19 @@ export function SuperAdminPortal() {
     }
 
     return (
-      <div className="animate-page-in space-y-6">
+      <div className="animate-page-in space-y-5">
+        {/* Page header */}
+        <div className="flex items-end justify-between gap-4">
+          <div>
+            <h2 className="text-2xl font-semibold text-slate-900 tracking-tight">Analytics</h2>
+            <p className="text-sm text-slate-500 mt-0.5">Platform-wide revenue, growth, and retention</p>
+          </div>
+          <RefreshButton onRefresh={loadData} title="Refresh analytics" />
+        </div>
+
         {/* Revenue Section */}
         <div>
-          <h2 className="text-xl font-bold mb-4" style={{ color: "#102a43" }}>Revenue</h2>
+          <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-400 mb-3">Revenue</h3>
 
           {/* MRR Overview */}
           <div className="glass rounded-xl p-6 mb-4">
@@ -3460,7 +3460,7 @@ export function SuperAdminPortal() {
 
         {/* Growth Section */}
         <div>
-          <h2 className="text-xl font-bold mb-4" style={{ color: "#102a43" }}>Growth</h2>
+          <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-400 mb-3">Growth</h3>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-4">
             {growthStats.map((s) => (
@@ -3517,7 +3517,7 @@ export function SuperAdminPortal() {
 
         {/* Churn Section */}
         <div>
-          <h2 className="text-xl font-bold mb-4" style={{ color: "#102a43" }}>Churn</h2>
+          <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-400 mb-3">Churn</h3>
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
             <div className="glass rounded-xl p-5">
@@ -3556,7 +3556,7 @@ export function SuperAdminPortal() {
 
         {/* Utilization Section */}
         <div>
-          <h2 className="text-xl font-bold mb-4" style={{ color: "#102a43" }}>Utilization</h2>
+          <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-400 mb-3">Utilization</h3>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             {/* Visit Utilization by Plan Tier */}
@@ -3597,7 +3597,7 @@ export function SuperAdminPortal() {
 
         {/* Retention Cohorts */}
         <div>
-          <h2 className="text-xl font-bold mb-4" style={{ color: "#102a43" }}>Retention Cohorts</h2>
+          <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-400 mb-3">Retention cohorts</h3>
           <div className="glass rounded-xl overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full">
@@ -3685,25 +3685,24 @@ export function SuperAdminPortal() {
     }
 
     return (
-      <div className="animate-page-in space-y-6">
-        {/* Revenue Summary */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-          {revenueSummary.map((stat) => {
-            const Icon = stat.icon;
-            return (
-              <div key={stat.label} className="glass hover-lift rounded-xl p-5 relative overflow-hidden">
-                <div className="flex items-start justify-between">
-                  <div>
-                    <p className="text-sm font-medium text-slate-500">{stat.label}</p>
-                    <p className="text-2xl font-bold mt-1" style={{ color: "#102a43" }}>{stat.value}</p>
-                  </div>
-                  <div className="w-10 h-10 rounded-xl flex items-center justify-center text-white" style={{ background: stat.gradient }}>
-                    <Icon className="w-5 h-5" />
-                  </div>
-                </div>
-              </div>
-            );
-          })}
+      <div className="animate-page-in space-y-5">
+        {/* Page header */}
+        <div className="flex items-end justify-between gap-4">
+          <div>
+            <h2 className="text-2xl font-semibold text-slate-900 tracking-tight">Billing</h2>
+            <p className="text-sm text-slate-500 mt-0.5">Practice subscriptions, transactions, and dunning</p>
+          </div>
+          <RefreshButton onRefresh={loadData} title="Refresh billing" />
+        </div>
+
+        {/* Revenue Summary — Stripe-style border tiles */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+          {revenueSummary.map((stat) => (
+            <div key={stat.label} className="rounded-xl border border-slate-200 bg-white px-4 py-3">
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">{stat.label}</p>
+              <p className="text-xl font-semibold tabular-nums mt-1 text-slate-900">{stat.value}</p>
+            </div>
+          ))}
         </div>
 
         {/* Stripe Connect Status */}
@@ -3738,7 +3737,7 @@ export function SuperAdminPortal() {
 
         {/* Practice Billing Table */}
         <div>
-          <h2 className="text-xl font-bold mb-4" style={{ color: "#102a43" }}>Practice Billing</h2>
+          <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-400 mb-3">Practice billing</h3>
           <div className="glass rounded-xl overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full">
@@ -3773,7 +3772,7 @@ export function SuperAdminPortal() {
 
         {/* Recent Transactions */}
         <div>
-          <h2 className="text-xl font-bold mb-4" style={{ color: "#102a43" }}>Recent Transactions</h2>
+          <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-400 mb-3">Recent transactions</h3>
           <div className="glass rounded-xl overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full">
@@ -3818,7 +3817,7 @@ export function SuperAdminPortal() {
 
         {/* Dunning Queue */}
         <div>
-          <h2 className="text-xl font-bold mb-4" style={{ color: "#102a43" }}>Dunning Queue</h2>
+          <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-400 mb-3">Dunning queue</h3>
           <div className="space-y-3">
             {dunning.map((d) => (
               <div key={d.practice} className="glass rounded-xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -3927,7 +3926,16 @@ export function SuperAdminPortal() {
     };
 
     return (
-      <div className="animate-page-in space-y-6">
+      <div className="animate-page-in space-y-5">
+        {/* Page header */}
+        <div className="flex items-end justify-between gap-4">
+          <div>
+            <h2 className="text-2xl font-semibold text-slate-900 tracking-tight">Support</h2>
+            <p className="text-sm text-slate-500 mt-0.5">Practice tickets, escalations, and SLA tracking</p>
+          </div>
+          <RefreshButton onRefresh={loadData} title="Refresh tickets" />
+        </div>
+
         {/* Support Stats */}
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
           {supportStats.map((stat) => {
