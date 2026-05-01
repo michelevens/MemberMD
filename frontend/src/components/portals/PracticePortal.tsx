@@ -2227,12 +2227,15 @@ export function PracticePortal() {
   function renderRecentActivity() {
     const events = isDemoMode ? generateDemoTimelineEvents() : [];
     return (
-      <div className="space-y-4">
-        <div>
-          <h3 className="text-lg font-semibold text-slate-800">Recent Activity</h3>
-          <p className="text-sm text-slate-400 mt-0.5">
-            Practice-wide clinical feed. Filter by event type. Click any row to open the patient.
-          </p>
+      <div className="space-y-5">
+        <div className="flex items-end justify-between gap-4">
+          <div>
+            <h2 className="text-2xl font-semibold text-slate-900 tracking-tight">Recent activity</h2>
+            <p className="text-sm text-slate-500 mt-0.5">
+              Practice-wide clinical feed. Filter by event type. Click any row to open the patient.
+            </p>
+          </div>
+          <RefreshButton onRefresh={loadPracticeData} title="Refresh activity" />
         </div>
         <CareTimeline
           events={events}
@@ -5800,17 +5803,20 @@ export function PracticePortal() {
     return (
       <div className="space-y-6">
         {/* Header */}
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-          <h2 className="text-xl font-bold text-slate-800">Telehealth</h2>
+        <div className="flex items-end justify-between gap-4">
+          <div>
+            <h2 className="text-2xl font-semibold text-slate-900 tracking-tight">Telehealth</h2>
+            <p className="text-sm text-slate-500 mt-0.5">Configure your video platform and launch ad-hoc visits</p>
+          </div>
           <button
             onClick={handleQuickLaunch}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors shrink-0"
-            style={{ backgroundColor: "#22c55e" }}
-            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#16a34a")}
-            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "#22c55e")}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium text-white shadow-sm transition-colors"
+            style={{ backgroundColor: "#635bff" }}
+            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#544ee0")}
+            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "#635bff")}
           >
             <Video className="w-4 h-4" />
-            Start Ad-Hoc Video Call
+            Start ad-hoc visit
           </button>
         </div>
 
@@ -7400,19 +7406,27 @@ export function PracticePortal() {
     };
 
     return (
-      <div className="space-y-6">
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-          <h2 className="text-xl font-bold text-slate-800">Screenings</h2>
-          <button
-            className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors shrink-0"
-            style={{ backgroundColor: "#27ab83" }}
-            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#147d64")}
-            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "#27ab83")}
-            onClick={() => setShowNewScreening(true)}
-          >
-            <Plus className="w-4 h-4" />
-            Administer Screening
-          </button>
+      <div className="space-y-5">
+        <div className="flex items-end justify-between gap-4">
+          <div>
+            <h2 className="text-2xl font-semibold text-slate-900 tracking-tight">Screenings</h2>
+            <p className="text-sm text-slate-500 mt-0.5">
+              {mockRecentScreenings.length} {mockRecentScreenings.length === 1 ? "response" : "responses"} recorded
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <RefreshButton onRefresh={loadPracticeData} title="Refresh screenings" />
+            <button
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium text-white shadow-sm transition-colors"
+              style={{ backgroundColor: "#635bff" }}
+              onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#544ee0")}
+              onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "#635bff")}
+              onClick={() => setShowNewScreening(true)}
+            >
+              <Plus className="w-4 h-4" />
+              Administer screening
+            </button>
+          </div>
         </div>
 
         {/* Available Instruments */}
@@ -8077,10 +8091,49 @@ export function PracticePortal() {
       limited: { bg: "#fffbeb", text: "#d97706" },
     };
 
+    const totalPanel = providers.reduce((sum: number, p) => sum + (p.panelCount ?? 0), 0);
+    const totalPanelMax = providers.reduce((sum: number, p) => sum + (p.panelMax ?? 0), 0);
+    const openPanels = providers.filter((p) => String(p.panelStatus).toLowerCase() === "open").length;
+    const telehealthCount = providers.filter((p) => p.telehealth).length;
+
     return (
-      <div className="space-y-6">
-        <div className="flex items-center justify-between">
-          <h2 className="text-xl font-bold text-slate-800">Providers</h2>
+      <div className="space-y-5">
+        {/* Stripe-grade header */}
+        <div className="flex items-end justify-between gap-4">
+          <div>
+            <h2 className="text-2xl font-semibold text-slate-900 tracking-tight">Providers</h2>
+            <p className="text-sm text-slate-500 mt-0.5">
+              {providers.length} {providers.length === 1 ? "provider" : "providers"}
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <RefreshButton onRefresh={loadPracticeData} title="Refresh providers" />
+            <button
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium text-white shadow-sm transition-colors"
+              style={{ backgroundColor: "#635bff" }}
+              onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#544ee0")}
+              onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "#635bff")}
+              onClick={() => setShowAddProvider(true)}
+            >
+              <Plus className="w-4 h-4" />
+              Add provider
+            </button>
+          </div>
+        </div>
+
+        {/* KPI tiles */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          {[
+            { label: "Total providers", value: providers.length },
+            { label: "Open panels", value: openPanels },
+            { label: "Telehealth-enabled", value: telehealthCount },
+            { label: "Total panel size", value: `${totalPanel.toLocaleString()} / ${totalPanelMax.toLocaleString()}` },
+          ].map((tile) => (
+            <div key={tile.label} className="rounded-xl border border-slate-200 bg-white px-4 py-3">
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">{tile.label}</p>
+              <p className="text-xl font-semibold tabular-nums mt-1 text-slate-900">{tile.value}</p>
+            </div>
+          ))}
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
@@ -8394,78 +8447,84 @@ export function PracticePortal() {
       }
     };
 
+    const unreadCount = mockNotifications.filter((n) => !n.read).length;
+
     return (
-      <div className="space-y-4">
-        <div className="flex items-center justify-between">
-          <h2 className="text-xl font-bold text-slate-800">Notifications</h2>
-          <button
-            className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border border-slate-200 text-slate-500 hover:bg-slate-50 transition-colors"
-          >
-            <Check className="w-4 h-4" />
-            Mark All Read
-          </button>
+      <div className="space-y-5">
+        <div className="flex items-end justify-between gap-4">
+          <div>
+            <h2 className="text-2xl font-semibold text-slate-900 tracking-tight">Notifications</h2>
+            <p className="text-sm text-slate-500 mt-0.5">
+              {unreadCount > 0 ? `${unreadCount} unread` : "All caught up"}
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <RefreshButton onRefresh={loadPracticeData} title="Refresh notifications" />
+            <button
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors"
+              onClick={() => setToast({ message: "All notifications marked as read.", type: "success" })}
+            >
+              <Check className="w-4 h-4" />
+              Mark all read
+            </button>
+          </div>
         </div>
 
-        {/* Filter Tabs */}
+        {/* Filter Tabs — Stripe-style segmented row */}
         <div className="flex gap-1 border-b border-slate-200 overflow-x-auto">
-          {filterTabs.map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setNotificationFilter(tab.id)}
-              className="px-4 py-2.5 text-sm font-medium capitalize transition-colors whitespace-nowrap"
-              style={
-                notificationFilter === tab.id
-                  ? { color: "#27ab83", borderBottom: "2px solid #27ab83" }
-                  : { color: "#64748b", borderBottom: "2px solid transparent" }
-              }
-              onMouseEnter={(e) => {
-                if (notificationFilter !== tab.id) e.currentTarget.style.color = "#334e68";
-              }}
-              onMouseLeave={(e) => {
-                if (notificationFilter !== tab.id) e.currentTarget.style.color = "#64748b";
-              }}
-            >
-              {tab.label}
-            </button>
-          ))}
+          {filterTabs.map((tab) => {
+            const isActive = notificationFilter === tab.id;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => setNotificationFilter(tab.id)}
+                className={`px-3 py-2 text-[13px] font-medium capitalize transition-colors whitespace-nowrap ${
+                  isActive
+                    ? "text-slate-900 border-b-2 border-[#635bff]"
+                    : "text-slate-500 hover:text-slate-700 border-b-2 border-transparent"
+                }`}
+              >
+                {tab.label}
+              </button>
+            );
+          })}
         </div>
 
         {/* Notification Feed */}
-        <div className="space-y-2">
+        <div className="rounded-xl border border-slate-200 bg-white overflow-hidden divide-y divide-slate-100">
           {filtered.map((notif) => {
             const ic = categoryIcon(notif.category);
             return (
               <div
                 key={notif.id}
-                className="glass rounded-xl p-4 flex items-start gap-3 transition-colors cursor-pointer hover:bg-slate-50"
-                style={!notif.read ? { borderLeft: "3px solid #27ab83" } : { borderLeft: "3px solid transparent" }}
+                className={`px-4 py-3 flex items-start gap-3 transition-colors cursor-pointer ${
+                  notif.read ? "hover:bg-slate-50" : "hover:bg-slate-50 bg-blue-50/30"
+                }`}
               >
-                {/* Dot indicator */}
                 <div className="mt-1.5 shrink-0">
                   <div
-                    className="w-2.5 h-2.5 rounded-full"
+                    className="w-2 h-2 rounded-full"
                     style={{ backgroundColor: notif.read ? "#e2e8f0" : ic.color }}
                   />
                 </div>
-
                 <div className="flex-1 min-w-0">
                   <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <p className={`text-sm ${notif.read ? "text-slate-600" : "text-slate-800 font-semibold"}`}>
+                    <div className="min-w-0">
+                      <p className={`text-sm ${notif.read ? "text-slate-600" : "text-slate-900 font-semibold"}`}>
                         {notif.title}
                       </p>
                       <p className="text-sm text-slate-500 mt-0.5">{notif.description}</p>
                     </div>
-                    <span className="text-xs text-slate-400 shrink-0 whitespace-nowrap">{notif.time}</span>
+                    <span className="text-[11px] text-slate-400 shrink-0 whitespace-nowrap font-medium">{notif.time}</span>
                   </div>
                 </div>
               </div>
             );
           })}
           {filtered.length === 0 && (
-            <div className="py-12 text-center text-slate-400">
-              <Bell className="w-10 h-10 mx-auto mb-2 opacity-40" />
-              <p>No notifications in this category</p>
+            <div className="py-10 text-center text-slate-400">
+              <Bell className="w-8 h-8 mx-auto mb-2 opacity-40" />
+              <p className="text-sm">No notifications in this category</p>
             </div>
           )}
         </div>
