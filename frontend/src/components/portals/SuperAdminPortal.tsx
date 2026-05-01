@@ -26,7 +26,6 @@ import {
   ChevronDown,
   ChevronUp,
   Eye,
-  MoreHorizontal,
   Menu,
   X,
   Shield,
@@ -1905,110 +1904,81 @@ export function SuperAdminPortal() {
           </button>
         </div>
 
-        <div className="glass rounded-xl overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr style={{ backgroundColor: "#f8fafc" }}>
-                  <th className="text-left px-6 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                    Template Name
-                  </th>
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                    Specialty
-                  </th>
-                  <th className="text-center px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                    Tier
-                  </th>
-                  <th className="text-right px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                    Monthly Price
-                  </th>
-                  <th className="text-right px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                    Visits/Month
-                  </th>
-                  <th className="text-center px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                    Telehealth
-                  </th>
-                  <th className="text-center px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                    Messaging
-                  </th>
-                  <th className="text-center px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                    Actions
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {(isDemoMode ? MOCK_PLAN_TEMPLATES : []).length === 0 && (
-                  <tr>
-                    <td colSpan={8} className="px-6 py-12 text-center text-sm text-slate-400">
-                      No plan templates configured yet
-                    </td>
-                  </tr>
-                )}
-                {(isDemoMode ? MOCK_PLAN_TEMPLATES : []).map((template) => (
-                  <tr
-                    key={template.id}
-                    className="hover:bg-slate-50/50 transition-colors"
-                  >
-                    <td className="px-6 py-3.5">
-                      <p
-                        className="text-sm font-medium"
-                        style={{ color: "#102a43" }}
-                      >
-                        {template.name}
-                      </p>
-                    </td>
-                    <td className="px-4 py-3.5 text-sm text-slate-600">
-                      {template.specialty}
-                    </td>
-                    <td className="px-4 py-3.5 text-center">
-                      <TierBadge tier={template.tier} />
-                    </td>
-                    <td className="px-4 py-3.5 text-sm text-right font-semibold" style={{ color: "#102a43" }}>
-                      {formatCurrency(template.monthlyPrice)}
-                    </td>
-                    <td className="px-4 py-3.5 text-sm text-right text-slate-600">
-                      {template.visitsPerMonth}
-                    </td>
-                    <td className="px-4 py-3.5 text-center">
-                      {template.telehealth ? (
-                        <span className="text-green-600 font-medium text-sm">
-                          Yes
-                        </span>
-                      ) : (
-                        <span className="text-slate-400 text-sm">No</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3.5 text-center">
-                      {template.messaging ? (
-                        <span className="text-green-600 font-medium text-sm">
-                          Yes
-                        </span>
-                      ) : (
-                        <span className="text-slate-400 text-sm">No</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3.5">
-                      <div className="flex items-center justify-center gap-1">
-                        <button
-                          className="p-1.5 rounded-lg hover:bg-slate-100 transition-colors"
-                          title="View template"
-                        >
-                          <Eye className="w-4 h-4 text-slate-500" />
-                        </button>
-                        <button
-                          className="p-1.5 rounded-lg hover:bg-slate-100 transition-colors"
-                          title="More actions"
-                        >
-                          <MoreHorizontal className="w-4 h-4 text-slate-500" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
+        {(() => {
+          const templates = isDemoMode ? MOCK_PLAN_TEMPLATES : [];
+          type Tpl = typeof templates[number];
+
+          const cols: import("../shared/stripe-ui").DataTableColumn<Tpl>[] = [
+            {
+              key: "name",
+              header: "Template",
+              cell: (t) => (
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-slate-800 truncate">{t.name}</p>
+                  <p className="text-xs text-slate-400 truncate">{t.specialty}</p>
+                </div>
+              ),
+            },
+            {
+              key: "tier",
+              header: "Tier",
+              cell: (t) => <TierBadge tier={t.tier} />,
+            },
+            {
+              key: "price",
+              header: "Monthly",
+              align: "right",
+              cell: (t) => <MoneyAmount amount={t.monthlyPrice} />,
+            },
+            {
+              key: "visits",
+              header: "Visits / mo",
+              align: "right",
+              hideBelow: "md",
+              cell: (t) => <span className="tabular-nums text-slate-700">{t.visitsPerMonth}</span>,
+            },
+            {
+              key: "telehealth",
+              header: "Telehealth",
+              hideBelow: "lg",
+              cell: (t) => (
+                t.telehealth
+                  ? <span className="text-emerald-700 font-medium text-xs">Included</span>
+                  : <span className="text-slate-300 text-xs">—</span>
+              ),
+            },
+            {
+              key: "messaging",
+              header: "Messaging",
+              hideBelow: "lg",
+              cell: (t) => (
+                t.messaging
+                  ? <span className="text-emerald-700 font-medium text-xs">Included</span>
+                  : <span className="text-slate-300 text-xs">—</span>
+              ),
+            },
+          ];
+
+          const rowActions = (t: Tpl): import("../shared/stripe-ui").KebabAction[] => [
+            { label: "View template", onClick: () => { void t; } },
+            { label: "Edit template", onClick: () => { void t; } },
+            { label: "Duplicate", onClick: () => { void t; } },
+          ];
+
+          return (
+            <DataTable
+              columns={cols}
+              rows={templates}
+              rowKey={(t) => t.id}
+              actions={rowActions}
+              empty={
+                <div className="text-center py-8">
+                  <p className="text-sm text-slate-500">No plan templates configured yet</p>
+                </div>
+              }
+            />
+          );
+        })()}
       </div>
     );
   }
