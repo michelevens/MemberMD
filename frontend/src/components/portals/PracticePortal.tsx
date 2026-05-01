@@ -852,6 +852,9 @@ export function PracticePortal() {
   // Stripe-style prescriptions view.
   const [prescriptionSearch, setPrescriptionSearch] = useState("");
   const [prescriptionFilters, setPrescriptionFilters] = useState<import("../shared/stripe-ui").ActiveFilter[]>([]);
+  // Stripe-style encounters view.
+  const [encounterSearch, setEncounterSearch] = useState("");
+  const [encounterFilters, setEncounterFilters] = useState<import("../shared/stripe-ui").ActiveFilter[]>([]);
 
   // ─── Create Plan Modal ─────────────────────────────────────────────
   const [showCreatePlan, setShowCreatePlan] = useState(false);
@@ -6811,143 +6814,180 @@ export function PracticePortal() {
       RPM: "Device Review",
     };
 
-    const encounterStatusConfig: Record<string, { bg: string; text: string; dot: string }> = {
-      draft: { bg: "#fffbeb", text: "#d97706", dot: "#f59e0b" },
-      signed: { bg: "#ecf9ec", text: "#2f8132", dot: "#3f9142" },
-      amended: { bg: "#e0e8f0", text: "#334e68", dot: "#486581" },
-    };
+    // Status pill is now rendered by StatusPill which infers variant from
+    // the status string (signed -> success, draft -> warning, amended ->
+    // neutral). The legacy encounterStatusConfig was dropped — kept here
+    // as a comment for future readers wondering where the colors went.
+
+    const allEnc = (apiEncounters || mockPracticeEncounters);
+    type Enc = typeof allEnc[number];
+
+    const typeOpts = Array.from(new Set(allEnc.map((e) => e.type).filter(Boolean))).map((t) => ({ value: t, label: t.replace(/_/g, " ") }));
+    const programOpts = Array.from(new Set(allEnc.map((e) => e.program).filter(Boolean))).map((p) => ({ value: p, label: p }));
+    const statusOpts = Array.from(new Set(allEnc.map((e) => e.status))).map((s) => ({
+      value: s, label: s.charAt(0).toUpperCase() + s.slice(1),
+    }));
+    const facets: import("../shared/stripe-ui").FilterFacet[] = [
+      { key: "status", label: "Status", options: statusOpts },
+      { key: "type", label: "Type", options: typeOpts },
+      { key: "program", label: "Program", options: programOpts },
+    ];
+
+    const filtered = allEnc.filter((e) => {
+      if (encounterSearch.trim()) {
+        const q = encounterSearch.toLowerCase();
+        const hay = [e.patient, e.provider, e.type, e.program].join(" ").toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      for (const f of encounterFilters) {
+        if (f.key === "status" && e.status !== f.value) return false;
+        if (f.key === "type" && e.type !== f.value) return false;
+        if (f.key === "program" && e.program !== f.value) return false;
+      }
+      return true;
+    });
+
+    const cols: import("../shared/stripe-ui").DataTableColumn<Enc>[] = [
+      {
+        key: "date",
+        header: "Date",
+        cell: (enc) => <span className="text-slate-700 font-medium tabular-nums">{enc.date}</span>,
+      },
+      {
+        key: "patient",
+        header: "Patient",
+        cell: (enc) => (
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold text-white shrink-0" style={{ background: "linear-gradient(135deg, #334e68, #243b53)" }}>
+              {(enc.patient || "?").split(" ").map((n: string) => n[0]).join("").slice(0, 2)}
+            </div>
+            <span className="truncate text-slate-800">{enc.patient}</span>
+          </div>
+        ),
+      },
+      {
+        key: "type",
+        header: "Type",
+        cell: (enc) => {
+          const tc = encounterTypeConfig[enc.type] || encounterTypeConfig["Follow-Up"];
+          return (
+            <span className="px-2 py-0.5 rounded text-xs font-medium capitalize" style={{ backgroundColor: tc.bg, color: tc.text }}>
+              {String(enc.type).replace(/_/g, " ")}
+            </span>
+          );
+        },
+      },
+      {
+        key: "program",
+        header: "Program",
+        hideBelow: "lg",
+        cell: (enc) => {
+          const pbc = programBadgeConfig[enc.program] || { bg: "#e0e8f0", text: "#334e68" };
+          return (
+            <span className="px-2 py-0.5 rounded text-xs font-medium" style={{ backgroundColor: pbc.bg, color: pbc.text }}>
+              {enc.program}
+            </span>
+          );
+        },
+      },
+      {
+        key: "provider",
+        header: "Provider",
+        hideBelow: "md",
+        cell: (enc) => <span className="text-slate-600">{enc.provider}</span>,
+      },
+      {
+        key: "duration",
+        header: "Duration",
+        align: "right",
+        hideBelow: "md",
+        cell: (enc) => <span className="tabular-nums text-slate-500">{enc.duration}</span>,
+      },
+      {
+        key: "noteTemplate",
+        header: "Template",
+        hideBelow: "lg",
+        cell: (enc) => <span className="text-xs text-slate-500">{noteTemplateLabels[enc.noteTemplate] || enc.noteTemplate}</span>,
+      },
+      {
+        key: "status",
+        header: "Status",
+        cell: (enc) => <StatusPill label={enc.status} />,
+      },
+      {
+        key: "id",
+        header: "ID",
+        hideBelow: "xl",
+        cell: (enc) => <EntityId prefix="enc" id={enc.id} />,
+      },
+    ];
+
+    const rowActions = (enc: Enc): import("../shared/stripe-ui").KebabAction[] => [
+      { label: "View encounter", onClick: () => { setExpandedEncounters((prev) => prev.includes(enc.id) ? prev : [...prev, enc.id]); } },
+      { label: "Edit", onClick: () => { setEditingEncounterId(enc.id); setSoapForm({ subjective: "", objective: "", assessment: "", plan: "", chiefComplaint: "" }); setActiveTab("encounters"); } },
+      ...(enc.status === "draft" ? [{ label: "Sign", onClick: () => handleSignEncounter(enc.id) }] : []),
+      ...(enc.status === "signed" ? [{ label: "Amend", onClick: () => { setEditingEncounterId(enc.id); setSoapForm({ subjective: "", objective: "", assessment: "", plan: "", chiefComplaint: "" }); } }] : []),
+      ...(enc.status === "draft" ? [{ label: "Delete", danger: true, onClick: () => setConfirmDialog({ title: "Delete Encounter", message: "Delete this draft encounter?", confirmLabel: "Delete", danger: true, onConfirm: async () => { try { await encounterService.update(enc.id, { status: "in_progress" }); setToast({ message: "Encounter deleted.", type: "success" }); loadPracticeData(); } catch { setToast({ message: "Failed.", type: "error" }); } setConfirmDialog(null); } }) }] : []),
+    ];
 
     return (
-      <div className="space-y-4">
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-          <h2 className="text-xl font-bold text-slate-800">Encounters</h2>
-          <button
-            className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors shrink-0"
-            style={{ backgroundColor: "#27ab83" }}
-            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#147d64")}
-            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "#27ab83")}
-            onClick={() => setShowNewEncounter(true)}
-          >
-            <Plus className="w-4 h-4" />
-            New Encounter
-          </button>
-        </div>
-
-        {/* Filters */}
-        <div className="flex flex-wrap items-center gap-2">
-          {["Initial", "Follow-Up", "Med Mgmt", "Care Coord", "Device Review"].map((type) => {
-            const tc = encounterTypeConfig[type];
-            return (
-              <button
-                key={type}
-                className="px-3 py-1.5 rounded-lg text-xs font-medium border border-slate-200 hover:bg-slate-50 transition-colors"
-                style={{ color: tc.text }}
-              >
-                {type}
-              </button>
-            );
-          })}
-        </div>
-
-        {/* Table */}
-        <div className="glass rounded-xl overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr style={{ backgroundColor: "rgba(16,42,67,0.03)" }}>
-                  <th className="text-left px-4 py-3 font-medium text-slate-500">Date</th>
-                  <th className="text-left px-4 py-3 font-medium text-slate-500">Patient</th>
-                  <th className="text-left px-4 py-3 font-medium text-slate-500 hidden lg:table-cell">Program</th>
-                  <th className="text-left px-4 py-3 font-medium text-slate-500 hidden md:table-cell">Provider</th>
-                  <th className="text-left px-4 py-3 font-medium text-slate-500">Type</th>
-                  <th className="text-left px-4 py-3 font-medium text-slate-500 hidden lg:table-cell">Note Template</th>
-                  <th className="text-left px-4 py-3 font-medium text-slate-500 hidden md:table-cell">Duration</th>
-                  <th className="text-left px-4 py-3 font-medium text-slate-500">Status</th>
-                  <th className="text-left px-4 py-3 font-medium text-slate-500">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(apiEncounters || mockPracticeEncounters).length === 0 && (
-                  <tr><td colSpan={9} className="py-8 text-center text-slate-400 text-sm">No encounters yet. Click "New Encounter" to document a visit.</td></tr>
-                )}
-                {(apiEncounters || mockPracticeEncounters).map((enc) => {
-                  // Defensive lookups: if enc.type / enc.status come back
-                  // as a value not in the config (e.g. "office_visit"
-                  // wasn't here, "draft" is), fall back instead of
-                  // throwing — one bad row used to take down the whole
-                  // table.
-                  const tc = encounterTypeConfig[enc.type] || encounterTypeConfig["Follow-Up"];
-                  const esc = encounterStatusConfig[enc.status] || encounterStatusConfig.draft;
-                  const pbc = programBadgeConfig[enc.program] || { bg: "#e0e8f0", text: "#334e68" };
-                  return (
-                    <tr key={enc.id} className="border-t border-slate-100 hover:bg-slate-50 transition-colors">
-                      <td className="px-4 py-3 font-medium text-slate-700">{enc.date}</td>
-                      <td className="px-4 py-3 text-slate-700">{enc.patient}</td>
-                      <td className="px-4 py-3 hidden lg:table-cell">
-                        <span className="px-2 py-0.5 rounded text-xs font-medium" style={{ backgroundColor: pbc.bg, color: pbc.text }}>
-                          {enc.program}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-slate-500 hidden md:table-cell">{enc.provider}</td>
-                      <td className="px-4 py-3">
-                        <span className="px-2 py-0.5 rounded text-xs font-medium" style={{ backgroundColor: tc.bg, color: tc.text }}>
-                          {enc.type}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 hidden lg:table-cell">
-                        <span className="text-xs text-slate-500">{noteTemplateLabels[enc.noteTemplate] || enc.noteTemplate}</span>
-                      </td>
-                      <td className="px-4 py-3 text-slate-500 hidden md:table-cell">{enc.duration}</td>
-                      <td className="px-4 py-3">
-                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium capitalize" style={{ backgroundColor: esc.bg, color: esc.text }}>
-                          <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: esc.dot }} />
-                          {enc.status}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-1">
-                          <button
-                            className="p-1.5 rounded-md hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors"
-                            title="View encounter"
-                            onClick={() => {
-                              setExpandedEncounters(prev => prev.includes(enc.id) ? prev : [...prev, enc.id]);
-                            }}
-                          >
-                            <Eye className="w-4 h-4" />
-                          </button>
-                          <button
-                            className="p-1.5 rounded-md hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors"
-                            title="Edit encounter"
-                            onClick={() => {
-                              setEditingEncounterId(enc.id);
-                              setSoapForm({ subjective: "", objective: "", assessment: "", plan: "", chiefComplaint: "" });
-                              setActiveTab("encounters");
-                            }}
-                          >
-                            <Pencil className="w-4 h-4" />
-                          </button>
-                          {enc.status === "draft" && (
-                            <button
-                              className="px-2 py-1 rounded text-xs font-medium transition-colors"
-                              style={{ color: "#27ab83" }}
-                              onClick={() => handleSignEncounter(enc.id)}
-                            >
-                              Sign
-                            </button>
-                          )}
-                          <MoreActionsDropdown actions={[
-                            ...(enc.status === "signed" ? [{ label: "Amend", onClick: () => { setEditingEncounterId(enc.id); setSoapForm({ subjective: "", objective: "", assessment: "", plan: "", chiefComplaint: "" }); } }] : []),
-                            ...(enc.status === "draft" ? [{ label: "Delete", onClick: () => setConfirmDialog({ title: "Delete Encounter", message: "Delete this draft encounter?", confirmLabel: "Delete", danger: true, onConfirm: async () => { try { await encounterService.update(enc.id, { status: "in_progress" }); setToast({ message: "Encounter deleted.", type: "success" }); loadPracticeData(); } catch { setToast({ message: "Failed.", type: "error" }); } setConfirmDialog(null); } }), danger: true }] : []),
-                          ]} />
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+      <div className="space-y-5">
+        <div className="flex items-end justify-between gap-4">
+          <div>
+            <h2 className="text-2xl font-semibold text-slate-900 tracking-tight">Encounters</h2>
+            <p className="text-sm text-slate-500 mt-0.5">
+              {filtered.length === allEnc.length
+                ? `${allEnc.length} ${allEnc.length === 1 ? "encounter" : "encounters"}`
+                : `${filtered.length} of ${allEnc.length}`}
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <RefreshButton onRefresh={loadPracticeData} title="Refresh encounters" />
+            <button
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium text-white shadow-sm transition-colors"
+              style={{ backgroundColor: "#635bff" }}
+              onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#544ee0")}
+              onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "#635bff")}
+              onClick={() => setShowNewEncounter(true)}
+            >
+              <Plus className="w-4 h-4" />
+              New encounter
+            </button>
           </div>
         </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative flex-1 min-w-[240px] max-w-sm">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+            <input
+              type="text"
+              placeholder="Search by patient, provider, type..."
+              value={encounterSearch}
+              onChange={(e) => setEncounterSearch(e.target.value)}
+              className="w-full pl-9 pr-3 py-1.5 rounded-md border border-slate-200 text-sm bg-white focus:outline-none focus:border-slate-400"
+            />
+          </div>
+          <FilterChips facets={facets} active={encounterFilters} onChange={setEncounterFilters} />
+        </div>
+
+        <DataTable
+          columns={cols}
+          rows={filtered}
+          rowKey={(enc) => enc.id}
+          actions={rowActions}
+          empty={
+            <div className="text-center py-8">
+              <p className="text-sm text-slate-500 mb-1">
+                {allEnc.length === 0 ? "No encounters yet." : "No encounters match your filters"}
+              </p>
+              {allEnc.length > 0 && (
+                <button onClick={() => { setEncounterFilters([]); setEncounterSearch(""); }} className="text-xs text-blue-600 hover:underline">
+                  Clear filters
+                </button>
+              )}
+            </div>
+          }
+        />
 
         {/* Inline SOAP Editor */}
         {editingEncounterId && (
