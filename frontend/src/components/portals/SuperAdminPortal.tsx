@@ -1430,125 +1430,74 @@ export function SuperAdminPortal() {
         {/* Recent Practices + Platform Health */}
         <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
           {/* Recent Practices Table */}
-          <div className="xl:col-span-2 glass rounded-xl overflow-hidden">
-            <div className="px-6 py-4 border-b border-slate-200/60 flex items-center justify-between">
+          <div className="xl:col-span-2 rounded-xl border border-slate-200 bg-white overflow-hidden">
+            <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
               <div>
-                <h3
-                  className="text-base font-semibold"
-                  style={{ color: "#102a43" }}
-                >
-                  Recent Practices
-                </h3>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  Latest practices on the platform
-                </p>
+                <h3 className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Recent practices</h3>
+                <p className="text-sm text-slate-700 font-medium mt-0.5">Latest practices on the platform</p>
               </div>
               <button
                 onClick={() => setActiveTab("practices")}
-                className="text-sm font-medium flex items-center gap-1 transition-colors"
-                style={{ color: "#27ab83" }}
+                className="text-xs font-medium flex items-center gap-1 text-blue-600 hover:text-blue-700 transition-colors"
               >
-                View All
-                <ChevronRight className="w-4 h-4" />
+                View all
+                <ChevronRight className="w-3.5 h-3.5" />
               </button>
             </div>
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr style={{ backgroundColor: "#f8fafc" }}>
-                    <th className="text-left px-6 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                      Practice
-                    </th>
-                    <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                      Specialty
-                    </th>
-                    <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                      Model
-                    </th>
-                    <th className="text-right px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                      Members
-                    </th>
-                    <th className="text-right px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                      MRR
-                    </th>
-                    <th className="text-center px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                      Status
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {recentPractices.length === 0 && (
-                    <tr>
-                      <td colSpan={6} className="px-6 py-12 text-center text-sm text-slate-400">
-                        No practices registered yet
-                      </td>
-                    </tr>
-                  )}
-                  {recentPractices.map((practice) => (
-                    <tr
-                      key={practice.id}
-                      className="hover:bg-slate-50/50 transition-colors cursor-pointer"
-                      onClick={() => setSelectedPractice(practice)}
-                    >
-                      <td className="px-6 py-3.5">
-                        <div>
-                          <button
-                            onClick={(e) => { e.stopPropagation(); setSelectedPractice(practice); }}
-                            className="text-sm font-medium hover:underline text-left"
-                            style={{ color: "#102a43" }}
-                          >
-                            {practice.name}
-                          </button>
-                          <p className="text-xs text-slate-400">
-                            {practice.city}, {practice.state}
-                          </p>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3.5 text-sm text-slate-600">
-                        {practice.specialty}
-                      </td>
-                      <td className="px-4 py-3.5 text-sm text-slate-600">
-                        {practice.model}
-                      </td>
-                      <td className="px-4 py-3.5 text-sm text-right font-medium text-slate-700">
-                        {formatNumber(practice.members)}
-                      </td>
-                      <td className="px-4 py-3.5 text-sm text-right font-medium text-slate-700">
-                        {formatCurrency(practice.mrr)}
-                      </td>
-                      <td className="px-4 py-3.5 text-center">
-                        <StatusBadge status={practice.status} />
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            {(() => {
+              type Pr = typeof recentPractices[number];
+              const cols: import("../shared/stripe-ui").DataTableColumn<Pr>[] = [
+                {
+                  key: "name",
+                  header: "Practice",
+                  cell: (p) => (
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-slate-800 truncate">{p.name}</p>
+                      <p className="text-xs text-slate-400 truncate">{p.city}, {p.state}</p>
+                    </div>
+                  ),
+                },
+                { key: "specialty", header: "Specialty", hideBelow: "md", cell: (p) => <span className="text-slate-600">{p.specialty}</span> },
+                { key: "model", header: "Model", hideBelow: "lg", cell: (p) => <span className="text-slate-600">{p.model}</span> },
+                { key: "members", header: "Members", align: "right", cell: (p) => <span className="tabular-nums text-slate-700">{formatNumber(p.members)}</span> },
+                { key: "mrr", header: "MRR", align: "right", cell: (p) => <span className="tabular-nums text-slate-700 font-medium">{formatCurrency(p.mrr)}</span> },
+                { key: "status", header: "Status", cell: (p) => <StatusBadge status={p.status} /> },
+              ];
+              return (
+                <DataTable
+                  columns={cols}
+                  rows={recentPractices}
+                  rowKey={(p) => p.id}
+                  onRowClick={(p) => setSelectedPractice(p)}
+                  empty={
+                    <div className="text-center py-8">
+                      <p className="text-sm text-slate-500">No practices registered yet</p>
+                    </div>
+                  }
+                  className="border-0 rounded-none"
+                />
+              );
+            })()}
           </div>
 
           {/* Platform Health */}
-          <div className="glass rounded-xl p-6">
-            <h3
-              className="text-base font-semibold mb-4"
-              style={{ color: "#102a43" }}
-            >
-              Platform Health
-            </h3>
-            <div className="space-y-4">
+          <div className="rounded-xl border border-slate-200 bg-white p-4">
+            <h3 className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-3">Platform health</h3>
+            <div className="space-y-2.5">
               {[
-                { label: "API Uptime", value: "99.97%", color: "#2f8132" },
-                { label: "Avg Response", value: "142ms", color: "#27ab83" },
-                { label: "Active Sessions", value: "1,247", color: "#0369a1" },
-                { label: "Error Rate", value: "0.03%", color: "#2f8132" },
-                { label: "DB Connections", value: "34/100", color: "#d97706" },
+                { label: "API uptime", value: "99.97%", color: "#066e54" },
+                { label: "Avg response", value: "142ms", color: "#066e54" },
+                { label: "Active sessions", value: "1,247", color: "#1e3a8a" },
+                { label: "Error rate", value: "0.03%", color: "#066e54" },
+                { label: "DB connections", value: "34 / 100", color: "#92400e" },
               ].map((metric) => (
                 <div
                   key={metric.label}
-                  className="flex items-center justify-between py-2.5 border-b border-slate-100 last:border-0"
+                  className="flex items-center justify-between py-1.5 border-b border-slate-100 last:border-0"
                 >
                   <span className="text-sm text-slate-600">{metric.label}</span>
                   <span
-                    className="text-sm font-bold"
+                    className="text-sm font-semibold tabular-nums"
                     style={{ color: metric.color }}
                   >
                     {metric.value}
