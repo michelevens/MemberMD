@@ -2,7 +2,7 @@
 // Main dashboard for DPC practice owners/admins — manage membership practice
 // Tabs: Dashboard, Patient Roster, Membership Plans, Appointments, Messages, Invoices, + Coming Soon tabs
 
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { ProviderDetailPage } from "./ProviderDetailPage";
 import { useAuth } from "../../contexts/AuthContext";
@@ -59,8 +59,6 @@ import {
   TrendingUp,
   Search,
   Plus,
-  MoreHorizontal,
-  Eye,
   Pencil,
   Send,
   Check,
@@ -76,7 +74,6 @@ import {
   Download,
   ChevronDown,
   ChevronUp,
-  Mail,
   Layers,
   Copy,
   Wifi,
@@ -615,47 +612,6 @@ function StatCard({
   );
 }
 
-// ─── MoreActionsDropdown ──────────────────────────────────────────────────────
-
-function MoreActionsDropdown({ actions }: { actions: { label: string; onClick: () => void; danger?: boolean }[] }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [open]);
-
-  return (
-    <div className="relative" ref={ref}>
-      <button
-        onClick={() => setOpen(!open)}
-        className="p-1.5 rounded-md hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors"
-      >
-        <MoreHorizontal className="w-4 h-4" />
-      </button>
-      {open && (
-        <div className="absolute right-0 top-8 z-50 bg-white border border-slate-200 rounded-lg shadow-lg py-1 min-w-40">
-          {actions.map((action, i) => (
-            <button
-              key={i}
-              onClick={() => { action.onClick(); setOpen(false); }}
-              className="w-full text-left px-4 py-2 text-sm hover:bg-slate-50 transition-colors"
-              style={action.danger ? { color: "#dc2626" } : { color: "#334e68" }}
-            >
-              {action.label}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
 // ─── ConfirmDialog ───────────────────────────────────────────────────────────
 
 function ConfirmDialog({ title, message, onConfirm, onCancel, confirmLabel, danger }: {
@@ -855,6 +811,12 @@ export function PracticePortal() {
   // Stripe-style encounters view.
   const [encounterSearch, setEncounterSearch] = useState("");
   const [encounterFilters, setEncounterFilters] = useState<import("../shared/stripe-ui").ActiveFilter[]>([]);
+  // Stripe-style intakes view.
+  const [intakeSearch, setIntakeSearch] = useState("");
+  const [intakeFilters, setIntakeFilters] = useState<import("../shared/stripe-ui").ActiveFilter[]>([]);
+  // Stripe-style waitlist view.
+  const [waitlistSearch, setWaitlistSearch] = useState("");
+  const [waitlistFilters, setWaitlistFilters] = useState<import("../shared/stripe-ui").ActiveFilter[]>([]);
 
   // ─── Create Plan Modal ─────────────────────────────────────────────
   const [showCreatePlan, setShowCreatePlan] = useState(false);
@@ -6562,124 +6524,152 @@ export function PracticePortal() {
     ];
     const mockIntakes = apiIntakes.length > 0 ? apiIntakes : (isDemoMode ? mockIntakesDemo : []);
 
-    const intakeStatusConfig: Record<string, { bg: string; text: string; dot: string }> = {
-      pending: { bg: "#fffbeb", text: "#d97706", dot: "#f59e0b" },
-      under_review: { bg: "#e0e8f0", text: "#334e68", dot: "#486581" },
-      approved: { bg: "#ecf9ec", text: "#2f8132", dot: "#3f9142" },
-      rejected: { bg: "#fef2f2", text: "#dc2626", dot: "#ef4444" },
-      converted: { bg: "#e6f7f2", text: "#147d64", dot: "#27ab83" },
-    };
+    type Itk = typeof mockIntakes[number];
+
+    const statusOpts = Array.from(new Set(mockIntakes.map((i) => i.status))).map((s) => ({
+      value: s, label: s.split("_").map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(" "),
+    }));
+    const facets: import("../shared/stripe-ui").FilterFacet[] = [
+      { key: "status", label: "Status", options: statusOpts },
+    ];
+
+    const filtered = mockIntakes.filter((i) => {
+      if (intakeSearch.trim()) {
+        const q = intakeSearch.toLowerCase();
+        const hay = [i.code, i.name].join(" ").toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      for (const f of intakeFilters) {
+        if (f.key === "status" && i.status !== f.value) return false;
+      }
+      return true;
+    });
+
+    const cols: import("../shared/stripe-ui").DataTableColumn<Itk>[] = [
+      {
+        key: "name",
+        header: "Submitted by",
+        cell: (i) => (
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold text-white shrink-0" style={{ background: "linear-gradient(135deg, #334e68, #243b53)" }}>
+              {(i.name || "?").split(" ").map((n: string) => n[0]).join("").slice(0, 2)}
+            </div>
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-slate-800 truncate">{i.name}</p>
+              <p className="text-[11px] text-slate-400 font-mono">{i.code}</p>
+            </div>
+          </div>
+        ),
+      },
+      {
+        key: "status",
+        header: "Status",
+        cell: (i) => <StatusPill label={i.status} />,
+      },
+      {
+        key: "date",
+        header: "Submitted",
+        hideBelow: "md",
+        cell: (i) => <span className="text-slate-500">{i.dateSubmitted}</span>,
+      },
+    ];
+
+    const rowActions = (intake: Itk): import("../shared/stripe-ui").KebabAction[] => [
+      { label: "View details", onClick: () => setToast({ message: "Intake detail view coming soon.", type: "success" }) },
+      ...((intake.status === "pending" || intake.status === "under_review") ? [{
+        label: "Approve",
+        onClick: async () => {
+          try {
+            await apiFetch(`/intakes/${intake.id}`, { method: "PUT", body: JSON.stringify({ status: "approved" }) });
+            setToast({ message: "Intake approved.", type: "success" });
+            loadPracticeData();
+          } catch { setToast({ message: "Failed to approve intake.", type: "error" }); }
+        },
+      }] : []),
+      ...(intake.status === "approved" ? [{
+        label: "Convert to patient",
+        onClick: async () => {
+          try {
+            await apiFetch(`/intakes/${intake.id}/convert`, { method: "POST" });
+            setToast({ message: "Intake converted to patient.", type: "success" });
+            loadPracticeData();
+          } catch { setToast({ message: "Failed to convert intake.", type: "error" }); }
+        },
+      }] : []),
+      ...(intake.status === "pending" ? [{
+        label: "Reject",
+        danger: true,
+        onClick: async () => {
+          try {
+            await apiFetch(`/intakes/${intake.id}`, { method: "PUT", body: JSON.stringify({ status: "rejected" }) });
+            setToast({ message: "Intake rejected.", type: "success" });
+            loadPracticeData();
+          } catch { setToast({ message: "Failed.", type: "error" }); }
+        },
+      }] : []),
+    ];
 
     return (
-      <div className="space-y-6">
-        <div className="flex items-center justify-between">
-          <h2 className="text-xl font-bold text-slate-800">Intake Submissions</h2>
+      <div className="space-y-5">
+        <div className="flex items-end justify-between gap-4">
+          <div>
+            <h2 className="text-2xl font-semibold text-slate-900 tracking-tight">Intake submissions</h2>
+            <p className="text-sm text-slate-500 mt-0.5">
+              {filtered.length === mockIntakes.length
+                ? `${mockIntakes.length} ${mockIntakes.length === 1 ? "submission" : "submissions"}`
+                : `${filtered.length} of ${mockIntakes.length}`}
+            </p>
+          </div>
+          <RefreshButton onRefresh={loadPracticeData} title="Refresh intakes" />
         </div>
 
-        {/* Stats */}
+        {/* KPI tiles */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <div className="glass rounded-lg p-4">
-            <p className="text-xs text-slate-500 mb-1">Total</p>
-            <p className="text-2xl font-bold text-slate-800">{mockIntakes.length || (isDemoMode ? 15 : 0)}</p>
-          </div>
-          <div className="glass rounded-lg p-4">
-            <p className="text-xs text-slate-500 mb-1">Pending</p>
-            <p className="text-2xl font-bold" style={{ color: "#d97706" }}>{mockIntakes.filter(i => i.status === "pending").length}</p>
-          </div>
-          <div className="glass rounded-lg p-4">
-            <p className="text-xs text-slate-500 mb-1">Approved</p>
-            <p className="text-2xl font-bold" style={{ color: "#2f8132" }}>{mockIntakes.filter(i => i.status === "approved").length}</p>
-          </div>
-          <div className="glass rounded-lg p-4">
-            <p className="text-xs text-slate-500 mb-1">Converted</p>
-            <p className="text-2xl font-bold" style={{ color: "#147d64" }}>{mockIntakes.filter(i => i.status === "converted").length}</p>
-          </div>
+          {[
+            { label: "Total", value: mockIntakes.length, color: "#0f172a" },
+            { label: "Pending", value: mockIntakes.filter((i) => i.status === "pending").length, color: "#92400e" },
+            { label: "Approved", value: mockIntakes.filter((i) => i.status === "approved").length, color: "#066e54" },
+            { label: "Converted", value: mockIntakes.filter((i) => i.status === "converted").length, color: "#147d64" },
+          ].map((tile) => (
+            <div key={tile.label} className="rounded-xl border border-slate-200 bg-white px-4 py-3">
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">{tile.label}</p>
+              <p className="text-xl font-semibold tabular-nums mt-1" style={{ color: tile.color }}>{tile.value}</p>
+            </div>
+          ))}
         </div>
 
-        {/* Table */}
-        <div className="glass rounded-xl overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr style={{ backgroundColor: "rgba(16,42,67,0.03)" }}>
-                  <th className="text-left px-4 py-3 font-medium text-slate-500">Submission Code</th>
-                  <th className="text-left px-4 py-3 font-medium text-slate-500">Name</th>
-                  <th className="text-left px-4 py-3 font-medium text-slate-500 hidden md:table-cell">Date Submitted</th>
-                  <th className="text-left px-4 py-3 font-medium text-slate-500">Status</th>
-                  <th className="text-left px-4 py-3 font-medium text-slate-500">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {mockIntakes.length === 0 && (
-                  <tr><td colSpan={5} className="py-8 text-center text-slate-400 text-sm">No intake submissions yet.</td></tr>
-                )}
-                {mockIntakes.map((intake) => {
-                  const sc = intakeStatusConfig[intake.status] || intakeStatusConfig.pending;
-                  return (
-                    <tr key={intake.id} className="border-t border-slate-100 hover:bg-slate-50 transition-colors">
-                      <td className="px-4 py-3 font-mono text-sm font-medium text-slate-700">{intake.code}</td>
-                      <td className="px-4 py-3 text-slate-700 font-medium">{intake.name}</td>
-                      <td className="px-4 py-3 text-slate-500 hidden md:table-cell">{intake.dateSubmitted}</td>
-                      <td className="px-4 py-3">
-                        <span
-                          className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium capitalize"
-                          style={{ backgroundColor: sc.bg, color: sc.text }}
-                        >
-                          <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: sc.dot }} />
-                          {intake.status.replace("_", " ")}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-1">
-                          <button
-                            className="p-1.5 rounded-md hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors"
-                            onClick={() => setToast({ message: "Intake detail view coming soon.", type: "success" })}
-                          >
-                            <Eye className="w-4 h-4" />
-                          </button>
-                          {(intake.status === "pending" || intake.status === "under_review") && (
-                            <button
-                              className="px-2 py-1 rounded text-xs font-medium transition-colors"
-                              style={{ color: "#27ab83" }}
-                              onClick={async () => {
-                                try {
-                                  await apiFetch(`/intakes/${intake.id}`, { method: "PUT", body: JSON.stringify({ status: "approved" }) });
-                                  setToast({ message: "Intake approved.", type: "success" });
-                                  loadPracticeData();
-                                } catch { setToast({ message: "Failed to approve intake.", type: "error" }); }
-                              }}
-                            >
-                              Approve
-                            </button>
-                          )}
-                          {intake.status === "approved" && (
-                            <button
-                              className="px-2 py-1 rounded text-xs font-medium transition-colors"
-                              style={{ color: "#147d64" }}
-                              onClick={async () => {
-                                try {
-                                  await apiFetch(`/intakes/${intake.id}/convert`, { method: "POST" });
-                                  setToast({ message: "Intake converted to patient.", type: "success" });
-                                  loadPracticeData();
-                                } catch { setToast({ message: "Failed to convert intake.", type: "error" }); }
-                              }}
-                            >
-                              Convert
-                            </button>
-                          )}
-                          <MoreActionsDropdown actions={[
-                            { label: "View Details", onClick: () => setToast({ message: "Intake detail view coming soon.", type: "success" }) },
-                            ...(intake.status === "pending" ? [{ label: "Reject", onClick: async () => { try { await apiFetch(`/intakes/${intake.id}`, { method: "PUT", body: JSON.stringify({ status: "rejected" }) }); setToast({ message: "Intake rejected.", type: "success" }); loadPracticeData(); } catch { setToast({ message: "Failed.", type: "error" }); } }, danger: true }] : []),
-                          ]} />
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative flex-1 min-w-[240px] max-w-sm">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+            <input
+              type="text"
+              placeholder="Search by name or code..."
+              value={intakeSearch}
+              onChange={(e) => setIntakeSearch(e.target.value)}
+              className="w-full pl-9 pr-3 py-1.5 rounded-md border border-slate-200 text-sm bg-white focus:outline-none focus:border-slate-400"
+            />
           </div>
+          <FilterChips facets={facets} active={intakeFilters} onChange={setIntakeFilters} />
         </div>
+
+        <DataTable
+          columns={cols}
+          rows={filtered}
+          rowKey={(i) => i.id}
+          actions={rowActions}
+          empty={
+            <div className="text-center py-8">
+              <p className="text-sm text-slate-500 mb-1">
+                {mockIntakes.length === 0 ? "No intake submissions yet." : "No intakes match your filters"}
+              </p>
+              {mockIntakes.length > 0 && (
+                <button onClick={() => { setIntakeFilters([]); setIntakeSearch(""); }} className="text-xs text-blue-600 hover:underline">
+                  Clear filters
+                </button>
+              )}
+            </div>
+          }
+        />
       </div>
     );
   }
@@ -6701,112 +6691,179 @@ export function PracticePortal() {
       low: { bg: "#e0e8f0", text: "#334e68" },
     };
 
-    const waitlistStatusConfig: Record<string, { bg: string; text: string; dot: string }> = {
-      waiting: { bg: "#fffbeb", text: "#d97706", dot: "#f59e0b" },
-      contacted: { bg: "#e0e8f0", text: "#334e68", dot: "#486581" },
-      enrolled: { bg: "#ecf9ec", text: "#2f8132", dot: "#3f9142" },
-    };
-
     const panelUsed = 85;
     const panelMax = 400;
     const panelPct = Math.round((panelUsed / panelMax) * 100);
 
+    type Wl = typeof mockWaitlist[number];
+
+    const statusOpts = Array.from(new Set(mockWaitlist.map((w) => w.status))).map((s) => ({
+      value: s, label: s.charAt(0).toUpperCase() + s.slice(1),
+    }));
+    const priorityOpts = Array.from(new Set(mockWaitlist.map((w) => w.priority))).map((p) => ({
+      value: p, label: p.charAt(0).toUpperCase() + p.slice(1),
+    }));
+    const planOpts = Array.from(new Set(mockWaitlist.map((w) => w.desiredPlan).filter(Boolean))).map((p) => ({ value: p, label: p }));
+    const facets: import("../shared/stripe-ui").FilterFacet[] = [
+      { key: "status", label: "Status", options: statusOpts },
+      { key: "priority", label: "Priority", options: priorityOpts },
+      { key: "plan", label: "Desired plan", options: planOpts },
+    ];
+
+    const filtered = mockWaitlist.filter((w) => {
+      if (waitlistSearch.trim()) {
+        const q = waitlistSearch.toLowerCase();
+        const hay = [w.name, w.email, w.phone, w.desiredPlan].join(" ").toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      for (const f of waitlistFilters) {
+        if (f.key === "status" && w.status !== f.value) return false;
+        if (f.key === "priority" && w.priority !== f.value) return false;
+        if (f.key === "plan" && w.desiredPlan !== f.value) return false;
+      }
+      return true;
+    });
+
+    const cols: import("../shared/stripe-ui").DataTableColumn<Wl>[] = [
+      {
+        key: "name",
+        header: "Name",
+        cell: (entry) => (
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold text-white shrink-0" style={{ background: "linear-gradient(135deg, #334e68, #243b53)" }}>
+              {(entry.name || "?").split(" ").map((n: string) => n[0]).join("").slice(0, 2)}
+            </div>
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-slate-800 truncate">{entry.name}</p>
+              <p className="text-xs text-slate-400 truncate">{entry.email}</p>
+            </div>
+          </div>
+        ),
+      },
+      {
+        key: "desiredPlan",
+        header: "Desired plan",
+        cell: (entry) => <PlanBadge plan={entry.desiredPlan} />,
+      },
+      {
+        key: "phone",
+        header: "Phone",
+        hideBelow: "lg",
+        cell: (entry) => <span className="text-slate-500">{entry.phone || "—"}</span>,
+      },
+      {
+        key: "priority",
+        header: "Priority",
+        cell: (entry) => {
+          const pc = priorityConfig[entry.priority];
+          return (
+            <span className="px-2 py-0.5 rounded-full text-xs font-medium capitalize" style={{ backgroundColor: pc.bg, color: pc.text }}>
+              {entry.priority}
+            </span>
+          );
+        },
+      },
+      {
+        key: "status",
+        header: "Status",
+        cell: (entry) => <StatusPill label={entry.status} />,
+      },
+      {
+        key: "requested",
+        header: "Requested",
+        hideBelow: "md",
+        cell: (entry) => <span className="text-slate-500">{entry.requestedDate}</span>,
+      },
+    ];
+
+    const rowActions = (entry: Wl): import("../shared/stripe-ui").KebabAction[] => [
+      { label: "View details", onClick: () => setToast({ message: "Waitlist detail view coming soon.", type: "success" }) },
+      ...(entry.status !== "enrolled" ? [{
+        label: "Invite to enroll",
+        onClick: async () => {
+          try {
+            await apiFetch(`/appointments/waitlist/${entry.id}/invite`, { method: "POST" });
+            setToast({ message: `Enrollment invite sent to ${entry.name}.`, type: "success" });
+            loadPracticeData();
+          } catch { setToast({ message: "Invite sent (or endpoint not configured).", type: "success" }); }
+        },
+      }] : []),
+      ...(entry.status !== "enrolled" ? [{
+        label: "Remove from waitlist",
+        danger: true,
+        onClick: async () => {
+          try {
+            await apiFetch(`/appointments/waitlist/${entry.id}`, { method: "DELETE" });
+            setToast({ message: "Removed from waitlist.", type: "success" });
+            loadPracticeData();
+          } catch { setToast({ message: "Failed.", type: "error" }); }
+        },
+      }] : []),
+    ];
+
     return (
-      <div className="space-y-6">
-        <div className="flex items-center justify-between">
-          <h2 className="text-xl font-bold text-slate-800">Waitlist</h2>
+      <div className="space-y-5">
+        <div className="flex items-end justify-between gap-4">
+          <div>
+            <h2 className="text-2xl font-semibold text-slate-900 tracking-tight">Waitlist</h2>
+            <p className="text-sm text-slate-500 mt-0.5">
+              {filtered.length === mockWaitlist.length
+                ? `${mockWaitlist.length} on waitlist`
+                : `${filtered.length} of ${mockWaitlist.length}`}
+            </p>
+          </div>
+          <RefreshButton onRefresh={loadPracticeData} title="Refresh waitlist" />
         </div>
 
         {/* Panel capacity */}
-        <div className="glass rounded-xl p-5">
+        <div className="rounded-xl border border-slate-200 bg-white p-4">
           <div className="flex items-center justify-between mb-2">
-            <h3 className="font-semibold text-slate-800">Current Panel Capacity</h3>
-            <span className="text-sm font-medium" style={{ color: "#27ab83" }}>
-              {panelUsed} of {panelMax} members ({panelPct}%)
+            <p className="text-sm font-semibold text-slate-700">Current panel capacity</p>
+            <span className="text-sm font-medium tabular-nums" style={{ color: "#066e54" }}>
+              {panelUsed} / {panelMax} ({panelPct}%)
             </span>
           </div>
-          <div className="w-full h-3 rounded-full" style={{ backgroundColor: "#e6f7f2" }}>
+          <div className="w-full h-2 rounded-full bg-slate-100">
             <div
-              className="h-3 rounded-full transition-all duration-500"
-              style={{ width: `${panelPct}%`, backgroundColor: "#27ab83" }}
+              className="h-2 rounded-full transition-all duration-500"
+              style={{ width: `${panelPct}%`, backgroundColor: "#10b981" }}
             />
           </div>
           <p className="text-xs text-slate-400 mt-2">{panelMax - panelUsed} spots available</p>
         </div>
 
-        {/* Table */}
-        <div className="glass rounded-xl overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr style={{ backgroundColor: "rgba(16,42,67,0.03)" }}>
-                  <th className="text-left px-4 py-3 font-medium text-slate-500">Name</th>
-                  <th className="text-left px-4 py-3 font-medium text-slate-500 hidden md:table-cell">Email</th>
-                  <th className="text-left px-4 py-3 font-medium text-slate-500 hidden lg:table-cell">Phone</th>
-                  <th className="text-left px-4 py-3 font-medium text-slate-500">Desired Plan</th>
-                  <th className="text-left px-4 py-3 font-medium text-slate-500 hidden md:table-cell">Requested</th>
-                  <th className="text-left px-4 py-3 font-medium text-slate-500">Priority</th>
-                  <th className="text-left px-4 py-3 font-medium text-slate-500">Status</th>
-                  <th className="text-left px-4 py-3 font-medium text-slate-500">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {mockWaitlist.length === 0 && (
-                  <tr><td colSpan={8} className="py-8 text-center text-slate-400 text-sm">No one on the waitlist.</td></tr>
-                )}
-                {mockWaitlist.map((entry) => {
-                  const pc = priorityConfig[entry.priority];
-                  const wsc = waitlistStatusConfig[entry.status];
-                  return (
-                    <tr key={entry.id} className="border-t border-slate-100 hover:bg-slate-50 transition-colors">
-                      <td className="px-4 py-3 font-medium text-slate-700">{entry.name}</td>
-                      <td className="px-4 py-3 text-slate-500 hidden md:table-cell">{entry.email}</td>
-                      <td className="px-4 py-3 text-slate-500 hidden lg:table-cell">{entry.phone}</td>
-                      <td className="px-4 py-3"><PlanBadge plan={entry.desiredPlan} /></td>
-                      <td className="px-4 py-3 text-slate-500 hidden md:table-cell">{entry.requestedDate}</td>
-                      <td className="px-4 py-3">
-                        <span className="px-2 py-0.5 rounded-full text-xs font-medium capitalize" style={{ backgroundColor: pc.bg, color: pc.text }}>
-                          {entry.priority}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3">
-                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium capitalize" style={{ backgroundColor: wsc.bg, color: wsc.text }}>
-                          <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: wsc.dot }} />
-                          {entry.status}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-1">
-                          {entry.status !== "enrolled" && (
-                            <button
-                              className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium text-white transition-colors"
-                              style={{ backgroundColor: "#27ab83" }}
-                              onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#147d64")}
-                              onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "#27ab83")}
-                              onClick={async () => {
-                                try {
-                                  await apiFetch(`/appointments/waitlist/${entry.id}/invite`, { method: "POST" });
-                                  setToast({ message: `Enrollment invite sent to ${entry.name}.`, type: "success" });
-                                  loadPracticeData();
-                                } catch { setToast({ message: "Invite sent (or endpoint not configured).", type: "success" }); }
-                              }}
-                            >
-                              <Mail className="w-3 h-3" /> Invite to Enroll
-                            </button>
-                          )}
-                          <MoreActionsDropdown actions={[
-                            { label: "View Details", onClick: () => setToast({ message: "Waitlist detail view coming soon.", type: "success" }) },
-                            ...(entry.status !== "enrolled" ? [{ label: "Remove from Waitlist", onClick: async () => { try { await apiFetch(`/appointments/waitlist/${entry.id}`, { method: "DELETE" }); setToast({ message: "Removed from waitlist.", type: "success" }); loadPracticeData(); } catch { setToast({ message: "Failed.", type: "error" }); } }, danger: true }] : []),
-                          ]} />
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative flex-1 min-w-[240px] max-w-sm">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+            <input
+              type="text"
+              placeholder="Search by name, email, phone..."
+              value={waitlistSearch}
+              onChange={(e) => setWaitlistSearch(e.target.value)}
+              className="w-full pl-9 pr-3 py-1.5 rounded-md border border-slate-200 text-sm bg-white focus:outline-none focus:border-slate-400"
+            />
           </div>
+          <FilterChips facets={facets} active={waitlistFilters} onChange={setWaitlistFilters} />
         </div>
+
+        <DataTable
+          columns={cols}
+          rows={filtered}
+          rowKey={(w) => w.id}
+          actions={rowActions}
+          empty={
+            <div className="text-center py-8">
+              <p className="text-sm text-slate-500 mb-1">
+                {mockWaitlist.length === 0 ? "No one on the waitlist." : "No entries match your filters"}
+              </p>
+              {mockWaitlist.length > 0 && (
+                <button onClick={() => { setWaitlistFilters([]); setWaitlistSearch(""); }} className="text-xs text-blue-600 hover:underline">
+                  Clear filters
+                </button>
+              )}
+            </div>
+          }
+        />
       </div>
     );
   }
