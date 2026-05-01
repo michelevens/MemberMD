@@ -700,6 +700,8 @@ export function PracticePortal() {
   const [activeTab, setActiveTab] = useState<TabId>("dashboard");
   const [selectedThread, setSelectedThread] = useState(isDemoMode ? MOCK_THREADS[0].id : "");
   const [searchQuery, setSearchQuery] = useState("");
+  // Stripe-style roster: stackable filter chips on top of the existing search.
+  const [rosterFilters, setRosterFilters] = useState<import("../shared/stripe-ui").ActiveFilter[]>([]);
   const [messageInput, setMessageInput] = useState("");
   const [selectedPatient, setSelectedPatient] = useState<MockPatient | null>(null);
   // Reset-link modal — admin tool for "the patient never got the
@@ -837,6 +839,10 @@ export function PracticePortal() {
   const [invoiceSearch, setInvoiceSearch] = useState("");
   const [invoiceFilters, setInvoiceFilters] = useState<import("../shared/stripe-ui").ActiveFilter[]>([]);
   const [selectedInvoiceId, setSelectedInvoiceId] = useState<string | null>(null);
+  // Stripe-style payments view: same pattern.
+  const [paymentSearch, setPaymentSearch] = useState("");
+  const [paymentFilters, setPaymentFilters] = useState<import("../shared/stripe-ui").ActiveFilter[]>([]);
+  const [selectedPaymentId, setSelectedPaymentId] = useState<string | null>(null);
 
   // ─── Create Plan Modal ─────────────────────────────────────────────
   const [showCreatePlan, setShowCreatePlan] = useState(false);
@@ -2483,128 +2489,175 @@ export function PracticePortal() {
   // ─── Patient Roster Tab ─────────────────────────────────────────────────
 
   function renderRoster() {
-    const filtered = filteredPatients;
+    // Build facets from the current roster so we never show a zero-result option.
+    const planOpts = Array.from(new Set(filteredPatients.map((p) => p.plan).filter((x) => x && x !== "No Plan"))).map((p) => ({ value: p, label: p }));
+    const statusOpts = Array.from(new Set(filteredPatients.map((p) => p.status))).map((s) => ({
+      value: s,
+      label: s.charAt(0).toUpperCase() + s.slice(1),
+    }));
+    const facets: import("../shared/stripe-ui").FilterFacet[] = [
+      { key: "status", label: "Status", options: statusOpts },
+      { key: "plan", label: "Plan", options: planOpts },
+    ];
+
+    // Filter chips applied on top of the existing search.
+    const filtered = filteredPatients.filter((p) => {
+      for (const f of rosterFilters) {
+        if (f.key === "status" && p.status !== f.value) return false;
+        if (f.key === "plan" && p.plan !== f.value) return false;
+      }
+      return true;
+    });
+
+    type Pt = typeof filteredPatients[number];
+
+    const cols: import("../shared/stripe-ui").DataTableColumn<Pt>[] = [
+      {
+        key: "name",
+        header: "Customer",
+        cell: (p) => (
+          <div className="flex items-center gap-2 min-w-0">
+            <div
+              className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold text-white shrink-0"
+              style={{ background: "linear-gradient(135deg, #334e68, #243b53)" }}
+            >
+              {(p.name || "?").split(" ").map((n: string) => n[0]).join("").slice(0, 2)}
+            </div>
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-slate-800 truncate">{p.name}</p>
+              <p className="text-xs text-slate-400 truncate">{p.email || "—"}</p>
+            </div>
+          </div>
+        ),
+      },
+      {
+        key: "plan",
+        header: "Plan",
+        cell: (p) => (p.plan && p.plan !== "No Plan" ? <PlanBadge plan={p.plan} /> : <span className="text-xs text-slate-400">No plan</span>),
+      },
+      {
+        key: "status",
+        header: "Status",
+        cell: (p) => <StatusPill label={p.status} />,
+      },
+      {
+        key: "memberId",
+        header: "Member",
+        hideBelow: "lg",
+        cell: (p) => p.memberId ? <span className="font-mono text-xs text-slate-500 tabular-nums">{p.memberId}</span> : <span className="text-slate-300">—</span>,
+      },
+      {
+        key: "phone",
+        header: "Phone",
+        hideBelow: "md",
+        cell: (p) => <span className="text-slate-500">{p.phone || "—"}</span>,
+      },
+      {
+        key: "lastVisit",
+        header: "Last visit",
+        hideBelow: "md",
+        cell: (p) => <span className="text-slate-500">{p.lastVisit && p.lastVisit !== "N/A" ? p.lastVisit : "—"}</span>,
+      },
+      {
+        key: "nextApt",
+        header: "Next appt",
+        hideBelow: "lg",
+        cell: (p) => <span className="text-slate-500">{p.nextApt && p.nextApt !== "N/A" && p.nextApt !== "—" ? p.nextApt : "—"}</span>,
+      },
+    ];
+
+    const rowActions = (patient: Pt): import("../shared/stripe-ui").KebabAction[] => [
+      { label: "View details", onClick: () => { setSelectedPatient(patient); setPatientDetailTab("demographics"); } },
+      { label: "Edit", onClick: () => openEditPatient(patient) },
+      { label: "Book appointment", onClick: () => { setBookApptForm(f => ({ ...f, patientId: patient.id })); setShowBookAppointment(true); } },
+      { label: "Send message", onClick: () => { setSelectedPatient(patient); setPatientDetailTab("messages"); } },
+      { label: "Log activity", onClick: () => { setActiveTab("activity-log"); } },
+      { label: "Create encounter", onClick: () => { setEncounterForm(f => ({ ...f, patientId: patient.id })); setShowNewEncounter(true); } },
+      ...(patient.status === "active" && patient.membershipId
+        ? [
+            { label: "Change plan", onClick: () => { setRosterPlanDialog({ patientId: patient.id, patientName: patient.name, membershipId: patient.membershipId, mode: "change" as const }); fetchRosterPlans(); setRosterSelectedPlanId(null); } },
+            { label: "Pause membership", onClick: () => { setConfirmDialog({ title: "Pause Membership", message: `Pause ${patient.name}'s membership? They will retain their plan but benefits will be suspended.`, confirmLabel: "Pause", onConfirm: async () => { if (patient.membershipId) { await handlePauseMembership(patient.membershipId, patient.name); } setConfirmDialog(null); } }); } },
+            { label: "Cancel membership", danger: true, onClick: () => { if (patient.membershipId) { setRosterCancelDialog({ patientId: patient.id, patientName: patient.name, membershipId: patient.membershipId }); setRosterCancelReason(""); } } },
+          ]
+        : [
+            { label: "Enroll in plan", onClick: () => { setRosterPlanDialog({ patientId: patient.id, patientName: patient.name, mode: "enroll" as const }); fetchRosterPlans(); setRosterSelectedPlanId(null); } },
+          ]),
+      { label: "Deactivate", danger: true, onClick: () => { setConfirmDialog({ title: "Deactivate Patient", message: `Are you sure you want to deactivate ${patient.name}?`, confirmLabel: "Deactivate", danger: true, onConfirm: async () => { try { await patientService.update(patient.id, { status: "inactive" }); setToast({ message: "Patient deactivated.", type: "success" }); loadPracticeData(); } catch { setToast({ message: "Failed to deactivate.", type: "error" }); } setConfirmDialog(null); } }); } },
+    ];
 
     return (
-      <div className="space-y-4">
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-          <h2 className="text-xl font-bold text-slate-800">Patient Roster</h2>
-          <div className="flex items-center gap-3 w-full sm:w-auto">
-            <div className="relative flex-1 sm:w-64">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-              <input
-                type="text"
-                placeholder="Search patients..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-9 pr-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 bg-white"
-                onFocus={(e) => (e.currentTarget.style.borderColor = "#27ab83")}
-                onBlur={(e) => (e.currentTarget.style.borderColor = "")}
-              />
-            </div>
+      <div className="space-y-5">
+        {/* Page header */}
+        <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
+          <div>
+            <h2 className="text-2xl font-semibold text-slate-900 tracking-tight">Patients</h2>
+            <p className="text-sm text-slate-500 mt-0.5">
+              {filtered.length === filteredPatients.length
+                ? `${filteredPatients.length} ${filteredPatients.length === 1 ? "patient" : "patients"}`
+                : `${filtered.length} of ${filteredPatients.length}`}
+            </p>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
             <RefreshButton onRefresh={loadPracticeData} title="Refresh roster" />
             <button
-              className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors shrink-0"
-              style={{ backgroundColor: "#27ab83" }}
-              onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#147d64")}
-              onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "#27ab83")}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium text-white shadow-sm transition-colors"
+              style={{ backgroundColor: "#635bff" }}
+              onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#544ee0")}
+              onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "#635bff")}
               onClick={() => setShowAddPatient(true)}
             >
               <Plus className="w-4 h-4" />
-              Add Patient
+              Add patient
             </button>
           </div>
         </div>
 
-        <div className="glass rounded-xl overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr style={{ backgroundColor: "rgba(16,42,67,0.03)" }}>
-                  <th className="text-left px-4 py-3 font-medium text-slate-500">Name</th>
-                  <th className="text-left px-4 py-3 font-medium text-slate-500">Plan</th>
-                  <th className="text-left px-4 py-3 font-medium text-slate-500">Status</th>
-                  <th className="text-left px-4 py-3 font-medium text-slate-500 hidden md:table-cell">Phone</th>
-                  <th className="text-left px-4 py-3 font-medium text-slate-500 hidden lg:table-cell">Email</th>
-                  <th className="text-left px-4 py-3 font-medium text-slate-500 hidden md:table-cell">Last Visit</th>
-                  <th className="text-left px-4 py-3 font-medium text-slate-500 hidden lg:table-cell">Next Apt</th>
-                  <th className="text-left px-4 py-3 font-medium text-slate-500">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((patient) => (
-                  <tr
-                    key={patient.id}
-                    className="border-t border-slate-100 hover:bg-slate-50 transition-colors"
-                  >
-                    <td className="px-4 py-3">
-                      <button
-                        onClick={() => { setSelectedPatient(patient); setPatientDetailTab("demographics"); }}
-                        className="font-medium hover:underline transition-colors"
-                        style={{ color: "#334e68" }}
-                        onMouseEnter={(e) => (e.currentTarget.style.color = "#27ab83")}
-                        onMouseLeave={(e) => (e.currentTarget.style.color = "#334e68")}
-                      >
-                        {patient.name}
-                      </button>
-                    </td>
-                    <td className="px-4 py-3">
-                      <PlanBadge plan={patient.plan} />
-                    </td>
-                    <td className="px-4 py-3">
-                      <StatusBadge status={patient.status} />
-                    </td>
-                    <td className="px-4 py-3 text-slate-500 hidden md:table-cell">{patient.phone}</td>
-                    <td className="px-4 py-3 text-slate-500 hidden lg:table-cell">{patient.email}</td>
-                    <td className="px-4 py-3 text-slate-500 hidden md:table-cell">{patient.lastVisit}</td>
-                    <td className="px-4 py-3 text-slate-500 hidden lg:table-cell">{patient.nextApt}</td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-1">
-                        <button
-                          onClick={() => { setSelectedPatient(patient); setPatientDetailTab("demographics"); }}
-                          className="p-1.5 rounded-md hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors"
-                          title="View patient"
-                        >
-                          <Eye className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => openEditPatient(patient)}
-                          className="p-1.5 rounded-md hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors"
-                          title="Edit patient"
-                        >
-                          <Pencil className="w-4 h-4" />
-                        </button>
-                        <MoreActionsDropdown actions={[
-                          { label: "View Details", onClick: () => { setSelectedPatient(patient); setPatientDetailTab("demographics"); } },
-                          { label: "Book Appointment", onClick: () => { setBookApptForm(f => ({ ...f, patientId: patient.id })); setShowBookAppointment(true); } },
-                          { label: "Send Message", onClick: () => { setSelectedPatient(patient); setPatientDetailTab("messages"); } },
-                          { label: "Log Activity", onClick: () => { setActiveTab("activity-log"); } },
-                          { label: "Create Encounter", onClick: () => { setEncounterForm(f => ({ ...f, patientId: patient.id })); setShowNewEncounter(true); } },
-                          ...(patient.status === "active" && patient.membershipId
-                            ? [
-                                { label: "Change Plan", onClick: () => { setRosterPlanDialog({ patientId: patient.id, patientName: patient.name, membershipId: patient.membershipId, mode: "change" as const }); fetchRosterPlans(); setRosterSelectedPlanId(null); } },
-                                { label: "Pause Membership", onClick: () => { setConfirmDialog({ title: "Pause Membership", message: `Pause ${patient.name}'s membership? They will retain their plan but benefits will be suspended.`, confirmLabel: "Pause", onConfirm: async () => { if (patient.membershipId) { await handlePauseMembership(patient.membershipId, patient.name); } setConfirmDialog(null); } }); } },
-                                { label: "Cancel Membership", onClick: () => { if (patient.membershipId) { setRosterCancelDialog({ patientId: patient.id, patientName: patient.name, membershipId: patient.membershipId }); setRosterCancelReason(""); } }, danger: true },
-                              ]
-                            : [
-                                { label: "Enroll in Plan", onClick: () => { setRosterPlanDialog({ patientId: patient.id, patientName: patient.name, mode: "enroll" as const }); fetchRosterPlans(); setRosterSelectedPlanId(null); } },
-                              ]),
-                          { label: "Deactivate", onClick: () => { setConfirmDialog({ title: "Deactivate Patient", message: `Are you sure you want to deactivate ${patient.name}?`, confirmLabel: "Deactivate", danger: true, onConfirm: async () => { try { await patientService.update(patient.id, { status: "inactive" }); setToast({ message: "Patient deactivated.", type: "success" }); loadPracticeData(); } catch { setToast({ message: "Failed to deactivate.", type: "error" }); } setConfirmDialog(null); } }); }, danger: true },
-                        ]} />
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+        {/* Search + filter chips bar */}
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative flex-1 min-w-[240px] max-w-sm">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+            <input
+              type="text"
+              placeholder="Search by name, email, phone..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full pl-9 pr-3 py-1.5 rounded-md border border-slate-200 text-sm bg-white focus:outline-none focus:border-slate-400"
+            />
           </div>
-          {filtered.length === 0 && (
-            <div className="py-12 text-center text-slate-400">
-              <Users className="w-10 h-10 mx-auto mb-2 opacity-40" />
-              <p>{patients.length === 0 && !searchQuery ? "No patients yet. Click \"Add Patient\" to get started." : `No patients found matching "${searchQuery}"`}</p>
-            </div>
-          )}
+          <FilterChips facets={facets} active={rosterFilters} onChange={setRosterFilters} />
         </div>
+
+        {/* Stripe-grade data table */}
+        <DataTable
+          columns={cols}
+          rows={filtered}
+          rowKey={(p) => p.id}
+          actions={rowActions}
+          onRowClick={(p) => { setSelectedPatient(p); setPatientDetailTab("demographics"); }}
+          empty={
+            <div className="text-center py-8">
+              <Users className="w-10 h-10 mx-auto mb-2 text-slate-300" />
+              {patients.length === 0 && !searchQuery && rosterFilters.length === 0 ? (
+                <p className="text-sm text-slate-500">No patients yet. Click "Add patient" to get started.</p>
+              ) : (
+                <>
+                  <p className="text-sm text-slate-500 mb-1">No patients match your filters</p>
+                  <button
+                    onClick={() => { setRosterFilters([]); setSearchQuery(""); }}
+                    className="text-xs text-blue-600 hover:underline"
+                  >
+                    Clear filters
+                  </button>
+                </>
+              )}
+            </div>
+          }
+          footer={
+            filtered.length > 0
+              ? `Showing ${filtered.length} ${filtered.length === 1 ? "patient" : "patients"}`
+              : null
+          }
+        />
       </div>
     );
   }
@@ -7262,115 +7315,318 @@ export function PracticePortal() {
     ];
     const mockPayments = apiPayments.length > 0 ? apiPayments : (isDemoMode ? mockPaymentsDemo : []);
 
-    // Backend Payment.status enum carries values the demo seeder writes
-    // (completed) plus the dunning paths Stripe surfaces (succeeded /
-    // pending / failed / refunded). Map all of them to a color so an
-    // unknown status doesn't crash the row.
-    const payStatusConfig: Record<string, { bg: string; text: string; dot: string }> = {
-      succeeded: { bg: "#ecf9ec", text: "#2f8132", dot: "#3f9142" },
-      completed: { bg: "#ecf9ec", text: "#2f8132", dot: "#3f9142" },
-      pending: { bg: "#fffbeb", text: "#d97706", dot: "#f59e0b" },
-      failed: { bg: "#fef2f2", text: "#dc2626", dot: "#ef4444" },
-      refunded: { bg: "#f1f5f9", text: "#64748b", dot: "#94a3b8" },
-    };
-    const payStatusFallback = { bg: "#e0e8f0", text: "#334e68", dot: "#486581" };
+    // Treat `completed` (legacy seeder) the same as `succeeded` for KPI math.
+    const isSuccessful = (s: string) => s === "succeeded" || s === "completed";
+
+    // KPIs
+    const monthSucceeded = mockPayments.filter((p) => isSuccessful(p.status)).reduce((sum: number, p: { amount: number }) => sum + Number(p.amount ?? 0), 0);
+    const monthOutstanding = mockPayments.filter((p) => p.status === "pending").reduce((sum: number, p: { amount: number }) => sum + Number(p.amount ?? 0), 0);
+    const monthRefunded = mockPayments.filter((p) => p.status === "refunded").reduce((sum: number, p: { amount: number }) => sum + Number(p.amount ?? 0), 0);
+    const monthFailed = mockPayments.filter((p) => p.status === "failed").reduce((sum: number, p: { amount: number }) => sum + Number(p.amount ?? 0), 0);
+
+    // Filter facets
+    const statusOpts = Array.from(new Set(mockPayments.map((p) => p.status))).map((s) => ({
+      value: s,
+      label: s.charAt(0).toUpperCase() + s.slice(1),
+    }));
+    const methodOpts = Array.from(new Set(mockPayments.map((p) => p.method))).map((m) => ({
+      value: m,
+      label: m === "card" ? "Card" : m === "bank" ? "Bank transfer" : m.charAt(0).toUpperCase() + m.slice(1),
+    }));
+    const facets: import("../shared/stripe-ui").FilterFacet[] = [
+      { key: "status", label: "Status", options: statusOpts },
+      { key: "method", label: "Method", options: methodOpts },
+    ];
+
+    // Apply search + filters
+    const filtered = mockPayments.filter((p) => {
+      if (paymentSearch.trim()) {
+        const q = paymentSearch.toLowerCase();
+        const hay = [p.id, p.patient, p.invoice, p.status, p.method].join(" ").toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      for (const f of paymentFilters) {
+        if (f.key === "status" && p.status !== f.value) return false;
+        if (f.key === "method" && p.method !== f.value) return false;
+      }
+      return true;
+    });
+
+    type Pay = typeof mockPayments[number];
+
+    const cols: import("../shared/stripe-ui").DataTableColumn<Pay>[] = [
+      {
+        key: "amount",
+        header: "Amount",
+        cell: (pay) => <MoneyAmount amount={pay.amount} />,
+      },
+      {
+        key: "status",
+        header: "Status",
+        cell: (pay) => <StatusPill label={pay.status} />,
+      },
+      {
+        key: "patient",
+        header: "Customer",
+        cell: (pay) => (
+          <div className="flex items-center gap-2 min-w-0">
+            <div
+              className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold text-white shrink-0"
+              style={{ background: "linear-gradient(135deg, #334e68, #243b53)" }}
+            >
+              {(pay.patient || "?").split(" ").map((n: string) => n[0]).join("").slice(0, 2)}
+            </div>
+            <span className="truncate text-slate-800">{pay.patient}</span>
+          </div>
+        ),
+      },
+      {
+        key: "method",
+        header: "Method",
+        hideBelow: "md",
+        cell: (pay) => (
+          <span className="text-sm text-slate-600 capitalize">
+            {pay.method === "card" ? "Card" : pay.method === "bank" ? "Bank transfer" : pay.method}
+          </span>
+        ),
+      },
+      {
+        key: "invoice",
+        header: "Invoice",
+        hideBelow: "md",
+        cell: (pay) => pay.invoice ? <span className="font-mono text-xs text-slate-500 tabular-nums">{pay.invoice}</span> : <span className="text-slate-300">—</span>,
+      },
+      {
+        key: "date",
+        header: "Created",
+        hideBelow: "sm",
+        cell: (pay) => <span className="text-slate-500">{pay.date}</span>,
+      },
+      {
+        key: "id",
+        header: "ID",
+        hideBelow: "lg",
+        cell: (pay) => <EntityId prefix="py" id={pay.id} />,
+      },
+    ];
+
+    const rowActions = (pay: Pay): import("../shared/stripe-ui").KebabAction[] => [
+      { label: "View details", onClick: () => setSelectedPaymentId(pay.id) },
+      ...(pay.status === "failed" ? [{
+        label: "Retry payment",
+        onClick: async () => {
+          try {
+            await apiFetch(`/payments/${pay.id}/retry`, { method: "POST" });
+            setToast({ message: "Payment retry initiated.", type: "success" });
+            loadPracticeData();
+          } catch { setToast({ message: "Payment retry failed.", type: "error" }); }
+        },
+      }] : []),
+      ...(isSuccessful(pay.status) ? [{
+        label: "Refund payment",
+        danger: true,
+        onClick: () => setConfirmDialog({
+          title: "Refund Payment",
+          message: `Refund $${Number(pay.amount ?? 0).toFixed(2)} to ${pay.patient}?`,
+          confirmLabel: "Refund",
+          danger: true,
+          onConfirm: async () => {
+            try {
+              await paymentService.refund(pay.id);
+              setToast({ message: "Refund processed.", type: "success" });
+              loadPracticeData();
+            } catch { setToast({ message: "Refund failed.", type: "error" }); }
+            setConfirmDialog(null);
+          },
+        }),
+      }] : []),
+    ];
+
+    const selectedPayment = mockPayments.find((p) => p.id === selectedPaymentId) ?? null;
 
     return (
-      <div className="space-y-6">
-        <div className="flex items-center justify-between">
-          <h2 className="text-xl font-bold text-slate-800">Payments</h2>
+      <div className="space-y-5">
+        {/* Page header */}
+        <div className="flex items-end justify-between gap-4">
+          <div>
+            <h2 className="text-2xl font-semibold text-slate-900 tracking-tight">Payments</h2>
+            <p className="text-sm text-slate-500 mt-0.5">
+              {filtered.length === mockPayments.length
+                ? `${mockPayments.length} ${mockPayments.length === 1 ? "payment" : "payments"}`
+                : `${filtered.length} of ${mockPayments.length}`}
+            </p>
+          </div>
+          <RefreshButton onRefresh={loadPracticeData} title="Refresh payments" />
         </div>
 
-        {/* Stats */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-          <div className="glass rounded-lg p-4">
-            <p className="text-xs text-slate-500 mb-1">This Month</p>
-            <p className="text-2xl font-bold" style={{ color: "#2f8132" }}>${mockPayments.filter(p => p.status === "succeeded").reduce((s: number, p: { amount: number }) => s + p.amount, 0).toLocaleString()}</p>
-          </div>
-          <div className="glass rounded-lg p-4">
-            <p className="text-xs text-slate-500 mb-1">Outstanding</p>
-            <p className="text-2xl font-bold" style={{ color: "#d97706" }}>${mockPayments.filter(p => p.status === "pending").reduce((s: number, p: { amount: number }) => s + p.amount, 0).toLocaleString()}</p>
-          </div>
-          <div className="glass rounded-lg p-4">
-            <p className="text-xs text-slate-500 mb-1">Refunded</p>
-            <p className="text-2xl font-bold text-slate-500">${mockPayments.filter(p => p.status === "refunded").reduce((s: number, p: { amount: number }) => s + p.amount, 0).toLocaleString()}</p>
-          </div>
+        {/* Summary KPI tiles */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          {[
+            { label: "Succeeded", value: monthSucceeded, color: "#066e54" },
+            { label: "Outstanding", value: monthOutstanding, color: "#92400e" },
+            { label: "Failed", value: monthFailed, color: "#b91c1c" },
+            { label: "Refunded", value: monthRefunded, color: "#475569" },
+          ].map((tile) => (
+            <div key={tile.label} className="rounded-xl border border-slate-200 bg-white px-4 py-3">
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                {tile.label}
+              </p>
+              <p className="text-xl font-semibold tabular-nums mt-1" style={{ color: tile.color }}>
+                <MoneyAmount amount={tile.value} />
+              </p>
+            </div>
+          ))}
         </div>
 
-        {/* Table */}
-        <div className="glass rounded-xl overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr style={{ backgroundColor: "rgba(16,42,67,0.03)" }}>
-                  <th className="text-left px-4 py-3 font-medium text-slate-500">Date</th>
-                  <th className="text-left px-4 py-3 font-medium text-slate-500">Patient</th>
-                  <th className="text-left px-4 py-3 font-medium text-slate-500">Amount</th>
-                  <th className="text-left px-4 py-3 font-medium text-slate-500 hidden md:table-cell">Method</th>
-                  <th className="text-left px-4 py-3 font-medium text-slate-500">Status</th>
-                  <th className="text-left px-4 py-3 font-medium text-slate-500 hidden md:table-cell">Invoice</th>
-                  <th className="text-left px-4 py-3 font-medium text-slate-500">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {mockPayments.length === 0 && (
-                  <tr><td colSpan={7} className="py-8 text-center text-slate-400 text-sm">No payments recorded yet.</td></tr>
+        {/* Search + filter chips bar */}
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative flex-1 min-w-[240px] max-w-sm">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+            <input
+              type="text"
+              placeholder="Search by patient, invoice, ID..."
+              value={paymentSearch}
+              onChange={(e) => setPaymentSearch(e.target.value)}
+              className="w-full pl-9 pr-3 py-1.5 rounded-md border border-slate-200 text-sm bg-white focus:outline-none focus:border-slate-400"
+            />
+          </div>
+          <FilterChips facets={facets} active={paymentFilters} onChange={setPaymentFilters} />
+        </div>
+
+        {/* Stripe-grade data table */}
+        <DataTable
+          columns={cols}
+          rows={filtered}
+          rowKey={(p) => p.id}
+          actions={rowActions}
+          onRowClick={(p) => setSelectedPaymentId(p.id)}
+          highlightRowId={selectedPaymentId}
+          empty={
+            <div className="text-center py-8">
+              <p className="text-sm text-slate-500 mb-1">
+                {mockPayments.length === 0 ? "No payments recorded yet." : "No payments match your filters"}
+              </p>
+              {mockPayments.length > 0 && (
+                <button
+                  onClick={() => { setPaymentFilters([]); setPaymentSearch(""); }}
+                  className="text-xs text-blue-600 hover:underline"
+                >
+                  Clear filters
+                </button>
+              )}
+            </div>
+          }
+          footer={
+            filtered.length > 0
+              ? `Showing ${filtered.length} ${filtered.length === 1 ? "payment" : "payments"}`
+              : null
+          }
+        />
+
+        {/* Slide-over payment detail */}
+        <DetailDrawer
+          open={!!selectedPayment}
+          onClose={() => setSelectedPaymentId(null)}
+          eyebrow="Payment"
+          title={
+            selectedPayment ? (
+              <div className="flex items-center gap-2 min-w-0">
+                <MoneyAmount amount={selectedPayment.amount} />
+                <StatusPill label={selectedPayment.status} />
+              </div>
+            ) : ""
+          }
+          width="md"
+          footer={
+            selectedPayment ? (
+              <>
+                <button
+                  onClick={() => setSelectedPaymentId(null)}
+                  className="px-3 py-1.5 rounded-md text-sm font-medium border border-slate-200 text-slate-600 hover:bg-slate-50"
+                >
+                  Close
+                </button>
+                {isSuccessful(selectedPayment.status) && (
+                  <button
+                    onClick={() => setConfirmDialog({ title: "Refund Payment", message: `Refund $${Number(selectedPayment.amount ?? 0).toFixed(2)} to ${selectedPayment.patient}?`, confirmLabel: "Refund", danger: true, onConfirm: async () => { try { await paymentService.refund(selectedPayment.id); setToast({ message: "Refund processed.", type: "success" }); loadPracticeData(); setSelectedPaymentId(null); } catch { setToast({ message: "Refund failed.", type: "error" }); } setConfirmDialog(null); } })}
+                    className="px-3 py-1.5 rounded-md text-sm font-medium border border-red-200 text-red-700 bg-white hover:bg-red-50"
+                  >
+                    Refund
+                  </button>
                 )}
-                {mockPayments.map((pay) => {
-                  const psc = payStatusConfig[pay.status] || payStatusFallback;
-                  return (
-                    <tr
-                      key={pay.id}
-                      className="border-t border-slate-100 hover:bg-slate-50 transition-colors"
-                      style={pay.status === "failed" ? { backgroundColor: "rgba(254,242,242,0.5)" } : {}}
+              </>
+            ) : null
+          }
+        >
+          {selectedPayment && (
+            <div className="space-y-5">
+              <div className="space-y-3">
+                <Field label="Payment ID">
+                  <EntityId prefix="py" id={selectedPayment.id} full />
+                </Field>
+                <Field label="Customer">
+                  <div className="flex items-center gap-2">
+                    <div
+                      className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold text-white shrink-0"
+                      style={{ background: "linear-gradient(135deg, #334e68, #243b53)" }}
                     >
-                      <td className="px-4 py-3 text-slate-700">{pay.date}</td>
-                      <td className="px-4 py-3 font-medium text-slate-700">{pay.patient}</td>
-                      <td className="px-4 py-3 font-medium text-slate-800">${Number(pay.amount ?? 0).toFixed(2)}</td>
-                      <td className="px-4 py-3 text-slate-500 hidden md:table-cell capitalize">{pay.method === "card" ? "Card" : "Bank Transfer"}</td>
-                      <td className="px-4 py-3">
-                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium capitalize" style={{ backgroundColor: psc.bg, color: psc.text }}>
-                          <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: psc.dot }} />
-                          {pay.status}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 font-mono text-sm text-slate-500 hidden md:table-cell">{pay.invoice}</td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-1">
-                          <button
-                            className="p-1.5 rounded-md hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors"
-                            onClick={() => setToast({ message: "Payment detail view coming soon.", type: "success" })}
-                          >
-                            <Eye className="w-4 h-4" />
-                          </button>
-                          {pay.status === "failed" && (
-                            <button
-                              className="px-2 py-1 rounded text-xs font-medium transition-colors"
-                              style={{ color: "#dc2626" }}
-                              onClick={async () => {
-                                try {
-                                  await apiFetch(`/payments/${pay.id}/retry`, { method: "POST" });
-                                  setToast({ message: "Payment retry initiated.", type: "success" });
-                                  loadPracticeData();
-                                } catch { setToast({ message: "Payment retry failed.", type: "error" }); }
-                              }}
-                            >
-                              Retry
-                            </button>
-                          )}
-                          <MoreActionsDropdown actions={[
-                            { label: "View Details", onClick: () => setToast({ message: "Payment detail view coming soon.", type: "success" }) },
-                            ...(pay.status === "succeeded" ? [{ label: "Refund", onClick: () => setConfirmDialog({ title: "Refund Payment", message: `Refund $${Number(pay.amount ?? 0).toFixed(2)} to ${pay.patient}?`, confirmLabel: "Refund", danger: true, onConfirm: async () => { try { await paymentService.refund(pay.id); setToast({ message: "Refund processed.", type: "success" }); loadPracticeData(); } catch { setToast({ message: "Refund failed.", type: "error" }); } setConfirmDialog(null); } }), danger: true }] : []),
-                          ]} />
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
+                      {(selectedPayment.patient || "?").split(" ").map((n: string) => n[0]).join("").slice(0, 2)}
+                    </div>
+                    <span className="text-sm text-slate-800">{selectedPayment.patient}</span>
+                  </div>
+                </Field>
+                <Field label="Method">
+                  <span className="text-sm text-slate-700 capitalize">
+                    {selectedPayment.method === "card" ? "Card" : selectedPayment.method === "bank" ? "Bank transfer" : selectedPayment.method}
+                  </span>
+                </Field>
+                <Field label="Invoice">
+                  {selectedPayment.invoice ? <span className="font-mono text-xs text-slate-700">{selectedPayment.invoice}</span> : <span className="text-sm text-slate-400">—</span>}
+                </Field>
+                <Field label="Created">
+                  <span className="text-sm text-slate-700">{selectedPayment.date}</span>
+                </Field>
+                <Field label="Status">
+                  <StatusPill label={selectedPayment.status} />
+                </Field>
+              </div>
+
+              <div className="border-t border-slate-100 pt-4">
+                <p className="text-[11px] uppercase tracking-wider font-semibold text-slate-400 mb-3">
+                  Amount
+                </p>
+                <div className="rounded-lg border border-slate-200 bg-slate-50/60 p-4">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-semibold text-slate-900">Total</span>
+                    <MoneyAmount amount={selectedPayment.amount} className="font-semibold text-base" />
+                  </div>
+                </div>
+              </div>
+
+              {selectedPayment.status === "failed" && (
+                <div className="border-t border-slate-100 pt-4">
+                  <p className="text-[11px] uppercase tracking-wider font-semibold text-slate-400 mb-3">
+                    Recovery
+                  </p>
+                  <button
+                    onClick={async () => {
+                      try {
+                        await apiFetch(`/payments/${selectedPayment.id}/retry`, { method: "POST" });
+                        setToast({ message: "Payment retry initiated.", type: "success" });
+                        loadPracticeData();
+                        setSelectedPaymentId(null);
+                      } catch { setToast({ message: "Payment retry failed.", type: "error" }); }
+                    }}
+                    className="px-3 py-1.5 rounded-md text-sm font-medium text-white shadow-sm"
+                    style={{ backgroundColor: "#635bff" }}
+                  >
+                    Retry payment
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+        </DetailDrawer>
       </div>
     );
   }
