@@ -6802,12 +6802,18 @@ export function PracticePortal() {
     ];
     const mockPayments = apiPayments.length > 0 ? apiPayments : (isDemoMode ? mockPaymentsDemo : []);
 
+    // Backend Payment.status enum carries values the demo seeder writes
+    // (completed) plus the dunning paths Stripe surfaces (succeeded /
+    // pending / failed / refunded). Map all of them to a color so an
+    // unknown status doesn't crash the row.
     const payStatusConfig: Record<string, { bg: string; text: string; dot: string }> = {
       succeeded: { bg: "#ecf9ec", text: "#2f8132", dot: "#3f9142" },
+      completed: { bg: "#ecf9ec", text: "#2f8132", dot: "#3f9142" },
       pending: { bg: "#fffbeb", text: "#d97706", dot: "#f59e0b" },
       failed: { bg: "#fef2f2", text: "#dc2626", dot: "#ef4444" },
       refunded: { bg: "#f1f5f9", text: "#64748b", dot: "#94a3b8" },
     };
+    const payStatusFallback = { bg: "#e0e8f0", text: "#334e68", dot: "#486581" };
 
     return (
       <div className="space-y-6">
@@ -6851,7 +6857,7 @@ export function PracticePortal() {
                   <tr><td colSpan={7} className="py-8 text-center text-slate-400 text-sm">No payments recorded yet.</td></tr>
                 )}
                 {mockPayments.map((pay) => {
-                  const psc = payStatusConfig[pay.status];
+                  const psc = payStatusConfig[pay.status] || payStatusFallback;
                   return (
                     <tr
                       key={pay.id}
