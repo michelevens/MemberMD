@@ -17,7 +17,29 @@ class MessageController extends Controller
 
         $user = $request->user();
 
-        // Get latest message per thread where user is sender or recipient
+        // patient_id mode — used by the practice-side patient detail
+        // drawer to render that patient's full message history. Allowed
+        // for staff/provider/admin only; patients can never look up
+        // another user's threads via this query parameter.
+        if ($request->filled('patient_id') && !$user->isPatient()) {
+            $patient = \App\Models\Patient::where('tenant_id', $user->tenant_id)
+                ->find($request->patient_id);
+            if (!$patient || !$patient->user_id) {
+                return response()->json(['data' => []]);
+            }
+            $messages = Message::where('tenant_id', $user->tenant_id)
+                ->where(function ($q) use ($patient) {
+                    $q->where('sender_id', $patient->user_id)
+                      ->orWhere('recipient_id', $patient->user_id);
+                })
+                ->with(['sender', 'recipient'])
+                ->orderBy('created_at', 'asc')
+                ->get();
+            return response()->json(['data' => $messages]);
+        }
+
+        // Default mode — latest message per thread where current user
+        // is sender or recipient.
         $threads = Message::where('tenant_id', $user->tenant_id)
             ->where(function ($q) use ($user) {
                 $q->where('sender_id', $user->id)

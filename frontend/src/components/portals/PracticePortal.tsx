@@ -2640,19 +2640,43 @@ export function PracticePortal() {
     ];
     const mockEncounters = isDemoMode ? mockEncountersData : [];
 
-    // Mock screening scores
-    const phq9Scores = isDemoMode ? [
+    // Screening scores — pivot the per-patient API responses into the
+    // PHQ-9 and GAD-7 series the JSX renders. Each ScreeningResponse has
+    // template_id (resolves to template.code), score, severity, date.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const screeningRows = _ptApiScreenings as any[];
+    type SeriesRow = { date: string; score: number; severity: string };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const buildSeries = (code: string, demoFallback: SeriesRow[]): SeriesRow[] => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const matched = screeningRows.filter((s: any) => {
+        const tplCode = s.template?.code || s.templateCode || s.template_code;
+        return tplCode === code;
+      });
+      if (matched.length === 0) return isDemoMode ? demoFallback : [];
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return matched.map((s: any) => {
+        const dt = s.administeredAt || s.administered_at || s.createdAt || s.created_at;
+        const dateStr = dt ? new Date(dt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "";
+        return {
+          date: dateStr,
+          score: Number(s.score ?? 0),
+          severity: (s.severity || "").replace(/_/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase()),
+        };
+      }).sort((a: SeriesRow, b: SeriesRow) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    };
+    const phq9Scores = buildSeries("phq9", [
       { date: "Jan 20, 2026", score: 18, severity: "Moderately Severe" },
       { date: "Feb 12, 2026", score: 14, severity: "Moderate" },
       { date: "Mar 12, 2026", score: 9, severity: "Mild" },
       { date: "Apr 9, 2026", score: 7, severity: "Mild" },
-    ] : [];
-    const gad7Scores = isDemoMode ? [
+    ]);
+    const gad7Scores = buildSeries("gad7", [
       { date: "Jan 20, 2026", score: 15, severity: "Severe" },
       { date: "Feb 12, 2026", score: 12, severity: "Moderate" },
       { date: "Mar 12, 2026", score: 8, severity: "Mild" },
       { date: "Apr 9, 2026", score: 6, severity: "Mild" },
-    ] : [];
+    ]);
 
     // Patient appointments — real API data first, then demo fallback,
     // then empty arrays in production-with-no-history.
@@ -2704,33 +2728,82 @@ export function PracticePortal() {
       } : { upcoming: [], past: [] };
 
     // Mock invoices for this patient
-    const mockPtInvoices = isDemoMode ? [
-      { id: "INV-1050", date: "Mar 15, 2026", amount: 199.00, status: "paid" as const, description: "Complete Plan — March 2026" },
-      { id: "INV-1038", date: "Feb 15, 2026", amount: 199.00, status: "paid" as const, description: "Complete Plan — February 2026" },
-      { id: "INV-1025", date: "Jan 15, 2026", amount: 199.00, status: "paid" as const, description: "Complete Plan — January 2026" },
-      { id: "INV-1026", date: "Jan 20, 2026", amount: 75.00, status: "paid" as const, description: "Initial Evaluation Copay" },
-      { id: "INV-1030", date: "Jan 28, 2026", amount: 25.00, status: "paid" as const, description: "Lab Work — CBC Panel" },
-      { id: "INV-1045", date: "Mar 10, 2026", amount: 15.00, status: "open" as const, description: "Lab Results Review" },
-    ] : [];
+    // Patient invoices — real API rows from the per-patient slot, with
+    // demo fallback so the billing card still feels populated for sales
+    // walkthroughs of fresh tenants.
+    type PtInvoice = { id: string; date: string; amount: number; status: "paid" | "open" | "pending" | "void" | "overdue"; description: string };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const mockPtInvoices: PtInvoice[] = (_ptApiInvoices as any[]).length > 0
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ? (_ptApiInvoices as any[]).map((iv: any) => ({
+          id: iv.invoiceNumber || iv.invoice_number || iv.id,
+          date: (iv.issuedAt || iv.issued_at || iv.createdAt || iv.created_at)
+            ? new Date(iv.issuedAt || iv.issued_at || iv.createdAt || iv.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+            : "",
+          amount: Number(iv.totalAmount ?? iv.total_amount ?? iv.amount ?? 0),
+          status: (iv.status === "paid" ? "paid" : iv.status === "pending" ? "pending" : iv.status === "void" ? "void" : iv.status === "overdue" ? "overdue" : "open") as PtInvoice["status"],
+          description: iv.description || iv.lineItems?.[0]?.description || iv.line_items?.[0]?.description || "",
+        }))
+      : isDemoMode ? [
+        { id: "INV-1050", date: "Mar 15, 2026", amount: 199.00, status: "paid" as const, description: "Complete Plan — March 2026" },
+        { id: "INV-1038", date: "Feb 15, 2026", amount: 199.00, status: "paid" as const, description: "Complete Plan — February 2026" },
+        { id: "INV-1025", date: "Jan 15, 2026", amount: 199.00, status: "paid" as const, description: "Complete Plan — January 2026" },
+        { id: "INV-1045", date: "Mar 10, 2026", amount: 15.00, status: "open" as const, description: "Lab Results Review" },
+      ] : [];
 
     // Mock documents
-    const mockDocuments = isDemoMode ? [
-      { id: "d1", name: "Intake Form", type: "PDF", date: "Jan 15, 2026", status: "uploaded" },
-      { id: "d2", name: "HIPAA Consent", type: "PDF", date: "Jan 15, 2026", status: "signed" },
-      { id: "d3", name: "Treatment Consent", type: "PDF", date: "Jan 15, 2026", status: "signed" },
-      { id: "d4", name: "Lab Results — CBC Panel", type: "PDF", date: "Jan 30, 2026", status: "uploaded" },
-      { id: "d5", name: "Provider Letter", type: "PDF", date: "Mar 15, 2026", status: "generated" },
-    ] : [];
+    type PtDoc = { id: string; name: string; type: string; date: string; status: string };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const mockDocuments: PtDoc[] = (_ptApiDocuments as any[]).length > 0
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ? (_ptApiDocuments as any[]).map((d: any) => ({
+          id: d.id,
+          name: d.name || d.title || d.fileName || d.file_name || "Document",
+          type: (d.type || d.fileType || d.file_type || "file").toString().toUpperCase(),
+          date: (d.createdAt || d.created_at || d.uploadedAt || d.uploaded_at)
+            ? new Date(d.createdAt || d.created_at || d.uploadedAt || d.uploaded_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+            : "",
+          status: d.status || "uploaded",
+        }))
+      : isDemoMode ? [
+        { id: "d1", name: "Intake Form", type: "PDF", date: "Jan 15, 2026", status: "uploaded" },
+        { id: "d2", name: "HIPAA Consent", type: "PDF", date: "Jan 15, 2026", status: "signed" },
+        { id: "d3", name: "Treatment Consent", type: "PDF", date: "Jan 15, 2026", status: "signed" },
+      ] : [];
 
-    // Mock messages for this patient
-    const mockPtMessages = isDemoMode ? [
-      { id: "pm1", sender: "James Wilson", text: "Hi Dr. Michel, I wanted to let you know the melatonin is working much better than the trazodone for sleep. No more morning grogginess.", time: "Mar 14, 2026 9:15 AM", isPatient: true },
-      { id: "pm2", sender: "Dr. Michel", text: "Great to hear, James! That's exactly what we were hoping for. How's your mood been overall this past week?", time: "Mar 14, 2026 10:30 AM", isPatient: false },
-      { id: "pm3", sender: "James Wilson", text: "Definitely better. I've been more productive at work and my wife noticed I'm more engaged at home. Still some anxious days but the hydroxyzine helps.", time: "Mar 14, 2026 11:00 AM", isPatient: true },
-      { id: "pm4", sender: "Dr. Michel", text: "That's wonderful progress. We'll review everything in detail at your appointment on the 25th. Keep up with the therapy sessions too.", time: "Mar 14, 2026 2:00 PM", isPatient: false },
-      { id: "pm5", sender: "James Wilson", text: "Will do. Thanks, Dr. Michel!", time: "Mar 14, 2026 2:15 PM", isPatient: true },
-      { id: "pm6", sender: "James Wilson", text: "Quick question — is it okay to take the hydroxyzine and melatonin on the same night?", time: "Mar 17, 2026 8:00 PM", isPatient: true },
-    ] : [];
+    // Patient messages thread for the practice-side detail drawer.
+    // Real rows from the per-patient slot when available, demo fallback
+    // otherwise. Each Message has body (encrypted->decoded by backend),
+    // sender_id, sender_type, created_at.
+    type PtMsg = { id: string; sender: string; text: string; time: string; isPatient: boolean };
+    const ptName = pt.name || "Patient";
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const mockPtMessages: PtMsg[] = (_ptApiMessages as any[]).length > 0
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ? (_ptApiMessages as any[])
+          .slice()
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          .sort((a: any, b: any) => new Date(a.createdAt || a.created_at).getTime() - new Date(b.createdAt || b.created_at).getTime())
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          .map((m: any) => {
+            const senderType = (m.senderType ?? m.sender_type ?? (m.sender?.role === "patient" ? "patient" : "provider")) as string;
+            const isPatient = senderType === "patient";
+            const senderName = m.sender
+              ? `${m.sender.firstName || m.sender.first_name || ""} ${m.sender.lastName || m.sender.last_name || ""}`.trim() || m.sender.name || (isPatient ? ptName : "Provider")
+              : (isPatient ? ptName : "Provider");
+            const ts = m.createdAt || m.created_at;
+            return {
+              id: m.id,
+              sender: senderName,
+              text: m.body || m.text || "",
+              time: ts ? new Date(ts).toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" }) : "",
+              isPatient,
+            };
+          })
+      : isDemoMode ? [
+        { id: "pm1", sender: ptName, text: "Hi Dr. Michel, I wanted to let you know the medication is working well.", time: "Mar 14, 2026 9:15 AM", isPatient: true },
+        { id: "pm2", sender: "Dr. Michel", text: "Great to hear! How's your mood been overall this past week?", time: "Mar 14, 2026 10:30 AM", isPatient: false },
+      ] : [];
 
     // PHQ-9 questions for screening detail
     const phq9Questions = [
@@ -2939,14 +3012,46 @@ export function PracticePortal() {
               </span>
             </div>
           </div>
-          <div className="glass rounded-xl p-4">
-            <p className="text-xs text-slate-400 mb-1">Next Appointment</p>
-            <p className="text-sm font-bold text-slate-800">{pt.nextApt === "—" ? "None scheduled" : pt.nextApt}</p>
-          </div>
-          <div className="glass rounded-xl p-4">
-            <p className="text-xs text-slate-400 mb-1">Last Visit</p>
-            <p className="text-sm font-bold text-slate-800">{pt.lastVisit}</p>
-          </div>
+          {/* Next / Last visit: derive from the per-patient appointments
+              we already fetched, falling back to whatever the patient
+              row carried (lastVisitAt/nextAppointmentAt). Keeps the
+              tiles populated even though the patient list endpoint
+              doesn't compute these. */}
+          {(() => {
+            const now = Date.now();
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const apts = ptApiAppointments as any[];
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const futures = apts.filter((a: any) => {
+              const dt = a.scheduledAt || a.scheduled_at;
+              return dt && new Date(dt).getTime() > now && a.status !== "cancelled" && a.status !== "canceled";
+            });
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const past = apts.filter((a: any) => {
+              const dt = a.scheduledAt || a.scheduled_at;
+              return dt && new Date(dt).getTime() <= now && (a.status === "completed" || a.status === "no_show");
+            });
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const fmt = (d: any) => d ? new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—";
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const next = futures.sort((a: any, b: any) => new Date(a.scheduledAt || a.scheduled_at).getTime() - new Date(b.scheduledAt || b.scheduled_at).getTime())[0];
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const last = past.sort((a: any, b: any) => new Date(b.scheduledAt || b.scheduled_at).getTime() - new Date(a.scheduledAt || a.scheduled_at).getTime())[0];
+            const nextLabel = next ? fmt(next.scheduledAt || next.scheduled_at) : (pt.nextApt && pt.nextApt !== "N/A" && pt.nextApt !== "—" ? pt.nextApt : "None scheduled");
+            const lastLabel = last ? fmt(last.scheduledAt || last.scheduled_at) : (pt.lastVisit && pt.lastVisit !== "N/A" ? pt.lastVisit : "—");
+            return (
+              <>
+                <div className="glass rounded-xl p-4">
+                  <p className="text-xs text-slate-400 mb-1">Next Appointment</p>
+                  <p className="text-sm font-bold text-slate-800">{nextLabel}</p>
+                </div>
+                <div className="glass rounded-xl p-4">
+                  <p className="text-xs text-slate-400 mb-1">Last Visit</p>
+                  <p className="text-sm font-bold text-slate-800">{lastLabel}</p>
+                </div>
+              </>
+            );
+          })()}
         </div>
 
         {/* ── Program Enrollments ──────────────────────────────────────── */}
@@ -3686,15 +3791,17 @@ export function PracticePortal() {
 
         {/* Encounters */}
         {patientDetailTab === "encounters" && (() => {
-          // Patient encounter list now reads from the real API. Falls back
-          // to the mockEncounters demo fixture only when not in demo mode
-          // AND apiEncountersRaw is still loading. Filters by patientId so
-          // we only show this patient's records.
-          const realEncounters = (apiEncountersRaw || []).filter(
-            (e: any) => e.patientId === pt.id || e.patient_id === pt.id
-          );
-          const useReal = !isDemoMode || realEncounters.length > 0;
-          const encountersToShow = useReal ? realEncounters : mockEncounters;
+          // Patient encounter list reads from the per-patient API slot
+          // populated when this patient was opened. Falls through to the
+          // global apiEncountersRaw filter (older path) and finally the
+          // demo mockEncounters when nothing has loaded yet.
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const scopedEncounters = (_ptApiEncounters as any[]).length > 0
+            ? _ptApiEncounters
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            : (apiEncountersRaw || []).filter((e: any) => e.patientId === pt.id || e.patient_id === pt.id);
+          const useReal = !isDemoMode || scopedEncounters.length > 0;
+          const encountersToShow = useReal ? scopedEncounters : mockEncounters;
           return (
             <div className="space-y-4">
               <h3 className="font-semibold text-slate-800">Visit Notes (SOAP)</h3>
