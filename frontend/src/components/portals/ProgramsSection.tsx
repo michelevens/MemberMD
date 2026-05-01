@@ -983,18 +983,15 @@ export function ProgramsSection() {
         </button>
 
         {/* Header */}
-        <div className="glass rounded-xl p-6">
+        <div className="rounded-xl border border-slate-200 bg-white p-5">
           <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
-            <div className="flex items-start gap-4">
-              <div
-                className="w-14 h-14 rounded-xl flex items-center justify-center shrink-0"
-                style={{ backgroundColor: "#e6f7f2" }}
-              >
-                <Icon className="w-7 h-7" style={{ color: "#0D9488" }} />
+            <div className="flex items-start gap-3 min-w-0">
+              <div className="w-10 h-10 rounded-md flex items-center justify-center shrink-0 bg-slate-100">
+                <Icon className="w-5 h-5 text-slate-700" />
               </div>
-              <div>
-                <div className="flex items-center gap-3 flex-wrap">
-                  <h2 className="text-xl font-bold" style={{ color: "#1B2B4D" }}>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h2 className="text-2xl font-semibold tracking-tight text-slate-900">
                     {selectedProgram.name}
                   </h2>
                   <TypeBadge type={selectedProgram.type} />

@@ -1309,7 +1309,16 @@ export function SuperAdminPortal() {
     const recentPractices = practices.slice(0, 6);
 
     return (
-      <div className="animate-page-in space-y-6">
+      <div className="animate-page-in space-y-5">
+        {/* Stripe-grade page header */}
+        <div className="flex items-end justify-between gap-4">
+          <div>
+            <h2 className="text-2xl font-semibold text-slate-900 tracking-tight">Dashboard</h2>
+            <p className="text-sm text-slate-500 mt-0.5">Network-wide growth, members, and platform health</p>
+          </div>
+          <RefreshButton onRefresh={loadData} title="Refresh dashboard" />
+        </div>
+
         {/* Stats Row */}
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
           {stats.map((stat) => {
@@ -2225,30 +2234,30 @@ export function SuperAdminPortal() {
       : getMockActivity(p.name));
 
     return (
-      <div className="animate-page-in space-y-6">
+      <div className="animate-page-in space-y-5">
         {/* Header Bar */}
-        <div className="glass rounded-xl p-5">
+        <div className="rounded-xl border border-slate-200 bg-white p-5">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-3">
               <button
                 onClick={() => setSelectedPractice(null)}
-                className="p-2 rounded-lg hover:bg-slate-100 transition-colors shrink-0"
+                className="p-1.5 rounded-md hover:bg-slate-100 transition-colors shrink-0"
                 title="Back"
               >
                 <ArrowLeft className="w-5 h-5" style={{ color: "#334e68" }} />
               </button>
               <div
-                className="w-12 h-12 rounded-xl flex items-center justify-center text-lg font-bold text-white shrink-0"
+                className="w-10 h-10 rounded-md flex items-center justify-center text-sm font-bold text-white shrink-0"
                 style={{ background: "linear-gradient(135deg, #334e68, #243b53)" }}
               >
                 {p.name.charAt(0)}
               </div>
               <div>
-                <div className="flex items-center gap-3">
-                  <h2 className="text-xl font-bold" style={{ color: "#102a43" }}>{p.name}</h2>
+                <div className="flex items-center gap-2">
+                  <h2 className="text-2xl font-semibold tracking-tight text-slate-900">{p.name}</h2>
                   <StatusBadge status={p.status} />
                 </div>
-                <p className="text-sm text-slate-500 mt-0.5">{p.specialty} &middot; {p.model} &middot; {p.city}, {p.state}</p>
+                <p className="text-sm text-slate-500 mt-0.5">{p.specialty} · {p.model} · {p.city}, {p.state}</p>
               </div>
             </div>
             <div className="flex items-center gap-2 pl-14 sm:pl-0">
