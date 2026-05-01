@@ -6,7 +6,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { ProviderDetailPage } from "./ProviderDetailPage";
 import { useAuth } from "../../contexts/AuthContext";
-import { dashboardService, membershipPlanService, messageService, patientService, appointmentService, encounterService, prescriptionService, invoiceService, programService, telehealthService, screeningService, couponService, providerService, paymentService, notificationService, apiFetch, billingEnhancedService } from "../../lib/api";
+import { dashboardService, membershipPlanService, messageService, patientService, appointmentService, encounterService, prescriptionService, invoiceService, programService, telehealthService, screeningService, couponService, providerService, paymentService, notificationService, apiFetch, billingEnhancedService, documentService } from "../../lib/api";
 import { PortalShell, type NavSection as ShellNavSection, type PortalColor } from "../shared/PortalShell";
 import { CommandPalette, useCommandPaletteShortcut } from "../shared/CommandPalette";
 import { AddAllergyDialog, type AllergyEntry } from "../clinical/AddAllergyDialog";
@@ -868,6 +868,27 @@ export function PracticePortal() {
   const [patientActivitiesPage, setPatientActivitiesPage] = useState(1);
   const [patientActivitiesTotalPages, setPatientActivitiesTotalPages] = useState(1);
 
+  // ─── Patient Detail per-tab data slots ───────────────────────────────
+  // Each sub-tab in the patient drawer loads its own scoped fetch when
+  // the patient is opened. Without this every sub-tab fell back to
+  // demo-only mocks that resolved to [] in production. Slots that the
+  // sub-tabs read are checked individually; the unused ones are still
+  // populated so activating their tab doesn't require a fresh fetch.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [ptApiAppointments, setPtApiAppointments] = useState<any[]>([]);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [ptApiPrescriptions, setPtApiPrescriptions] = useState<any[]>([]);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [_ptApiEncounters, setPtApiEncounters] = useState<any[]>([]);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [_ptApiInvoices, setPtApiInvoices] = useState<any[]>([]);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [_ptApiScreenings, setPtApiScreenings] = useState<any[]>([]);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [_ptApiDocuments, setPtApiDocuments] = useState<any[]>([]);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [_ptApiMessages, setPtApiMessages] = useState<any[]>([]);
+
   // ─── Roster Cancel Membership Dialog ───────────────────────────────────
   const [rosterCancelDialog, setRosterCancelDialog] = useState<{ patientId: string; patientName: string; membershipId: string } | null>(null);
   const [rosterCancelReason, setRosterCancelReason] = useState("");
@@ -1146,6 +1167,55 @@ export function PracticePortal() {
   }, []);
 
   useEffect(() => { loadPracticeData(); }, [loadPracticeData]);
+
+  // ─── Per-patient detail fetches ──────────────────────────────────────
+  // When a patient is opened in the detail drawer, fan out to each
+  // sub-tab's scoped endpoint in parallel and store the results.
+  // Empty handlers per request — sub-tabs render empty state when one
+  // particular endpoint fails rather than blanking the whole drawer.
+  useEffect(() => {
+    if (!selectedPatient?.id) {
+      setPtApiAppointments([]);
+      setPtApiPrescriptions([]);
+      setPtApiEncounters([]);
+      setPtApiInvoices([]);
+      setPtApiScreenings([]);
+      setPtApiDocuments([]);
+      setPtApiMessages([]);
+      return;
+    }
+    const pid = selectedPatient.id;
+    let cancelled = false;
+    (async () => {
+      const results = await Promise.allSettled([
+        appointmentService.list({ patient_id: pid }),
+        prescriptionService.list({ patient_id: pid }),
+        encounterService.list({ patient_id: pid }),
+        invoiceService.list({ patient_id: pid }),
+        screeningService.list({ patient_id: pid }),
+        documentService.list({ patient_id: pid }),
+        messageService.list({ patient_id: pid }),
+      ]);
+      if (cancelled) return;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const unpack = (r: any): any[] => {
+        if (r.status !== "fulfilled" || !r.value?.data) return [];
+        const d = r.value.data;
+        if (Array.isArray(d)) return d;
+        if (Array.isArray(d?.data)) return d.data; // paginated
+        if (Array.isArray(d?.items)) return d.items;
+        return [];
+      };
+      setPtApiAppointments(unpack(results[0]));
+      setPtApiPrescriptions(unpack(results[1]));
+      setPtApiEncounters(unpack(results[2]));
+      setPtApiInvoices(unpack(results[3]));
+      setPtApiScreenings(unpack(results[4]));
+      setPtApiDocuments(unpack(results[5]));
+      setPtApiMessages(unpack(results[6]));
+    })();
+    return () => { cancelled = true; };
+  }, [selectedPatient?.id]);
 
   // ─── Fetch Entitlement Types ─────────────────────────────────────────
   const fetchEntitlementTypes = useCallback(async () => {
@@ -2584,20 +2654,54 @@ export function PracticePortal() {
       { date: "Apr 9, 2026", score: 6, severity: "Mild" },
     ] : [];
 
-    // Mock patient appointments
-    const mockPtAppointments = isDemoMode ? {
-      upcoming: [
-        { id: "pa1", date: "Mar 25, 2026", time: "2:00 PM", type: "Med Management", provider: "Dr. Nageley Michel", telehealth: true },
-      ],
-      past: [
-        { id: "pa2", date: "Mar 12, 2026", type: "Med Management", provider: "Dr. Nageley Michel", duration: "30 min", status: "completed" as const, notes: true },
-        { id: "pa3", date: "Feb 12, 2026", type: "Med Management", provider: "Dr. Nageley Michel", duration: "30 min", status: "completed" as const, notes: true },
-        { id: "pa4", date: "Jan 20, 2026", type: "Initial Evaluation", provider: "Dr. Nageley Michel", duration: "60 min", status: "completed" as const, notes: true },
-        { id: "pa5", date: "Feb 26, 2026", type: "Therapy", provider: "Dr. Nageley Michel", duration: "45 min", status: "cancelled" as const, notes: false },
-        { id: "pa6", date: "Mar 5, 2026", type: "Lab Review", provider: "NP Johnson", duration: "15 min", status: "completed" as const, notes: true },
-        { id: "pa7", date: "Jan 28, 2026", type: "Lab Work", provider: "NP Johnson", duration: "15 min", status: "completed" as const, notes: false },
-      ],
-    } : { upcoming: [] as { id: string; date: string; time: string; type: string; provider: string; telehealth: boolean }[], past: [] as { id: string; date: string; type: string; provider: string; duration: string; status: "completed" | "cancelled"; notes: boolean }[] };
+    // Patient appointments — real API data first, then demo fallback,
+    // then empty arrays in production-with-no-history.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const formatApt = (a: any) => {
+      const dt = a.scheduledAt || a.scheduled_at || a.date;
+      const date = dt ? new Date(dt) : null;
+      const dateStr = date ? date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "";
+      const timeStr = date ? date.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }) : "";
+      const provName = a.provider?.user
+        ? `${a.provider.user.firstName || a.provider.user.first_name || ""} ${a.provider.user.lastName || a.provider.user.last_name || ""}`.trim()
+        : (a.providerName || a.provider_name || "");
+      return {
+        id: a.id,
+        date: dateStr,
+        time: timeStr,
+        type: a.appointmentType?.name || a.type || "Visit",
+        provider: provName,
+        duration: `${a.durationMinutes || a.duration_minutes || 30} min`,
+        status: (a.status === "completed" ? "completed" : a.status === "canceled" || a.status === "cancelled" ? "cancelled" : a.status) as "completed" | "cancelled",
+        telehealth: !!(a.isTelehealth ?? a.is_telehealth),
+        notes: !!a.notes,
+      };
+    };
+    const apiUpcoming = ptApiAppointments
+      .filter((a) => {
+        const dt = a.scheduledAt || a.scheduled_at;
+        return dt && new Date(dt) > new Date();
+      })
+      .map(formatApt);
+    const apiPast = ptApiAppointments
+      .filter((a) => {
+        const dt = a.scheduledAt || a.scheduled_at;
+        return !dt || new Date(dt) <= new Date();
+      })
+      .map(formatApt);
+    type PtApt = ReturnType<typeof formatApt>;
+    const mockPtAppointments: { upcoming: PtApt[]; past: PtApt[] } = ptApiAppointments.length > 0
+      ? { upcoming: apiUpcoming, past: apiPast }
+      : isDemoMode ? {
+        upcoming: [
+          { id: "pa1", date: "Mar 25, 2026", time: "2:00 PM", type: "Med Management", provider: "Dr. Nageley Michel", telehealth: true, duration: "30 min", status: "completed" as const, notes: false },
+        ],
+        past: [
+          { id: "pa2", date: "Mar 12, 2026", time: "", type: "Med Management", provider: "Dr. Nageley Michel", duration: "30 min", status: "completed" as const, notes: true, telehealth: false },
+          { id: "pa3", date: "Feb 12, 2026", time: "", type: "Med Management", provider: "Dr. Nageley Michel", duration: "30 min", status: "completed" as const, notes: true, telehealth: false },
+          { id: "pa4", date: "Jan 20, 2026", time: "", type: "Initial Evaluation", provider: "Dr. Nageley Michel", duration: "60 min", status: "completed" as const, notes: true, telehealth: false },
+        ],
+      } : { upcoming: [], past: [] };
 
     // Mock invoices for this patient
     const mockPtInvoices = isDemoMode ? [
@@ -3459,37 +3563,49 @@ export function PracticePortal() {
                     </tr>
                   </thead>
                   <tbody>
-                    {(pt.medications || []).map((med, i) => (
-                      <tr key={i} className="border-t border-slate-100 hover:bg-slate-50 transition-colors">
-                        <td className="px-4 py-3 font-medium text-slate-700">{med.name}</td>
-                        <td className="px-4 py-3 text-slate-600">{med.dosage}</td>
-                        <td className="px-4 py-3 text-slate-500">{med.frequency}</td>
-                        <td className="px-4 py-3 text-slate-500 hidden md:table-cell">{med.prescriber}</td>
-                        <td className="px-4 py-3">
-                          <span
-                            className="px-2 py-0.5 rounded-full text-xs font-medium capitalize"
-                            style={med.status === "active" ? { backgroundColor: "#ecf9ec", color: "#2f8132" } : { backgroundColor: "#f1f5f9", color: "#64748b" }}
-                          >
-                            {med.status}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 text-slate-500 hidden lg:table-cell">{med.startDate}</td>
-                        <td className="px-4 py-3">
-                          <div className="flex items-center gap-1">
-                            {med.status === "active" && (
-                              <>
-                                <button className="px-2 py-1 rounded text-xs font-medium" style={{ color: "#27ab83" }} onClick={() => setToast({ message: "Use the Prescriptions tab to manage refills.", type: "success" })}>Refill</button>
-                                <button className="px-2 py-1 rounded text-xs font-medium text-slate-400" onClick={() => setToast({ message: "Use the Prescriptions tab to discontinue.", type: "success" })}>Discontinue</button>
-                              </>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
+                    {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+                    {(ptApiPrescriptions.length > 0 ? ptApiPrescriptions : (pt.medications || [])).map((med: any, i: number) => {
+                      const name = med.name || med.medicationName || med.medication_name || "—";
+                      const dosage = med.dosage || "";
+                      const frequency = med.frequency || "";
+                      const prescriber = med.prescriber || med.providerName || med.provider?.user?.firstName || "";
+                      const status = med.status || "active";
+                      const startDate = med.startDate || med.prescribedAt || med.prescribed_at || "";
+                      const startDateStr = typeof startDate === "string" && startDate.length > 10
+                        ? new Date(startDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+                        : startDate;
+                      return (
+                        <tr key={med.id || i} className="border-t border-slate-100 hover:bg-slate-50 transition-colors">
+                          <td className="px-4 py-3 font-medium text-slate-700">{name}</td>
+                          <td className="px-4 py-3 text-slate-600">{dosage}</td>
+                          <td className="px-4 py-3 text-slate-500">{frequency}</td>
+                          <td className="px-4 py-3 text-slate-500 hidden md:table-cell">{prescriber}</td>
+                          <td className="px-4 py-3">
+                            <span
+                              className="px-2 py-0.5 rounded-full text-xs font-medium capitalize"
+                              style={status === "active" ? { backgroundColor: "#ecf9ec", color: "#2f8132" } : { backgroundColor: "#f1f5f9", color: "#64748b" }}
+                            >
+                              {status}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-slate-500 hidden lg:table-cell">{startDateStr}</td>
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-1">
+                              {status === "active" && (
+                                <>
+                                  <button className="px-2 py-1 rounded text-xs font-medium" style={{ color: "#27ab83" }} onClick={() => setToast({ message: "Use the Prescriptions tab to manage refills.", type: "success" })}>Refill</button>
+                                  <button className="px-2 py-1 rounded text-xs font-medium text-slate-400" onClick={() => setToast({ message: "Use the Prescriptions tab to discontinue.", type: "success" })}>Discontinue</button>
+                                </>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
-              {(!pt.medications || pt.medications.length === 0) && (
+              {ptApiPrescriptions.length === 0 && (!pt.medications || pt.medications.length === 0) && (
                 <div className="py-8 text-center text-slate-400 text-sm">No medications on file.</div>
               )}
             </div>

@@ -49,6 +49,10 @@ class AppointmentController extends Controller
             $query->where('provider_id', $request->provider_id);
         }
 
+        if ($request->filled('patient_id')) {
+            $query->where('patient_id', $request->patient_id);
+        }
+
         if ($request->filled('status')) {
             $query->where('status', $request->status);
         }
