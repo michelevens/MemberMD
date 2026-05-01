@@ -16,6 +16,7 @@ use App\Models\PatientEntitlement;
 use App\Models\PatientFamilyMember;
 use App\Models\PatientMembership;
 use App\Models\Payment;
+use App\Models\PlanEntitlement;
 use App\Models\Practice;
 use App\Models\Prescription;
 use App\Models\Provider;
@@ -81,6 +82,7 @@ class DemoSeeder extends Seeder
         $this->seedTeam();
         $this->seedProviders();
         $this->seedPlans();
+        $this->seedPlanEntitlements();
         $this->seedEmployer();
         $this->seedPatients();
         $this->seedAppointments();
@@ -891,6 +893,117 @@ class DemoSeeder extends Seeder
     }
 
     // ─── Lifecycle events ────────────────────────────────────────────────────
+    // ─── Plan entitlements ────────────────────────────────────────────────
+    // Attach a representative entitlement set to each demo plan so the
+    // enrollment widget shows real benefits, the Practice Portal plan
+    // detail "Entitlements" tab is populated, and patient_entitlements
+    // can be derived by membership creation. Quantities scale per tier.
+
+    private function seedPlanEntitlements(): void
+    {
+        $tenantId = $this->practice->id;
+        // Code -> id lookup for this tenant's catalog.
+        $catalog = DB::table('entitlement_types')
+            ->where('tenant_id', $tenantId)
+            ->pluck('id', 'code')
+            ->toArray();
+        if (empty($catalog)) {
+            $this->command->warn('  ↳ plan_entitlements skip: entitlement_types empty');
+            return;
+        }
+
+        // (planKey => [code => [qty, unlimited?]])
+        $plans = [
+            'wellness' => [
+                'office_visit' => [4, false],
+                'telehealth_visit' => [2, false],
+                'secure_messaging' => [0, true],
+                'basic_lab_panel' => [1, false],
+                'annual_wellness' => [1, false],
+            ],
+            'complete' => [
+                'office_visit' => [12, false],
+                'telehealth_visit' => [12, false],
+                'same_day_visit' => [4, false],
+                'secure_messaging' => [0, true],
+                'after_hours_oncall' => [0, true],
+                'basic_lab_panel' => [4, false],
+                'rapid_test' => [4, false],
+                'minor_procedure' => [2, false],
+                'ekg' => [2, false],
+                'annual_wellness' => [1, false],
+            ],
+            'concierge' => [
+                'office_visit' => [0, true],
+                'telehealth_visit' => [0, true],
+                'same_day_visit' => [0, true],
+                'after_hours_visit' => [0, true],
+                'walk_in_visit' => [0, true],
+                'secure_messaging' => [0, true],
+                'phone_text_access' => [0, true],
+                'email_access' => [0, true],
+                'after_hours_oncall' => [0, true],
+                'care_coordination' => [0, true],
+                'basic_lab_panel' => [0, true],
+                'advanced_lab_panel' => [4, false],
+                'rapid_test' => [0, true],
+                'minor_procedure' => [4, false],
+                'joint_injection' => [4, false],
+                'ekg' => [4, false],
+                'spirometry' => [2, false],
+                'imaging_coordination' => [0, true],
+                'specialist_referral_coord' => [0, true],
+                'chronic_care_mgmt' => [0, true],
+                'annual_wellness' => [1, false],
+            ],
+            'family' => [
+                'office_visit' => [24, false],
+                'telehealth_visit' => [24, false],
+                'same_day_visit' => [8, false],
+                'secure_messaging' => [0, true],
+                'after_hours_oncall' => [0, true],
+                'basic_lab_panel' => [8, false],
+                'rapid_test' => [8, false],
+                'minor_procedure' => [4, false],
+                'vaccines_immunizations' => [0, true],
+                'annual_wellness' => [4, false],
+            ],
+            'starter' => [
+                'office_visit' => [2, false],
+                'telehealth_visit' => [2, false],
+                'secure_messaging' => [0, true],
+                'basic_lab_panel' => [1, false],
+            ],
+        ];
+
+        foreach ($plans as $planKey => $entitlements) {
+            $plan = $this->plans[$planKey] ?? null;
+            if (!$plan) continue;
+            $sort = 0;
+            foreach ($entitlements as $code => [$qty, $unlimited]) {
+                $entId = $catalog[$code] ?? null;
+                if (!$entId) continue;
+                try {
+                    PlanEntitlement::updateOrCreate(
+                        ['plan_id' => $plan->id, 'entitlement_type_id' => $entId],
+                        [
+                            'quantity_limit' => $unlimited ? null : $qty,
+                            'is_unlimited' => $unlimited,
+                            'period_type' => 'per_month',
+                            'rollover_enabled' => false,
+                            'overage_policy' => 'notify',
+                            'family_shared' => $planKey === 'family',
+                            'sort_order' => $sort++,
+                            'is_active' => true,
+                        ],
+                    );
+                } catch (\Throwable $e) {
+                    $this->command->warn("  ↳ plan_entitlement skip {$planKey}/{$code}: ".$e->getMessage());
+                }
+            }
+        }
+    }
+
     // Uses the nudge-idempotency table as an activity log: one
     // first_visit_nudge per active membership marks the enrollment.
     // The (membership_id, event_type) unique key prevents duplicates.
