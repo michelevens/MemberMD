@@ -12,12 +12,12 @@ class NotificationPreference extends Model
     use HasFactory, HasUuids;
 
     public const DEFAULT_CATEGORIES = [
-        'appointments' => ['in_app' => true, 'email' => true, 'sms' => false],
-        'messages' => ['in_app' => true, 'email' => true, 'sms' => false],
-        'billing' => ['in_app' => true, 'email' => true, 'sms' => false],
-        'lab_results' => ['in_app' => true, 'email' => true, 'sms' => false],
-        'prescriptions' => ['in_app' => true, 'email' => true, 'sms' => false],
-        'system' => ['in_app' => true, 'email' => false, 'sms' => false],
+        'appointments'  => ['in_app' => true, 'email' => true,  'sms' => false, 'push' => true],
+        'messages'      => ['in_app' => true, 'email' => true,  'sms' => false, 'push' => true],
+        'billing'       => ['in_app' => true, 'email' => true,  'sms' => false, 'push' => true],
+        'lab_results'   => ['in_app' => true, 'email' => true,  'sms' => false, 'push' => true],
+        'prescriptions' => ['in_app' => true, 'email' => true,  'sms' => false, 'push' => true],
+        'system'        => ['in_app' => true, 'email' => false, 'sms' => false, 'push' => false],
     ];
 
     public const DIGEST_FREQUENCIES = ['immediate', 'daily', 'weekly'];

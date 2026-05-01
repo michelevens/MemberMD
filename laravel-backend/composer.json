@@ -11,6 +11,7 @@
         "laravel/framework": "^13.0",
         "laravel/sanctum": "*",
         "laravel/tinker": "^3.0",
+        "minishlink/web-push": "^9.0",
         "resend/resend-laravel": "*",
         "stripe/stripe-php": "*"
     },

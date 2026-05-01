@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Jobs\SendWebPushNotification;
 use App\Models\NotificationPreference;
 use App\Models\User;
 use Carbon\Carbon;
@@ -28,6 +29,15 @@ class NotificationDispatcher
             return $defaults[$category][$channel] ?? false;
         }
 
+        // Master switches — if the user has globally disabled push or sms,
+        // the per-category matrix never overrides that.
+        if ($channel === 'push' && $preference->push_enabled === false) {
+            return false;
+        }
+        if ($channel === 'sms' && $preference->sms_enabled === false) {
+            return false;
+        }
+
         // Check category-level channel preference
         $categories = $preference->getCategoriesWithDefaults();
 
@@ -51,21 +61,40 @@ class NotificationDispatcher
 
     /**
      * Send a notification to a user via Laravel's notification system.
+     *
+     * Also fans the same payload out as a Web Push notification when the
+     * user has push subscriptions and their preferences allow it for the
+     * given category. The push is dispatched as a queued job so the
+     * caller's request thread isn't blocked on transport calls.
      */
     public function sendNotification(User $user, string $notificationClass, array $data = []): void
     {
-        try {
-            if (!$this->shouldSend($user->id, $data['category'] ?? 'general', 'in_app')) {
-                return;
-            }
+        $category = $data['category'] ?? 'general';
 
-            if (class_exists($notificationClass)) {
-                $user->notify(new $notificationClass($data));
-            } else {
-                Log::info("Notification queued: {$notificationClass} for user {$user->id}", $data);
+        try {
+            if ($this->shouldSend($user->id, $category, 'in_app')) {
+                if (class_exists($notificationClass)) {
+                    $user->notify(new $notificationClass($data));
+                } else {
+                    Log::info("Notification queued: {$notificationClass} for user {$user->id}", $data);
+                }
             }
         } catch (\Throwable $e) {
             Log::warning("Failed to send notification to user {$user->id}: " . $e->getMessage());
+        }
+
+        try {
+            if ($this->shouldSend($user->id, $category, 'push')) {
+                $payload = [
+                    'title' => (string) ($data['title'] ?? 'MemberMD'),
+                    'body' => (string) ($data['body'] ?? ''),
+                    'url' => isset($data['url']) ? (string) $data['url'] : '/',
+                    'tag' => isset($data['tag']) ? (string) $data['tag'] : ($category ?: null),
+                ];
+                SendWebPushNotification::dispatch($user->id, $payload);
+            }
+        } catch (\Throwable $e) {
+            Log::warning("Failed to queue push for user {$user->id}: " . $e->getMessage());
         }
     }
 
