@@ -1374,7 +1374,7 @@ export function SuperAdminPortal() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           <button
             onClick={() => setActiveTab("pending-approvals")}
-            className="glass hover-lift rounded-xl p-4 flex items-center gap-4 text-left transition-all"
+            className="rounded-xl border border-slate-200 bg-white hover:bg-slate-50 p-4 flex items-center gap-4 text-left transition-colors"
           >
             <div
               className="w-10 h-10 rounded-lg flex items-center justify-center shrink-0"
@@ -1395,7 +1395,7 @@ export function SuperAdminPortal() {
 
           <button
             onClick={() => setActiveTab("specialties")}
-            className="glass hover-lift rounded-xl p-4 flex items-center gap-4 text-left transition-all"
+            className="rounded-xl border border-slate-200 bg-white hover:bg-slate-50 p-4 flex items-center gap-4 text-left transition-colors"
           >
             <div
               className="w-10 h-10 rounded-lg flex items-center justify-center shrink-0"
@@ -1416,7 +1416,7 @@ export function SuperAdminPortal() {
 
           <button
             onClick={() => setActiveTab("audit-logs")}
-            className="glass hover-lift rounded-xl p-4 flex items-center gap-4 text-left transition-all"
+            className="rounded-xl border border-slate-200 bg-white hover:bg-slate-50 p-4 flex items-center gap-4 text-left transition-colors"
           >
             <div
               className="w-10 h-10 rounded-lg flex items-center justify-center shrink-0"
