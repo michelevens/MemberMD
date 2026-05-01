@@ -48,7 +48,7 @@ export interface NavSection {
   items: NavItem[];
 }
 
-export type PortalColor = "teal" | "navy" | "sage" | "gold";
+export type PortalColor = "teal" | "navy" | "sage" | "gold" | "stripe";
 
 interface PortalShellProps {
   /** Brand label shown above the user profile (e.g. "Patient Portal"). */
@@ -128,6 +128,19 @@ const colorMap: Record<
     glow: "shadow-[#D4A855]/20",
     badge: "bg-[#D4A855]",
   },
+  // Stripe-grade flat theme — used by portals adopting the new
+  // information-density chrome. No gradients, no glows: a flat slate
+  // active state with the Stripe-purple accent for badges + brand.
+  // Visually disciplined like dashboard.stripe.com.
+  stripe: {
+    gradient: "from-[#635bff] to-[#544ee0]",
+    active: "bg-slate-100 text-slate-900",
+    activeText: "text-slate-900",
+    hover: "hover:bg-slate-50",
+    accent: "#635bff",
+    glow: "",
+    badge: "bg-[#635bff]",
+  },
 };
 
 // ─── Component ──────────────────────────────────────────────────────────────
@@ -183,9 +196,42 @@ export function PortalShell({
     ? nav
     : [{ id: "main", items: nav }];
 
+  const isStripe = portalColor === "stripe";
+
   const renderNavItem = (item: NavItem) => {
     const Icon = item.icon;
     const isActive = activeTab === item.id;
+    if (isStripe) {
+      // Stripe pattern: tighter rows, flat active background, no shadow,
+      // active row gets a subtle left border accent in brand color and
+      // mildly bolder text. Inactive rows are slate-600.
+      return (
+        <button
+          key={item.id}
+          onClick={() => {
+            onTabChange(item.id);
+            setSidebarOpen(false);
+          }}
+          className={`group w-full flex items-center gap-2.5 pl-2.5 pr-2 py-1.5 rounded-md transition-colors text-[13px] ${
+            isActive
+              ? "bg-slate-100 text-slate-900 font-medium"
+              : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+          }`}
+        >
+          <Icon className={`w-4 h-4 flex-shrink-0 ${isActive ? "text-slate-700" : "text-slate-400 group-hover:text-slate-600"}`} />
+          <span className="truncate">{item.label}</span>
+          {item.badge !== undefined && item.badge > 0 && (
+            <span
+              className={`ml-auto text-[10px] h-4 min-w-4 px-1 rounded flex items-center justify-center font-semibold ${
+                isActive ? "bg-white text-slate-700 border border-slate-200" : `${item.badgeColor || colors.badge} text-white`
+              }`}
+            >
+              {item.badge}
+            </span>
+          )}
+        </button>
+      );
+    }
     return (
       <button
         key={item.id}
@@ -217,7 +263,13 @@ export function PortalShell({
   };
 
   return (
-    <div className="flex h-screen bg-gradient-to-br from-gray-50/80 via-white to-gray-50/50 overflow-hidden">
+    <div
+      className={`flex h-screen overflow-hidden ${
+        isStripe
+          ? "bg-slate-50"
+          : "bg-gradient-to-br from-gray-50/80 via-white to-gray-50/50"
+      }`}
+    >
       {/* Mobile overlay */}
       <AnimatePresence>
         {sidebarOpen && (
@@ -235,8 +287,8 @@ export function PortalShell({
       <aside
         className={`
         h-full flex flex-col flex-shrink-0
-        bg-white border-r border-gray-200/60
-        w-[260px] min-w-[260px]
+        ${isStripe ? "bg-white border-r border-slate-200" : "bg-white border-r border-gray-200/60"}
+        ${isStripe ? "w-[240px] min-w-[240px]" : "w-[260px] min-w-[260px]"}
         fixed inset-y-0 left-0 z-50
         transition-transform duration-300 ease-out
         ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}
@@ -244,18 +296,24 @@ export function PortalShell({
       `}
       >
         {/* Brand Section */}
-        <div className="p-4 border-b border-gray-200/40">
-          <div className="flex items-center gap-3">
+        <div className={`${isStripe ? "px-4 py-3.5 border-b border-slate-200" : "p-4 border-b border-gray-200/40"}`}>
+          <div className="flex items-center gap-2.5">
             <div
-              className={`w-10 h-10 rounded-xl bg-gradient-to-br ${colors.gradient} flex items-center justify-center text-white font-bold text-lg shadow-md ${colors.glow}`}
+              className={
+                isStripe
+                  ? `w-7 h-7 rounded-md bg-[#635bff] flex items-center justify-center text-white font-semibold text-[13px]`
+                  : `w-10 h-10 rounded-xl bg-gradient-to-br ${colors.gradient} flex items-center justify-center text-white font-bold text-lg shadow-md ${colors.glow}`
+              }
             >
-              {PortalIcon ? <PortalIcon className="w-5 h-5" /> : "M"}
+              {PortalIcon ? <PortalIcon className={isStripe ? "w-3.5 h-3.5" : "w-5 h-5"} /> : "M"}
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-sm text-gray-900 font-bold truncate">
+              <p className={isStripe ? "text-[13px] text-slate-900 font-semibold tracking-tight truncate" : "text-sm text-gray-900 font-bold truncate"}>
                 {portalTitle}
               </p>
-              <p className="text-xs text-gray-500">MemberMD</p>
+              {!isStripe && (
+                <p className="text-xs text-gray-500">MemberMD</p>
+              )}
             </div>
             <button
               onClick={() => setSidebarOpen(false)}
@@ -268,10 +326,14 @@ export function PortalShell({
         </div>
 
         {/* User Profile */}
-        <div className="p-4 border-b border-gray-200/40">
-          <div className="flex items-center gap-3">
+        <div className={`${isStripe ? "px-4 py-3 border-b border-slate-100" : "p-4 border-b border-gray-200/40"}`}>
+          <div className="flex items-center gap-2.5">
             <div
-              className={`w-10 h-10 rounded-full ring-2 ring-white shadow-md ${colors.glow} bg-gradient-to-br ${colors.gradient} flex items-center justify-center text-white text-sm font-semibold overflow-hidden`}
+              className={
+                isStripe
+                  ? `w-7 h-7 rounded-full bg-slate-200 flex items-center justify-center text-slate-700 text-[11px] font-semibold overflow-hidden`
+                  : `w-10 h-10 rounded-full ring-2 ring-white shadow-md ${colors.glow} bg-gradient-to-br ${colors.gradient} flex items-center justify-center text-white text-sm font-semibold overflow-hidden`
+              }
             >
               {userAvatar ? (
                 <img
@@ -284,30 +346,36 @@ export function PortalShell({
               )}
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-sm text-gray-900 truncate font-semibold">
+              <p className={isStripe ? "text-[12px] text-slate-700 truncate font-medium" : "text-sm text-gray-900 truncate font-semibold"}>
                 {userName.split(" ")[0]}
               </p>
               {userSubtitle && (
-                <p className="text-xs text-gray-500 truncate">{userSubtitle}</p>
+                <p className={isStripe ? "text-[11px] text-slate-400 truncate" : "text-xs text-gray-500 truncate"}>{userSubtitle}</p>
               )}
             </div>
-            <div
-              className="w-2.5 h-2.5 bg-green-500 rounded-full flex-shrink-0 ring-2 ring-white shadow-sm"
-              title="Online"
-            />
+            {!isStripe && (
+              <div
+                className="w-2.5 h-2.5 bg-green-500 rounded-full flex-shrink-0 ring-2 ring-white shadow-sm"
+                title="Online"
+              />
+            )}
           </div>
         </div>
 
         {/* Navigation */}
-        <nav className="flex-1 px-3 py-3 overflow-y-auto">
+        <nav className={isStripe ? "flex-1 px-2 py-2 overflow-y-auto" : "flex-1 px-3 py-3 overflow-y-auto"}>
           {sections.map((section, i) => (
-            <div key={section.id} className={i > 0 ? "mt-4" : ""}>
+            <div key={section.id} className={i > 0 ? (isStripe ? "mt-3" : "mt-4") : ""}>
               {section.label && (
-                <p className="px-3 mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-gray-400">
+                <p className={
+                  isStripe
+                    ? "px-2.5 mt-1 mb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400"
+                    : "px-3 mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-gray-400"
+                }>
                   {section.label}
                 </p>
               )}
-              <div className="space-y-1">
+              <div className={isStripe ? "space-y-0.5" : "space-y-1"}>
                 {section.items.map(renderNavItem)}
               </div>
             </div>
@@ -315,13 +383,17 @@ export function PortalShell({
         </nav>
 
         {/* Sidebar Footer — sign out */}
-        <div className="p-3 border-t border-gray-200/40">
+        <div className={isStripe ? "p-2 border-t border-slate-100" : "p-3 border-t border-gray-200/40"}>
           <button
             onClick={onLogout}
-            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-gray-500 hover:text-red-600 hover:bg-red-50/50 transition-all duration-200"
+            className={
+              isStripe
+                ? "w-full flex items-center gap-2.5 pl-2.5 pr-2 py-1.5 rounded-md text-[13px] text-slate-500 hover:text-red-600 hover:bg-red-50 transition-colors"
+                : "w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-gray-500 hover:text-red-600 hover:bg-red-50/50 transition-all duration-200"
+            }
           >
             <LogOut className="w-4 h-4" />
-            <span className="font-medium">Sign Out</span>
+            <span className="font-medium">Sign out</span>
           </button>
         </div>
       </aside>
@@ -329,7 +401,11 @@ export function PortalShell({
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* Top Header */}
-        <header className="h-16 bg-white border-b border-gray-200/60 flex items-center justify-between px-4 lg:px-6 flex-shrink-0">
+        <header className={
+          isStripe
+            ? "h-14 bg-white border-b border-slate-200 flex items-center justify-between px-4 lg:px-6 flex-shrink-0"
+            : "h-16 bg-white border-b border-gray-200/60 flex items-center justify-between px-4 lg:px-6 flex-shrink-0"
+        }>
           <div className="flex items-center gap-4 min-w-0">
             <button
               onClick={() => setSidebarOpen(true)}
@@ -339,7 +415,11 @@ export function PortalShell({
               <Menu className="w-5 h-5 text-gray-600" />
             </button>
             {headerTitle && (
-              <h1 className="text-lg text-gray-900 font-bold truncate">
+              <h1 className={
+                isStripe
+                  ? "text-[15px] text-slate-900 font-semibold tracking-tight truncate"
+                  : "text-lg text-gray-900 font-bold truncate"
+              }>
                 {headerTitle}
               </h1>
             )}

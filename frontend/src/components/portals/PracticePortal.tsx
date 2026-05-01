@@ -8280,12 +8280,11 @@ export function PracticePortal() {
     : auth.user?.role === "superadmin" ? "superadmin"
     : "practice_admin";
 
-  // Sidebar tint per role: admin = sage (matches EnnHealth admin
-  // family); provider = teal (clinician); staff = navy (operations).
-  const portalColor: PortalColor =
-    portalRole === "provider" ? "teal"
-    : portalRole === "staff" ? "navy"
-    : "sage";
+  // Practice Portal now uses the flat Stripe-grade chrome regardless of
+  // role. The brand sigil is the Stripe-purple square; nav rows are
+  // tighter, badges sit inline. Role-tinted gradients live on in the
+  // SuperAdmin / Patient / Operator portals until they migrate too.
+  const portalColor: PortalColor = "stripe";
 
   // Convert NAV_SECTIONS -> PortalShell's NavSection shape and filter
   // by the current role. Empty sections are dropped automatically.
