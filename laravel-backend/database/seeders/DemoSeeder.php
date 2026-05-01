@@ -86,6 +86,7 @@ class DemoSeeder extends Seeder
         $this->seedEmployer();
         $this->seedPatients();
         $this->seedAppointments();
+        $this->seedEntitlementUsage();
         $this->seedMessaging();
         $this->seedLifecycleEvents();
 
@@ -847,6 +848,86 @@ class DemoSeeder extends Seeder
                 ]);
             } catch (\Throwable $e) {
                 $this->command->warn('  ↳ appointment skip: ' . $e->getMessage());
+            }
+        }
+    }
+
+    // ─── Entitlement usage ──────────────────────────────────────────────
+    // Seed entitlement_usage rows so the Benefits & Utilization card on
+    // the patient detail drawer shows realistic consumption. Production
+    // real flows fire AppointmentObserver/EncounterObserver to do this
+    // automatically, but those observers run on UPDATE — seeded rows
+    // are inserted in their final state and so never trigger them.
+    //
+    // For each active patient: replay their completed appointments as
+    // office_visit/telehealth_visit usage rows (1 per appt, scoped to
+    // the appointment's billing period).
+
+    private function seedEntitlementUsage(): void
+    {
+        $tenantId = $this->practice->id;
+
+        // Catalog: code -> id, to map appointment is_telehealth -> the
+        // right entitlement_type_id.
+        $catalog = DB::table('entitlement_types')
+            ->where('tenant_id', $tenantId)
+            ->pluck('id', 'code')
+            ->toArray();
+
+        $officeVisitId = $catalog['office_visit'] ?? null;
+        $telehealthVisitId = $catalog['telehealth_visit'] ?? null;
+        if (!$officeVisitId && !$telehealthVisitId) {
+            $this->command->warn('  ↳ entitlement_usage skip: no office_visit/telehealth_visit type');
+            return;
+        }
+
+        // Cash values for "savings" math.
+        $officeCash = (float) (DB::table('entitlement_types')->where('id', $officeVisitId)->value('cash_value') ?? 0);
+        $teleCash = (float) (DB::table('entitlement_types')->where('id', $telehealthVisitId)->value('cash_value') ?? 0);
+
+        // Walk each active membership's completed appointments.
+        foreach ($this->activePairs as $pair) {
+            /** @var PatientMembership $membership */
+            $membership = $pair['membership'];
+            $startedAt = $pair['started_at'];
+
+            $appts = DB::table('appointments')
+                ->where('tenant_id', $tenantId)
+                ->where('patient_id', $membership->patient_id)
+                ->where('status', 'completed')
+                ->orderBy('scheduled_at')
+                ->get();
+
+            foreach ($appts as $apt) {
+                $isTele = (bool) $apt->is_telehealth;
+                $entId = $isTele ? $telehealthVisitId : $officeVisitId;
+                if (!$entId) continue;
+
+                // Period is the calendar month of the appointment so the
+                // utilization aggregator's per_month groupings work.
+                $aptDate = $apt->scheduled_at ? new \DateTime($apt->scheduled_at) : $startedAt;
+                $periodStart = (clone $aptDate)->modify('first day of this month')->format('Y-m-d');
+                $periodEnd = (clone $aptDate)->modify('last day of this month')->format('Y-m-d');
+
+                try {
+                    DB::table('entitlement_usage')->insert([
+                        'id' => (string) Str::uuid(),
+                        'tenant_id' => $tenantId,
+                        'patient_membership_id' => $membership->id,
+                        'entitlement_type_id' => $entId,
+                        'quantity' => 1,
+                        'period_start' => $periodStart,
+                        'period_end' => $periodEnd,
+                        'source_type' => 'appointment',
+                        'source_id' => $apt->id,
+                        'recorded_by' => $this->admin->id,
+                        'cash_value_used' => $isTele ? $teleCash : $officeCash,
+                        'created_at' => $aptDate->format('Y-m-d H:i:s'),
+                        'updated_at' => $aptDate->format('Y-m-d H:i:s'),
+                    ]);
+                } catch (\Throwable $e) {
+                    $this->command->warn('  ↳ entitlement_usage skip: ' . $e->getMessage());
+                }
             }
         }
     }
