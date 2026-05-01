@@ -8924,9 +8924,9 @@ export function PracticePortal() {
       {rosterPlanDialog && (
         <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: "rgba(0,0,0,0.5)" }}>
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
-            <div className="p-6" style={{ background: "linear-gradient(135deg, #1B2B4D, #243b53)" }}>
+            <div className="px-6 py-4 border-b border-slate-100">
               <h3 className="text-lg font-bold text-white">{rosterPlanDialog.mode === "change" ? "Change Plan" : "Enroll in Plan"}</h3>
-              <p className="text-sm text-slate-300 mt-1">
+              <p className="text-sm text-slate-500 mt-0.5">
                 {rosterPlanDialog.mode === "change" ? `Select a new plan for ${rosterPlanDialog.patientName}` : `Choose a plan for ${rosterPlanDialog.patientName}`}
               </p>
             </div>
@@ -8993,9 +8993,9 @@ export function PracticePortal() {
       {resetLinkModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: "rgba(0,0,0,0.5)" }}>
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden">
-            <div className="p-6" style={{ background: "linear-gradient(135deg, #1B2B4D, #243b53)" }}>
-              <h3 className="text-xl font-bold text-white">Portal Sign-In Link</h3>
-              <p className="text-sm text-slate-300 mt-1">Share this link with {resetLinkModal.patientName} to set their password.</p>
+            <div className="px-6 py-4 border-b border-slate-100">
+              <h3 className="text-base font-semibold text-slate-900">Portal sign-in link</h3>
+              <p className="text-sm text-slate-500 mt-0.5">Share this link with {resetLinkModal.patientName} to set their password.</p>
             </div>
             <div className="p-6 space-y-4">
               <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
@@ -9038,9 +9038,9 @@ export function PracticePortal() {
       {showAddPatient && (
         <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: "rgba(0,0,0,0.5)" }}>
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden">
-            <div className="p-6" style={{ background: "linear-gradient(135deg, #1B2B4D, #243b53)" }}>
-              <h3 className="text-xl font-bold text-white">Add New Patient</h3>
-              <p className="text-sm text-slate-300 mt-1">Enter patient demographics to create a new record.</p>
+            <div className="px-6 py-4 border-b border-slate-100">
+              <h3 className="text-base font-semibold text-slate-900">Add new patient</h3>
+              <p className="text-sm text-slate-500 mt-0.5">Enter patient demographics to create a new record.</p>
             </div>
             <div className="p-6 space-y-4">
               {addPatientError && (
@@ -9106,9 +9106,9 @@ export function PracticePortal() {
       {showBookAppointment && (
         <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: "rgba(0,0,0,0.5)" }}>
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden">
-            <div className="p-6" style={{ background: "linear-gradient(135deg, #1B2B4D, #243b53)" }}>
-              <h3 className="text-xl font-bold text-white">Book Appointment</h3>
-              <p className="text-sm text-slate-300 mt-1">Schedule a new appointment for a patient.</p>
+            <div className="px-6 py-4 border-b border-slate-100">
+              <h3 className="text-base font-semibold text-slate-900">Book appointment</h3>
+              <p className="text-sm text-slate-500 mt-0.5">Schedule a new appointment for a patient.</p>
             </div>
             <div className="p-6 space-y-4 max-h-96 overflow-y-auto">
               <div>
@@ -9193,9 +9193,9 @@ export function PracticePortal() {
       {showNewEncounter && (
         <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: "rgba(0,0,0,0.5)" }}>
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden">
-            <div className="p-6" style={{ background: "linear-gradient(135deg, #1B2B4D, #243b53)" }}>
-              <h3 className="text-xl font-bold text-white">New Encounter</h3>
-              <p className="text-sm text-slate-300 mt-1">Create a clinical encounter to document a visit.</p>
+            <div className="px-6 py-4 border-b border-slate-100">
+              <h3 className="text-base font-semibold text-slate-900">New encounter</h3>
+              <p className="text-sm text-slate-500 mt-0.5">Create a clinical encounter to document a visit.</p>
             </div>
             <div className="p-6 space-y-4">
               <div>
@@ -9258,9 +9258,9 @@ export function PracticePortal() {
       {showNewPrescription && (
         <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: "rgba(0,0,0,0.5)" }}>
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden">
-            <div className="p-6" style={{ background: "linear-gradient(135deg, #1B2B4D, #243b53)" }}>
-              <h3 className="text-xl font-bold text-white">New Prescription</h3>
-              <p className="text-sm text-slate-300 mt-1">Prescribe a medication for a patient.</p>
+            <div className="px-6 py-4 border-b border-slate-100">
+              <h3 className="text-base font-semibold text-slate-900">New prescription</h3>
+              <p className="text-sm text-slate-500 mt-0.5">Prescribe a medication for a patient.</p>
             </div>
             <div className="p-6 space-y-4 max-h-96 overflow-y-auto">
               <div>
@@ -9364,9 +9364,9 @@ export function PracticePortal() {
       {showEfaxModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: "rgba(0,0,0,0.5)" }}>
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
-            <div className="p-6" style={{ background: "linear-gradient(135deg, #1B2B4D, #243b53)" }}>
-              <h3 className="text-xl font-bold text-white">eFax Prescription to Pharmacy</h3>
-              <p className="text-sm text-slate-300 mt-1">Send this prescription via secure eFax.</p>
+            <div className="px-6 py-4 border-b border-slate-100">
+              <h3 className="text-base font-semibold text-slate-900">eFax prescription to pharmacy</h3>
+              <p className="text-sm text-slate-500 mt-0.5">Send this prescription via secure eFax.</p>
             </div>
             <div className="p-6 space-y-4">
               <div className="rounded-lg p-4" style={{ backgroundColor: "#f8fafc", border: "1px solid #e2e8f0" }}>
@@ -9405,9 +9405,9 @@ export function PracticePortal() {
       {showEditPatient && (
         <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: "rgba(0,0,0,0.5)" }}>
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden">
-            <div className="p-6" style={{ background: "linear-gradient(135deg, #1B2B4D, #243b53)" }}>
-              <h3 className="text-xl font-bold text-white">Edit Patient</h3>
-              <p className="text-sm text-slate-300 mt-1">Update patient information.</p>
+            <div className="px-6 py-4 border-b border-slate-100">
+              <h3 className="text-base font-semibold text-slate-900">Edit patient</h3>
+              <p className="text-sm text-slate-500 mt-0.5">Update patient information.</p>
             </div>
             <div className="p-6 space-y-4 max-h-96 overflow-y-auto">
               <div className="grid grid-cols-2 gap-4">
@@ -9485,9 +9485,9 @@ export function PracticePortal() {
       {showNewScreening && (
         <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: "rgba(0,0,0,0.5)" }}>
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden">
-            <div className="p-6" style={{ background: "linear-gradient(135deg, #1B2B4D, #243b53)" }}>
-              <h3 className="text-xl font-bold text-white">Administer Screening</h3>
-              <p className="text-sm text-slate-300 mt-1">Select a patient and instrument to administer a screening.</p>
+            <div className="px-6 py-4 border-b border-slate-100">
+              <h3 className="text-base font-semibold text-slate-900">Administer screening</h3>
+              <p className="text-sm text-slate-500 mt-0.5">Select a patient and instrument to administer a screening.</p>
             </div>
             <div className="p-6 space-y-4">
               <div>
@@ -9533,9 +9533,9 @@ export function PracticePortal() {
       {showNewCoupon && (
         <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: "rgba(0,0,0,0.5)" }}>
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden">
-            <div className="p-6" style={{ background: "linear-gradient(135deg, #1B2B4D, #243b53)" }}>
-              <h3 className="text-xl font-bold text-white">Create Coupon</h3>
-              <p className="text-sm text-slate-300 mt-1">Create a discount coupon for membership plans.</p>
+            <div className="px-6 py-4 border-b border-slate-100">
+              <h3 className="text-base font-semibold text-slate-900">Create coupon</h3>
+              <p className="text-sm text-slate-500 mt-0.5">Create a discount coupon for membership plans.</p>
             </div>
             <div className="p-6 space-y-4">
               <div>
@@ -9590,9 +9590,9 @@ export function PracticePortal() {
       {showAddProvider && (
         <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: "rgba(0,0,0,0.5)" }}>
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden">
-            <div className="p-6" style={{ background: "linear-gradient(135deg, #1B2B4D, #243b53)" }}>
-              <h3 className="text-xl font-bold text-white">Add Provider</h3>
-              <p className="text-sm text-slate-300 mt-1">Onboard a new clinician to your practice.</p>
+            <div className="px-6 py-4 border-b border-slate-100">
+              <h3 className="text-base font-semibold text-slate-900">Add provider</h3>
+              <p className="text-sm text-slate-500 mt-0.5">Onboard a new clinician to your practice.</p>
             </div>
             <div className="p-6 space-y-4 max-h-96 overflow-y-auto">
               <div className="grid grid-cols-2 gap-4">
@@ -9671,9 +9671,9 @@ export function PracticePortal() {
       {showEditProvider && (
         <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: "rgba(0,0,0,0.5)" }}>
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden">
-            <div className="p-6" style={{ background: "linear-gradient(135deg, #1B2B4D, #243b53)" }}>
-              <h3 className="text-xl font-bold text-white">Edit Provider</h3>
-              <p className="text-sm text-slate-300 mt-1">Update provider information.</p>
+            <div className="px-6 py-4 border-b border-slate-100">
+              <h3 className="text-base font-semibold text-slate-900">Edit provider</h3>
+              <p className="text-sm text-slate-500 mt-0.5">Update provider information.</p>
             </div>
             <div className="p-6 space-y-4 max-h-96 overflow-y-auto">
               <div className="grid grid-cols-2 gap-4">
@@ -9752,9 +9752,9 @@ export function PracticePortal() {
       {showInviteStaff && (
         <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: "rgba(0,0,0,0.5)" }}>
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden">
-            <div className="p-6" style={{ background: "linear-gradient(135deg, #1B2B4D, #243b53)" }}>
-              <h3 className="text-xl font-bold text-white">Invite Staff</h3>
-              <p className="text-sm text-slate-300 mt-1">Send an invitation to a new team member.</p>
+            <div className="px-6 py-4 border-b border-slate-100">
+              <h3 className="text-base font-semibold text-slate-900">Invite staff</h3>
+              <p className="text-sm text-slate-500 mt-0.5">Send an invitation to a new team member.</p>
             </div>
             <div className="p-6 space-y-4">
               <div>
