@@ -86,10 +86,10 @@ export function PatientConsentsTab({
       <div className="flex items-center justify-between">
         <h3 className="font-semibold text-slate-800">Consents & Authorizations</h3>
         <button
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white transition-colors"
-          style={{ backgroundColor: "#27ab83" }}
-          onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#147d64")}
-          onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "#27ab83")}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold text-white transition-colors"
+          style={{ backgroundColor: "#635bff" }}
+          onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#544ee0")}
+          onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "#635bff")}
           onClick={() => setToast({ message: "Request Consent flow — coming soon.", type: "success" })}
         >
           <Send className="w-3.5 h-3.5" /> Request Consent

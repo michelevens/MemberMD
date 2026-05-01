@@ -334,7 +334,7 @@ function PolicyEditor({
           onClick={handleSave}
           disabled={saving}
           className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors disabled:opacity-50"
-          style={{ backgroundColor: "#27ab83" }}
+          style={{ backgroundColor: "#635bff" }}
         >
           <Save className="w-4 h-4" />
           {saving ? "Saving..." : "Save Policy"}
@@ -437,7 +437,7 @@ export function DunningDashboardTab() {
         <button
           onClick={fetchData}
           className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors"
-          style={{ backgroundColor: "#27ab83" }}
+          style={{ backgroundColor: "#635bff" }}
         >
           <RefreshCw className="w-4 h-4" />
           Retry
@@ -635,7 +635,7 @@ export function DunningDashboardTab() {
                         onClick={() => handleRetryPayment(patient.membershipId)}
                         disabled={retrying === patient.membershipId}
                         className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-white transition-colors disabled:opacity-50"
-                        style={{ backgroundColor: "#27ab83" }}
+                        style={{ backgroundColor: "#635bff" }}
                       >
                         {retrying === patient.membershipId ? (
                           <RefreshCw className="w-3.5 h-3.5 animate-spin" />

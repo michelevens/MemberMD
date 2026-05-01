@@ -326,7 +326,7 @@ export function ReferralManagementTab() {
         <button
           onClick={fetchData}
           className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors"
-          style={{ backgroundColor: "#27ab83" }}
+          style={{ backgroundColor: "#635bff" }}
         >
           <RefreshCw className="w-4 h-4" />
           Retry
@@ -354,7 +354,7 @@ export function ReferralManagementTab() {
           <button
             onClick={() => setShowNewReferral(true)}
             className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors"
-            style={{ backgroundColor: "#27ab83" }}
+            style={{ backgroundColor: "#635bff" }}
           >
             <Plus className="w-4 h-4" />
             New Referral
@@ -568,7 +568,7 @@ export function ReferralManagementTab() {
                 <button
                   onClick={() => setShowAddSpecialist(true)}
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-white transition-colors"
-                  style={{ backgroundColor: "#27ab83" }}
+                  style={{ backgroundColor: "#635bff" }}
                 >
                   <UserPlus className="w-3.5 h-3.5" />
                   Add Specialist
@@ -718,7 +718,7 @@ export function ReferralManagementTab() {
                 onClick={handleCreateReferral}
                 disabled={submittingReferral || !referralForm.patientName || !referralForm.specialistId || !referralForm.reason}
                 className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors disabled:opacity-50"
-                style={{ backgroundColor: "#27ab83" }}
+                style={{ backgroundColor: "#635bff" }}
               >
                 <Send className="w-4 h-4" />
                 {submittingReferral ? "Creating..." : "Create Referral"}
@@ -840,7 +840,7 @@ export function ReferralManagementTab() {
                 onClick={handleCreateSpecialist}
                 disabled={submittingSpecialist || !specialistForm.name || !specialistForm.specialty}
                 className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors disabled:opacity-50"
-                style={{ backgroundColor: "#27ab83" }}
+                style={{ backgroundColor: "#635bff" }}
               >
                 <UserPlus className="w-4 h-4" />
                 {submittingSpecialist ? "Adding..." : "Add Specialist"}

@@ -2190,8 +2190,8 @@ function PatientFieldEditDialog({ mode, patient, onClose, onSaved, onError }: Pa
           <button
             onClick={() => void handleSave()}
             disabled={saving}
-            className="px-4 py-2 rounded-lg text-sm font-medium text-white disabled:opacity-50"
-            style={{ backgroundColor: "#27ab83" }}
+            className="px-4 py-2 rounded-md text-sm font-medium text-white disabled:opacity-50"
+            style={{ backgroundColor: "#635bff" }}
           >
             {saving ? "Saving…" : "Save"}
           </button>

@@ -1186,36 +1186,38 @@ export function SuperAdminPortal() {
   function renderSidebar() {
     return (
       <aside
-        className={`fixed inset-y-0 left-0 z-40 w-64 flex flex-col transition-transform duration-300 lg:translate-x-0 ${
+        className={`fixed inset-y-0 left-0 z-40 w-60 flex flex-col bg-white border-r border-slate-200 transition-transform duration-300 lg:translate-x-0 ${
           sidebarOpen ? "translate-x-0" : "-translate-x-full"
         }`}
-        style={{
-          background: "linear-gradient(180deg, #102a43 0%, #1a2f45 100%)",
-        }}
       >
-        {/* Logo */}
-        <div className="flex items-center justify-between px-6 py-5 border-b border-white/10">
-          <div>
-            <h1 className="text-xl font-bold text-white tracking-tight">
-              MemberMD
-            </h1>
-            <p className="text-xs font-medium mt-0.5" style={{ color: "#27ab83" }}>
-              Platform Admin
-            </p>
+        {/* Logo — Stripe-purple sigil + tracking-tight wordmark */}
+        <div className="flex items-center justify-between px-5 h-14 border-b border-slate-100">
+          <div className="flex items-center gap-2.5">
+            <div className="w-7 h-7 rounded-md bg-[#635bff] flex items-center justify-center text-white font-semibold text-[13px]">
+              M
+            </div>
+            <div>
+              <h1 className="text-[13px] font-semibold tracking-tight text-slate-900 leading-none">
+                MemberMD
+              </h1>
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 mt-1 leading-none">
+                Platform Admin
+              </p>
+            </div>
           </div>
           <button
             onClick={() => setSidebarOpen(false)}
-            className="lg:hidden text-white/60 hover:text-white transition-colors"
+            className="lg:hidden text-slate-400 hover:text-slate-600 transition-colors"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
         {/* Navigation */}
-        <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-6">
+        <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-5">
           {NAV_SECTIONS.map((section) => (
             <div key={section.title}>
-              <p className="px-3 mb-2 text-xs font-semibold uppercase tracking-wider text-slate-400">
+              <p className="px-3 mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
                 {section.title}
               </p>
               <div className="space-y-0.5">
@@ -1231,22 +1233,13 @@ export function SuperAdminPortal() {
                         setSelectedPractice(null);
                         setSelectedSpecialtyDetail(null);
                       }}
-                      className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 ${
+                      className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-[13px] transition-colors ${
                         isActive
-                          ? "text-white"
-                          : "text-slate-300 hover:text-white hover:bg-white/5"
+                          ? "bg-slate-100 text-slate-900 font-medium"
+                          : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
                       }`}
-                      style={
-                        isActive
-                          ? {
-                              background:
-                                "linear-gradient(135deg, rgba(39,171,131,0.2), rgba(20,125,100,0.15))",
-                              borderLeft: "3px solid #27ab83",
-                            }
-                          : undefined
-                      }
                     >
-                      <Icon className="w-4.5 h-4.5 shrink-0" />
+                      <Icon className="w-4 h-4 shrink-0" />
                       <span>{item.label}</span>
                     </button>
                   );
@@ -1257,7 +1250,7 @@ export function SuperAdminPortal() {
         </nav>
 
         {/* User section */}
-        <div className="border-t border-white/10 px-4 py-3">
+        <div className="border-t border-slate-100 px-4 py-3">
           <UserSettingsDropdown variant="superadmin" onNavigateToProfile={() => setActiveTab("profile")} />
         </div>
       </aside>
@@ -3971,7 +3964,7 @@ export function SuperAdminPortal() {
                                   placeholder="Type a reply..."
                                   rows={2}
                                 />
-                                <button className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white self-end transition-colors" style={{ backgroundColor: "#27ab83" }}>
+                                <button className="flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium text-white self-end transition-colors" style={{ backgroundColor: "#635bff" }}>
                                   <Send className="w-4 h-4" />
                                   Send Reply
                                 </button>
@@ -4107,39 +4100,26 @@ export function SuperAdminPortal() {
       {renderSidebar()}
 
       {/* Main Content */}
-      <div className="lg:pl-64 min-h-screen flex flex-col">
+      <div className="lg:pl-60 min-h-screen flex flex-col">
         {/* Top Header */}
-        <header className="sticky top-0 z-20 glass border-b border-slate-200/60">
-          <div className="flex items-center justify-between px-4 sm:px-6 lg:px-8 py-3">
+        <header className="sticky top-0 z-20 bg-white border-b border-slate-200">
+          <div className="flex items-center justify-between px-4 sm:px-6 lg:px-8 h-14">
             <div className="flex items-center gap-3">
               <button
                 onClick={() => setSidebarOpen(true)}
-                className="lg:hidden p-2 rounded-lg hover:bg-slate-100 transition-colors"
+                className="lg:hidden p-2 rounded-md hover:bg-slate-100 transition-colors"
               >
                 <Menu className="w-5 h-5 text-slate-600" />
               </button>
-              <div>
-                <h2
-                  className="text-lg font-bold"
-                  style={{ color: "#102a43" }}
-                >
-                  {selectedPractice ? selectedPractice.name : (currentNavItem?.label || "Dashboard")}
-                </h2>
-                <p className="text-xs text-slate-500 hidden sm:block">
-                  {new Date().toLocaleDateString("en-US", {
-                    weekday: "long",
-                    year: "numeric",
-                    month: "long",
-                    day: "numeric",
-                  })}
-                </p>
-              </div>
+              <h2 className="text-[15px] font-semibold tracking-tight text-slate-900">
+                {selectedPractice ? selectedPractice.name : (currentNavItem?.label || "Dashboard")}
+              </h2>
             </div>
 
             <div className="flex items-center gap-3">
-              <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full" style={{ backgroundColor: "#e6f7f2" }}>
-                <div className="w-2 h-2 rounded-full" style={{ backgroundColor: "#27ab83" }} />
-                <span className="text-xs font-medium" style={{ color: "#147d64" }}>
+              <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-50 border border-emerald-100">
+                <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                <span className="text-[11px] font-medium text-emerald-700">
                   All Systems Operational
                 </span>
               </div>
@@ -4150,8 +4130,8 @@ export function SuperAdminPortal() {
 
         {/* Loading indicator */}
         {adminLoading && (
-          <div className="h-0.5 w-full overflow-hidden" style={{ backgroundColor: "#e6f7f2" }}>
-            <div className="h-full animate-pulse" style={{ backgroundColor: "#27ab83", width: "40%", animationDuration: "1s" }} />
+          <div className="h-0.5 w-full overflow-hidden bg-slate-100">
+            <div className="h-full animate-pulse" style={{ backgroundColor: "#635bff", width: "40%", animationDuration: "1s" }} />
           </div>
         )}
 

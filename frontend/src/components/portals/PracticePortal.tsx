@@ -2993,7 +2993,7 @@ export function PracticePortal() {
               <div className="flex flex-wrap gap-2">
             <button
               className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium text-white transition-colors"
-              style={{ backgroundColor: "#27ab83" }}
+              style={{ backgroundColor: "#635bff" }}
               onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#147d64")}
               onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "#27ab83")}
             >
@@ -3317,7 +3317,7 @@ export function PracticePortal() {
                 </h3>
                 <button
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-white transition-colors"
-                  style={{ backgroundColor: "#27ab83" }}
+                  style={{ backgroundColor: "#635bff" }}
                   onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#147d64")}
                   onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "#27ab83")}
                   onClick={() => { setShowQuickActivityLog(true); setQuickActivityForm({ activityType: "", durationMinutes: "15", notes: "" }); }}
@@ -3445,7 +3445,7 @@ export function PracticePortal() {
                       onClick={() => handleQuickActivityLog(pt.id)}
                       disabled={!quickActivityForm.activityType || quickActivityLoading}
                       className="px-3 py-1.5 rounded-lg text-xs font-medium text-white transition-colors disabled:opacity-50"
-                      style={{ backgroundColor: "#27ab83" }}
+                      style={{ backgroundColor: "#635bff" }}
                     >
                       {quickActivityLoading ? "Saving..." : "Save Activity"}
                     </button>
@@ -3590,7 +3590,7 @@ export function PracticePortal() {
                 <h3 className="font-semibold text-slate-800">Diagnoses</h3>
                 <button
                   className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium text-white transition-colors"
-                  style={{ backgroundColor: "#27ab83" }}
+                  style={{ backgroundColor: "#635bff" }}
                   onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#147d64")}
                   onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "#27ab83")}
                 >
@@ -3637,7 +3637,7 @@ export function PracticePortal() {
                 <h3 className="font-semibold text-slate-800">Allergies</h3>
                 <button
                   className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium text-white transition-colors"
-                  style={{ backgroundColor: "#27ab83" }}
+                  style={{ backgroundColor: "#635bff" }}
                   onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#147d64")}
                   onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "#27ab83")}
                   onClick={() => setAllergyDialogOpen(true)}
@@ -3708,7 +3708,7 @@ export function PracticePortal() {
               <h3 className="font-semibold text-slate-800">Current Medications</h3>
               <button
                 className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium text-white transition-colors"
-                style={{ backgroundColor: "#27ab83" }}
+                style={{ backgroundColor: "#635bff" }}
                 onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#147d64")}
                 onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "#27ab83")}
                 onClick={() => { if (pt) { setRxForm(f => ({ ...f, patientId: pt.id })); setShowNewPrescription(true); } }}
@@ -3952,7 +3952,7 @@ export function PracticePortal() {
               <h3 className="font-semibold text-slate-800">Screening Score History</h3>
               <button
                 className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium text-white transition-colors"
-                style={{ backgroundColor: "#27ab83" }}
+                style={{ backgroundColor: "#635bff" }}
                 onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#147d64")}
                 onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "#27ab83")}
                 onClick={() => setMeasureDialogOpen(true)}
@@ -4128,7 +4128,7 @@ export function PracticePortal() {
                 <h3 className="font-semibold text-slate-800">Payment Methods</h3>
                 <button
                   className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium text-white transition-colors"
-                  style={{ backgroundColor: "#27ab83" }}
+                  style={{ backgroundColor: "#635bff" }}
                   onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#147d64")}
                   onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "#27ab83")}
                   onClick={() => setToast({ message: "Payment method management coming soon.", type: "success" })}
@@ -4155,7 +4155,7 @@ export function PracticePortal() {
               <h3 className="font-semibold text-slate-800">Vital Signs</h3>
               <button
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white transition-colors"
-                style={{ backgroundColor: "#27ab83" }}
+                style={{ backgroundColor: "#635bff" }}
                 onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#147d64")}
                 onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "#27ab83")}
                 onClick={() => setToast({ message: "Record Vitals dialog — coming soon.", type: "success" })}
@@ -4202,7 +4202,7 @@ export function PracticePortal() {
               <h3 className="font-semibold text-slate-800">Lab Results</h3>
               <button
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white transition-colors"
-                style={{ backgroundColor: "#27ab83" }}
+                style={{ backgroundColor: "#635bff" }}
                 onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#147d64")}
                 onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "#27ab83")}
                 onClick={() => setToast({ message: "Order Lab dialog — coming soon.", type: "success" })}
@@ -4272,7 +4272,7 @@ export function PracticePortal() {
               <h3 className="font-semibold text-slate-800">Care Team</h3>
               <button
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white transition-colors"
-                style={{ backgroundColor: "#27ab83" }}
+                style={{ backgroundColor: "#635bff" }}
                 onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#147d64")}
                 onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "#27ab83")}
                 onClick={() => setToast({ message: "Add Team Member dialog — coming soon.", type: "success" })}
@@ -4388,7 +4388,7 @@ export function PracticePortal() {
                   />
                   <button
                     className="p-2.5 rounded-xl text-white transition-colors"
-                    style={{ backgroundColor: "#27ab83" }}
+                    style={{ backgroundColor: "#635bff" }}
                     onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#147d64")}
                     onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "#27ab83")}
                   >
@@ -4844,7 +4844,7 @@ export function PracticePortal() {
                                 <div className="flex gap-1 ml-auto">
                                   <button
                                     className="px-2.5 py-1 rounded text-xs font-medium text-white transition-colors"
-                                    style={{ backgroundColor: "#27ab83" }}
+                                    style={{ backgroundColor: "#635bff" }}
                                     onClick={() => handleUpdatePlanDetailEntitlement(plan.id, entId, {
                                       quantityLimit: planDetailEditForm.unlimited ? null : planDetailEditForm.quantity,
                                       isUnlimited: planDetailEditForm.unlimited,
@@ -5566,7 +5566,7 @@ export function PracticePortal() {
               </div>
               <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-200 shrink-0">
                 <button onClick={() => { setShowCreatePlan(false); setCreatePlanEntitlements([]); }} className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 rounded-lg">Cancel</button>
-                <button onClick={handleCreatePlan} disabled={createPlanLoading} className="px-4 py-2 rounded-lg text-white text-sm font-medium transition-all hover:opacity-90 disabled:opacity-50" style={{ backgroundColor: "#27ab83" }}>
+                <button onClick={handleCreatePlan} disabled={createPlanLoading} className="px-4 py-2 rounded-lg text-white text-sm font-medium transition-all hover:opacity-90 disabled:opacity-50" style={{ backgroundColor: "#635bff" }}>
                   {createPlanLoading ? "Creating..." : "Create Plan"}
                 </button>
               </div>
@@ -5728,7 +5728,7 @@ export function PracticePortal() {
               </div>
               <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-200 shrink-0">
                 <button onClick={() => { setShowEditPlan(false); setEditPlanEntitlements([]); setEditPlanExistingEntitlementIds([]); }} className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 rounded-lg">Cancel</button>
-                <button onClick={handleEditPlan} disabled={editPlanLoading} className="px-4 py-2 rounded-lg text-white text-sm font-medium transition-all hover:opacity-90 disabled:opacity-50" style={{ backgroundColor: "#27ab83" }}>
+                <button onClick={handleEditPlan} disabled={editPlanLoading} className="px-4 py-2 rounded-lg text-white text-sm font-medium transition-all hover:opacity-90 disabled:opacity-50" style={{ backgroundColor: "#635bff" }}>
                   {editPlanLoading ? "Saving..." : "Save Changes"}
                 </button>
               </div>
@@ -6117,7 +6117,7 @@ export function PracticePortal() {
                         {thread.unread > 0 && (
                           <span
                             className="w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold text-white shrink-0"
-                            style={{ backgroundColor: "#27ab83" }}
+                            style={{ backgroundColor: "#635bff" }}
                           >
                             {thread.unread}
                           </span>
@@ -6206,7 +6206,7 @@ export function PracticePortal() {
                 <button
                   onClick={handleSendMessage}
                   className="p-2.5 rounded-xl text-white transition-colors"
-                  style={{ backgroundColor: "#27ab83" }}
+                  style={{ backgroundColor: "#635bff" }}
                   onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#147d64")}
                   onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "#27ab83")}
                 >
@@ -7168,7 +7168,7 @@ export function PracticePortal() {
               </button>
               <button
                 className="px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors"
-                style={{ backgroundColor: "#27ab83" }}
+                style={{ backgroundColor: "#635bff" }}
                 onClick={() => handleSaveSoap(true)}
                 disabled={soapLoading}
               >
@@ -8189,7 +8189,7 @@ export function PracticePortal() {
                   <div className="w-full h-2 rounded-full" style={{ backgroundColor: "#e6f7f2" }}>
                     <div
                       className="h-2 rounded-full transition-all duration-500"
-                      style={{ width: `${panelPct}%`, backgroundColor: "#27ab83" }}
+                      style={{ width: `${panelPct}%`, backgroundColor: "#635bff" }}
                     />
                   </div>
                 </div>
@@ -8723,8 +8723,8 @@ export function PracticePortal() {
         headerTitle={activeLabel}
       >
         {dataLoading && (
-          <div className="h-0.5 w-full overflow-hidden mb-4 -mt-2" style={{ backgroundColor: "#e6f7f2" }}>
-            <div className="h-full animate-pulse" style={{ backgroundColor: "#27ab83", width: "40%", animationDuration: "1s" }} />
+          <div className="h-0.5 w-full overflow-hidden mb-4 -mt-2 bg-slate-100">
+            <div className="h-full animate-pulse" style={{ backgroundColor: "#635bff", width: "40%", animationDuration: "1s" }} />
           </div>
         )}
         {renderContent()}
@@ -8761,11 +8761,11 @@ export function PracticePortal() {
         <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: "rgba(0,0,0,0.5)" }}>
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden">
             {/* Header */}
-            <div className="p-6" style={{ background: rosterCancelStep === "offers" ? "linear-gradient(135deg, #1B2B4D, #243b53)" : "linear-gradient(135deg, #dc2626, #ef4444)" }}>
-              <h3 className="text-lg font-bold text-white">
-                {rosterCancelStep === "reason" ? "Cancel Membership" : rosterCancelStep === "offers" ? "Before You Go..." : "Confirm Cancellation"}
+            <div className="px-6 py-4 border-b border-slate-100">
+              <h3 className="text-base font-semibold text-slate-900">
+                {rosterCancelStep === "reason" ? "Cancel membership" : rosterCancelStep === "offers" ? "Before you go…" : "Confirm cancellation"}
               </h3>
-              <p className="text-sm mt-1" style={{ color: rosterCancelStep === "offers" ? "#94a3b8" : "#fecaca" }}>
+              <p className="text-sm text-slate-500 mt-0.5">
                 {rosterCancelStep === "reason" ? `Cancel ${rosterCancelDialog.patientName}'s membership` : rosterCancelStep === "offers" ? "We'd love to keep this member. Consider these options:" : `This will cancel ${rosterCancelDialog.patientName}'s membership`}
               </p>
             </div>
@@ -9018,7 +9018,7 @@ export function PracticePortal() {
                     setToast({ message: "Link copied to clipboard.", type: "success" });
                   }}
                   className="px-4 py-2 rounded-lg text-sm font-medium text-white"
-                  style={{ backgroundColor: "#27ab83" }}
+                  style={{ backgroundColor: "#635bff" }}
                 >
                   Copy Link
                 </button>
@@ -9090,7 +9090,7 @@ export function PracticePortal() {
               <button className="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100 transition-colors"
                 onClick={() => { setShowAddPatient(false); setAddPatientError(null); }}>Cancel</button>
               <button className="px-6 py-2 rounded-lg text-sm font-medium text-white transition-colors"
-                style={{ backgroundColor: "#27ab83" }}
+                style={{ backgroundColor: "#635bff" }}
                 onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#147d64")}
                 onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "#27ab83")}
                 onClick={handleAddPatient}
@@ -9178,7 +9178,7 @@ export function PracticePortal() {
               <button className="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100 transition-colors" onClick={() => setShowBookAppointment(false)}>Cancel</button>
               <button
                 className="px-6 py-2 rounded-lg text-sm font-medium text-white transition-colors"
-                style={{ backgroundColor: "#27ab83" }}
+                style={{ backgroundColor: "#635bff" }}
                 onClick={handleBookAppointment}
                 disabled={bookApptLoading}
               >
@@ -9243,7 +9243,7 @@ export function PracticePortal() {
               <button className="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100 transition-colors" onClick={() => setShowNewEncounter(false)}>Cancel</button>
               <button
                 className="px-6 py-2 rounded-lg text-sm font-medium text-white transition-colors"
-                style={{ backgroundColor: "#27ab83" }}
+                style={{ backgroundColor: "#635bff" }}
                 onClick={handleCreateEncounter}
                 disabled={encounterLoading}
               >
@@ -9349,7 +9349,7 @@ export function PracticePortal() {
               <button className="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100 transition-colors" onClick={() => setShowNewPrescription(false)}>Cancel</button>
               <button
                 className="px-6 py-2 rounded-lg text-sm font-medium text-white transition-colors"
-                style={{ backgroundColor: "#27ab83" }}
+                style={{ backgroundColor: "#635bff" }}
                 onClick={handleCreatePrescription}
                 disabled={rxLoading}
               >
@@ -9470,7 +9470,7 @@ export function PracticePortal() {
               <button className="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100 transition-colors" onClick={() => setShowEditPatient(false)}>Cancel</button>
               <button
                 className="px-6 py-2 rounded-lg text-sm font-medium text-white transition-colors"
-                style={{ backgroundColor: "#27ab83" }}
+                style={{ backgroundColor: "#635bff" }}
                 onClick={handleEditPatient}
                 disabled={editPatientLoading}
               >
@@ -9518,7 +9518,7 @@ export function PracticePortal() {
               <button className="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100 transition-colors" onClick={() => setShowNewScreening(false)}>Cancel</button>
               <button
                 className="px-6 py-2 rounded-lg text-sm font-medium text-white transition-colors"
-                style={{ backgroundColor: "#27ab83" }}
+                style={{ backgroundColor: "#635bff" }}
                 onClick={handleCreateScreening}
                 disabled={screeningLoading}
               >
@@ -9575,7 +9575,7 @@ export function PracticePortal() {
               <button className="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100 transition-colors" onClick={() => setShowNewCoupon(false)}>Cancel</button>
               <button
                 className="px-6 py-2 rounded-lg text-sm font-medium text-white transition-colors"
-                style={{ backgroundColor: "#27ab83" }}
+                style={{ backgroundColor: "#635bff" }}
                 onClick={handleCreateCoupon}
                 disabled={couponLoading}
               >
@@ -9656,7 +9656,7 @@ export function PracticePortal() {
               <button className="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100 transition-colors" onClick={() => setShowAddProvider(false)}>Cancel</button>
               <button
                 className="px-6 py-2 rounded-lg text-sm font-medium text-white transition-colors"
-                style={{ backgroundColor: "#27ab83" }}
+                style={{ backgroundColor: "#635bff" }}
                 onClick={handleAddProvider}
                 disabled={addProviderLoading}
               >
@@ -9737,7 +9737,7 @@ export function PracticePortal() {
               <button className="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100 transition-colors" onClick={() => { setShowEditProvider(false); setEditProviderId(null); }}>Cancel</button>
               <button
                 className="px-6 py-2 rounded-lg text-sm font-medium text-white transition-colors"
-                style={{ backgroundColor: "#27ab83" }}
+                style={{ backgroundColor: "#635bff" }}
                 onClick={handleEditProvider}
                 disabled={editProviderLoading}
               >
@@ -9780,7 +9780,7 @@ export function PracticePortal() {
               <button className="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100 transition-colors" onClick={() => setShowInviteStaff(false)}>Cancel</button>
               <button
                 className="px-6 py-2 rounded-lg text-sm font-medium text-white transition-colors"
-                style={{ backgroundColor: "#27ab83" }}
+                style={{ backgroundColor: "#635bff" }}
                 onClick={handleInviteStaff}
                 disabled={inviteStaffLoading}
               >

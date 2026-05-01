@@ -351,7 +351,7 @@ export function EmployerManagementTab() {
             <button
               onClick={() => setShowAddEmployer(true)}
               className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white"
-              style={{ backgroundColor: "#27ab83" }}
+              style={{ backgroundColor: "#635bff" }}
             >
               <Plus className="w-4 h-4" />
               Add Employer
@@ -540,7 +540,7 @@ export function EmployerManagementTab() {
                   onClick={handleAddEmployer}
                   disabled={!newEmployer.name || !newEmployer.contactEmail}
                   className="px-4 py-2 rounded-lg text-sm font-medium text-white disabled:opacity-50"
-                  style={{ backgroundColor: "#27ab83" }}
+                  style={{ backgroundColor: "#635bff" }}
                 >
                   Add Employer
                 </button>
@@ -558,7 +558,7 @@ export function EmployerManagementTab() {
             <button
               onClick={() => setShowNewContract(true)}
               className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white"
-              style={{ backgroundColor: "#27ab83" }}
+              style={{ backgroundColor: "#635bff" }}
             >
               <Plus className="w-4 h-4" />
               New Contract
@@ -674,7 +674,7 @@ export function EmployerManagementTab() {
                   onClick={handleNewContract}
                   disabled={!newContract.employerId || !newContract.membershipPlanId || !newContract.pepmRate}
                   className="px-4 py-2 rounded-lg text-sm font-medium text-white disabled:opacity-50"
-                  style={{ backgroundColor: "#27ab83" }}
+                  style={{ backgroundColor: "#635bff" }}
                 >
                   Create Contract
                 </button>
@@ -693,7 +693,7 @@ export function EmployerManagementTab() {
               onClick={handleGenerateInvoice}
               disabled={generatingInvoice}
               className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white disabled:opacity-50"
-              style={{ backgroundColor: "#27ab83" }}
+              style={{ backgroundColor: "#635bff" }}
             >
               <DollarSign className="w-4 h-4" />
               {generatingInvoice ? "Generating..." : "Generate Invoice"}
@@ -738,7 +738,7 @@ export function EmployerManagementTab() {
                         <button
                           onClick={() => handleMarkPaid(inv.id)}
                           className="flex items-center gap-1 px-3 py-1 rounded-md text-xs font-medium text-white"
-                          style={{ backgroundColor: "#27ab83" }}
+                          style={{ backgroundColor: "#635bff" }}
                         >
                           <Check className="w-3 h-3" />
                           Mark Paid

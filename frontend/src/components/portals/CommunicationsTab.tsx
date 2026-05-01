@@ -324,7 +324,7 @@ export function CommunicationsTab() {
               <button
                 onClick={() => setShowLogCall(true)}
                 className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white"
-                style={{ backgroundColor: "#27ab83" }}
+                style={{ backgroundColor: "#635bff" }}
               >
                 <Phone className="w-4 h-4" />
                 Log Phone Call
@@ -501,7 +501,7 @@ export function CommunicationsTab() {
               onClick={handleLogCall}
               disabled={!callForm.patientName || !callForm.durationMinutes || submittingCall}
               className="px-4 py-2 rounded-lg text-sm font-medium text-white disabled:opacity-50"
-              style={{ backgroundColor: "#27ab83" }}
+              style={{ backgroundColor: "#635bff" }}
             >
               {submittingCall ? "Saving..." : "Log Call"}
             </button>

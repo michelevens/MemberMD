@@ -287,8 +287,8 @@ export function RevenueAnalyticsTab() {
         <p className="text-sm text-slate-500 mb-4">{error}</p>
         <button
           onClick={fetchData}
-          className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors"
-          style={{ backgroundColor: "#27ab83" }}
+          className="inline-flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium text-white transition-colors"
+          style={{ backgroundColor: "#635bff" }}
         >
           <RefreshCw className="w-4 h-4" />
           Retry
@@ -315,8 +315,8 @@ export function RevenueAnalyticsTab() {
           </button>
           <button
             onClick={handleExport}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors"
-            style={{ backgroundColor: "#27ab83" }}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium text-white transition-colors"
+            style={{ backgroundColor: "#635bff" }}
           >
             <Download className="w-4 h-4" />
             Export Report
