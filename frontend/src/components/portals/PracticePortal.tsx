@@ -843,6 +843,15 @@ export function PracticePortal() {
   const [paymentSearch, setPaymentSearch] = useState("");
   const [paymentFilters, setPaymentFilters] = useState<import("../shared/stripe-ui").ActiveFilter[]>([]);
   const [selectedPaymentId, setSelectedPaymentId] = useState<string | null>(null);
+  // Stripe-style coupons view.
+  const [couponSearch, setCouponSearch] = useState("");
+  const [couponFilters, setCouponFilters] = useState<import("../shared/stripe-ui").ActiveFilter[]>([]);
+  // Stripe-style staff view.
+  const [staffSearch, setStaffSearch] = useState("");
+  const [staffFilters, setStaffFilters] = useState<import("../shared/stripe-ui").ActiveFilter[]>([]);
+  // Stripe-style prescriptions view.
+  const [prescriptionSearch, setPrescriptionSearch] = useState("");
+  const [prescriptionFilters, setPrescriptionFilters] = useState<import("../shared/stripe-ui").ActiveFilter[]>([]);
 
   // ─── Create Plan Modal ─────────────────────────────────────────────
   const [showCreatePlan, setShowCreatePlan] = useState(false);
@@ -7023,68 +7032,148 @@ export function PracticePortal() {
       { id: "rx8", patient: "James Wilson", medication: "Trazodone", dosage: "50mg", frequency: "Bedtime", prescriber: "Dr. Michel", status: "discontinued" as const, refillsLeft: 0 },
     ] : [];
 
-    const rxStatusConfig: Record<string, { bg: string; text: string; dot: string }> = {
-      active: { bg: "#ecf9ec", text: "#2f8132", dot: "#3f9142" },
-      sent: { bg: "#eff6ff", text: "#1d4ed8", dot: "#3b82f6" },
-      discontinued: { bg: "#f1f5f9", text: "#64748b", dot: "#94a3b8" },
-      refill_requested: { bg: "#fffbeb", text: "#d97706", dot: "#f59e0b" },
-    };
+    const allRx = (apiPrescriptions || mockPrescriptions);
+    type Rx = typeof allRx[number];
+
+    const statusOpts = Array.from(new Set(allRx.map((r) => r.status))).map((s) => ({
+      value: s,
+      label: s.split("_").map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(" "),
+    }));
+    const prescriberOpts = Array.from(new Set(allRx.map((r) => r.prescriber).filter(Boolean))).map((p) => ({ value: p, label: p }));
+    const facets: import("../shared/stripe-ui").FilterFacet[] = [
+      { key: "status", label: "Status", options: statusOpts },
+      { key: "prescriber", label: "Prescriber", options: prescriberOpts },
+    ];
+
+    const filtered = allRx.filter((r) => {
+      if (prescriptionSearch.trim()) {
+        const q = prescriptionSearch.toLowerCase();
+        const hay = [r.patient, r.medication, r.dosage, r.prescriber].join(" ").toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      for (const f of prescriptionFilters) {
+        if (f.key === "status" && r.status !== f.value) return false;
+        if (f.key === "prescriber" && r.prescriber !== f.value) return false;
+      }
+      return true;
+    });
+
+    const cols: import("../shared/stripe-ui").DataTableColumn<Rx>[] = [
+      {
+        key: "medication",
+        header: "Medication",
+        cell: (rx) => (
+          <div className="min-w-0">
+            <p className="text-sm font-medium text-slate-800 truncate">{rx.medication}</p>
+            <p className="text-xs text-slate-500 truncate">{rx.dosage} · {rx.frequency}</p>
+          </div>
+        ),
+      },
+      {
+        key: "patient",
+        header: "Patient",
+        cell: (rx) => (
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold text-white shrink-0" style={{ background: "linear-gradient(135deg, #334e68, #243b53)" }}>
+              {(rx.patient || "?").split(" ").map((n: string) => n[0]).join("").slice(0, 2)}
+            </div>
+            <span className="truncate text-slate-800">{rx.patient}</span>
+          </div>
+        ),
+      },
+      {
+        key: "prescriber",
+        header: "Prescriber",
+        hideBelow: "md",
+        cell: (rx) => <span className="text-slate-600">{rx.prescriber}</span>,
+      },
+      {
+        key: "status",
+        header: "Status",
+        cell: (rx) => <StatusPill label={rx.status} />,
+      },
+      {
+        key: "refills",
+        header: "Refills left",
+        align: "right",
+        hideBelow: "lg",
+        cell: (rx) => <span className="tabular-nums text-slate-700">{rx.refillsLeft}</span>,
+      },
+      {
+        key: "id",
+        header: "Rx ID",
+        hideBelow: "xl",
+        cell: (rx) => <EntityId prefix="rx" id={rx.id} />,
+      },
+    ];
+
+    const rowActions = (rx: Rx): import("../shared/stripe-ui").KebabAction[] => [
+      { label: "Download PDF", onClick: () => handleDownloadRxPdf(rx.id) },
+      { label: "eFax to pharmacy", onClick: () => handleOpenEfax(rx) },
+      { label: "View details", onClick: () => setToast({ message: "Prescription detail view coming soon.", type: "success" }) },
+      { label: "Edit prescription", onClick: () => setToast({ message: "Prescription editing coming soon.", type: "success" }) },
+      ...(rx.status === "active" ? [
+        { label: "Request refill", onClick: () => handleRefillPrescription(rx.id) },
+        { label: "Discontinue", danger: true, onClick: () => setConfirmDialog({ title: "Discontinue Prescription", message: `Discontinue ${rx.medication} ${rx.dosage} for ${rx.patient}?`, confirmLabel: "Discontinue", danger: true, onConfirm: () => { handleDiscontinuePrescription(rx.id); setConfirmDialog(null); } }) },
+      ] : []),
+      ...(rx.status === "refill_requested" ? [
+        { label: "Approve refill", onClick: () => handleRefillPrescription(rx.id) },
+        { label: "Deny refill", danger: true, onClick: () => setConfirmDialog({ title: "Deny Refill", message: `Deny refill request for ${rx.medication}?`, confirmLabel: "Deny", danger: true, onConfirm: () => { handleDiscontinuePrescription(rx.id); setConfirmDialog(null); } }) },
+      ] : []),
+    ];
 
     return (
-      <div className="space-y-6">
-        <div className="flex items-center justify-between">
-          <h2 className="text-xl font-bold text-slate-800">Prescriptions</h2>
+      <div className="space-y-5">
+        <div className="flex items-end justify-between gap-4">
+          <div>
+            <h2 className="text-2xl font-semibold text-slate-900 tracking-tight">Prescriptions</h2>
+            <p className="text-sm text-slate-500 mt-0.5">
+              {filtered.length === allRx.length
+                ? `${allRx.length} ${allRx.length === 1 ? "prescription" : "prescriptions"}`
+                : `${filtered.length} of ${allRx.length}`}
+            </p>
+          </div>
+          <RefreshButton onRefresh={loadPracticeData} title="Refresh prescriptions" />
         </div>
 
         {/* Stats */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <div className="glass rounded-lg p-4">
-            <p className="text-xs text-slate-500 mb-1">Active</p>
-            <p className="text-2xl font-bold" style={{ color: "#2f8132" }}>{prescriptionCounts.active}</p>
-          </div>
-          <div className="glass rounded-lg p-4">
-            <p className="text-xs text-slate-500 mb-1">eFaxed</p>
-            <p className="text-2xl font-bold" style={{ color: "#1d4ed8" }}>{prescriptionCounts.sent}</p>
-          </div>
-          <div className="glass rounded-lg p-4">
-            <p className="text-xs text-slate-500 mb-1">Refill Requests</p>
-            <p className="text-2xl font-bold" style={{ color: "#d97706" }}>{prescriptionCounts.refillRequested}</p>
-          </div>
-          <div className="glass rounded-lg p-4">
-            <p className="text-xs text-slate-500 mb-1">Discontinued</p>
-            <p className="text-2xl font-bold text-slate-500">{prescriptionCounts.discontinued}</p>
-          </div>
+          {[
+            { label: "Active", value: prescriptionCounts.active, color: "#066e54" },
+            { label: "eFaxed", value: prescriptionCounts.sent, color: "#1e3a8a" },
+            { label: "Refill requests", value: prescriptionCounts.refillRequested, color: "#92400e" },
+            { label: "Discontinued", value: prescriptionCounts.discontinued, color: "#475569" },
+          ].map((tile) => (
+            <div key={tile.label} className="rounded-xl border border-slate-200 bg-white px-4 py-3">
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">{tile.label}</p>
+              <p className="text-xl font-semibold tabular-nums mt-1" style={{ color: tile.color }}>{tile.value}</p>
+            </div>
+          ))}
         </div>
 
-        {/* Pending Refill Requests */}
+        {/* Pending Refill Requests — preserved from legacy view, now styled flat */}
         {(!apiPrescriptions && isDemoMode && mockRefillRequests.length > 0) && (
-          <div>
-            <h3 className="text-sm font-semibold text-slate-800 mb-3">Pending Refill Requests</h3>
+          <div className="rounded-xl border border-amber-200 bg-amber-50/40 p-4">
+            <h3 className="text-sm font-semibold text-amber-900 mb-3">Pending Refill Requests</h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {mockRefillRequests.map((req) => (
-                <div
-                  key={req.id}
-                  className="glass rounded-xl p-4 border-l-4"
-                  style={{ borderLeftColor: "#d97706" }}
-                >
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <p className="font-medium text-slate-800">{req.patient}</p>
-                      <p className="text-sm text-slate-600 mt-1">{req.medication} {req.dosage}</p>
-                      <p className="text-xs text-slate-400 mt-1">Requested {req.requestedDate}</p>
+                <div key={req.id} className="rounded-lg bg-white border border-amber-100 p-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="font-medium text-slate-800 truncate">{req.patient}</p>
+                      <p className="text-sm text-slate-600 mt-0.5">{req.medication} {req.dosage}</p>
+                      <p className="text-xs text-slate-400 mt-0.5">Requested {req.requestedDate}</p>
                     </div>
-                    <div className="flex gap-2">
+                    <div className="flex gap-1.5 shrink-0">
                       <button
-                        className="px-3 py-1.5 rounded-lg text-xs font-medium text-white transition-colors"
-                        style={{ backgroundColor: "#27ab83" }}
-                        onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#147d64")}
-                        onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "#27ab83")}
+                        className="px-2.5 py-1 rounded-md text-xs font-medium text-white transition-colors"
+                        style={{ backgroundColor: "#635bff" }}
                         onClick={() => handleRefillPrescription(req.id)}
                       >
                         Approve
                       </button>
                       <button
-                        className="px-3 py-1.5 rounded-lg text-xs font-medium border border-slate-200 text-slate-500 hover:bg-slate-50 transition-colors"
+                        className="px-2.5 py-1 rounded-md text-xs font-medium border border-slate-200 text-slate-600 hover:bg-slate-50"
                         onClick={() => setConfirmDialog({ title: "Deny Refill", message: `Deny refill for ${req.medication} ${req.dosage}?`, confirmLabel: "Deny", danger: true, onConfirm: () => { handleDiscontinuePrescription(req.id); setConfirmDialog(null); } })}
                       >
                         Deny
@@ -7097,79 +7186,39 @@ export function PracticePortal() {
           </div>
         )}
 
-        {/* Prescriptions table */}
-        <div className="glass rounded-xl overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr style={{ backgroundColor: "rgba(16,42,67,0.03)" }}>
-                  <th className="text-left px-4 py-3 font-medium text-slate-500">Patient</th>
-                  <th className="text-left px-4 py-3 font-medium text-slate-500">Medication</th>
-                  <th className="text-left px-4 py-3 font-medium text-slate-500 hidden md:table-cell">Dosage</th>
-                  <th className="text-left px-4 py-3 font-medium text-slate-500 hidden lg:table-cell">Frequency</th>
-                  <th className="text-left px-4 py-3 font-medium text-slate-500 hidden md:table-cell">Prescriber</th>
-                  <th className="text-left px-4 py-3 font-medium text-slate-500">Status</th>
-                  <th className="text-left px-4 py-3 font-medium text-slate-500 hidden lg:table-cell">Refills Left</th>
-                  <th className="text-left px-4 py-3 font-medium text-slate-500">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(apiPrescriptions || mockPrescriptions).length === 0 && (
-                  <tr><td colSpan={8} className="py-8 text-center text-slate-400 text-sm">No prescriptions yet. Click "New Prescription" to prescribe a medication.</td></tr>
-                )}
-                {(apiPrescriptions || mockPrescriptions).map((rx) => {
-                  const rsc = rxStatusConfig[rx.status];
-                  return (
-                    <tr key={rx.id} className="border-t border-slate-100 hover:bg-slate-50 transition-colors">
-                      <td className="px-4 py-3 font-medium text-slate-700">{rx.patient}</td>
-                      <td className="px-4 py-3 text-slate-700">{rx.medication}</td>
-                      <td className="px-4 py-3 text-slate-500 hidden md:table-cell">{rx.dosage}</td>
-                      <td className="px-4 py-3 text-slate-500 hidden lg:table-cell">{rx.frequency}</td>
-                      <td className="px-4 py-3 text-slate-500 hidden md:table-cell">{rx.prescriber}</td>
-                      <td className="px-4 py-3">
-                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium capitalize" style={{ backgroundColor: rsc.bg, color: rsc.text }}>
-                          <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: rsc.dot }} />
-                          {rx.status.replace("_", " ")}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-slate-500 hidden lg:table-cell">{rx.refillsLeft}</td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-1">
-                          <button
-                            className="p-1.5 rounded-md hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors"
-                            title="View prescription"
-                            onClick={() => setToast({ message: "Prescription detail view coming soon.", type: "success" })}
-                          >
-                            <Eye className="w-4 h-4" />
-                          </button>
-                          <button
-                            className="p-1.5 rounded-md hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors"
-                            title="Edit prescription"
-                            onClick={() => setToast({ message: "Prescription editing coming soon.", type: "success" })}
-                          >
-                            <Pencil className="w-4 h-4" />
-                          </button>
-                          <MoreActionsDropdown actions={[
-                            { label: "Download PDF", onClick: () => handleDownloadRxPdf(rx.id) },
-                            { label: "eFax to Pharmacy", onClick: () => handleOpenEfax(rx) },
-                            ...(rx.status === "active" ? [
-                              { label: "Refill", onClick: () => handleRefillPrescription(rx.id) },
-                              { label: "Discontinue", onClick: () => setConfirmDialog({ title: "Discontinue Prescription", message: `Discontinue ${rx.medication} ${rx.dosage} for ${rx.patient}?`, confirmLabel: "Discontinue", danger: true, onConfirm: () => { handleDiscontinuePrescription(rx.id); setConfirmDialog(null); } }), danger: true },
-                            ] : []),
-                            ...(rx.status === "refill_requested" ? [
-                              { label: "Approve Refill", onClick: () => handleRefillPrescription(rx.id) },
-                              { label: "Deny Refill", onClick: () => setConfirmDialog({ title: "Deny Refill", message: `Deny refill request for ${rx.medication}?`, confirmLabel: "Deny", danger: true, onConfirm: () => { handleDiscontinuePrescription(rx.id); setConfirmDialog(null); } }), danger: true },
-                            ] : []),
-                          ]} />
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+        {/* Search + filter chips */}
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative flex-1 min-w-[240px] max-w-sm">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+            <input
+              type="text"
+              placeholder="Search by medication, patient, prescriber..."
+              value={prescriptionSearch}
+              onChange={(e) => setPrescriptionSearch(e.target.value)}
+              className="w-full pl-9 pr-3 py-1.5 rounded-md border border-slate-200 text-sm bg-white focus:outline-none focus:border-slate-400"
+            />
           </div>
+          <FilterChips facets={facets} active={prescriptionFilters} onChange={setPrescriptionFilters} />
         </div>
+
+        <DataTable
+          columns={cols}
+          rows={filtered}
+          rowKey={(rx) => rx.id}
+          actions={rowActions}
+          empty={
+            <div className="text-center py-8">
+              <p className="text-sm text-slate-500 mb-1">
+                {allRx.length === 0 ? "No prescriptions yet." : "No prescriptions match your filters"}
+              </p>
+              {allRx.length > 0 && (
+                <button onClick={() => { setPrescriptionFilters([]); setPrescriptionSearch(""); }} className="text-xs text-blue-600 hover:underline">
+                  Clear filters
+                </button>
+              )}
+            </div>
+          }
+        />
       </div>
     );
   }
@@ -7642,107 +7691,167 @@ export function PracticePortal() {
     ];
     const mockCoupons = apiCoupons.length > 0 ? apiCoupons : (isDemoMode ? mockCouponsDemo : []);
 
-    const formatDiscount = (coupon: typeof mockCoupons[0]) => {
+    type Cp = typeof mockCoupons[number];
+
+    const formatDiscount = (coupon: Cp) => {
       if (coupon.discountType === "percent") return `${coupon.discountValue}% off`;
       if (coupon.discountType === "amount") return `$${coupon.discountValue} off`;
       return `${coupon.discountValue} month${coupon.discountValue > 1 ? "s" : ""} free`;
     };
 
-    return (
-      <div className="space-y-6">
-        <div className="flex items-center justify-between">
-          <h2 className="text-xl font-bold text-slate-800">Coupons</h2>
-          <button
-            className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors"
-            style={{ backgroundColor: "#27ab83" }}
-            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#147d64")}
-            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "#27ab83")}
-            onClick={() => setShowNewCoupon(true)}
-          >
-            <Plus className="w-4 h-4" />
-            Create Coupon
-          </button>
-        </div>
+    const statusOpts = Array.from(new Set(mockCoupons.map((c) => c.status))).map((s) => ({
+      value: s, label: s.charAt(0).toUpperCase() + s.slice(1),
+    }));
+    const typeOpts = Array.from(new Set(mockCoupons.map((c) => c.discountType))).map((t) => ({
+      value: t,
+      label: t === "percent" ? "Percent off" : t === "amount" ? "Amount off" : "Free months",
+    }));
+    const facets: import("../shared/stripe-ui").FilterFacet[] = [
+      { key: "status", label: "Status", options: statusOpts },
+      { key: "type", label: "Type", options: typeOpts },
+    ];
 
-        {/* Table */}
-        <div className="glass rounded-xl overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr style={{ backgroundColor: "rgba(16,42,67,0.03)" }}>
-                  <th className="text-left px-4 py-3 font-medium text-slate-500">Code</th>
-                  <th className="text-left px-4 py-3 font-medium text-slate-500">Description</th>
-                  <th className="text-left px-4 py-3 font-medium text-slate-500">Discount</th>
-                  <th className="text-left px-4 py-3 font-medium text-slate-500 hidden md:table-cell">Uses</th>
-                  <th className="text-left px-4 py-3 font-medium text-slate-500 hidden md:table-cell">Valid Until</th>
-                  <th className="text-left px-4 py-3 font-medium text-slate-500">Status</th>
-                  <th className="text-left px-4 py-3 font-medium text-slate-500">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {mockCoupons.length === 0 && (
-                  <tr><td colSpan={7} className="py-8 text-center text-slate-400 text-sm">No coupons created yet. Click "Create Coupon" to add one.</td></tr>
-                )}
-                {mockCoupons.map((coupon) => (
-                  <tr key={coupon.id} className="border-t border-slate-100 hover:bg-slate-50 transition-colors">
-                    <td className="px-4 py-3">
-                      <span className="px-2 py-1 rounded text-xs font-mono font-bold" style={{ backgroundColor: "#e6f7f2", color: "#147d64" }}>
-                        {coupon.code}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-slate-700">{coupon.description}</td>
-                    <td className="px-4 py-3">
-                      <span className="font-medium" style={{ color: "#D4A855" }}>{formatDiscount(coupon)}</span>
-                    </td>
-                    <td className="px-4 py-3 text-slate-500 hidden md:table-cell">
-                      {coupon.usesCount}/{coupon.usesMax ?? "unlimited"}
-                    </td>
-                    <td className="px-4 py-3 text-slate-500 hidden md:table-cell">{coupon.validUntil}</td>
-                    <td className="px-4 py-3">
-                      <StatusBadge status={coupon.status === "active" ? "active" : "cancelled"} />
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-1">
-                        <button
-                          className="p-1.5 rounded-md hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors"
-                          onClick={() => setToast({ message: "Coupon editing coming soon.", type: "success" })}
-                        >
-                          <Pencil className="w-4 h-4" />
-                        </button>
-                        {coupon.status === "active" && (
-                          <button
-                            className="px-2 py-1 rounded text-xs font-medium transition-colors"
-                            style={{ color: "#dc2626" }}
-                            onClick={() => setConfirmDialog({
-                              title: "Deactivate Coupon",
-                              message: `Deactivate coupon "${coupon.code}"?`,
-                              confirmLabel: "Deactivate",
-                              danger: true,
-                              onConfirm: async () => {
-                                try {
-                                  await couponService.update(coupon.id, { isActive: false } as Record<string, unknown>);
-                                  setToast({ message: "Coupon deactivated.", type: "success" });
-                                  loadPracticeData();
-                                } catch { setToast({ message: "Failed to deactivate coupon.", type: "error" }); }
-                                setConfirmDialog(null);
-                              },
-                            })}
-                          >
-                            Deactivate
-                          </button>
-                        )}
-                        <MoreActionsDropdown actions={[
-                          { label: "Copy Code", onClick: () => { navigator.clipboard.writeText(coupon.code); setToast({ message: `Copied "${coupon.code}" to clipboard.`, type: "success" }); } },
-                          { label: "Delete", onClick: () => setConfirmDialog({ title: "Delete Coupon", message: `Delete coupon "${coupon.code}"? This cannot be undone.`, confirmLabel: "Delete", danger: true, onConfirm: async () => { try { await couponService.delete(coupon.id); setToast({ message: "Coupon deleted.", type: "success" }); loadPracticeData(); } catch { setToast({ message: "Failed.", type: "error" }); } setConfirmDialog(null); } }), danger: true },
-                        ]} />
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+    const filtered = mockCoupons.filter((c) => {
+      if (couponSearch.trim()) {
+        const q = couponSearch.toLowerCase();
+        const hay = [c.code, c.description].join(" ").toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      for (const f of couponFilters) {
+        if (f.key === "status" && c.status !== f.value) return false;
+        if (f.key === "type" && c.discountType !== f.value) return false;
+      }
+      return true;
+    });
+
+    const cols: import("../shared/stripe-ui").DataTableColumn<Cp>[] = [
+      {
+        key: "code",
+        header: "Code",
+        cell: (c) => (
+          <span className="px-2 py-0.5 rounded text-xs font-mono font-semibold tabular-nums" style={{ backgroundColor: "#eef2ff", color: "#4338ca" }}>
+            {c.code}
+          </span>
+        ),
+      },
+      {
+        key: "discount",
+        header: "Discount",
+        cell: (c) => <span className="text-slate-700 font-medium">{formatDiscount(c)}</span>,
+      },
+      {
+        key: "description",
+        header: "Description",
+        hideBelow: "md",
+        cell: (c) => <span className="text-slate-600 truncate">{c.description}</span>,
+      },
+      {
+        key: "uses",
+        header: "Redemptions",
+        align: "right",
+        hideBelow: "md",
+        cell: (c) => (
+          <span className="text-slate-600 tabular-nums">
+            {c.usesCount}<span className="text-slate-400"> / {c.usesMax ?? "∞"}</span>
+          </span>
+        ),
+      },
+      {
+        key: "validUntil",
+        header: "Valid until",
+        hideBelow: "md",
+        cell: (c) => <span className="text-slate-500">{c.validUntil}</span>,
+      },
+      {
+        key: "status",
+        header: "Status",
+        cell: (c) => <StatusPill label={c.status} />,
+      },
+    ];
+
+    const rowActions = (coupon: Cp): import("../shared/stripe-ui").KebabAction[] => [
+      { label: "Copy code", onClick: () => { navigator.clipboard.writeText(coupon.code); setToast({ message: `Copied "${coupon.code}" to clipboard.`, type: "success" }); } },
+      { label: "Edit coupon", onClick: () => setToast({ message: "Coupon editing coming soon.", type: "success" }) },
+      ...(coupon.status === "active" ? [{
+        label: "Deactivate", danger: true, onClick: () => setConfirmDialog({
+          title: "Deactivate Coupon",
+          message: `Deactivate coupon "${coupon.code}"?`,
+          confirmLabel: "Deactivate",
+          danger: true,
+          onConfirm: async () => {
+            try {
+              await couponService.update(coupon.id, { isActive: false } as Record<string, unknown>);
+              setToast({ message: "Coupon deactivated.", type: "success" });
+              loadPracticeData();
+            } catch { setToast({ message: "Failed to deactivate coupon.", type: "error" }); }
+            setConfirmDialog(null);
+          },
+        }),
+      }] : []),
+      { label: "Delete", danger: true, onClick: () => setConfirmDialog({ title: "Delete Coupon", message: `Delete coupon "${coupon.code}"? This cannot be undone.`, confirmLabel: "Delete", danger: true, onConfirm: async () => { try { await couponService.delete(coupon.id); setToast({ message: "Coupon deleted.", type: "success" }); loadPracticeData(); } catch { setToast({ message: "Failed.", type: "error" }); } setConfirmDialog(null); } }) },
+    ];
+
+    return (
+      <div className="space-y-5">
+        <div className="flex items-end justify-between gap-4">
+          <div>
+            <h2 className="text-2xl font-semibold text-slate-900 tracking-tight">Coupons</h2>
+            <p className="text-sm text-slate-500 mt-0.5">
+              {filtered.length === mockCoupons.length
+                ? `${mockCoupons.length} ${mockCoupons.length === 1 ? "coupon" : "coupons"}`
+                : `${filtered.length} of ${mockCoupons.length}`}
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <RefreshButton onRefresh={loadPracticeData} title="Refresh coupons" />
+            <button
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium text-white shadow-sm transition-colors"
+              style={{ backgroundColor: "#635bff" }}
+              onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#544ee0")}
+              onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "#635bff")}
+              onClick={() => setShowNewCoupon(true)}
+            >
+              <Plus className="w-4 h-4" />
+              Create coupon
+            </button>
           </div>
         </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative flex-1 min-w-[240px] max-w-sm">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+            <input
+              type="text"
+              placeholder="Search by code or description..."
+              value={couponSearch}
+              onChange={(e) => setCouponSearch(e.target.value)}
+              className="w-full pl-9 pr-3 py-1.5 rounded-md border border-slate-200 text-sm bg-white focus:outline-none focus:border-slate-400"
+            />
+          </div>
+          <FilterChips facets={facets} active={couponFilters} onChange={setCouponFilters} />
+        </div>
+
+        <DataTable
+          columns={cols}
+          rows={filtered}
+          rowKey={(c) => c.id}
+          actions={rowActions}
+          empty={
+            <div className="text-center py-8">
+              <p className="text-sm text-slate-500 mb-1">
+                {mockCoupons.length === 0 ? "No coupons created yet." : "No coupons match your filters"}
+              </p>
+              {mockCoupons.length > 0 && (
+                <button
+                  onClick={() => { setCouponFilters([]); setCouponSearch(""); }}
+                  className="text-xs text-blue-600 hover:underline"
+                >
+                  Clear filters
+                </button>
+              )}
+            </div>
+          }
+        />
       </div>
     );
   }
@@ -7957,96 +8066,151 @@ export function PracticePortal() {
       "Billing Coordinator": { bg: "#fffbeb", text: "#d97706" },
       "Office Manager": { bg: "#e0e8f0", text: "#334e68" },
     };
+    const fallbackRoleColor = { bg: "#f1f5f9", text: "#475569" };
+
+    type Sf = typeof mockStaff[number];
+
+    const roleOpts = Array.from(new Set(mockStaff.map((s) => s.role).filter(Boolean))).map((r) => ({ value: r, label: r }));
+    const statusOpts = Array.from(new Set(mockStaff.map((s) => s.status))).map((s) => ({
+      value: s, label: s.charAt(0).toUpperCase() + s.slice(1),
+    }));
+    const facets: import("../shared/stripe-ui").FilterFacet[] = [
+      { key: "status", label: "Status", options: statusOpts },
+      { key: "role", label: "Role", options: roleOpts },
+    ];
+
+    const filtered = mockStaff.filter((s) => {
+      if (staffSearch.trim()) {
+        const q = staffSearch.toLowerCase();
+        const hay = [s.name, s.email, s.role].join(" ").toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      for (const f of staffFilters) {
+        if (f.key === "status" && s.status !== f.value) return false;
+        if (f.key === "role" && s.role !== f.value) return false;
+      }
+      return true;
+    });
+
+    const cols: import("../shared/stripe-ui").DataTableColumn<Sf>[] = [
+      {
+        key: "name",
+        header: "Name",
+        cell: (s) => (
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold text-white shrink-0" style={{ background: "linear-gradient(135deg, #334e68, #243b53)" }}>
+              {(s.name || "?").split(" ").map((n: string) => n[0]).join("").slice(0, 2)}
+            </div>
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-slate-800 truncate">{s.name}</p>
+              <p className="text-xs text-slate-400 truncate">{s.email}</p>
+            </div>
+          </div>
+        ),
+      },
+      {
+        key: "role",
+        header: "Role",
+        cell: (s) => {
+          const rc = roleConfig[s.role] || fallbackRoleColor;
+          return (
+            <span className="px-2 py-0.5 rounded text-xs font-medium" style={{ backgroundColor: rc.bg, color: rc.text }}>
+              {s.role}
+            </span>
+          );
+        },
+      },
+      {
+        key: "status",
+        header: "Status",
+        cell: (s) => <StatusPill label={s.status} />,
+      },
+      {
+        key: "lastLogin",
+        header: "Last login",
+        hideBelow: "md",
+        cell: (s) => <span className="text-slate-500">{s.lastLogin}</span>,
+      },
+    ];
+
+    const rowActions = (staff: Sf): import("../shared/stripe-ui").KebabAction[] => [
+      { label: "Edit", onClick: () => setToast({ message: "Staff editing coming soon.", type: "success" }) },
+      { label: "Resend invite", onClick: () => setToast({ message: "Invite resent.", type: "success" }) },
+      { label: "Deactivate", danger: true, onClick: () => setConfirmDialog({
+        title: "Deactivate Staff",
+        message: `Deactivate ${staff.name}? They will lose access to the portal.`,
+        confirmLabel: "Deactivate",
+        danger: true,
+        onConfirm: async () => {
+          try {
+            await apiFetch(`/staff/${staff.id}`, { method: "PUT", body: JSON.stringify({ isActive: false }) });
+            setToast({ message: `${staff.name} deactivated.`, type: "success" });
+            loadPracticeData();
+          } catch { setToast({ message: "Failed to deactivate staff member.", type: "error" }); }
+          setConfirmDialog(null);
+        },
+      }) },
+      { label: "Remove permanently", danger: true, onClick: () => setConfirmDialog({ title: "Remove Staff", message: `Remove ${staff.name} permanently?`, confirmLabel: "Remove", danger: true, onConfirm: async () => { try { await apiFetch(`/staff/${staff.id}`, { method: "DELETE" }); setToast({ message: "Staff member removed.", type: "success" }); loadPracticeData(); } catch { setToast({ message: "Failed.", type: "error" }); } setConfirmDialog(null); } }) },
+    ];
 
     return (
-      <div className="space-y-4">
-        <div className="flex items-center justify-between">
-          <h2 className="text-xl font-bold text-slate-800">Staff</h2>
-          <button
-            className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors"
-            style={{ backgroundColor: "#27ab83" }}
-            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#147d64")}
-            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "#27ab83")}
-            onClick={() => setShowInviteStaff(true)}
-          >
-            <UserPlus className="w-4 h-4" />
-            Invite Staff
-          </button>
-        </div>
-
-        <div className="glass rounded-xl overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr style={{ backgroundColor: "rgba(16,42,67,0.03)" }}>
-                  <th className="text-left px-4 py-3 font-medium text-slate-500">Name</th>
-                  <th className="text-left px-4 py-3 font-medium text-slate-500 hidden md:table-cell">Email</th>
-                  <th className="text-left px-4 py-3 font-medium text-slate-500">Role</th>
-                  <th className="text-left px-4 py-3 font-medium text-slate-500">Status</th>
-                  <th className="text-left px-4 py-3 font-medium text-slate-500 hidden md:table-cell">Last Login</th>
-                  <th className="text-left px-4 py-3 font-medium text-slate-500">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {mockStaff.length === 0 && (
-                  <tr><td colSpan={6} className="py-8 text-center text-slate-400 text-sm">No staff members yet. Click "Invite Staff" to add team members.</td></tr>
-                )}
-                {mockStaff.map((staff) => {
-                  const rc = roleConfig[staff.role] || roleConfig["Office Manager"];
-                  return (
-                    <tr key={staff.id} className="border-t border-slate-100 hover:bg-slate-50 transition-colors">
-                      <td className="px-4 py-3 font-medium text-slate-700">{staff.name}</td>
-                      <td className="px-4 py-3 text-slate-500 hidden md:table-cell">{staff.email}</td>
-                      <td className="px-4 py-3">
-                        <span className="px-2 py-0.5 rounded text-xs font-medium" style={{ backgroundColor: rc.bg, color: rc.text }}>
-                          {staff.role}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3">
-                        <StatusBadge status={staff.status} />
-                      </td>
-                      <td className="px-4 py-3 text-slate-500 hidden md:table-cell">{staff.lastLogin}</td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-1">
-                          <button
-                            className="p-1.5 rounded-md hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors"
-                            onClick={() => setToast({ message: "Staff editing coming soon.", type: "success" })}
-                          >
-                            <Pencil className="w-4 h-4" />
-                          </button>
-                          <button
-                            className="px-2 py-1 rounded text-xs font-medium transition-colors"
-                            style={{ color: "#dc2626" }}
-                            onClick={() => setConfirmDialog({
-                              title: "Deactivate Staff",
-                              message: `Deactivate ${staff.name}? They will lose access to the portal.`,
-                              confirmLabel: "Deactivate",
-                              danger: true,
-                              onConfirm: async () => {
-                                try {
-                                  await apiFetch(`/staff/${staff.id}`, { method: "PUT", body: JSON.stringify({ isActive: false }) });
-                                  setToast({ message: `${staff.name} deactivated.`, type: "success" });
-                                  loadPracticeData();
-                                } catch { setToast({ message: "Failed to deactivate staff member.", type: "error" }); }
-                                setConfirmDialog(null);
-                              },
-                            })}
-                          >
-                            Deactivate
-                          </button>
-                          <MoreActionsDropdown actions={[
-                            { label: "Resend Invite", onClick: () => setToast({ message: "Invite resent.", type: "success" }) },
-                            { label: "Remove", onClick: () => setConfirmDialog({ title: "Remove Staff", message: `Remove ${staff.name} permanently?`, confirmLabel: "Remove", danger: true, onConfirm: async () => { try { await apiFetch(`/staff/${staff.id}`, { method: "DELETE" }); setToast({ message: "Staff member removed.", type: "success" }); loadPracticeData(); } catch { setToast({ message: "Failed.", type: "error" }); } setConfirmDialog(null); } }), danger: true },
-                          ]} />
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+      <div className="space-y-5">
+        <div className="flex items-end justify-between gap-4">
+          <div>
+            <h2 className="text-2xl font-semibold text-slate-900 tracking-tight">Staff</h2>
+            <p className="text-sm text-slate-500 mt-0.5">
+              {filtered.length === mockStaff.length
+                ? `${mockStaff.length} ${mockStaff.length === 1 ? "staff member" : "staff members"}`
+                : `${filtered.length} of ${mockStaff.length}`}
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <RefreshButton onRefresh={loadPracticeData} title="Refresh staff" />
+            <button
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium text-white shadow-sm transition-colors"
+              style={{ backgroundColor: "#635bff" }}
+              onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#544ee0")}
+              onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "#635bff")}
+              onClick={() => setShowInviteStaff(true)}
+            >
+              <UserPlus className="w-4 h-4" />
+              Invite staff
+            </button>
           </div>
         </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative flex-1 min-w-[240px] max-w-sm">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+            <input
+              type="text"
+              placeholder="Search by name, email, role..."
+              value={staffSearch}
+              onChange={(e) => setStaffSearch(e.target.value)}
+              className="w-full pl-9 pr-3 py-1.5 rounded-md border border-slate-200 text-sm bg-white focus:outline-none focus:border-slate-400"
+            />
+          </div>
+          <FilterChips facets={facets} active={staffFilters} onChange={setStaffFilters} />
+        </div>
+
+        <DataTable
+          columns={cols}
+          rows={filtered}
+          rowKey={(s) => s.id}
+          actions={rowActions}
+          empty={
+            <div className="text-center py-8">
+              <p className="text-sm text-slate-500 mb-1">
+                {mockStaff.length === 0 ? "No staff members yet. Click \"Invite staff\" to add team members." : "No staff match your filters"}
+              </p>
+              {mockStaff.length > 0 && (
+                <button onClick={() => { setStaffFilters([]); setStaffSearch(""); }} className="text-xs text-blue-600 hover:underline">
+                  Clear filters
+                </button>
+              )}
+            </div>
+          }
+        />
       </div>
     );
   }
