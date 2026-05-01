@@ -4660,7 +4660,7 @@ export function PracticePortal() {
             </div>
 
             {/* Add entitlement type selector */}
-            {planDetailShowAddEntitlement && entitlementTypes.length > 0 && (
+            {planDetailShowAddEntitlement && (
               <div className="glass rounded-xl p-4">
                 <div className="flex items-center justify-between mb-3">
                   <p className="text-sm font-medium text-slate-700">Select entitlement type to add:</p>
@@ -4671,8 +4671,15 @@ export function PracticePortal() {
                     <X className="w-4 h-4" />
                   </button>
                 </div>
+                {entitlementTypesLoading && (
+                  <span className="text-sm text-slate-400">Loading entitlement types…</span>
+                )}
+                {!entitlementTypesLoading && entitlementTypes.length === 0 && (
+                  <p className="text-sm text-slate-500">
+                    No entitlement types are seeded for this practice yet. Run the practice bootstrap or contact support to populate the catalog.
+                  </p>
+                )}
                 <div className="flex flex-wrap gap-2">
-                  {entitlementTypesLoading && <span className="text-sm text-slate-400">Loading...</span>}
                   {entitlementTypes.map((et: { id: string; name: string; code?: string; category?: string }) => {
                     const alreadyAdded = planDetailEntitlements.some(
                       // eslint-disable-next-line @typescript-eslint/no-explicit-any
