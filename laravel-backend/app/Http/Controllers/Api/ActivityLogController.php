@@ -120,6 +120,101 @@ class ActivityLogController extends Controller
     }
 
     /**
+     * GET /activity-log — paginated tenant-wide activity log used by the
+     * Activity Logger tab. Returns:
+     *   { items: [...], total: N, page: N, page_size: N }
+     *
+     * Filters: type (activity_type), date_from, date_to, patient_id.
+     * The frontend hits this on first render — without it, the tab spins
+     * forever on "Loading activities…" because the route 404s.
+     */
+    public function index(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        abort_if(!in_array($user->role, ['practice_admin', 'provider', 'staff', 'superadmin']), 403);
+
+        $page = max(1, (int) $request->query('page', 1));
+        $pageSize = min(100, max(1, (int) $request->query('page_size', $request->query('pageSize', 20))));
+
+        $query = CommunicationLog::query()
+            ->where('tenant_id', $user->tenant_id)
+            ->with('patient:id,first_name,last_name')
+            ->orderByDesc('logged_at');
+
+        if ($request->filled('type')) {
+            $type = (string) $request->query('type');
+            // Map UI activity types -> CommunicationLog channels where they
+            // diverge. Anything else passes straight through.
+            $channelMap = [
+                'phone_call' => 'phone',
+                'text_message' => 'sms',
+                'after_hours_call' => 'phone',
+                'referral_call' => 'phone',
+            ];
+            if (isset($channelMap[$type])) {
+                $query->where('channel', $channelMap[$type]);
+            } else {
+                $query->where('channel', $type);
+            }
+        }
+
+        if ($request->filled('patient_id')) {
+            $query->where('patient_id', $request->query('patient_id'));
+        }
+
+        if ($request->filled('date_from') || $request->filled('dateFrom')) {
+            $from = $request->query('date_from') ?? $request->query('dateFrom');
+            $query->where('logged_at', '>=', $from);
+        }
+
+        if ($request->filled('date_to') || $request->filled('dateTo')) {
+            $to = $request->query('date_to') ?? $request->query('dateTo');
+            $query->where('logged_at', '<=', $to . ' 23:59:59');
+        }
+
+        $total = (clone $query)->count();
+        $logs = $query->forPage($page, $pageSize)->get();
+
+        $items = $logs->map(function (CommunicationLog $log) {
+            $patientName = trim(($log->patient->first_name ?? '') . ' ' . ($log->patient->last_name ?? ''));
+            // Derive a UI activity_type from the channel + subject so the
+            // frontend ActivityBadge resolves correctly.
+            $activityType = 'other';
+            $channel = (string) $log->channel;
+            if ($channel === 'sms') {
+                $activityType = 'text_message';
+            } elseif ($channel === 'phone') {
+                // Best-effort mapping from subject text — back-fill historical
+                // rows that didn't carry a discrete activity_type column.
+                $subj = strtolower((string) $log->subject);
+                if (str_contains($subj, 'after')) $activityType = 'after_hours_call';
+                elseif (str_contains($subj, 'referral')) $activityType = 'referral_call';
+                else $activityType = 'phone_call';
+            }
+
+            return [
+                'id' => $log->id,
+                'patient_id' => $log->patient_id,
+                'patient_name' => $patientName ?: 'Unknown',
+                'activity_type' => $activityType,
+                'duration_minutes' => $log->duration_seconds !== null
+                    ? (int) round($log->duration_seconds / 60)
+                    : null,
+                'notes' => $log->summary ?? '',
+                'entitlement_deducted' => null,
+                'created_at' => ($log->logged_at ?? $log->created_at)?->toIso8601String(),
+            ];
+        })->values();
+
+        return response()->json([
+            'items' => $items,
+            'total' => $total,
+            'page' => $page,
+            'page_size' => $pageSize,
+        ]);
+    }
+
+    /**
      * GET /activity-log/patient/{patientId} — list recent activity logs for a patient.
      */
     public function recent(Request $request, string $patientId): JsonResponse

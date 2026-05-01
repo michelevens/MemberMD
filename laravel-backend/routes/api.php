@@ -677,6 +677,7 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
 
     // ===== Activity Logger =====
     Route::prefix('activity-log')->group(function () {
+        Route::get('/', [ActivityLogController::class, 'index']);
         Route::get('/types', [ActivityLogController::class, 'types']);
         Route::post('/', [ActivityLogController::class, 'log']);
         Route::get('/patient/{patientId}', [ActivityLogController::class, 'recent']);

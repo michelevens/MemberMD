@@ -1974,10 +1974,22 @@ export function PracticePortal() {
     }
     setCouponLoading(true);
     try {
+      // Backend enum is 'percentage' | 'fixed'. UI also exposes a
+      // 'free_months' option that the backend doesn't natively support;
+      // we send it as 'fixed' with a description suffix so the value is
+      // captured even if the discount logic doesn't apply months yet.
+      const apiDiscountType =
+        couponForm.discountType === "percent" ? "percentage"
+        : couponForm.discountType === "amount" ? "fixed"
+        : "fixed";
+      const apiDescription = couponForm.discountType === "free_months"
+        ? `${couponForm.description || "Free months"} (${couponForm.discountValue} month${parseInt(couponForm.discountValue) === 1 ? "" : "s"} free)`
+        : couponForm.description || undefined;
+
       const res = await couponService.create({
         code: couponForm.code.toUpperCase(),
-        description: couponForm.description || undefined,
-        discountType: couponForm.discountType,
+        description: apiDescription,
+        discountType: apiDiscountType,
         discountValue: parseFloat(couponForm.discountValue),
         maxUses: couponForm.maxUses ? parseInt(couponForm.maxUses) : undefined,
         validUntil: couponForm.validUntil || undefined,
@@ -9289,6 +9301,11 @@ export function PracticePortal() {
                     <option value="rpm">RPM</option>
                   </>}
                 </select>
+                {apiPrograms.length === 0 && !isDemoMode && (
+                  <p className="text-xs text-slate-400 mt-1">
+                    No programs configured yet. Visit Practice → Programs to set them up, or leave as "No program".
+                  </p>
+                )}
               </div>
               <div className="flex items-center gap-3">
                 <label className="flex items-center gap-2 cursor-pointer">
@@ -9364,6 +9381,11 @@ export function PracticePortal() {
                     <option value="rpm">RPM</option>
                   </>}
                 </select>
+                {apiPrograms.length === 0 && !isDemoMode && (
+                  <p className="text-xs text-slate-400 mt-1">
+                    No programs configured yet. Visit Practice → Programs to set them up, or leave as "No program".
+                  </p>
+                )}
               </div>
             </div>
             <div className="px-6 pb-6 flex items-center justify-end gap-3">

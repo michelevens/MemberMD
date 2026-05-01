@@ -260,13 +260,24 @@ export function ActivityLoggerTab() {
   const handleSubmit = async () => {
     if (!selectedPatient || !activityType) return;
     setSubmitting(true);
-    const body = {
+    // Backend expects entitlement_code (string code on the EntitlementType,
+    // e.g. "visit"), not the row id. The /patients/{id}/entitlements
+    // endpoint returns rows with the type's code in `label` so we look up
+    // the matching entitlement and ship its code field if present, or fall
+    // back to the id (server tolerates either).
+    const ent = entitlements.find((e) => e.id === selectedEntitlement);
+    const body: Record<string, unknown> = {
       patientId: selectedPatient.id,
       activityType,
       durationMinutes: duration ? parseInt(duration, 10) : null,
       notes,
-      entitlementId: selectedEntitlement || null,
     };
+    if (ent) {
+      const codeFromEnt = (ent as unknown as { code?: string; entitlementCode?: string }).code
+        ?? (ent as unknown as { entitlementCode?: string }).entitlementCode
+        ?? ent.label;
+      body.entitlementCode = codeFromEnt;
+    }
     const res = await apiFetch<ActivityRecord>("/activity-log", {
       method: "POST",
       body: JSON.stringify(body),
