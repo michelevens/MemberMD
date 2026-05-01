@@ -2925,38 +2925,34 @@ export function PracticePortal() {
       .toUpperCase();
 
     return (
-      <div className="space-y-6">
-        {/* ── Header (EnnHealth-style gradient card with avatar) ─────── */}
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => { setSelectedPatient(null); setPatientUtilization(null); setPatientActivities([]); setShowQuickActivityLog(false); }}
-            className="p-2 rounded-lg hover:bg-slate-100 text-slate-500 transition-colors shrink-0"
-          >
-            <ArrowLeft className="w-5 h-5" />
-          </button>
-          <span className="text-sm text-slate-400">Back to roster</span>
-        </div>
-
-        <div
-          className="rounded-2xl shadow-xl border border-slate-200/40 overflow-hidden"
-          style={{ background: "linear-gradient(135deg, #ffffff 0%, #f8fafc 100%)" }}
+      <div className="space-y-5">
+        {/* Back link — Stripe slim pattern */}
+        <button
+          onClick={() => { setSelectedPatient(null); setPatientUtilization(null); setPatientActivities([]); setShowQuickActivityLog(false); }}
+          className="inline-flex items-center gap-1.5 text-sm text-slate-600 hover:text-slate-900 transition-colors"
         >
-          <div className="p-6 sm:p-8 flex flex-col md:flex-row items-start gap-6">
+          <ArrowLeft className="w-4 h-4" />
+          Back to patients
+        </button>
+
+        {/* Patient header card — flat border treatment */}
+        <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
+          <div className="p-5 flex flex-col md:flex-row items-start gap-5">
             {/* Avatar */}
             <div
-              className="w-24 h-24 rounded-full ring-4 ring-white shadow-lg flex items-center justify-center text-white text-2xl font-semibold shrink-0"
-              style={{ background: "linear-gradient(135deg, #334e68 0%, #d97706 100%)" }}
+              className="w-14 h-14 rounded-lg flex items-center justify-center text-white text-base font-bold shrink-0"
+              style={{ background: "linear-gradient(135deg, #334e68, #243b53)" }}
             >
               {patientInitials}
             </div>
 
-            <div className="flex-1 min-w-0 space-y-4">
+            <div className="flex-1 min-w-0 space-y-3">
               <div>
-                <div className="flex flex-wrap items-center gap-3 mb-2">
-                  <h1 className="text-3xl font-semibold text-slate-900">
+                <div className="flex flex-wrap items-center gap-2 mb-1">
+                  <h1 className="text-2xl font-semibold tracking-tight text-slate-900">
                     {pt.name}
                     {pt.preferredName && (
-                      <span className="text-lg font-normal text-slate-400 ml-2">({pt.preferredName})</span>
+                      <span className="text-base font-normal text-slate-400 ml-2">({pt.preferredName})</span>
                     )}
                   </h1>
                   <PlanBadge plan={pt.plan} />

@@ -150,7 +150,15 @@ export function OperatorNetworkDashboard() {
   const buckets = (granularity === "daily" ? timeseries?.daily : timeseries?.monthly) ?? [];
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
+      {/* Stripe-grade page header */}
+      <div className="flex items-end justify-between gap-4">
+        <div>
+          <h2 className="text-2xl font-semibold text-slate-900 tracking-tight">Network</h2>
+          <p className="text-sm text-slate-500 mt-0.5">MRR, members, retention, and clinic leaderboards across your network</p>
+        </div>
+      </div>
+
       {/* KPI Row */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <KpiCard
