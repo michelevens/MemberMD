@@ -100,18 +100,21 @@ class MembershipLifecycleE2ETest extends TestCase
         $response->assertSuccessful();
         $body = $response->json();
 
-        // The public enrollment response is intentionally lightweight:
-        // top-level member_id (a human-readable code derived from the User
-        // UUID — NOT the PatientMembership PK), patient_id, optional
-        // stripe_warning. Resolve the actual membership row via patient_id.
-        // GAP NOTE: response should expose the membership UUID directly.
-        $patientId = $body['patient_id'] ?? null;
-        $this->assertNotEmpty($patientId, 'Enrollment must return patient_id.');
+        // Three IDs returned at the top level (intentionally not under
+        // a `data` wrapper for backwards compat with the widget):
+        //   member_id       human-readable code (MBR-XXXXXX), shown on cards
+        //   membership_id   PatientMembership UUID — for API follow-ups
+        //   patient_id      Patient UUID
         $this->assertNotEmpty($body['member_id'] ?? null,
             'Enrollment must return a human-readable member_id code.');
+        $this->assertNotEmpty($body['patient_id'] ?? null,
+            'Enrollment must return patient_id.');
+        $this->assertNotEmpty($body['membership_id'] ?? null,
+            'Enrollment must return the PatientMembership UUID directly.');
 
-        $membership = PatientMembership::where('patient_id', $patientId)->first();
-        $this->assertNotNull($membership, 'Membership row exists for the new patient');
+        $membership = PatientMembership::find($body['membership_id']);
+        $this->assertNotNull($membership, 'Membership row exists for the returned id');
+        $this->assertSame($body['patient_id'], $membership->patient_id);
         $this->assertSame('active', $membership->status);
 
         // The bug we just fixed: entitlement must be seeded on signup.
@@ -153,25 +156,103 @@ class MembershipLifecycleE2ETest extends TestCase
             $r = $this->actingAs($admin, 'sanctum')
                 ->postJson("/api/memberships/{$membership->id}/record-visit");
             $r->assertSuccessful();
+            $r->assertJsonPath('overage', false);
         }
 
         $entitlement->refresh();
         $this->assertSame(4, (int) $entitlement->visits_used);
+    }
 
-        // Today: a 5th visit increments past the cap because there's no
-        // counter-level block (cap enforcement is on the new
-        // EntitlementUsage path, not the legacy PatientEntitlement counter).
-        // We assert this current behavior + flag it as a gap for the future.
+    /** @test */
+    public function test_visit_at_cap_is_blocked_when_plan_has_no_overage(): void
+    {
+        $patient = $this->patientFor($this->practice);
+
+        // Default plan has no overage_fee, so once the cap is hit the
+        // recordVisit endpoint must 422 instead of silently incrementing.
+        $membership = PatientMembership::factory()->create([
+            'tenant_id' => $this->practice->id,
+            'patient_id' => $patient->id,
+            'plan_id' => $this->plan->id,
+        ]);
+        PatientEntitlement::factory()->exhausted()->create([
+            'tenant_id' => $this->practice->id,
+            'membership_id' => $membership->id,
+            'patient_id' => $patient->id,
+            'visits_allowed' => 4,
+        ]);
+
+        $admin = $this->adminFor($this->practice);
+
+        $resp = $this->actingAs($admin, 'sanctum')
+            ->postJson("/api/memberships/{$membership->id}/record-visit");
+
+        $resp->assertStatus(422);
+        $resp->assertJsonPath('data.cap_reached', true);
+        $resp->assertJsonPath('data.visits_used', 4);
+    }
+
+    /** @test */
+    public function test_visit_at_cap_succeeds_with_overage_when_plan_allows(): void
+    {
+        $patient = $this->patientFor($this->practice);
+        $overagePlan = MembershipPlan::factory()
+            ->withVisits(2)
+            ->create([
+                'tenant_id' => $this->practice->id,
+                'overage_fee' => 50.00,
+            ]);
+
+        $membership = PatientMembership::factory()->create([
+            'tenant_id' => $this->practice->id,
+            'patient_id' => $patient->id,
+            'plan_id' => $overagePlan->id,
+        ]);
+        PatientEntitlement::factory()->create([
+            'tenant_id' => $this->practice->id,
+            'membership_id' => $membership->id,
+            'patient_id' => $patient->id,
+            'visits_allowed' => 2,
+            'visits_used' => 2,
+        ]);
+
+        $admin = $this->adminFor($this->practice);
+
+        $resp = $this->actingAs($admin, 'sanctum')
+            ->postJson("/api/memberships/{$membership->id}/record-visit");
+
+        $resp->assertSuccessful();
+        $resp->assertJsonPath('overage', true);
+        $resp->assertJsonPath('overage_fee', 50);
+    }
+
+    /** @test */
+    public function test_unlimited_plan_never_blocks_at_cap(): void
+    {
+        $patient = $this->patientFor($this->practice);
+        $unlimitedPlan = MembershipPlan::factory()
+            ->unlimited()
+            ->create(['tenant_id' => $this->practice->id]);
+
+        $membership = PatientMembership::factory()->create([
+            'tenant_id' => $this->practice->id,
+            'patient_id' => $patient->id,
+            'plan_id' => $unlimitedPlan->id,
+        ]);
+        PatientEntitlement::factory()->create([
+            'tenant_id' => $this->practice->id,
+            'membership_id' => $membership->id,
+            'patient_id' => $patient->id,
+            'visits_allowed' => -1,
+            'visits_used' => 99,
+        ]);
+
+        $admin = $this->adminFor($this->practice);
+
         $this->actingAs($admin, 'sanctum')
             ->postJson("/api/memberships/{$membership->id}/record-visit")
-            ->assertSuccessful();
-
-        $entitlement->refresh();
-        $this->assertSame(
-            5,
-            (int) $entitlement->visits_used,
-            'Legacy PatientEntitlement counter has no built-in cap; cap enforcement happens via PlanEntitlement.overage_policy. Flag for follow-up: wire that policy into the recordVisit path.',
-        );
+            ->assertSuccessful()
+            ->assertJsonPath('overage', false);
     }
 
     /** @test */

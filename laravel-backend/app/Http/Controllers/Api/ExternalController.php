@@ -401,10 +401,16 @@ class ExternalController extends Controller
 
         return response()->json(array_filter([
             'message' => 'Enrollment successful!',
+            // member_id is the human-readable code (e.g. MBR-A1B2C3) we
+            // show on cards / receipts. Don't use it as a lookup key.
             'member_id' => $memberId,
+            // membership_id is the actual PatientMembership UUID — use
+            // this for follow-up API calls (status checks, cancellation,
+            // entitlement queries).
+            'membership_id' => $membership->id,
             'patient_id' => $patient->id,
             'stripe_warning' => $stripeWarning,
-        ]), 201);
+        ], fn ($v) => $v !== null), 201);
     }
 
     /**

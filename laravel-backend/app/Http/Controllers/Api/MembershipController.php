@@ -221,7 +221,9 @@ class MembershipController extends Controller
         $user = $request->user();
         abort_if(!in_array($user->role, ['practice_admin', 'provider', 'staff']), 403);
 
-        $membership = PatientMembership::where('tenant_id', $user->tenant_id)->findOrFail($id);
+        $membership = PatientMembership::with('plan')
+            ->where('tenant_id', $user->tenant_id)
+            ->findOrFail($id);
 
         // Find current period entitlement
         $entitlement = $membership->entitlements()
@@ -233,9 +235,49 @@ class MembershipController extends Controller
             return response()->json(['message' => 'No active entitlement period found.'], 422);
         }
 
+        // Enforce the cap. Three policies:
+        //   * visits_per_month = -1 (or is_unlimited)  → never block
+        //   * visits_used < visits_allowed             → consume normally
+        //   * at-or-over cap + plan has overage_fee>0  → allow + flag overage
+        //   * at-or-over cap + no overage configured   → 422 block (the bug
+        //     this fixes — previously we just kept incrementing past the cap)
+        //
+        // The body returns `overage: true|false` so the UI can warn the
+        // provider that this visit incurs an extra charge. The actual
+        // overage invoice item is created by the dunning/billing pipeline,
+        // not here.
+        $allowed = (int) ($entitlement->visits_allowed ?? 0);
+        $used = (int) ($entitlement->visits_used ?? 0);
+        $rollover = (int) ($entitlement->rollover_visits ?? 0);
+        $effectiveCap = $allowed + $rollover;
+        $unlimited = $allowed === -1;
+        $overageFee = (float) ($membership->plan->overage_fee ?? 0);
+        $forced = (bool) $request->boolean('force_overage', false);
+
+        $overage = false;
+        if (!$unlimited && $used >= $effectiveCap) {
+            if ($overageFee <= 0 && !$forced) {
+                return response()->json([
+                    'message' => 'Visit cap reached for this period. Plan does not allow overage.',
+                    'data' => [
+                        'visits_used' => $used,
+                        'visits_allowed' => $allowed,
+                        'rollover_visits' => $rollover,
+                        'effective_cap' => $effectiveCap,
+                        'cap_reached' => true,
+                    ],
+                ], 422);
+            }
+            $overage = true;
+        }
+
         $entitlement->increment('visits_used');
 
-        return response()->json(['data' => $entitlement->fresh()]);
+        return response()->json([
+            'data' => $entitlement->fresh(),
+            'overage' => $overage,
+            'overage_fee' => $overage ? $overageFee : 0,
+        ]);
     }
 
     /**
