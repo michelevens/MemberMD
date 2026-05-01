@@ -6046,19 +6046,36 @@ export function PracticePortal() {
 
     if (threads.length === 0) {
       return (
-        <div className="space-y-4">
-          <h2 className="text-xl font-bold text-slate-800">Messages</h2>
-          <div className="glass rounded-xl p-12 text-center text-slate-400">
+        <div className="space-y-5">
+          <div className="flex items-end justify-between gap-4">
+            <div>
+              <h2 className="text-2xl font-semibold text-slate-900 tracking-tight">Messages</h2>
+              <p className="text-sm text-slate-500 mt-0.5">No conversations yet</p>
+            </div>
+            <RefreshButton onRefresh={loadPracticeData} title="Refresh messages" />
+          </div>
+          <div className="rounded-xl border border-slate-200 bg-white p-12 text-center text-slate-400">
             <MessageSquare className="w-10 h-10 mx-auto mb-2 opacity-40" />
-            <p>No messages yet. Conversations with patients will appear here.</p>
+            <p className="text-sm">No messages yet. Conversations with patients will appear here.</p>
           </div>
         </div>
       );
     }
 
+    const totalUnread = threads.reduce((sum: number, t: typeof MOCK_THREADS[0]) => sum + (t.unread ?? 0), 0);
+
     return (
-      <div className="space-y-4">
-        <h2 className="text-xl font-bold text-slate-800">Messages</h2>
+      <div className="space-y-5">
+        <div className="flex items-end justify-between gap-4">
+          <div>
+            <h2 className="text-2xl font-semibold text-slate-900 tracking-tight">Messages</h2>
+            <p className="text-sm text-slate-500 mt-0.5">
+              {threads.length} {threads.length === 1 ? "thread" : "threads"}
+              {totalUnread > 0 ? ` · ${totalUnread} unread` : ""}
+            </p>
+          </div>
+          <RefreshButton onRefresh={loadPracticeData} title="Refresh messages" />
+        </div>
         <div className="glass rounded-xl overflow-hidden flex" style={{ height: "600px" }}>
           {/* Thread List */}
           <div className="w-80 border-r border-slate-200 flex flex-col shrink-0 hidden sm:flex">

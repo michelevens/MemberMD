@@ -69,7 +69,6 @@ import {
   UserCheck,
   Star,
   ClipboardCheck,
-  PenLine,
   AlertTriangle,
   MessageSquare,
   Send,
@@ -1784,18 +1783,19 @@ export function SuperAdminPortal() {
     const categories = [...new Set(specialtiesData.map((s) => s.category))];
 
     return (
-      <div className="animate-page-in space-y-6">
-        <div>
-          <h2 className="text-xl font-bold" style={{ color: "#102a43" }}>
-            Specialties
-          </h2>
-          <p className="text-sm text-slate-500 mt-0.5">
-            {specialtiesData.length} specialties configured across the platform
-          </p>
+      <div className="animate-page-in space-y-5">
+        <div className="flex items-end justify-between gap-4">
+          <div>
+            <h2 className="text-2xl font-semibold text-slate-900 tracking-tight">Specialties</h2>
+            <p className="text-sm text-slate-500 mt-0.5">
+              {specialtiesData.length} specialties configured across the platform
+            </p>
+          </div>
+          <RefreshButton onRefresh={loadData} title="Refresh specialties" />
         </div>
 
         {specialtiesData.length === 0 && (
-          <div className="glass rounded-xl p-12 text-center">
+          <div className="rounded-xl border border-slate-200 bg-white p-12 text-center">
             <Stethoscope className="w-10 h-10 text-slate-300 mx-auto mb-3" />
             <p className="text-sm text-slate-400">No specialties configured yet</p>
           </div>
@@ -1887,22 +1887,22 @@ export function SuperAdminPortal() {
 
   function renderPlanTemplates() {
     return (
-      <div className="animate-page-in space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div className="animate-page-in space-y-5">
+        <div className="flex items-end justify-between gap-4">
           <div>
-            <h2 className="text-xl font-bold" style={{ color: "#102a43" }}>
-              Plan Templates
-            </h2>
+            <h2 className="text-2xl font-semibold text-slate-900 tracking-tight">Plan templates</h2>
             <p className="text-sm text-slate-500 mt-0.5">
               Suggested membership plans for practices to adopt
             </p>
           </div>
           <button
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors"
-            style={{ background: "linear-gradient(135deg, #27ab83, #147d64)" }}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium text-white shadow-sm transition-colors"
+            style={{ backgroundColor: "#635bff" }}
+            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#544ee0")}
+            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "#635bff")}
           >
             <FileText className="w-4 h-4" />
-            Add Template
+            Add template
           </button>
         </div>
 
@@ -2018,22 +2018,21 @@ export function SuperAdminPortal() {
 
   function renderAuditLogs() {
     return (
-      <div className="animate-page-in space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div className="animate-page-in space-y-5">
+        <div className="flex items-end justify-between gap-4">
           <div>
-            <h2 className="text-xl font-bold" style={{ color: "#102a43" }}>
-              Audit Logs
-            </h2>
+            <h2 className="text-2xl font-semibold text-slate-900 tracking-tight">Audit logs</h2>
             <p className="text-sm text-slate-500 mt-0.5">
               Platform activity and security events
             </p>
           </div>
-          <div className="flex items-center gap-3">
-            <button className="flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-200 text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors">
+          <div className="flex items-center gap-2">
+            <RefreshButton onRefresh={loadData} title="Refresh audit logs" />
+            <button className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-slate-200 text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors">
               <Calendar className="w-4 h-4" />
-              Date Range
+              Date range
             </button>
-            <button className="flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-200 text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors">
+            <button className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-slate-200 text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors">
               <Filter className="w-4 h-4" />
               Filter
             </button>
@@ -2134,14 +2133,15 @@ export function SuperAdminPortal() {
 
   function renderPendingApprovals() {
     return (
-      <div className="animate-page-in space-y-4">
-        <div>
-          <h2 className="text-xl font-bold" style={{ color: "#102a43" }}>
-            Pending Approvals
-          </h2>
-          <p className="text-sm text-slate-500 mt-0.5">
-            {pendingPractices.length} practice{pendingPractices.length !== 1 ? "s" : ""} awaiting review
-          </p>
+      <div className="animate-page-in space-y-5">
+        <div className="flex items-end justify-between gap-4">
+          <div>
+            <h2 className="text-2xl font-semibold text-slate-900 tracking-tight">Pending approvals</h2>
+            <p className="text-sm text-slate-500 mt-0.5">
+              {pendingPractices.length} practice{pendingPractices.length !== 1 ? "s" : ""} awaiting review
+            </p>
+          </div>
+          <RefreshButton onRefresh={loadData} title="Refresh approvals" />
         </div>
 
         {approvalMessage && (
@@ -2675,12 +2675,14 @@ export function SuperAdminPortal() {
     return (
       <div className="animate-page-in space-y-6">
         {/* Header */}
-        <div>
-          <div className="flex items-center gap-3 mb-1">
-            <ClipboardCheck className="w-6 h-6" style={{ color: "#147d64" }} />
-            <h2 className="text-xl font-bold" style={{ color: "#102a43" }}>Screening Library</h2>
+        <div className="flex items-end justify-between gap-4">
+          <div>
+            <h2 className="text-2xl font-semibold text-slate-900 tracking-tight">Screening library</h2>
+            <p className="text-sm text-slate-500 mt-0.5">
+              Validated clinical instruments auto-provisioned to practices by specialty
+            </p>
           </div>
-          <p className="text-sm text-slate-500">Validated clinical instruments auto-provisioned to practices by specialty</p>
+          <RefreshButton onRefresh={loadData} title="Refresh screenings" />
         </div>
 
         {/* Filters */}
@@ -2849,14 +2851,16 @@ export function SuperAdminPortal() {
     };
 
     return (
-      <div className="animate-page-in space-y-6">
+      <div className="animate-page-in space-y-5">
         {/* Header */}
-        <div>
-          <div className="flex items-center gap-3 mb-1">
-            <FileCheck className="w-6 h-6" style={{ color: "#147d64" }} />
-            <h2 className="text-xl font-bold" style={{ color: "#102a43" }}>Consent Templates</h2>
+        <div className="flex items-end justify-between gap-4">
+          <div>
+            <h2 className="text-2xl font-semibold text-slate-900 tracking-tight">Consent templates</h2>
+            <p className="text-sm text-slate-500 mt-0.5">
+              Legal consent forms auto-assigned to practices during registration
+            </p>
           </div>
-          <p className="text-sm text-slate-500">Legal consent forms auto-assigned to practices during registration</p>
+          <RefreshButton onRefresh={loadData} title="Refresh consents" />
         </div>
 
         {/* Filters */}
@@ -3025,14 +3029,14 @@ export function SuperAdminPortal() {
     };
 
     return (
-      <div className="animate-page-in space-y-6">
+      <div className="animate-page-in space-y-5">
         {/* Header */}
-        <div>
-          <div className="flex items-center gap-3 mb-1">
-            <PenLine className="w-6 h-6" style={{ color: "#147d64" }} />
-            <h2 className="text-xl font-bold" style={{ color: "#102a43" }}>Note Templates</h2>
+        <div className="flex items-end justify-between gap-4">
+          <div>
+            <h2 className="text-2xl font-semibold text-slate-900 tracking-tight">Note templates</h2>
+            <p className="text-sm text-slate-500 mt-0.5">SOAP note templates provisioned by specialty</p>
           </div>
-          <p className="text-sm text-slate-500">SOAP note templates provisioned by specialty</p>
+          <RefreshButton onRefresh={loadData} title="Refresh templates" />
         </div>
 
         {/* Filters */}
@@ -3963,7 +3967,7 @@ export function SuperAdminPortal() {
         {/* Ticket List */}
         <div>
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
-            <h2 className="text-xl font-bold" style={{ color: "#102a43" }}>Support Tickets</h2>
+            <h2 className="text-2xl font-semibold text-slate-900 tracking-tight">Support tickets</h2>
             <div className="flex items-center gap-2">
               {filterTabs.map((tab) => (
                 <button
