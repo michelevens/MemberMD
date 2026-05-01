@@ -41,6 +41,7 @@ use App\Http\Controllers\Api\MasterPlanTemplateController;
 use App\Http\Controllers\Api\PublicPlanTemplateController;
 use App\Http\Controllers\Api\PublicManifestController;
 use App\Http\Controllers\Api\PushSubscriptionController;
+use App\Http\Controllers\Api\WebhookEndpointController;
 use App\Http\Controllers\Api\TenantDomainController;
 use App\Http\Controllers\Api\WidgetThemeController;
 use App\Http\Controllers\Api\WidgetAnalyticsController;
@@ -287,6 +288,7 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
     Route::prefix('stripe/connect')->group(function () {
         Route::get('/status', [StripeConnectController::class, 'status']);
         Route::post('/onboarding-link', [StripeConnectController::class, 'createOnboardingLink']);
+        Route::post('/account-session', [StripeConnectController::class, 'createAccountSession']);
         Route::post('/dashboard-link', [StripeConnectController::class, 'createDashboardLink']);
         Route::post('/refresh', [StripeConnectController::class, 'refresh']);
         Route::delete('/', [StripeConnectController::class, 'disconnect']);
@@ -351,6 +353,17 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
     Route::get('/push/vapid-key', [PushSubscriptionController::class, 'vapidKey']);
     Route::post('/push/subscriptions', [PushSubscriptionController::class, 'store']);
     Route::delete('/push/subscriptions', [PushSubscriptionController::class, 'destroy']);
+
+    // ===== Outbound Webhook Endpoints (practice → their systems) =====
+    Route::prefix('webhooks/endpoints')->group(function () {
+        Route::get('/', [WebhookEndpointController::class, 'index']);
+        Route::post('/', [WebhookEndpointController::class, 'store']);
+        Route::get('/{id}', [WebhookEndpointController::class, 'show']);
+        Route::patch('/{id}', [WebhookEndpointController::class, 'update']);
+        Route::delete('/{id}', [WebhookEndpointController::class, 'destroy']);
+        Route::post('/{id}/regenerate', [WebhookEndpointController::class, 'regenerate']);
+        Route::get('/{id}/deliveries', [WebhookEndpointController::class, 'deliveries']);
+    });
 
     // ===== Consent Forms (legacy ConsentFormController) =====
     Route::prefix('consents')->group(function () {

@@ -54,6 +54,26 @@ class StripeConnectController extends Controller
         ]);
     }
 
+    /**
+     * Mint a short-lived AccountSession client_secret for the embedded
+     * Stripe Connect components on the frontend. The frontend uses this
+     * with @stripe/connect-js to render onboarding inline instead of
+     * redirecting to Stripe's hosted page.
+     */
+    public function createAccountSession(Request $request): JsonResponse
+    {
+        $this->assertCanManagePayments($request);
+        $practice = $this->resolvePractice($request);
+
+        try {
+            $session = $this->connect->createAccountSession($practice);
+        } catch (RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 502);
+        }
+
+        return response()->json(['data' => $session]);
+    }
+
     public function createDashboardLink(Request $request): JsonResponse
     {
         $this->assertCanManagePayments($request);

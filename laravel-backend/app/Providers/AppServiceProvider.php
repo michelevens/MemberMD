@@ -2,11 +2,14 @@
 
 namespace App\Providers;
 
+use App\Events\MembershipStateChanged;
+use App\Listeners\DispatchMembershipWebhook;
 use App\Models\Appointment;
 use App\Models\Encounter;
 use App\Models\Practice;
 use App\Observers\AppointmentObserver;
 use App\Observers\EncounterObserver;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\View;
 use Illuminate\Support\ServiceProvider;
 
@@ -27,6 +30,12 @@ class AppServiceProvider extends ServiceProvider
     {
         Appointment::observe(AppointmentObserver::class);
         Encounter::observe(EncounterObserver::class);
+
+        // Lifecycle → outbound webhooks bridge. Every membership state
+        // transition fires MembershipStateChanged; the listener fans it
+        // out to any practice-registered webhook endpoint subscribed to
+        // the resulting event type.
+        Event::listen(MembershipStateChanged::class, DispatchMembershipWebhook::class);
 
         // Per-practice branding for transactional email templates.
         // Pattern adapted from ShiftPulse: a single composer makes

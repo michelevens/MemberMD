@@ -14,6 +14,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { stripeConnectService, type StripeConnectStatusResponse, type StripeConnectStatus } from "../../lib/api";
+import { EmbeddedConnectOnboarding } from "./EmbeddedConnectOnboarding";
 
 // ─── Colors ──────────────────────────────────────────────────────────────────
 
@@ -165,6 +166,7 @@ export function PaymentSetup() {
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [embeddedOpen, setEmbeddedOpen] = useState(false);
 
   const loadStatus = useCallback(async (refresh = false) => {
     setError(null);
@@ -183,17 +185,18 @@ export function PaymentSetup() {
     void loadStatus();
   }, [loadStatus]);
 
-  const startOnboarding = async () => {
-    setActionLoading("onboard");
-    const res = await stripeConnectService.createOnboardingLink();
-    setActionLoading(null);
-    if (res.error || !res.data) {
-      toast(res.error || "Failed to start onboarding.", "error");
-      return;
-    }
-    // Open in new tab so the practice can return without losing local state
-    window.open(res.data.url, "_blank", "noopener,noreferrer");
-    toast("Opened Stripe onboarding in a new tab.");
+  const startOnboarding = () => {
+    // Embed Stripe's onboarding inline instead of redirecting. The practice
+    // never leaves MemberMD, and we get progress callbacks via onExit.
+    setEmbeddedOpen(true);
+  };
+
+  const onEmbeddedExit = async () => {
+    setEmbeddedOpen(false);
+    // Refresh status so capability indicators + status badge update
+    // immediately when Stripe finishes verifying.
+    await loadStatus(true);
+    toast("Stripe onboarding session closed.");
   };
 
   const openDashboard = async () => {
@@ -372,6 +375,27 @@ export function PaymentSetup() {
           )}
         </div>
       </div>
+
+      {/* Embedded Stripe onboarding */}
+      {embeddedOpen && (
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+              Stripe onboarding
+            </p>
+            <button
+              onClick={() => setEmbeddedOpen(false)}
+              className="text-xs font-medium text-slate-500 hover:text-slate-700"
+            >
+              Close
+            </button>
+          </div>
+          <EmbeddedConnectOnboarding
+            onExit={() => void onEmbeddedExit()}
+            onError={(msg) => toast(msg, "error")}
+          />
+        </div>
+      )}
 
       {/* Requirements */}
       {reqs.length > 0 && (

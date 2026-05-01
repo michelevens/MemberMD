@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Events\MembershipStateChanged;
 use App\Models\PatientMembership;
 use Illuminate\Support\Facades\Log;
 use InvalidArgumentException;
@@ -85,7 +86,31 @@ class MembershipStateMachine
             $this->cascadeToDependents($membership, $newStatus, $extra);
         }
 
+        // Fire the domain event AFTER the update so listeners see the new state.
+        // Listeners (outbound webhooks, audit log, analytics, downstream
+        // notifications) hook in here instead of in every caller.
+        MembershipStateChanged::dispatch(
+            $membership->fresh() ?? $membership,
+            $current,
+            $newStatus,
+            $this->extractMetadata($extra),
+        );
+
         return true;
+    }
+
+    /**
+     * Strip large/irrelevant fields out of the transition's "extra"
+     * payload before shipping it to webhook listeners. We keep things
+     * like cancel_reason and the "force" / "actor" hints; we drop
+     * timestamps that are already on the membership row.
+     */
+    private function extractMetadata(array $extra): array
+    {
+        $excluded = ['paused_at', 'cancelled_at', 'expires_at', 'started_at',
+                     'last_state_change_at', 'last_stripe_event_at',
+                     'current_period_start', 'current_period_end'];
+        return collect($extra)->except($excluded)->all();
     }
 
     private function cascadeToDependents(
@@ -104,12 +129,22 @@ class MembershipStateMachine
             if (!in_array($newStatus, $allowed, true)) {
                 continue;
             }
+            $depFrom = (string) $dep->status;
             $dep->update(array_merge($extra, [
                 'status' => $newStatus,
                 'last_state_change_at' => now(),
                 'cancel_reason' => $dep->cancel_reason
                     ?? "primary_membership_{$newStatus}",
             ]));
+
+            // Cascaded transitions get their own domain event so listeners
+            // can react to dependent membership changes too.
+            MembershipStateChanged::dispatch(
+                $dep->fresh() ?? $dep,
+                $depFrom,
+                $newStatus,
+                ['cascade_from_membership_id' => $primary->id],
+            );
         }
     }
 

@@ -1797,6 +1797,16 @@ export const stripeConnectService = {
     return apiFetch<{ url: string; expiresInSeconds: number }>("/stripe/connect/onboarding-link", { method: "POST" });
   },
 
+  // Mint a short-lived AccountSession for the embedded Connect components
+  // (@stripe/connect-js). Frontend uses { client_secret, publishable_key }
+  // to instantiate loadConnectAndInitialize() and render onboarding inline.
+  createAccountSession: async (): Promise<ApiResponse<{ clientSecret: string; publishableKey: string | null; account: string }>> => {
+    return apiFetch<{ clientSecret: string; publishableKey: string | null; account: string }>(
+      "/stripe/connect/account-session",
+      { method: "POST" },
+    );
+  },
+
   createDashboardLink: async (): Promise<ApiResponse<{ url: string }>> => {
     return apiFetch<{ url: string }>("/stripe/connect/dashboard-link", { method: "POST" });
   },

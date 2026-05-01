@@ -9,6 +9,7 @@ use App\Models\PatientFamilyMember;
 use App\Models\PatientMembership;
 use App\Models\PatientEntitlement;
 use App\Models\MembershipPlan;
+use App\Events\MembershipStateChanged;
 use App\Services\MembershipStateMachine;
 use App\Services\ProrationService;
 use App\Services\StripeSubscriptionService;
@@ -100,6 +101,14 @@ class MembershipController extends Controller
             'started_at' => $now,
             'current_period_start' => $now,
             'current_period_end' => $periodEnd,
+            'last_state_change_at' => $now,
+        ]);
+
+        // New enrollments get a synthetic prospect→active transition event
+        // so outbound webhooks fire member.activated for fresh signups.
+        MembershipStateChanged::dispatch($membership, 'prospect', 'active', [
+            'source' => 'membership.store',
+            'created_by' => $user->id,
         ]);
 
         // Create initial entitlements for the first period
@@ -145,22 +154,44 @@ class MembershipController extends Controller
             'cancel_reason' => 'nullable|string|max:500',
         ]);
 
-        if (isset($validated['status'])) {
-            switch ($validated['status']) {
+        // Status changes route through the state machine for validation
+        // + cascade + domain event. Other fields update directly.
+        $newStatus = $validated['status'] ?? null;
+        unset($validated['status']);
+
+        if ($newStatus !== null && $newStatus !== $membership->status) {
+            $stateExtras = [];
+            switch ($newStatus) {
                 case 'paused':
-                    $validated['paused_at'] = now();
+                    $stateExtras['paused_at'] = now();
+                    if (isset($validated['cancel_reason'])) {
+                        $stateExtras['cancel_reason'] = $validated['cancel_reason'];
+                        unset($validated['cancel_reason']);
+                    }
                     break;
                 case 'cancelled':
-                    $validated['cancelled_at'] = now();
+                    $stateExtras['cancelled_at'] = now();
+                    if (isset($validated['cancel_reason'])) {
+                        $stateExtras['cancel_reason'] = $validated['cancel_reason'];
+                        unset($validated['cancel_reason']);
+                    }
                     break;
                 case 'active':
-                    // Resuming from pause
-                    $validated['paused_at'] = null;
+                    $stateExtras['paused_at'] = null;
                     break;
             }
+            $applied = $this->states->transition($membership, $newStatus, $stateExtras);
+            if (!$applied) {
+                return response()->json([
+                    'message' => "Cannot transition membership from {$membership->status} to {$newStatus}.",
+                ], 422);
+            }
+            $membership->refresh();
         }
 
-        $membership->update($validated);
+        if (!empty($validated)) {
+            $membership->update($validated);
+        }
 
         return response()->json([
             'data' => $membership->fresh()->load(['patient', 'plan', 'entitlements'])
@@ -217,21 +248,21 @@ class MembershipController extends Controller
 
         $membership = PatientMembership::where('tenant_id', $user->tenant_id)->findOrFail($id);
 
-        if ($membership->status !== 'active') {
-            return response()->json([
-                'message' => 'Only active memberships can be paused.',
-            ], 422);
-        }
-
         $validated = $request->validate([
             'reason' => 'required|string|max:500',
         ]);
 
-        $membership->update([
-            'status' => 'paused',
+        $applied = $this->states->transition($membership, 'paused', [
             'paused_at' => now(),
             'cancel_reason' => $validated['reason'],
+            'actor_user_id' => $user->id,
         ]);
+
+        if (!$applied) {
+            return response()->json([
+                'message' => "Cannot pause membership in status '{$membership->status}'.",
+            ], 422);
+        }
 
         return response()->json([
             'data' => $membership->fresh()->load(['patient', 'plan']),
@@ -249,17 +280,17 @@ class MembershipController extends Controller
 
         $membership = PatientMembership::where('tenant_id', $user->tenant_id)->findOrFail($id);
 
-        if ($membership->status !== 'paused') {
-            return response()->json([
-                'message' => 'Only paused memberships can be resumed.',
-            ], 422);
-        }
-
-        $membership->update([
-            'status' => 'active',
+        $applied = $this->states->transition($membership, 'active', [
             'paused_at' => null,
             'cancel_reason' => null,
+            'actor_user_id' => $user->id,
         ]);
+
+        if (!$applied) {
+            return response()->json([
+                'message' => "Cannot resume membership in status '{$membership->status}'.",
+            ], 422);
+        }
 
         return response()->json([
             'data' => $membership->fresh()->load(['patient', 'plan']),

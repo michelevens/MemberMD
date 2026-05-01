@@ -138,6 +138,42 @@ class StripeConnectService
     }
 
     /**
+     * Mint a short-lived AccountSession client_secret used by the embedded
+     * Stripe Connect components (@stripe/connect-js). The session declares
+     * which embedded components the practice's session is allowed to load.
+     *
+     * Returns the client_secret + the publishable key the frontend needs
+     * to instantiate loadConnectAndInitialize(). Sessions expire in ~30
+     * minutes; the frontend should always fetch a fresh one on mount.
+     *
+     * @return array{client_secret: string, publishable_key: string|null, account: string}
+     */
+    public function createAccountSession(Practice $practice): array
+    {
+        $accountId = $this->createOrGetAccount($practice);
+
+        try {
+            $session = $this->stripe()->accountSessions->create([
+                'account' => $accountId,
+                'components' => [
+                    'account_onboarding' => ['enabled' => true],
+                    'payouts' => ['enabled' => true],
+                    'payments' => ['enabled' => true],
+                    'account_management' => ['enabled' => true],
+                ],
+            ]);
+        } catch (ApiErrorException $e) {
+            throw new RuntimeException("Failed to create Connect account session: {$e->getMessage()}", 0, $e);
+        }
+
+        return [
+            'client_secret' => $session->client_secret,
+            'publishable_key' => config('services.stripe.key'),
+            'account' => $accountId,
+        ];
+    }
+
+    /**
      * Refresh the practice's local copy of Connect account state from Stripe.
      * Called from webhook handlers and on-demand from the practice settings UI.
      */
