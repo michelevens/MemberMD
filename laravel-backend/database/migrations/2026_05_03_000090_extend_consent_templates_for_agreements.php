@@ -56,14 +56,26 @@ return new class extends Migration {
         // Backfill: each existing template's slug = type (e.g., "hipaa").
         // For tenant-specific custom templates with no type, fall back to
         // a slug derived from name.
-        \DB::statement(<<<'SQL'
-            UPDATE consent_templates
-            SET slug = CASE
-                WHEN type IS NOT NULL AND type != '' THEN LOWER(type)
-                ELSE LOWER(REGEXP_REPLACE(name, '[^a-zA-Z0-9]+', '-', 'g'))
-            END
-            WHERE slug IS NULL
-        SQL);
+        //
+        // Driver-portable: Postgres has REGEXP_REPLACE built-in, SQLite
+        // (test env) doesn't. Use PHP-side slugification in a chunked loop.
+        \DB::table('consent_templates')
+            ->whereNull('slug')
+            ->orderBy('id')
+            ->chunkById(500, function ($rows) {
+                foreach ($rows as $row) {
+                    $type = trim((string) ($row->type ?? ''));
+                    if ($type !== '') {
+                        $slug = strtolower($type);
+                    } else {
+                        $name = (string) ($row->name ?? '');
+                        $slug = strtolower(preg_replace('/[^a-zA-Z0-9]+/', '-', $name) ?: 'template');
+                    }
+                    \DB::table('consent_templates')
+                        ->where('id', $row->id)
+                        ->update(['slug' => $slug]);
+                }
+            });
 
         Schema::table('membership_plans', function (Blueprint $table) {
             if (!Schema::hasColumn('membership_plans', 'agreement_template_id')) {

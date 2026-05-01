@@ -36,15 +36,34 @@ return new class extends Migration {
         // For going-forward correctness — old rows didn't have a snapshot,
         // so we assume current plan price reflected what they pay (best
         // guess). Practices should review and adjust where needed.
-        \DB::statement(<<<SQL
-            UPDATE patient_memberships pm
-            SET locked_monthly_price = mp.monthly_price,
-                locked_annual_price  = mp.annual_price,
-                locked_plan_version  = COALESCE(mp.template_version_applied, 1)
-            FROM membership_plans mp
-            WHERE pm.plan_id = mp.id
-              AND pm.locked_monthly_price IS NULL
-        SQL);
+        //
+        // Driver-portable: stream rows in batches and use individual UPDATEs.
+        // Postgres' UPDATE…FROM syntax doesn't exist in SQLite; the loop is
+        // fine here because (a) backfill runs once, (b) cardinality is the
+        // existing membership count which is bounded.
+        \DB::table('patient_memberships')
+            ->select('patient_memberships.id as id', 'plan_id')
+            ->whereNull('locked_monthly_price')
+            ->orderBy('patient_memberships.id')
+            ->chunkById(500, function ($rows) {
+                $planIds = $rows->pluck('plan_id')->filter()->unique()->all();
+                if (empty($planIds)) return;
+
+                $plans = \DB::table('membership_plans')
+                    ->whereIn('id', $planIds)
+                    ->get(['id', 'monthly_price', 'annual_price', 'template_version_applied'])
+                    ->keyBy('id');
+
+                foreach ($rows as $row) {
+                    $plan = $plans->get($row->plan_id);
+                    if (!$plan) continue;
+                    \DB::table('patient_memberships')->where('id', $row->id)->update([
+                        'locked_monthly_price' => $plan->monthly_price,
+                        'locked_annual_price' => $plan->annual_price,
+                        'locked_plan_version' => $plan->template_version_applied ?? 1,
+                    ]);
+                }
+            });
     }
 
     public function down(): void

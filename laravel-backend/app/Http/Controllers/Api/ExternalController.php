@@ -4,10 +4,12 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Mail\MembershipActivated;
+use App\Events\MembershipStateChanged;
 use App\Models\ConsentSignature;
 use App\Models\ConsentTemplate;
 use App\Models\MembershipPlan;
 use App\Models\Patient;
+use App\Models\PatientEntitlement;
 use App\Models\PatientMembership;
 use App\Models\Practice;
 use App\Models\User;
@@ -231,6 +233,32 @@ class ExternalController extends Controller
             'current_period_end' => $validated['billing_frequency'] === 'annual'
                 ? now()->addYear()
                 : now()->addMonth(),
+            'last_state_change_at' => now(),
+        ]);
+
+        // Seed first-period PatientEntitlement counters. Without this,
+        // the patient's portal would show 0/0 visits until the first
+        // Stripe invoice.paid webhook arrived (which may be never if the
+        // practice hasn't finished Connect onboarding yet). Mirror the
+        // shape MembershipController::store creates.
+        PatientEntitlement::create([
+            'tenant_id' => $practice->id,
+            'membership_id' => $membership->id,
+            'patient_id' => $patient->id,
+            'period_start' => $membership->current_period_start->toDateString(),
+            'period_end' => $membership->current_period_end->toDateString(),
+            'visits_allowed' => $plan->visits_per_month ?? 0,
+            'visits_used' => 0,
+            'telehealth_sessions_used' => 0,
+            'messages_sent' => 0,
+            'rollover_visits' => 0,
+        ]);
+
+        // Fire the lifecycle event so outbound webhooks notify any
+        // practice-registered endpoint that a member just signed up.
+        MembershipStateChanged::dispatch($membership, 'prospect', 'active', [
+            'source' => 'external.enroll',
+            'plan_id' => $plan->id,
         ]);
 
         // Persist a ConsentSignature row per acknowledged consent. We snapshot
