@@ -692,14 +692,14 @@ export function PracticeRegistration() {
 
   return (
     <div className="min-h-screen bg-slate-50 pb-12">
-      {/* Navy Header */}
-      <div
-        className="py-8 px-4 mb-8"
-        style={{ background: "linear-gradient(135deg, #102a43, #243b53)" }}
-      >
-        <div className="max-w-2xl mx-auto text-center">
-          <h1 className="text-2xl font-bold text-white mb-1">MemberMD</h1>
-          <p className="text-slate-300 text-sm">Create Your Practice</p>
+      {/* Stripe-grade brand header — flat white with sigil + tracking-tight wordmark */}
+      <div className="py-7 px-4 mb-7 bg-white border-b border-slate-200">
+        <div className="max-w-2xl mx-auto flex items-center justify-center gap-2.5">
+          <div className="w-8 h-8 rounded-md bg-[#635bff] flex items-center justify-center text-white font-semibold text-sm">M</div>
+          <div className="text-left">
+            <h1 className="text-xl font-semibold tracking-tight text-slate-900 leading-none">MemberMD</h1>
+            <p className="text-xs text-slate-500 mt-0.5">Create your practice</p>
+          </div>
         </div>
       </div>
 

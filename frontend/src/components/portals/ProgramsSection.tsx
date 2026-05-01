@@ -1790,9 +1790,9 @@ export function ProgramsSection() {
         {changePlanModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: "rgba(0,0,0,0.5)" }}>
             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
-              <div className="p-6" style={{ background: "linear-gradient(135deg, #1B2B4D, #243b53)" }}>
+              <div className="px-6 py-4 border-b border-slate-100">
                 <h3 className="text-lg font-bold text-white">Change Plan</h3>
-                <p className="text-sm text-slate-300 mt-1">Select a new plan for {changePlanModal.patientName}</p>
+                <p className="text-sm text-slate-500 mt-0.5">Select a new plan for {changePlanModal.patientName}</p>
               </div>
               <div className="p-6">
                 {availablePlansLoading && <div className="flex items-center justify-center py-6"><Loader2 className="w-5 h-5 animate-spin text-slate-400" /></div>}
@@ -1821,9 +1821,9 @@ export function ProgramsSection() {
         {addProviderToProgram && addProviderProgramId && (
           <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: "rgba(0,0,0,0.5)" }}>
             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
-              <div className="p-6" style={{ background: "linear-gradient(135deg, #1B2B4D, #243b53)" }}>
+              <div className="px-6 py-4 border-b border-slate-100">
                 <h3 className="text-lg font-bold text-white">Add Provider to Program</h3>
-                <p className="text-sm text-slate-300 mt-1">Search and select a provider to add.</p>
+                <p className="text-sm text-slate-500 mt-0.5">Search and select a provider to add.</p>
               </div>
               <div className="p-6 space-y-4">
                 <div className="relative">
@@ -2243,7 +2243,7 @@ export function ProgramsSection() {
     {promptModal && (
       <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: "rgba(0,0,0,0.5)" }}>
         <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
-          <div className="p-6" style={{ background: "linear-gradient(135deg, #1B2B4D, #243b53)" }}>
+          <div className="px-6 py-4 border-b border-slate-100">
             <h3 className="text-lg font-bold text-white">{promptModal.title}</h3>
           </div>
           <div className="p-6">
@@ -2288,7 +2288,7 @@ export function ProgramsSection() {
     {actionMenuModal && (
       <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: "rgba(0,0,0,0.5)" }}>
         <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-4 overflow-hidden">
-          <div className="p-6" style={{ background: "linear-gradient(135deg, #1B2B4D, #243b53)" }}>
+          <div className="px-6 py-4 border-b border-slate-100">
             <h3 className="text-lg font-bold text-white">{actionMenuModal.title}</h3>
           </div>
           <div className="p-4 space-y-2">
@@ -2319,9 +2319,9 @@ export function ProgramsSection() {
     {addProviderToProgram && addProviderProgramId && (
       <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: "rgba(0,0,0,0.5)" }}>
         <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
-          <div className="p-6" style={{ background: "linear-gradient(135deg, #1B2B4D, #243b53)" }}>
+          <div className="px-6 py-4 border-b border-slate-100">
             <h3 className="text-lg font-bold text-white">Add Provider to Program</h3>
-            <p className="text-sm text-slate-300 mt-1">Search and select a provider to add.</p>
+            <p className="text-sm text-slate-500 mt-0.5">Search and select a provider to add.</p>
           </div>
           <div className="p-6 space-y-4">
             <div className="relative">
@@ -2454,9 +2454,9 @@ export function ProgramsSection() {
     {changePlanModal && (
       <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: "rgba(0,0,0,0.5)" }}>
         <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
-          <div className="p-6" style={{ background: "linear-gradient(135deg, #1B2B4D, #243b53)" }}>
+          <div className="px-6 py-4 border-b border-slate-100">
             <h3 className="text-lg font-bold text-white">Change Plan</h3>
-            <p className="text-sm text-slate-300 mt-1">Select a new plan for {changePlanModal.patientName}</p>
+            <p className="text-sm text-slate-500 mt-0.5">Select a new plan for {changePlanModal.patientName}</p>
           </div>
           <div className="p-6">
             {availablePlansLoading && (
