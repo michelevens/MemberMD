@@ -12,9 +12,6 @@ import { useEffect, useState } from "react";
 import {
   Shield,
   Eye,
-  Users,
-  FileCheck,
-  Lock,
   AlertTriangle,
   Download,
   ChevronDown,
@@ -255,56 +252,44 @@ export function AuditDashboard() {
   }
 
   return (
-    <div className="space-y-6">
-      {/* Summary Stats */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="glass rounded-xl p-4">
-          <div className="flex items-center gap-2 mb-2">
-            <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ backgroundColor: C.teal50 }}>
-              <Eye className="w-4 h-4" style={{ color: C.teal500 }} />
-            </div>
-            <span className="text-xs font-medium" style={{ color: C.slate400 }}>PHI Accesses (24h)</span>
-          </div>
-          <p className="text-2xl font-bold" style={{ color: C.navy800 }}>{stats?.phiAccess.last24h ?? 0}</p>
-          <p className="text-xs mt-1" style={{ color: C.slate400 }}>{stats?.phiAccess.last7d ?? 0} in 7 days</p>
+    <div className="space-y-5">
+      {/* Stripe-grade page header */}
+      <div className="flex items-end justify-between gap-4">
+        <div>
+          <h2 className="text-2xl font-semibold text-slate-900 tracking-tight">Compliance &amp; security</h2>
+          <p className="text-sm text-slate-500 mt-0.5">PHI access, login health, MFA adoption, and the HIPAA checklist</p>
+        </div>
+      </div>
+
+      {/* Summary Stats — flat border tiles */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
+          <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">PHI accesses (24h)</p>
+          <p className="text-xl font-semibold tabular-nums mt-1 text-slate-900">{stats?.phiAccess.last24h ?? 0}</p>
+          <p className="text-[11px] text-slate-400 mt-1">{stats?.phiAccess.last7d ?? 0} in 7 days</p>
         </div>
 
-        <div className="glass rounded-xl p-4">
-          <div className="flex items-center gap-2 mb-2">
-            <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ backgroundColor: C.blue50 }}>
-              <Users className="w-4 h-4" style={{ color: C.blue500 }} />
-            </div>
-            <span className="text-xs font-medium" style={{ color: C.slate400 }}>Failed Logins (24h)</span>
-          </div>
-          <p className="text-2xl font-bold" style={{ color: C.navy800 }}>{stats?.failedLogins24h ?? 0}</p>
-          <p className="text-xs mt-1" style={{ color: C.slate400 }}>across {stats?.totalUsers ?? 0} active users</p>
+        <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
+          <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Failed logins (24h)</p>
+          <p className="text-xl font-semibold tabular-nums mt-1 text-slate-900">{stats?.failedLogins24h ?? 0}</p>
+          <p className="text-[11px] text-slate-400 mt-1">across {stats?.totalUsers ?? 0} active users</p>
         </div>
 
-        <div className="glass rounded-xl p-4">
-          <div className="flex items-center gap-2 mb-2">
-            <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ backgroundColor: C.green50 }}>
-              <FileCheck className="w-4 h-4" style={{ color: C.green500 }} />
-            </div>
-            <span className="text-xs font-medium" style={{ color: C.slate400 }}>Telehealth Consent</span>
-          </div>
-          <p className="text-2xl font-bold" style={{ color: C.navy800 }}>{stats?.consentRate ?? 0}%</p>
-          <div className="w-full h-2 rounded-full mt-2" style={{ backgroundColor: C.slate100 }}>
+        <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
+          <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Telehealth consent</p>
+          <p className="text-xl font-semibold tabular-nums mt-1 text-slate-900">{stats?.consentRate ?? 0}%</p>
+          <div className="w-full h-1.5 rounded-full mt-2 bg-slate-100">
             <div
               className="h-full rounded-full"
-              style={{ width: `${stats?.consentRate ?? 0}%`, backgroundColor: C.green500 }}
+              style={{ width: `${stats?.consentRate ?? 0}%`, backgroundColor: "#10b981" }}
             />
           </div>
         </div>
 
-        <div className="glass rounded-xl p-4">
-          <div className="flex items-center gap-2 mb-2">
-            <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ backgroundColor: C.amber50 }}>
-              <Lock className="w-4 h-4" style={{ color: C.amber500 }} />
-            </div>
-            <span className="text-xs font-medium" style={{ color: C.slate400 }}>MFA Adoption</span>
-          </div>
-          <p className="text-2xl font-bold" style={{ color: C.navy800 }}>{stats?.mfaRate ?? 0}%</p>
-          <p className="text-xs mt-1" style={{ color: C.slate400 }}>{stats?.mfaUsers ?? 0} of {stats?.totalUsers ?? 0} users</p>
+        <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
+          <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">MFA adoption</p>
+          <p className="text-xl font-semibold tabular-nums mt-1 text-slate-900">{stats?.mfaRate ?? 0}%</p>
+          <p className="text-[11px] text-slate-400 mt-1">{stats?.mfaUsers ?? 0} of {stats?.totalUsers ?? 0} users</p>
         </div>
       </div>
 
@@ -328,7 +313,7 @@ export function AuditDashboard() {
       )}
 
       {/* HIPAA Checklist */}
-      <div className="glass rounded-xl overflow-hidden">
+      <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
         <div className="flex items-center justify-between p-4" style={{ borderBottom: `1px solid ${C.slate200}` }}>
           <h3 className="text-sm font-semibold flex items-center gap-2" style={{ color: C.navy800 }}>
             <Shield className="w-4 h-4" style={{ color: C.teal500 }} />
@@ -381,7 +366,7 @@ export function AuditDashboard() {
       </div>
 
       {/* PHI Access Log */}
-      <div className="glass rounded-xl overflow-hidden">
+      <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
         <div className="flex items-center justify-between p-4" style={{ borderBottom: `1px solid ${C.slate200}` }}>
           <h3 className="text-sm font-semibold flex items-center gap-2" style={{ color: C.navy800 }}>
             <Eye className="w-4 h-4" style={{ color: C.teal500 }} />
@@ -442,7 +427,7 @@ export function AuditDashboard() {
       </div>
 
       {/* Security Events */}
-      <div className="glass rounded-xl overflow-hidden">
+      <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
         <div className="flex items-center justify-between p-4" style={{ borderBottom: `1px solid ${C.slate200}` }}>
           <h3 className="text-sm font-semibold flex items-center gap-2" style={{ color: C.navy800 }}>
             <Activity className="w-4 h-4" style={{ color: C.teal500 }} />

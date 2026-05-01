@@ -118,7 +118,15 @@ export function ProviderAnalyticsSection() {
   ];
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
+      {/* Stripe-grade page header */}
+      <div className="flex items-end justify-between gap-4">
+        <div>
+          <h2 className="text-2xl font-semibold text-slate-900 tracking-tight">Analytics</h2>
+          <p className="text-sm text-slate-500 mt-0.5">Provider revenue, panel utilization, appointments, and program rollups</p>
+        </div>
+      </div>
+
       {/* Sub-tab Navigation */}
       <SubTabNav
         tabs={tabs}

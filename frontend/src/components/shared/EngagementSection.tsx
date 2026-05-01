@@ -282,7 +282,15 @@ export function EngagementSection() {
   ];
 
   return (
-    <div className="space-y-6 animate-fade-in-up">
+    <div className="space-y-5 animate-fade-in-up">
+      {/* Stripe-grade page header */}
+      <div className="flex items-end justify-between gap-4">
+        <div>
+          <h2 className="text-2xl font-semibold text-slate-900 tracking-tight">Engagement</h2>
+          <p className="text-sm text-slate-500 mt-0.5">Patient retention, NPS, churn risk, and outreach campaigns</p>
+        </div>
+      </div>
+
       {/* Toast */}
       {toast && (
         <div
