@@ -65,7 +65,6 @@ import {
   Globe,
   Hash,
   CheckCircle2,
-  XCircle,
   UserCheck,
   Star,
   ClipboardCheck,
@@ -2154,114 +2153,99 @@ export function SuperAdminPortal() {
           </div>
         )}
 
-        {pendingPractices.length === 0 ? (
-          <div className="glass rounded-xl p-12 text-center">
-            <div className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4" style={{ backgroundColor: "#ecf9ec" }}>
-              <CheckCircle2 className="w-8 h-8" style={{ color: "#2f8132" }} />
-            </div>
-            <h3 className="text-lg font-semibold mb-1" style={{ color: "#102a43" }}>All Caught Up</h3>
-            <p className="text-sm text-slate-500">No pending practice approvals at this time.</p>
-          </div>
-        ) : (
-          <div className="glass rounded-xl overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr style={{ backgroundColor: "#f8fafc" }}>
-                    <th className="text-left px-6 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Practice</th>
-                    <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Specialty</th>
-                    <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Owner</th>
-                    <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Submitted</th>
-                    <th className="text-center px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {pendingPractices.length === 0 && (
-                    <tr>
-                      <td colSpan={5} className="px-6 py-12 text-center text-sm text-slate-400">
-                        No pending practice approvals
-                      </td>
-                    </tr>
-                  )}
-                  {pendingPractices.map((practice) => (
-                    <tr key={practice.id} className="hover:bg-slate-50/50 transition-colors">
-                      <td className="px-6 py-4">
-                        <div className="flex items-center gap-3">
-                          <div
-                            className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0 text-sm font-bold text-white"
-                            style={{ background: "linear-gradient(135deg, #d97706, #92400e)" }}
-                          >
-                            {practice.name.charAt(0)}
-                          </div>
-                          <div>
-                            <button
-                              onClick={() => setSelectedPractice(practice)}
-                              className="text-sm font-medium hover:underline text-left"
-                              style={{ color: "#102a43" }}
-                            >
-                              {practice.name}
-                            </button>
-                            <p className="text-xs text-slate-400">{practice.city}, {practice.state}</p>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-4 py-4">
-                        <span
-                          className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium"
-                          style={{ backgroundColor: "#e0f2fe", color: "#0369a1" }}
-                        >
-                          {practice.specialty}
-                        </span>
-                      </td>
-                      <td className="px-4 py-4">
-                        <p className="text-sm font-medium" style={{ color: "#102a43" }}>{practice.ownerName}</p>
-                        <p className="text-xs text-slate-400">{practice.ownerEmail}</p>
-                      </td>
-                      <td className="px-4 py-4">
-                        <p className="text-sm text-slate-600">{practice.submittedAt}</p>
-                      </td>
-                      <td className="px-4 py-4">
-                        <div className="flex items-center justify-center gap-2">
-                          <button
-                            onClick={() => {
-                              setApprovalMessage(`${practice.name} has been approved and is now active.`);
-                              setPendingPractices((prev) => prev.filter((p) => p.id !== practice.id));
-                            }}
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white transition-colors"
-                            style={{ background: "linear-gradient(135deg, #27ab83, #147d64)" }}
-                          >
-                            <CheckCircle2 className="w-3.5 h-3.5" />
-                            Approve
-                          </button>
-                          <button
-                            onClick={() => {
-                              if (window.confirm(`Reject ${practice.name}? This cannot be undone.`)) {
-                                setPendingPractices((prev) => prev.filter((p) => p.id !== practice.id));
-                                setApprovalMessage(`${practice.name} has been rejected.`);
-                              }
-                            }}
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors"
-                            style={{ border: "1px solid #ef4444", color: "#dc2626", backgroundColor: "transparent" }}
-                          >
-                            <XCircle className="w-3.5 h-3.5" />
-                            Reject
-                          </button>
-                          <button
-                            onClick={() => setSelectedPractice(practice)}
-                            className="p-1.5 rounded-lg hover:bg-slate-100 transition-colors"
-                            title="View details"
-                          >
-                            <Eye className="w-4 h-4 text-slate-500" />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
+        {(() => {
+          type Pp = typeof pendingPractices[number];
+
+          const cols: import("../shared/stripe-ui").DataTableColumn<Pp>[] = [
+            {
+              key: "name",
+              header: "Practice",
+              cell: (practice) => (
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div
+                    className="w-7 h-7 rounded-md flex items-center justify-center shrink-0 text-xs font-bold text-white"
+                    style={{ background: "linear-gradient(135deg, #d97706, #92400e)" }}
+                  >
+                    {practice.name.charAt(0)}
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-slate-800 truncate">{practice.name}</p>
+                    <p className="text-xs text-slate-400 truncate">{practice.city}, {practice.state}</p>
+                  </div>
+                </div>
+              ),
+            },
+            {
+              key: "specialty",
+              header: "Specialty",
+              cell: (practice) => (
+                <span
+                  className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium"
+                  style={{ backgroundColor: "#e0f2fe", color: "#0369a1" }}
+                >
+                  {practice.specialty}
+                </span>
+              ),
+            },
+            {
+              key: "owner",
+              header: "Owner",
+              hideBelow: "md",
+              cell: (practice) => (
+                <div className="min-w-0">
+                  <p className="text-sm text-slate-800 truncate">{practice.ownerName}</p>
+                  <p className="text-xs text-slate-400 truncate">{practice.ownerEmail}</p>
+                </div>
+              ),
+            },
+            {
+              key: "submitted",
+              header: "Submitted",
+              hideBelow: "md",
+              cell: (practice) => <span className="text-slate-500">{practice.submittedAt}</span>,
+            },
+          ];
+
+          const rowActions = (practice: Pp): import("../shared/stripe-ui").KebabAction[] => [
+            { label: "View details", onClick: () => setSelectedPractice(practice) },
+            {
+              label: "Approve",
+              onClick: () => {
+                setApprovalMessage(`${practice.name} has been approved and is now active.`);
+                setPendingPractices((prev) => prev.filter((p) => p.id !== practice.id));
+              },
+            },
+            {
+              label: "Reject",
+              danger: true,
+              onClick: () => {
+                if (window.confirm(`Reject ${practice.name}? This cannot be undone.`)) {
+                  setPendingPractices((prev) => prev.filter((p) => p.id !== practice.id));
+                  setApprovalMessage(`${practice.name} has been rejected.`);
+                }
+              },
+            },
+          ];
+
+          return (
+            <DataTable
+              columns={cols}
+              rows={pendingPractices}
+              rowKey={(p) => p.id}
+              actions={rowActions}
+              onRowClick={(p) => setSelectedPractice(p)}
+              empty={
+                <div className="text-center py-10">
+                  <div className="w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-3" style={{ backgroundColor: "#ecfdf5" }}>
+                    <CheckCircle2 className="w-6 h-6" style={{ color: "#059669" }} />
+                  </div>
+                  <p className="text-sm font-medium text-slate-700">All caught up</p>
+                  <p className="text-xs text-slate-400 mt-0.5">No pending practice approvals at this time.</p>
+                </div>
+              }
+            />
+          );
+        })()}
       </div>
     );
   }
