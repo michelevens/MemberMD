@@ -1278,22 +1278,32 @@ export function PracticePortal() {
   const handleReconcilePending = useCallback(async (pendingId: string) => {
     setPtReconcileLoading(pendingId);
     try {
-      const res = await apiFetch<{ data?: { reconciled?: boolean }; message?: string }>(
-        `/memberships/pending/${pendingId}/reconcile`,
-        { method: "POST" },
-      );
+      // apiFetch unwraps the top-level "data" envelope from the response —
+      // so what comes back as res.data is the inner object the backend put
+      // under "data" (camelCased): { reconciled, paymentStatus, sessionStatus, ... }.
+      const res = await apiFetch<{
+        reconciled?: boolean;
+        paymentStatus?: string | null;
+        sessionStatus?: string | null;
+      }>(`/memberships/pending/${pendingId}/reconcile`, { method: "POST" });
+
       if (res.error) {
         setToast({ message: res.error, type: "error" });
       } else {
-        const reconciled = (res.data as { data?: { reconciled?: boolean } } | undefined)?.data?.reconciled;
-        const msg = (res.data as { message?: string } | undefined)?.message;
-        setToast({
-          message: msg || (reconciled ? "Membership reconciled." : "Nothing to reconcile yet."),
-          type: reconciled ? "success" : "error",
-        });
+        const reconciled = res.data?.reconciled;
         if (reconciled) {
+          setToast({ message: "Membership reconciled successfully.", type: "success" });
           loadPracticeData();
           setPtPendingEnrollments((prev) => prev.filter((p) => p.id !== pendingId));
+        } else {
+          // Surface Stripe's actual payment status so the admin can tell
+          // the difference between "patient never paid" (unpaid) and
+          // "session expired before they got there" (expired).
+          const ps = res.data?.paymentStatus || "unknown";
+          setToast({
+            message: `Stripe says payment_status="${ps}" — patient hasn't completed checkout yet. If they did pay, check that this is the right Stripe Connect account.`,
+            type: "error",
+          });
         }
       }
     } catch {
