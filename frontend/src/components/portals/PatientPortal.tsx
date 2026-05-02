@@ -742,38 +742,94 @@ export function PatientPortal() {
           authService.me(),
         ]);
 
+        // Helpers for the appointment mappers below.
+        // (1) AppointmentController::index returns a paginated envelope:
+        //     { data: { data: [...], current_page, total } }. apiFetch
+        //     unwraps the OUTER `data`, so callers see r.data as the
+        //     pagination object — NOT a plain array. Earlier mapper
+        //     guarded with Array.isArray(r.data) which silently
+        //     produced an empty list for every patient. Normalize.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const unwrapList = (r: { data?: unknown }): any[] => {
+          const d = r.data;
+          if (Array.isArray(d)) return d;
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          if (d && typeof d === "object" && Array.isArray((d as any).data)) return (d as any).data;
+          return [];
+        };
+
+        // (2) The API returns scheduled_at as a single ISO timestamp,
+        //     not pre-split date/time. Split into a YYYY-MM-DD date
+        //     string and a "h:mm AM/PM" time label rendered in the
+        //     patient's browser tz so the cards show what the patient
+        //     expects. ProviderAvailability + booking flow already
+        //     handle tz correctly; this is just display.
+        const splitScheduled = (iso: string | null): { date: string; time: string } => {
+          if (!iso) return { date: "", time: "" };
+          const d = new Date(iso);
+          if (isNaN(d.getTime())) return { date: "", time: "" };
+          const date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+          const time = new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit", hour12: true }).format(d);
+          return { date, time };
+        };
+
+        // (3) Provider name comes through the eager-loaded relation
+        //     a.provider.user (firstName/lastName). Type name comes
+        //     from a.appointmentType.name. Earlier mapper looked for
+        //     flat string fields that the API doesn't send.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const providerLabel = (a: any): string => {
+          const p = a.provider ?? null;
+          if (!p) return "";
+          const u = p.user ?? null;
+          const first = u?.firstName ?? u?.first_name ?? p.firstName ?? p.first_name ?? "";
+          const last = u?.lastName ?? u?.last_name ?? p.lastName ?? p.last_name ?? "";
+          const creds = p.credentials ?? "";
+          const name = [first, last].filter(Boolean).join(" ").trim();
+          return name + (creds ? `, ${creds}` : "");
+        };
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const typeLabel = (a: any): string => {
+          return a.appointmentType?.name
+            ?? a.appointment_type?.name
+            ?? a.type
+            ?? "";
+        };
+
         // Upcoming appointments
         if (results[0].status === "fulfilled") {
-          const r = results[0].value;
-          if (r.data && Array.isArray(r.data)) {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            setApiUpcoming(r.data.map((a: any) => ({
+          const list = unwrapList(results[0].value);
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          setApiUpcoming(list.map((a: any) => {
+            const { date, time } = splitScheduled(a.scheduledAt ?? a.scheduled_at ?? null);
+            return {
               id: (a.id as string) || "",
-              date: (a.date as string) || (a.scheduledDate as string) || (a.scheduled_date as string) || "",
-              time: (a.time as string) || (a.scheduledTime as string) || (a.scheduled_time as string) || "",
-              provider: (a.providerName as string) || (a.provider_name as string) || (a.provider as string) || "",
-              type: (a.type as string) || (a.appointmentType as string) || (a.appointment_type as string) || "",
+              date,
+              time,
+              provider: providerLabel(a),
+              type: typeLabel(a),
               status: "upcoming" as const,
               isVideo: !!(a.isVideo ?? a.is_video ?? a.isTelehealth ?? a.is_telehealth),
               // Patient self-booked appointments land with confirmedAt=null
               // until staff confirms — surface that as a pending pill in the
               // UI so the patient knows the booking isn't final yet.
               confirmedAt: (a.confirmedAt as string | null) ?? (a.confirmed_at as string | null) ?? null,
-            })));
-          }
+            };
+          }));
         }
 
         // Past appointments
         if (results[1].status === "fulfilled") {
-          const r = results[1].value;
-          if (r.data && Array.isArray(r.data)) {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            setApiPast(r.data.map((a: any) => ({
+          const list = unwrapList(results[1].value);
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          setApiPast(list.map((a: any) => {
+            const { date, time } = splitScheduled(a.scheduledAt ?? a.scheduled_at ?? null);
+            return {
               id: (a.id as string) || "",
-              date: (a.date as string) || (a.scheduledDate as string) || (a.scheduled_date as string) || "",
-              time: (a.time as string) || (a.scheduledTime as string) || (a.scheduled_time as string) || "",
-              provider: (a.providerName as string) || (a.provider_name as string) || (a.provider as string) || "",
-              type: (a.type as string) || (a.appointmentType as string) || (a.appointment_type as string) || "",
+              date,
+              time,
+              provider: providerLabel(a),
+              type: typeLabel(a),
               status: "completed" as const,
               isVideo: !!(a.isVideo ?? a.is_video ?? a.isTelehealth ?? a.is_telehealth),
               chiefComplaint: (a.chiefComplaint as string) || (a.chief_complaint as string) || "",
@@ -781,8 +837,8 @@ export function PatientPortal() {
               plan: (a.plan as string) || "",
               followUp: (a.followUp as string) || (a.follow_up as string) || "",
               diagnoses: (a.diagnoses as string) || "",
-            })));
-          }
+            };
+          }));
         }
 
         // Messages → threads
