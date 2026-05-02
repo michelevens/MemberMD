@@ -208,6 +208,10 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
     Route::get('/admin/practices/{id}/email-deliverability', [PracticeController::class, 'emailDeliverability']);
     Route::get('/admin/practices/{id}/audit-export', [PracticeController::class, 'exportAuditLogCsv']);
 
+    // Billing enforcement — pilot-practice picker + flip the flag.
+    Route::get('/admin/practices/{id}/billing-readiness', [PracticeController::class, 'billingReadiness']);
+    Route::post('/admin/practices/{id}/billing-enforced', [PracticeController::class, 'setBillingEnforced']);
+
     Route::get('/admin/stats', [PracticeController::class, 'platformStats']);
 
     // Practice: own practice

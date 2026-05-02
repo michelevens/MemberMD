@@ -1296,11 +1296,39 @@ export function SuperAdminPortal() {
     count?: number;
   }>>([]);
 
+  type BillingReadiness = {
+    billingEnforced: boolean;
+    connect: {
+      ready: boolean;
+      status: string | null;
+      accountId: string | null;
+      chargesEnabled: boolean;
+      payoutsEnabled: boolean;
+      detailsSubmitted: boolean;
+      disabledReason: string | null;
+    };
+    plans: {
+      totalActive: number;
+      withMonthlyPrice: number;
+      missingPrices: Array<{ id: string; name: string; monthlyPrice: number | string | null }>;
+    };
+    memberships: {
+      activeStripe: number;
+      activeComped: number;
+      activeManual: number;
+    };
+    recommendation: "connect_onboarding" | "create_plans" | "wire_plan_prices" | "wire_remaining_plan_prices" | "ready_to_flip" | "live";
+  };
+  const [billingReadiness, setBillingReadiness] = useState<BillingReadiness | null>(null);
+  const [billingFlipping, setBillingFlipping] = useState(false);
+  const [billingMessage, setBillingMessage] = useState<{ text: string; tone: "success" | "error" } | null>(null);
+
   useEffect(() => {
     if (!selectedPractice) {
       setWebhookHealth(null);
       setPendingActions([]);
       setEmailDeliv(null);
+      setBillingReadiness(null);
       return;
     }
     let cancelled = false;
@@ -1334,6 +1362,12 @@ export function SuperAdminPortal() {
           latestFailures: Array<{ id: string; recipient: string; mailable: string; context: string | null; errorMessage: string | null; createdAt: string }>;
         }>(`/admin/practices/${selectedPractice.id}/email-deliverability`);
         if (!cancelled && r.data) setEmailDeliv(r.data);
+      } catch {
+        // non-fatal — card just doesn't render
+      }
+      try {
+        const r = await apiFetch<BillingReadiness>(`/admin/practices/${selectedPractice.id}/billing-readiness`);
+        if (!cancelled && r.data) setBillingReadiness(r.data);
       } catch {
         // non-fatal — card just doesn't render
       }
@@ -3113,6 +3147,130 @@ export function SuperAdminPortal() {
                   <p className="text-lg font-semibold tabular-nums mt-0.5 text-slate-900">{count}</p>
                 </div>
               ))}
+            </div>
+          </div>
+        )}
+
+        {/* Billing readiness — pilot-practice picker. Shows Stripe Connect
+            status, plan price coverage, and the billing_enforced flag.
+            Operator flips the flag when ready. */}
+        {billingReadiness && (
+          <div className="rounded-xl border border-slate-200 bg-white p-5">
+            <div className="flex items-baseline justify-between mb-4">
+              <h3 className="text-sm font-semibold text-slate-900">Billing readiness</h3>
+              <span
+                className="text-[11px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded"
+                style={{
+                  backgroundColor: billingReadiness.billingEnforced ? "#dcfce7" : "#f1f5f9",
+                  color: billingReadiness.billingEnforced ? "#166534" : "#475569",
+                }}
+              >
+                {billingReadiness.billingEnforced ? "Enforced" : "Manual fallback"}
+              </span>
+            </div>
+
+            {/* Recommendation banner — what to do next */}
+            {(() => {
+              const r = billingReadiness.recommendation;
+              const banners: Record<typeof r, { color: string; bg: string; text: string }> = {
+                connect_onboarding: { color: "#92400e", bg: "#fef3c7", text: "Practice owner must complete Stripe Connect onboarding before this tenant can bill." },
+                create_plans: { color: "#92400e", bg: "#fef3c7", text: "No active membership plans. Have the practice create a plan first." },
+                wire_plan_prices: { color: "#92400e", bg: "#fef3c7", text: "Plans exist but none have a Stripe monthly price ID. Practice must wire prices in Plan Settings." },
+                wire_remaining_plan_prices: { color: "#92400e", bg: "#fef3c7", text: "Some plans are missing Stripe prices — listed below. New enrollments to those plans will fall back to manual billing." },
+                ready_to_flip: { color: "#166534", bg: "#dcfce7", text: "All set. Flip 'Enforce billing' on to require Stripe charges for new enrollments." },
+                live: { color: "#166534", bg: "#dcfce7", text: "Live. New enrollments are charged via Stripe." },
+              };
+              const b = banners[r];
+              return (
+                <div className="rounded-md px-3 py-2 mb-4 text-xs" style={{ backgroundColor: b.bg, color: b.color }}>
+                  {b.text}
+                </div>
+              );
+            })()}
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+              <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2.5">
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Stripe Connect</p>
+                <p className="text-sm font-semibold mt-0.5" style={{ color: billingReadiness.connect.ready ? "#166534" : "#dc2626" }}>
+                  {billingReadiness.connect.ready ? "Ready" : (billingReadiness.connect.status ?? "Not connected")}
+                </p>
+              </div>
+              <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2.5">
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Plans priced</p>
+                <p className="text-lg font-semibold tabular-nums mt-0.5 text-slate-900">
+                  {billingReadiness.plans.withMonthlyPrice}
+                  <span className="text-xs font-normal text-slate-400">/{billingReadiness.plans.totalActive}</span>
+                </p>
+              </div>
+              <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2.5">
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Active billed</p>
+                <p className="text-lg font-semibold tabular-nums mt-0.5 text-slate-900">{billingReadiness.memberships.activeStripe}</p>
+              </div>
+              <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2.5">
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Comped / manual</p>
+                <p className="text-lg font-semibold tabular-nums mt-0.5 text-slate-900">
+                  {billingReadiness.memberships.activeComped + billingReadiness.memberships.activeManual}
+                </p>
+              </div>
+            </div>
+
+            {billingReadiness.plans.missingPrices.length > 0 && (
+              <div className="mb-4">
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-1.5">Plans missing Stripe price</p>
+                <div className="rounded-md border border-slate-200 divide-y divide-slate-100">
+                  {billingReadiness.plans.missingPrices.map((p) => (
+                    <div key={p.id} className="px-3 py-2 flex items-center justify-between">
+                      <span className="text-sm text-slate-700">{p.name}</span>
+                      <span className="text-xs text-slate-500 tabular-nums">${p.monthlyPrice ?? "—"}/mo</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="flex items-center justify-between gap-3 pt-3 border-t border-slate-100">
+              <div className="text-xs text-slate-500">
+                {billingReadiness.billingEnforced
+                  ? "New enrollments must charge via Stripe. Comp path still works."
+                  : "Enrollments fall back to manual billing when Stripe isn't configured."}
+              </div>
+              {billingMessage && (
+                <span
+                  className="text-xs"
+                  style={{ color: billingMessage.tone === "error" ? "#dc2626" : "#166534" }}
+                >
+                  {billingMessage.text}
+                </span>
+              )}
+              <button
+                disabled={
+                  billingFlipping ||
+                  (!billingReadiness.billingEnforced && billingReadiness.recommendation !== "ready_to_flip" && billingReadiness.recommendation !== "wire_remaining_plan_prices")
+                }
+                onClick={async () => {
+                  if (!selectedPractice) return;
+                  setBillingFlipping(true);
+                  const next = !billingReadiness.billingEnforced;
+                  const r = await apiFetch<{ billingEnforced: boolean }>(`/admin/practices/${selectedPractice.id}/billing-enforced`, {
+                    method: "POST",
+                    body: JSON.stringify({ enforced: next }),
+                  });
+                  setBillingFlipping(false);
+                  if (r.error) {
+                    setBillingMessage({ text: r.error, tone: "error" });
+                    return;
+                  }
+                  setBillingReadiness({ ...billingReadiness, billingEnforced: next });
+                  setBillingMessage({
+                    text: next ? "Billing enforcement enabled." : "Billing enforcement disabled.",
+                    tone: "success",
+                  });
+                }}
+                className="px-3 py-1.5 rounded-md text-xs font-medium text-white transition-colors disabled:opacity-50"
+                style={{ backgroundColor: billingReadiness.billingEnforced ? "#64748b" : "#635bff" }}
+              >
+                {billingFlipping ? "Saving…" : (billingReadiness.billingEnforced ? "Disable enforcement" : "Enable billing")}
+              </button>
             </div>
           </div>
         )}

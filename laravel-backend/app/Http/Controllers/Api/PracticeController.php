@@ -803,6 +803,153 @@ class PracticeController extends Controller
     }
 
     /**
+     * Superadmin-only: billing readiness for one tenant.
+     *
+     * Returns a per-practice readout of everything a tenant needs before
+     * `billing_enforced=true` will succeed: Connect status, plan price
+     * coverage, current memberships by billing_mode. Drives the SuperAdmin
+     * "Billing Readiness" card and the pilot-practice picker.
+     */
+    public function billingReadiness(Request $request, string $practiceId): JsonResponse
+    {
+        abort_if($request->user()->role !== 'superadmin', 403);
+
+        $practice = Practice::findOrFail($practiceId);
+
+        // Connect readiness — the same check StripeSubscriptionService uses
+        // before creating a subscription.
+        $connectReady = !empty($practice->stripe_account_id) && $practice->canAcceptPayments();
+
+        // Plan readiness — every active plan needs at least a monthly Stripe
+        // price ID. Annual is optional (only needed if patients pick annual).
+        $plans = \App\Models\MembershipPlan::where('tenant_id', $practice->id)
+            ->where('is_active', true)
+            ->get(['id', 'name', 'monthly_price', 'stripe_monthly_price_id', 'stripe_annual_price_id']);
+
+        $plansTotal = $plans->count();
+        $plansWithMonthlyPrice = $plans->whereNotNull('stripe_monthly_price_id')
+            ->where('stripe_monthly_price_id', '!=', '')
+            ->count();
+
+        $plansMissingPrices = $plans->filter(fn ($p) =>
+            empty($p->stripe_monthly_price_id)
+        )->values()->map(fn ($p) => [
+            'id' => $p->id,
+            'name' => $p->name,
+            'monthly_price' => $p->monthly_price,
+        ]);
+
+        // Current membership distribution — useful to see what flipping the
+        // flag would change. Existing comped/manual memberships don't
+        // retroactively start billing; only NEW enrollments after the flip
+        // take the stripe path.
+        $membershipCounts = \App\Models\PatientMembership::where('tenant_id', $practice->id)
+            ->where('status', 'active')
+            ->selectRaw('billing_mode, COUNT(*) as count')
+            ->groupBy('billing_mode')
+            ->pluck('count', 'billing_mode')
+            ->toArray();
+
+        // Recommendation — what should the operator do next?
+        $recommendation = match (true) {
+            !$connectReady => 'connect_onboarding',
+            $plansTotal === 0 => 'create_plans',
+            $plansWithMonthlyPrice === 0 => 'wire_plan_prices',
+            $plansWithMonthlyPrice < $plansTotal => 'wire_remaining_plan_prices',
+            !$practice->billing_enforced => 'ready_to_flip',
+            default => 'live',
+        };
+
+        return response()->json([
+            'data' => [
+                'billing_enforced' => (bool) $practice->billing_enforced,
+                'connect' => [
+                    'ready' => $connectReady,
+                    'status' => $practice->stripe_connect_status,
+                    'account_id' => $practice->stripe_account_id,
+                    'charges_enabled' => (bool) $practice->stripe_charges_enabled,
+                    'payouts_enabled' => (bool) $practice->stripe_payouts_enabled,
+                    'details_submitted' => (bool) $practice->stripe_details_submitted,
+                    'disabled_reason' => $practice->stripe_disabled_reason,
+                ],
+                'plans' => [
+                    'total_active' => $plansTotal,
+                    'with_monthly_price' => $plansWithMonthlyPrice,
+                    'missing_prices' => $plansMissingPrices,
+                ],
+                'memberships' => [
+                    'active_stripe' => (int) ($membershipCounts['stripe'] ?? 0),
+                    'active_comped' => (int) ($membershipCounts['comped'] ?? 0),
+                    'active_manual' => (int) ($membershipCounts['manual'] ?? 0),
+                ],
+                'recommendation' => $recommendation,
+            ],
+        ]);
+    }
+
+    /**
+     * Superadmin-only: flip billing_enforced on a practice.
+     *
+     * When billing_enforced=true, MembershipController::store rejects
+     * enrollments that can't bill (no Connect, no Stripe price). When
+     * false, enrollment falls back to billing_mode='manual'. Audit-logged
+     * because this is a revenue-affecting setting change.
+     */
+    public function setBillingEnforced(Request $request, string $practiceId): JsonResponse
+    {
+        abort_if($request->user()->role !== 'superadmin', 403);
+
+        $practice = Practice::findOrFail($practiceId);
+
+        $validated = $request->validate([
+            'enforced' => 'required|boolean',
+        ]);
+
+        // If turning ON, double-check readiness so we can't create a
+        // half-broken pilot. The frontend should already block this, but
+        // server-side guard prevents a bad API call from leaving the
+        // practice unable to enroll anyone.
+        if ($validated['enforced']) {
+            $connectReady = !empty($practice->stripe_account_id) && $practice->canAcceptPayments();
+            $hasPricedPlan = \App\Models\MembershipPlan::where('tenant_id', $practice->id)
+                ->where('is_active', true)
+                ->whereNotNull('stripe_monthly_price_id')
+                ->where('stripe_monthly_price_id', '!=', '')
+                ->exists();
+
+            if (!$connectReady || !$hasPricedPlan) {
+                return response()->json([
+                    'message' => 'Cannot enable billing enforcement: '
+                        . (!$connectReady ? 'Stripe Connect not ready. ' : '')
+                        . (!$hasPricedPlan ? 'No active plan has a Stripe monthly price configured.' : ''),
+                ], 422);
+            }
+        }
+
+        $practice->update(['billing_enforced' => $validated['enforced']]);
+
+        \App\Models\AuditLog::create([
+            'tenant_id' => $practice->id,
+            'user_id' => $request->user()->id,
+            'action' => $validated['enforced'] ? 'billing_enforcement_enabled' : 'billing_enforcement_disabled',
+            'resource' => 'Practice',
+            'resource_id' => $practice->id,
+            'metadata' => [
+                'flipped_by' => $request->user()->email,
+            ],
+        ]);
+
+        return response()->json([
+            'data' => [
+                'billing_enforced' => (bool) $practice->billing_enforced,
+            ],
+            'message' => $validated['enforced']
+                ? 'Billing enforcement enabled. New enrollments will now charge via Stripe.'
+                : 'Billing enforcement disabled. New enrollments will fall back to manual billing.',
+        ]);
+    }
+
+    /**
      * Superadmin-only: email deliverability summary for one tenant.
      * Pulls from mail_dispatch_logs (sent/failed counters from the
      * last 7 days plus the last 5 failures for triage).
