@@ -16,6 +16,7 @@ import { RefreshButton } from "../shared/RefreshButton";
 import { BillingTab } from "./patient/BillingTab";
 import { EntitlementsTab } from "./patient/EntitlementsTab";
 import { LabResultsTab } from "./patient/LabResultsTab";
+import { FamilyMembersSection } from "./patient/FamilyMembersSection";
 import { usePushNotifications } from "../../hooks/usePushNotifications";
 import {
   familyService,
@@ -77,6 +78,7 @@ type TabId =
   | "lab-results"
   | "entitlements"
   | "account"
+  | "family"
   | "profile";
 
 interface Appointment {
@@ -1437,6 +1439,7 @@ export function PatientPortal() {
       items: [
         { id: "account", label: "Billing", icon: CreditCard },
         { id: "entitlements", label: "Entitlements", icon: Award },
+        { id: "family", label: "Family Members", icon: Heart },
         { id: "profile", label: "Profile", icon: User },
       ],
     },
@@ -3088,6 +3091,20 @@ export function PatientPortal() {
         return <EntitlementsTab patientId={patient.id} />;
       case "account":
         return renderAccount();
+      case "family":
+        return (
+          <div className="space-y-5">
+            <div>
+              <h1 className="text-2xl font-semibold tracking-tight" style={{ color: COLORS.navy800 }}>
+                Family Members
+              </h1>
+              <p className="text-sm mt-0.5" style={{ color: COLORS.slate500 }}>
+                Add or remove dependents on your membership
+              </p>
+            </div>
+            <FamilyMembersSection variant="card" />
+          </div>
+        );
       case "profile":
         return <ProfilePage onBack={() => setActiveTab("home")} />;
       default:
@@ -3108,6 +3125,7 @@ export function PatientPortal() {
     "lab-results": "Lab Results",
     entitlements: "Entitlements",
     account: "Billing & Account",
+    family: "Family Members",
     profile: "Profile",
   };
 

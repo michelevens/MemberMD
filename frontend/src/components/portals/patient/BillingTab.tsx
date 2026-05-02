@@ -23,6 +23,7 @@ import {
   apiFetch,
 } from "../../../lib/api";
 import { MyAgreementsSection } from "./MyAgreementsSection";
+import { FamilyMembersSection } from "./FamilyMembersSection";
 import type { PatientMembership, Invoice, PatientEntitlement } from "../../../types";
 
 // ─── Colors ─────────────────────────────────────────────────────────────────
@@ -391,6 +392,11 @@ export function BillingTab() {
           </button>
         </div>
       </div>
+
+      {/* ── Family on this membership ──────────────────────────────────────
+          Same component as the standalone Family Members tab — drops
+          its own card chrome to nest inside this section.  */}
+      <FamilyMembersSection variant="card" />
 
       {/* ── Invoice list ──────────────────────────────────────────────────── */}
       <div className="glass rounded-2xl p-5">
