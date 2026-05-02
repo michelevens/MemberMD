@@ -11,9 +11,11 @@ use App\Models\MembershipPlan;
 use App\Models\Patient;
 use App\Models\PatientEntitlement;
 use App\Models\PatientMembership;
+use App\Models\PendingEnrollment;
 use App\Models\Practice;
 use App\Models\User;
 use App\Services\IdempotencyService;
+use App\Services\MembershipEnrollmentService;
 use App\Services\StripeSubscriptionService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -28,6 +30,7 @@ class ExternalController extends Controller
     public function __construct(
         private readonly StripeSubscriptionService $subscriptions,
         private readonly IdempotencyService $idempotency,
+        private readonly MembershipEnrollmentService $enrollment,
     ) {
     }
 
@@ -207,69 +210,163 @@ class ExternalController extends Controller
             ]],
             'is_active' => true,
         ]);
-        // Trial mirroring: if the plan declares trial_days, set trial_ends_at
-        // locally so the patient portal can render the countdown even before
-        // Stripe acks. The Stripe subscription create below also sets it via
-        // trial_period_days; whichever lands first wins.
-        $trialDays = (int) ($plan->trial_days ?? 0);
-        $trialEndsAt = $trialDays > 0 ? now()->addDays($trialDays) : null;
+        // ─── Branch on billing mode ────────────────────────────────────────
+        // Resolve once, here, so the widget either redirects the patient to
+        // Stripe Checkout (stripe path) or completes a free enrollment
+        // immediately (manual path — practice not Stripe-ready and not
+        // billing_enforced). Comp is unreachable from a public widget.
+        // 'rejected' = practice has billing_enforced=true but no Stripe yet.
+        $billingMode = $this->enrollment->resolveBillingMode(
+            $practice, $plan, $validated['billing_frequency'], false,
+        );
 
-        $membership = PatientMembership::create([
-            'tenant_id' => $practice->id,
-            'patient_id' => $patient->id,
-            'plan_id' => $plan->id,
-            // Lock in what this patient agreed to pay. Subsequent plan
-            // edits won't retroactively rewrite their bill or their
-            // portal display. Either field can be null if that frequency
-            // isn't offered, but they get the one they chose.
-            'locked_monthly_price' => $plan->monthly_price,
-            'locked_annual_price' => $plan->annual_price,
-            'locked_plan_version' => $plan->version ?? 1,
-            'status' => 'active',
-            'billing_frequency' => $validated['billing_frequency'],
-            'started_at' => now(),
-            'trial_ends_at' => $trialEndsAt,
-            'current_period_start' => now(),
-            'current_period_end' => $validated['billing_frequency'] === 'annual'
-                ? now()->addYear()
-                : now()->addMonth(),
-            'last_state_change_at' => now(),
-        ]);
+        if ($billingMode === 'rejected') {
+            return response()->json([
+                'message' => 'This practice is not yet able to accept new memberships online. Please contact them directly.',
+                'code' => 'practice_not_billing_ready',
+            ], 422);
+        }
 
-        // Seed first-period PatientEntitlement counters. Without this,
-        // the patient's portal would show 0/0 visits until the first
-        // Stripe invoice.paid webhook arrived (which may be never if the
-        // practice hasn't finished Connect onboarding yet). Mirror the
-        // shape MembershipController::store creates.
-        PatientEntitlement::create([
-            'tenant_id' => $practice->id,
+        if ($billingMode === 'stripe') {
+            // Defer membership creation. Stash the consent payload + IP +
+            // user_agent on a PendingEnrollment row, create a Stripe Checkout
+            // session, and return the URL. The webhook handler creates the
+            // real PatientMembership + ConsentSignatures once payment lands.
+            $pending = PendingEnrollment::create([
+                'tenant_id' => $practice->id,
+                'patient_id' => $patient->id,
+                'plan_id' => $plan->id,
+                'billing_frequency' => $validated['billing_frequency'],
+                'status' => PendingEnrollment::STATUS_PENDING,
+                'consent_payload' => [
+                    'types' => array_values((array) $validated['consents']),
+                    'signature_data' => (string) $validated['signature_data'],
+                ],
+                'signed_ip' => $request->ip(),
+                'signed_user_agent' => substr((string) $request->userAgent(), 0, 255),
+                'expires_at' => now()->addHours(24),
+            ]);
+
+            $appUrl = (string) config('app.frontend_url', config('app.url'));
+            $successUrl = rtrim($appUrl, '/') . '/#/enrollment/success?pe=' . $pending->id;
+            $cancelUrl = rtrim($appUrl, '/') . '/#/enrollment/cancelled?pe=' . $pending->id;
+
+            try {
+                $session = $this->subscriptions->createPaymentLinkSession(
+                    practice: $practice,
+                    patient: $patient,
+                    plan: $plan,
+                    billingFrequency: $validated['billing_frequency'],
+                    pendingEnrollmentId: $pending->id,
+                    successUrl: $successUrl,
+                    cancelUrl: $cancelUrl,
+                );
+            } catch (Throwable $e) {
+                $pending->delete();
+                Log::warning('External enrollment Checkout session failed', [
+                    'patient_id' => $patient->id,
+                    'plan_id' => $plan->id,
+                    'practice_id' => $practice->id,
+                    'error' => $e->getMessage(),
+                ]);
+                return response()->json([
+                    'message' => 'Could not start checkout: ' . $e->getMessage(),
+                ], 422);
+            }
+
+            $pending->update([
+                'stripe_checkout_session_id' => $session['session_id'],
+                'stripe_customer_id' => $session['customer_id'],
+                'checkout_url' => $session['url'],
+                'expires_at' => $session['expires_at'],
+            ]);
+
+            return response()->json([
+                'requires_payment' => true,
+                'checkout_url' => $session['url'],
+                'pending_enrollment_id' => $pending->id,
+                'patient_id' => $patient->id,
+            ], 201);
+        }
+
+        // ─── Manual path: practice not billing-enforced, no Stripe ─────────
+        // Free enrollment — membership is active immediately. This preserves
+        // the historical behavior for tenants that haven't turned on billing
+        // yet (and is the path the demo widget exercised before this fix).
+        try {
+            $membership = $this->enrollment->enroll(
+                practice: $practice,
+                patient: $patient,
+                plan: $plan,
+                billingFrequency: $validated['billing_frequency'],
+                isComp: false,
+                compReason: null,
+                sourceUserId: null,
+                paymentMethodId: null,
+                source: 'external.enroll.manual',
+            );
+        } catch (\RuntimeException $e) {
+            // Patient is already saved — surface the error so the widget
+            // can show it. The practice can convert this prospect into a
+            // membership manually from the patient roster.
+            return response()->json([
+                'message' => 'Enrollment could not be completed: ' . $e->getMessage(),
+                'patient_id' => $patient->id,
+            ], 422);
+        }
+
+        // Persist consent signatures now that the membership exists.
+        self::writeConsentSignatures(
+            practice: $practice,
+            patient: $patient,
+            membership: $membership,
+            consentTypes: (array) $validated['consents'],
+            signatureData: (string) $validated['signature_data'],
+            ip: $request->ip(),
+            userAgent: substr((string) $request->userAgent(), 0, 255),
+        );
+
+        $stripeWarning = null;
+
+        self::firePostEnrollmentNotifications(
+            practice: $practice,
+            patient: $patient,
+            user: $user,
+            membership: $membership,
+            patientEmail: $validated['email'] ?? null,
+            patientName: trim(($validated['first_name'] ?? '') . ' ' . ($validated['last_name'] ?? '')),
+        );
+
+        return response()->json(array_filter([
+            'message' => 'Enrollment successful!',
+            // member_id is the human-readable code (e.g. MBR-A1B2C3) we
+            // show on cards / receipts. Don't use it as a lookup key.
+            'member_id' => $memberId,
+            // membership_id is the actual PatientMembership UUID — use
+            // this for follow-up API calls (status checks, cancellation,
+            // entitlement queries).
             'membership_id' => $membership->id,
             'patient_id' => $patient->id,
-            'period_start' => $membership->current_period_start->toDateString(),
-            'period_end' => $membership->current_period_end->toDateString(),
-            'visits_allowed' => $plan->visits_per_month ?? 0,
-            'visits_used' => 0,
-            'telehealth_sessions_used' => 0,
-            'messages_sent' => 0,
-            'rollover_visits' => 0,
-        ]);
+            'stripe_warning' => $stripeWarning,
+        ], fn ($v) => $v !== null), 201);
+    }
 
-        // Fire the lifecycle event so outbound webhooks notify any
-        // practice-registered endpoint that a member just signed up.
-        MembershipStateChanged::dispatch($membership, 'prospect', 'active', [
-            'source' => 'external.enroll',
-            'plan_id' => $plan->id,
-        ]);
-
-        // Persist a ConsentSignature row per acknowledged consent. We snapshot
-        // the template's current `version` so future template edits don't
-        // retroactively rewrite what the patient agreed to. The signature
-        // string is the raw typed name from the widget — replace with a real
-        // esignature service later, but the audit fields are correct now.
-        // ConsentTemplate uses `type` (not `category`) and `content` (not `body`)
-        // per the actual schema. Templates that match by type and either belong
-        // to the tenant or are platform-wide (tenant_id IS NULL).
-        $consentTypes = (array) $validated['consents'];
+    /**
+     * Persist a ConsentSignature row per acknowledged consent type. We
+     * snapshot the template's current `version` so future template edits
+     * don't retroactively rewrite what the patient agreed to. Called from
+     * the manual enrollment path and from the webhook handler when a
+     * Checkout-deferred enrollment converts.
+     */
+    public static function writeConsentSignatures(
+        Practice $practice,
+        Patient $patient,
+        PatientMembership $membership,
+        array $consentTypes,
+        string $signatureData,
+        ?string $ip,
+        ?string $userAgent,
+    ): void {
         $templates = ConsentTemplate::whereIn('type', $consentTypes)
             ->where('is_active', true)
             ->where(function ($q) use ($practice) {
@@ -278,10 +375,11 @@ class ExternalController extends Controller
             })
             ->get()
             ->keyBy('type');
+
         foreach ($consentTypes as $type) {
             $template = $templates->get($type);
             if (!$template) {
-                continue; // practice hasn't published this template yet — skip rather than block enrollment
+                continue; // template not published — skip rather than block.
             }
             ConsentSignature::create([
                 'tenant_id' => $practice->id,
@@ -290,59 +388,45 @@ class ExternalController extends Controller
                 'template_version' => $template->version,
                 'membership_id' => $membership->id,
                 'signature_type' => 'typed',
-                'signature_data' => (string) $validated['signature_data'],
+                'signature_data' => $signatureData,
                 'signed_at' => now(),
-                'ip_address' => $request->ip(),
-                'user_agent' => substr((string) $request->userAgent(), 0, 255),
+                'ip_address' => $ip,
+                'user_agent' => $userAgent,
             ]);
         }
+    }
 
-        // Tier 2 Stripe subscription on the practice's connected account.
-        // Best-effort: if Stripe isn't configured for this practice yet, we
-        // still complete enrollment — billing wires up when the practice
-        // finishes Connect onboarding and publishes Stripe prices on plans.
-        // The membership is created in 'active' state regardless; webhook
-        // arrival of the first invoice.paid will reconcile period dates.
-        $stripeWarning = null;
+    /**
+     * Welcome email + practice-admin notifications + in-app welcome.
+     * Each block is independently best-effort so one outage (Resend down,
+     * missing admin user) doesn't cascade. Called from the manual
+     * enrollment path and from the webhook when Checkout completes.
+     */
+    public static function firePostEnrollmentNotifications(
+        Practice $practice,
+        Patient $patient,
+        ?User $user,
+        PatientMembership $membership,
+        ?string $patientEmail,
+        string $patientName,
+    ): void {
         try {
-            $paymentMethodId = $request->input('stripe_payment_method_id');
-            $this->subscriptions->createSubscription($membership, $paymentMethodId);
-        } catch (Throwable $e) {
-            Log::warning('Tier 2 subscription creation failed at enrollment', [
-                'membership_id' => $membership->id,
-                'practice_id' => $practice->id,
-                'error' => $e->getMessage(),
-            ]);
-            $stripeWarning = 'Subscription will be set up when Stripe is configured.';
-        }
-
-        // Welcome email — fire after enrollment lands. Best-effort: a Resend
-        // outage shouldn't block enrollment (the patient is already enrolled
-        // and can hit the portal directly if email never arrives). Log and
-        // continue if the send fails. CLAUDE.md claimed this was wired but
-        // it wasn't — fixed 2026-04-30.
-        try {
-            if ($validated['email'] ?? null) {
-                Mail::to($validated['email'])->send(new MembershipActivated($membership));
+            if ($patientEmail) {
+                Mail::to($patientEmail)->send(new MembershipActivated($membership));
             }
         } catch (Throwable $e) {
             Log::warning('Welcome email failed to send', [
                 'membership_id' => $membership->id,
-                'email' => $validated['email'] ?? null,
+                'email' => $patientEmail,
                 'error' => $e->getMessage(),
             ]);
         }
 
-        // In-app + email notification to practice owners/admins, plus an
-        // in-app welcome receipt for the new member. Each block is
-        // independently best-effort so a single failure (missing admin
-        // user, mail outage) doesn't cascade.
         try {
-            $plan = $membership->plan ?? \App\Models\MembershipPlan::find($membership->plan_id);
+            $plan = $membership->plan ?? MembershipPlan::find($membership->plan_id);
             $planName = $plan?->name ?? 'a membership';
-            $patientName = trim(($validated['first_name'] ?? '') . ' ' . ($validated['last_name'] ?? ''));
 
-            $admins = \App\Models\User::where('tenant_id', $practice->id)
+            $admins = User::where('tenant_id', $practice->id)
                 ->whereIn('role', ['practice_admin', 'staff'])
                 ->where('status', 'active')
                 ->get();
@@ -352,7 +436,7 @@ class ExternalController extends Controller
                     $admin->notify(new \App\Notifications\NewMemberEnrolled(
                         membership: $membership,
                         patientName: $patientName,
-                        patientEmail: $validated['email'] ?? '',
+                        patientEmail: $patientEmail ?? '',
                         planName: $planName,
                     ));
                 } catch (Throwable $e) {
@@ -367,7 +451,7 @@ class ExternalController extends Controller
                         Mail::to($admin->email)->send(new \App\Mail\NewMemberEnrolledMail(
                             membership: $membership,
                             patientName: $patientName,
-                            patientEmail: $validated['email'] ?? '',
+                            patientEmail: $patientEmail ?? '',
                             planName: $planName,
                         ));
                     }
@@ -379,18 +463,19 @@ class ExternalController extends Controller
                 }
             }
 
-            // In-app welcome for the new member (email already sent above).
-            try {
-                $user->notify(new \App\Notifications\MembershipWelcome(
-                    membership: $membership,
-                    planName: $planName,
-                    practiceName: $practice->name,
-                ));
-            } catch (Throwable $e) {
-                Log::warning('MembershipWelcome in-app notify failed', [
-                    'user_id' => $user->id,
-                    'error' => $e->getMessage(),
-                ]);
+            if ($user) {
+                try {
+                    $user->notify(new \App\Notifications\MembershipWelcome(
+                        membership: $membership,
+                        planName: $planName,
+                        practiceName: $practice->name,
+                    ));
+                } catch (Throwable $e) {
+                    Log::warning('MembershipWelcome in-app notify failed', [
+                        'user_id' => $user->id,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
             }
         } catch (Throwable $e) {
             Log::warning('Enrollment notifications block failed', [
@@ -398,19 +483,6 @@ class ExternalController extends Controller
                 'error' => $e->getMessage(),
             ]);
         }
-
-        return response()->json(array_filter([
-            'message' => 'Enrollment successful!',
-            // member_id is the human-readable code (e.g. MBR-A1B2C3) we
-            // show on cards / receipts. Don't use it as a lookup key.
-            'member_id' => $memberId,
-            // membership_id is the actual PatientMembership UUID — use
-            // this for follow-up API calls (status checks, cancellation,
-            // entitlement queries).
-            'membership_id' => $membership->id,
-            'patient_id' => $patient->id,
-            'stripe_warning' => $stripeWarning,
-        ], fn ($v) => $v !== null), 201);
     }
 
     /**

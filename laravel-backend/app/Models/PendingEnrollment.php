@@ -19,6 +19,7 @@ class PendingEnrollment extends Model
     protected $fillable = [
         'tenant_id', 'patient_id', 'plan_id', 'billing_frequency',
         'stripe_checkout_session_id', 'stripe_customer_id', 'checkout_url',
+        'consent_payload', 'signed_ip', 'signed_user_agent',
         'status', 'claimed_membership_id', 'claimed_at',
         'created_by_user_id', 'expires_at',
     ];
@@ -26,6 +27,7 @@ class PendingEnrollment extends Model
     protected $casts = [
         'expires_at' => 'datetime',
         'claimed_at' => 'datetime',
+        'consent_payload' => 'array',
     ];
 
     public function patient(): BelongsTo

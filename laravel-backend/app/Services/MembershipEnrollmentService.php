@@ -153,6 +153,13 @@ class MembershipEnrollmentService
             'current_period_start' => $now,
             'current_period_end' => $periodEnd,
             'last_state_change_at' => $now,
+            // Snapshot the price + plan version this patient agreed to so
+            // future plan edits don't retroactively rewrite their bill or
+            // their portal display. Either price field can be null if that
+            // frequency isn't offered.
+            'locked_monthly_price' => $plan->monthly_price,
+            'locked_annual_price' => $plan->annual_price,
+            'locked_plan_version' => $plan->version ?? 1,
             // If the caller already paid via Checkout, attach the
             // pre-existing Stripe IDs so Stripe is the source of truth
             // for billing and we don't double-create a subscription.

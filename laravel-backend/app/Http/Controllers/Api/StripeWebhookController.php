@@ -635,11 +635,60 @@ class StripeWebhookController extends Controller
             'claimed_at' => now(),
         ]);
 
+        // Replay consent signatures captured at widget submit time. Only
+        // present when the pending row originated from the public widget
+        // (admin-sent payment links don't collect consents — admin already
+        // has them on file).
+        $consentPayload = $pending->consent_payload ?? null;
+        if (is_array($consentPayload) && !empty($consentPayload['types'])) {
+            try {
+                \App\Http\Controllers\Api\ExternalController::writeConsentSignatures(
+                    practice: $practice,
+                    patient: $patient,
+                    membership: $membership,
+                    consentTypes: (array) $consentPayload['types'],
+                    signatureData: (string) ($consentPayload['signature_data'] ?? ''),
+                    ip: $pending->signed_ip,
+                    userAgent: $pending->signed_user_agent,
+                );
+            } catch (\Throwable $e) {
+                Log::warning('Consent replay failed after Checkout conversion', [
+                    'pending_enrollment_id' => $pending->id,
+                    'membership_id' => $membership->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
+        // Welcome email + practice-admin in-app/email notifications. Same
+        // path the manual external enrollment uses, just deferred until
+        // payment lands. Without this, a Checkout-paid widget enrollment
+        // would create the membership silently and the practice would
+        // never know.
+        try {
+            $patient->loadMissing('user');
+            \App\Http\Controllers\Api\ExternalController::firePostEnrollmentNotifications(
+                practice: $practice,
+                patient: $patient,
+                user: $patient->user,
+                membership: $membership,
+                patientEmail: $patient->email,
+                patientName: trim(($patient->first_name ?? '') . ' ' . ($patient->last_name ?? '')),
+            );
+        } catch (\Throwable $e) {
+            Log::warning('Post-enrollment notifications failed after Checkout conversion', [
+                'pending_enrollment_id' => $pending->id,
+                'membership_id' => $membership->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
         $this->audit($practice, 'tier2_payment_link_claimed', [
             'pending_enrollment_id' => $pending->id,
             'membership_id' => $membership->id,
             'stripe_session_id' => $session->id,
             'stripe_subscription_id' => $session->subscription ?? null,
+            'origin' => $consentPayload ? 'external_widget' : 'admin_payment_link',
         ]);
     }
 

@@ -213,6 +213,7 @@ export function EnrollmentWidget() {
   const [submitted, setSubmitted] = useState(false);
   const [memberId, setMemberId] = useState("");
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [submissionError, setSubmissionError] = useState<string | null>(null);
 
   // Dynamic consent templates loaded from /external/consent-templates/{tenantCode}.
   // Falls back to legacy hardcoded checkboxes if the fetch fails.
@@ -423,6 +424,7 @@ export function EnrollmentWidget() {
       website_url: form.websiteUrl,
     };
 
+    setSubmissionError(null);
     try {
       const res = await fetch(`${API_BASE_URL}/external/enroll/${tenantCode}`, {
         method: "POST",
@@ -432,22 +434,32 @@ export function EnrollmentWidget() {
 
       if (!res.ok) {
         const errData = await res.json().catch(() => null);
-        throw new Error(errData?.message || "Enrollment failed");
+        throw new Error(errData?.message || "Enrollment failed. Please try again.");
       }
 
       const data = await res.json();
+
+      // Stripe-billed enrollment: backend returns a Checkout URL and the
+      // membership doesn't exist until the patient pays. Redirect them out
+      // to Stripe — checkout.session.completed will create the membership
+      // and they land on /#/enrollment/success when payment goes through.
+      if (data.requires_payment && data.checkout_url) {
+        // Don't track 'complete' here — the membership doesn't exist yet.
+        // The webhook fires once payment lands; we can add a separate
+        // checkout_started analytics event when the schema supports it.
+        window.location.href = data.checkout_url;
+        return;
+      }
+
+      // Manual path: practice not Stripe-enforced, membership active
+      // immediately. Show the success card.
       setMemberId(data.member_id || "MBR-000000");
       setSubmitted(true);
       if (tenantCode) {
         void widgetAnalyticsService.trackEvent(tenantCode, "enrollment", "complete");
       }
     } catch (err) {
-      // For mock/demo — simulate success
-      setMemberId("MBR-" + Math.random().toString(36).substring(2, 8).toUpperCase());
-      setSubmitted(true);
-      if (tenantCode) {
-        void widgetAnalyticsService.trackEvent(tenantCode, "enrollment", "complete");
-      }
+      setSubmissionError(err instanceof Error ? err.message : "Enrollment failed. Please try again.");
     } finally {
       setSubmitting(false);
     }
@@ -1170,6 +1182,15 @@ export function EnrollmentWidget() {
               </button>
             )}
           </div>
+
+          {submissionError && (
+            <div
+              className="mt-4 rounded-lg border px-4 py-3 text-sm"
+              style={{ borderColor: C.red400, backgroundColor: "#fef2f2", color: C.red500 }}
+            >
+              {submissionError}
+            </div>
+          )}
         </div>
 
         {/* Footer */}
