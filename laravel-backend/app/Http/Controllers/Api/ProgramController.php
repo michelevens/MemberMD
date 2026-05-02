@@ -277,6 +277,49 @@ class ProgramController extends Controller
     }
 
     /**
+     * Update an existing enrollment in place. Today this is just the
+     * "assign / re-assign primary provider for this enrollment"
+     * affordance the Programs tab needs after enroll. Other enrollment
+     * fields (status, goals, notes) flow through enrollPatient and
+     * unenrollPatient — keeping this surface small until we have a
+     * concrete reason to widen it. The provider must be one attached to
+     * THIS program; cross-program assignment is rejected so the booking
+     * widget's program-scoped provider list is enforceable.
+     */
+    public function updateEnrollment(Request $request, string $program, string $enrollment): JsonResponse
+    {
+        $programModel = Program::findOrFail($program);
+        $enrollmentModel = ProgramEnrollment::where('program_id', $programModel->id)
+            ->findOrFail($enrollment);
+
+        $validated = $request->validate([
+            'assigned_provider_id' => 'nullable|uuid|exists:providers,id',
+        ]);
+
+        // If a provider is being set, verify they're on this program.
+        // program_providers is the link table; existence check is enough
+        // — is_active flag isn't enforced here (admin override).
+        if (!empty($validated['assigned_provider_id'])) {
+            $isOnProgram = \App\Models\ProgramProvider::where('program_id', $programModel->id)
+                ->where('provider_id', $validated['assigned_provider_id'])
+                ->exists();
+            if (!$isOnProgram) {
+                return response()->json([
+                    'message' => 'That provider is not attached to this program. Add them on the Providers tab first.',
+                    'errors' => ['assigned_provider_id' => ['Provider not attached to this program.']],
+                ], 422);
+            }
+        }
+
+        $enrollmentModel->update($validated);
+
+        return response()->json([
+            'data' => $enrollmentModel->fresh()->load(['program', 'patient', 'provider']),
+            'message' => 'Enrollment updated.',
+        ]);
+    }
+
+    /**
      * Unenroll a patient from a program.
      */
     public function unenrollPatient(Request $request, string $program, string $enrollment): JsonResponse
@@ -481,5 +524,76 @@ class ProgramController extends Controller
                 'estimated_monthly_revenue' => $monthlyRevenue,
             ],
         ]);
+    }
+
+    /**
+     * Patient self-service: enrollments scoped to the calling user.
+     *
+     * Returns a flat list of the caller's currently-active program
+     * enrollments. Each entry carries:
+     *   - the program (id, name)
+     *   - the assigned primary provider for THIS enrollment, if any
+     *   - the full set of providers attached to the program
+     *     ("bookable_providers") — when assigned_provider is null, the
+     *     booking widget shows this list so the patient can pick one
+     *
+     * The booking widget calls this to gate booking on enrollment and to
+     * scope the provider list so a patient can't book with a clinician
+     * outside the programs they're in.
+     */
+    public function myEnrollments(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        if (!$user->isPatient() || !$user->patient) {
+            return response()->json(['data' => []]);
+        }
+
+        $enrollments = ProgramEnrollment::where('patient_id', $user->patient->id)
+            ->whereIn('status', ['active', 'pending'])
+            ->with([
+                'program',
+                'program.providers' => function ($q) {
+                    $q->wherePivot('is_active', true);
+                },
+                'program.providers.user:id,first_name,last_name',
+                'provider.user:id,first_name,last_name',
+            ])
+            ->orderByDesc('enrolled_at')
+            ->get();
+
+        $payload = $enrollments->map(function ($e) {
+            $assigned = $e->provider;
+            $programProviders = $e->program?->providers ?? collect();
+            return [
+                'id' => $e->id,
+                'status' => $e->status,
+                'enrolled_at' => $e->enrolled_at?->toIso8601String(),
+                'program' => $e->program ? [
+                    'id' => $e->program->id,
+                    'name' => $e->program->name,
+                    'description' => $e->program->description,
+                ] : null,
+                'assigned_provider' => $assigned ? [
+                    'id' => $assigned->id,
+                    'first_name' => $assigned->user?->first_name ?? $assigned->first_name,
+                    'last_name' => $assigned->user?->last_name ?? $assigned->last_name,
+                    'credentials' => $assigned->credentials,
+                ] : null,
+                'bookable_providers' => $programProviders->map(function ($p) {
+                    return [
+                        'id' => $p->id,
+                        'first_name' => $p->user?->first_name ?? $p->first_name,
+                        'last_name' => $p->user?->last_name ?? $p->last_name,
+                        'credentials' => $p->credentials,
+                        'specialty' => is_array($p->specialties) && !empty($p->specialties)
+                            ? $p->specialties[0]
+                            : ($p->specialty ?? null),
+                        'timezone' => $p->timezone,
+                    ];
+                })->values(),
+            ];
+        });
+
+        return response()->json(['data' => $payload]);
     }
 }

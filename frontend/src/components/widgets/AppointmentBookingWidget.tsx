@@ -18,7 +18,7 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import type { Appointment, ProviderAvailability } from "../../types";
-import { appointmentService, providerService, isUsingMockData, authService, apiFetch } from "../../lib/api";
+import { appointmentService, providerService, isUsingMockData, authService, apiFetch, programService } from "../../lib/api";
 
 // ─── Colors ──────────────────────────────────────────────────────────────────
 
@@ -46,6 +46,27 @@ const C = {
 };
 
 // ─── Mock Data ───────────────────────────────────────────────────────────────
+
+/** Patient's view of one of their active program enrollments —
+ *  returned by GET /me/enrollments. Drives the booking widget's
+ *  program-scoped provider list. assignedProvider is the practice's
+ *  preferred clinician for THIS enrollment (may be null);
+ *  bookableProviders is everyone attached to the program (the patient
+ *  can pick anyone on the list at booking time). */
+interface MyEnrollment {
+  id: string;
+  status: string;
+  program: { id: string; name: string; description?: string | null } | null;
+  assignedProvider: { id: string; firstName?: string; lastName?: string; credentials?: string | null } | null;
+  bookableProviders: Array<{
+    id: string;
+    firstName?: string;
+    lastName?: string;
+    credentials?: string | null;
+    specialty?: string | null;
+    timezone?: string | null;
+  }>;
+}
 
 interface MockProvider {
   id: string;
@@ -147,6 +168,14 @@ export function AppointmentBookingWidget({ onClose, onBooked }: AppointmentBooki
   // Practice tz from /auth/me — fallback when the chosen provider
   // doesn't have their own tz set yet (existing rows pre-migration).
   const [practiceTz, setPracticeTz] = useState<string | null>(null);
+  // Patient's active enrollments (with assigned + bookable providers).
+  // null = still loading (so we don't flash the "you must enroll" gate
+  // for a beat). [] = loaded, no enrollments → block booking. Otherwise
+  // → show only providers from those programs.
+  const [myEnrollments, setMyEnrollments] = useState<MyEnrollment[] | null>(null);
+  // If the patient has 2+ enrollments we ask them which one this visit
+  // is for. Single-enrollment auto-selects.
+  const [selectedEnrollmentId, setSelectedEnrollmentId] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -215,6 +244,45 @@ export function AppointmentBookingWidget({ onClose, onBooked }: AppointmentBooki
         setTypesError(e instanceof Error ? e.message : "Failed to load appointment types");
         setApiTypes([]);
       }
+
+      // 4) Patient's active program enrollments. Drives the
+      //    program-scoped provider list — the patient can only book
+      //    with providers attached to programs they're enrolled in.
+      try {
+        const enrollRes = await programService.myEnrollments();
+        if (cancelled) return;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const list: any[] = Array.isArray(enrollRes.data) ? enrollRes.data : (enrollRes.data as any)?.data || [];
+        const mapped: MyEnrollment[] = list.map((e) => ({
+          id: e.id,
+          status: e.status,
+          program: e.program ? { id: e.program.id, name: e.program.name, description: e.program.description } : null,
+          assignedProvider: e.assignedProvider
+            ? {
+                id: e.assignedProvider.id,
+                firstName: e.assignedProvider.firstName ?? e.assignedProvider.first_name ?? "",
+                lastName: e.assignedProvider.lastName ?? e.assignedProvider.last_name ?? "",
+                credentials: e.assignedProvider.credentials ?? null,
+              }
+            : null,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          bookableProviders: (e.bookableProviders ?? e.bookable_providers ?? []).map((p: any) => ({
+            id: p.id,
+            firstName: p.firstName ?? p.first_name ?? "",
+            lastName: p.lastName ?? p.last_name ?? "",
+            credentials: p.credentials ?? null,
+            specialty: p.specialty ?? null,
+            timezone: p.timezone ?? null,
+          })),
+        }));
+        setMyEnrollments(mapped);
+        // Auto-select the only enrollment so single-program patients
+        // don't see a redundant "which program?" picker.
+        if (mapped.length === 1) setSelectedEnrollmentId(mapped[0].id);
+      } catch {
+        if (cancelled) return;
+        setMyEnrollments([]);
+      }
     })();
     return () => { cancelled = true; };
   }, []);
@@ -243,7 +311,39 @@ export function AppointmentBookingWidget({ onClose, onBooked }: AppointmentBooki
 
   // The lists the widget actually renders. Switch by demoMode.
   const demoMode = isUsingMockData();
-  const providers: MockProvider[] = demoMode ? MOCK_PROVIDERS : (apiProviders || []);
+
+  // Patient's active enrollment that drives THIS booking. If they have
+  // multiple, we use whichever they selected on the program-picker step;
+  // single-enrollment auto-selects upstream so this is rarely null
+  // unless the patient hasn't enrolled yet (in which case we render the
+  // "you must enroll first" gate before reaching the provider step).
+  const activeEnrollment: MyEnrollment | null = useMemo(() => {
+    if (demoMode || !myEnrollments) return null;
+    if (selectedEnrollmentId) return myEnrollments.find(e => e.id === selectedEnrollmentId) ?? null;
+    if (myEnrollments.length === 1) return myEnrollments[0];
+    return null;
+  }, [demoMode, myEnrollments, selectedEnrollmentId]);
+
+  // Filter the practice-wide provider list to only those attached to
+  // the active enrollment's program. If the practice admin assigned a
+  // primary provider for this enrollment, surface that one first;
+  // patient can still pick any program-attached provider.
+  const providers: MockProvider[] = useMemo(() => {
+    if (demoMode) return MOCK_PROVIDERS;
+    const all = apiProviders || [];
+    if (!activeEnrollment) return all;
+    const allowedIds = new Set(activeEnrollment.bookableProviders.map(p => p.id));
+    if (allowedIds.size === 0) return all; // program has no providers attached → show none, picker UI flags it
+    const filtered = all.filter(p => allowedIds.has(p.id));
+    // Surface the assigned provider first, then the rest alphabetical
+    // by name for a stable order.
+    const assignedId = activeEnrollment.assignedProvider?.id ?? null;
+    return filtered.sort((a, b) => {
+      if (a.id === assignedId) return -1;
+      if (b.id === assignedId) return 1;
+      return a.name.localeCompare(b.name);
+    });
+  }, [demoMode, apiProviders, activeEnrollment]);
   // In demo mode types are keyed per-provider; in API mode they're
   // practice-scoped, so the same flat list applies to whichever
   // provider the patient picked.
@@ -571,54 +671,151 @@ export function AppointmentBookingWidget({ onClose, onBooked }: AppointmentBooki
         {/* Content */}
         <div className="flex-1 overflow-y-auto px-6 py-5">
 
-          {/* Step 1: Select Provider */}
+          {/* Step 1: Select Provider — gated on enrollment.
+              Three sub-cases for API mode:
+                a) loading: show a spinner-ish placeholder.
+                b) no active enrollments: block booking, show CTA.
+                c) multiple enrollments and none picked yet: program
+                   picker. Auto-skipped for single-enrollment patients
+                   (selectedEnrollmentId is set in the fetch).
+                d) one enrollment chosen: show its bookable providers,
+                   with the assigned one (if any) flagged. */}
           {step === 1 && (
             <div className="space-y-3">
-              {providers.length === 0 && !demoMode && (
+              {/* (a) still loading */}
+              {!demoMode && myEnrollments === null && (
                 <div className="text-center py-8 text-sm" style={{ color: C.slate500 }}>
-                  No providers available yet. Contact the practice.
+                  Loading your programs…
                 </div>
               )}
-              {providers.map((prov) => {
-                const selected = selectedProvider?.id === prov.id;
-                return (
+
+              {/* (b) zero active enrollments — block booking */}
+              {!demoMode && myEnrollments && myEnrollments.length === 0 && (
+                <div className="rounded-2xl border border-amber-200 bg-amber-50 p-6 text-center">
+                  <AlertTriangle className="w-8 h-8 mx-auto mb-2" style={{ color: C.amber600 }} />
+                  <p className="text-sm font-semibold" style={{ color: C.navy800 }}>
+                    Enroll in a program first
+                  </p>
+                  <p className="text-xs mt-1 mb-4" style={{ color: C.slate500 }}>
+                    Booking is open to active members. Pick a plan from your dashboard, then come back here to schedule.
+                  </p>
                   <button
-                    key={prov.id}
-                    onClick={() => {
-                      setSelectedProvider(prov);
-                      setSelectedType(null);
-                      setStep(2);
-                    }}
-                    className="w-full flex items-center gap-4 p-4 rounded-xl text-left transition-all"
-                    style={{
-                      border: `2px solid ${selected ? C.teal500 : C.slate200}`,
-                      backgroundColor: selected ? C.teal50 : C.white,
-                    }}
+                    onClick={onClose}
+                    className="px-4 py-2 rounded-lg text-sm font-semibold text-white"
+                    style={{ backgroundColor: C.teal500 }}
                   >
-                    <div
-                      className="w-12 h-12 rounded-full flex items-center justify-center text-sm font-bold text-white shrink-0"
-                      style={{ background: `linear-gradient(135deg, ${C.navy700}, ${C.teal500})` }}
-                    >
-                      {prov.avatarInitials}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold" style={{ color: C.navy800 }}>
-                        {prov.name}, {prov.credentials}
-                      </p>
-                      <span
-                        className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full mt-1"
-                        style={{ backgroundColor: C.slate100, color: C.slate600 }}
-                      >
-                        {prov.specialty}
-                      </span>
-                    </div>
-                    <div className="text-right shrink-0">
-                      <p className="text-xs" style={{ color: C.slate400 }}>Next available</p>
-                      <p className="text-xs font-semibold" style={{ color: C.teal600 }}>{prov.nextAvailable}</p>
-                    </div>
+                    Back to dashboard
                   </button>
-                );
-              })}
+                </div>
+              )}
+
+              {/* (c) multi-enrollment — pick which program first */}
+              {!demoMode && myEnrollments && myEnrollments.length > 1 && !selectedEnrollmentId && (
+                <div className="space-y-3">
+                  <p className="text-xs" style={{ color: C.slate500 }}>
+                    Which program is this visit for?
+                  </p>
+                  {myEnrollments.map((e) => (
+                    <button
+                      key={e.id}
+                      onClick={() => setSelectedEnrollmentId(e.id)}
+                      className="w-full text-left p-4 rounded-xl transition-all"
+                      style={{ border: `2px solid ${C.slate200}`, backgroundColor: C.white }}
+                    >
+                      <p className="text-sm font-semibold" style={{ color: C.navy800 }}>
+                        {e.program?.name ?? "Program"}
+                      </p>
+                      {e.assignedProvider && (
+                        <p className="text-xs mt-0.5" style={{ color: C.slate500 }}>
+                          Your provider: {e.assignedProvider.firstName} {e.assignedProvider.lastName}
+                          {e.assignedProvider.credentials ? `, ${e.assignedProvider.credentials}` : ""}
+                        </p>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {/* (d) program chosen (or single-enrollment auto-pick) →
+                  show that program's bookable providers. Assigned
+                  provider sorted to top. */}
+              {(demoMode || (myEnrollments && (selectedEnrollmentId || myEnrollments.length === 1))) && (
+                <>
+                  {!demoMode && activeEnrollment && (
+                    <div className="flex items-center justify-between mb-2 px-1">
+                      <p className="text-xs" style={{ color: C.slate500 }}>
+                        Booking under: <span className="font-semibold" style={{ color: C.navy800 }}>{activeEnrollment.program?.name}</span>
+                      </p>
+                      {myEnrollments && myEnrollments.length > 1 && (
+                        <button
+                          onClick={() => { setSelectedEnrollmentId(null); setSelectedProvider(null); }}
+                          className="text-xs underline"
+                          style={{ color: C.slate500 }}
+                        >
+                          Change program
+                        </button>
+                      )}
+                    </div>
+                  )}
+                  {providers.length === 0 && !demoMode && (
+                    <div className="text-center py-8 text-sm" style={{ color: C.slate500 }}>
+                      {activeEnrollment?.bookableProviders.length === 0
+                        ? "This program has no providers yet. Contact your practice."
+                        : "No providers available yet. Contact the practice."}
+                    </div>
+                  )}
+                  {providers.map((prov) => {
+                    const selected = selectedProvider?.id === prov.id;
+                    const isAssigned = !demoMode && activeEnrollment?.assignedProvider?.id === prov.id;
+                    return (
+                      <button
+                        key={prov.id}
+                        onClick={() => {
+                          setSelectedProvider(prov);
+                          setSelectedType(null);
+                          setStep(2);
+                        }}
+                        className="w-full flex items-center gap-4 p-4 rounded-xl text-left transition-all"
+                        style={{
+                          border: `2px solid ${selected ? C.teal500 : C.slate200}`,
+                          backgroundColor: selected ? C.teal50 : C.white,
+                        }}
+                      >
+                        <div
+                          className="w-12 h-12 rounded-full flex items-center justify-center text-sm font-bold text-white shrink-0"
+                          style={{ background: `linear-gradient(135deg, ${C.navy700}, ${C.teal500})` }}
+                        >
+                          {prov.avatarInitials}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <p className="text-sm font-semibold" style={{ color: C.navy800 }}>
+                              {prov.name}{prov.credentials ? `, ${prov.credentials}` : ""}
+                            </p>
+                            {isAssigned && (
+                              <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full" style={{ backgroundColor: C.teal50, color: C.teal600 }}>
+                                Your provider
+                              </span>
+                            )}
+                          </div>
+                          {prov.specialty && (
+                            <span
+                              className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full mt-1"
+                              style={{ backgroundColor: C.slate100, color: C.slate600 }}
+                            >
+                              {prov.specialty}
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-right shrink-0">
+                          <p className="text-xs" style={{ color: C.slate400 }}>Next available</p>
+                          <p className="text-xs font-semibold" style={{ color: C.teal600 }}>{prov.nextAvailable}</p>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </>
+              )}
             </div>
           )}
 

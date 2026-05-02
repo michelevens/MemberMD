@@ -321,6 +321,13 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
     Route::post('/memberships/{id}/sync-invoices', [MembershipController::class, 'syncInvoicesFromStripe']);
     Route::apiResource('memberships', MembershipController::class)->except(['destroy']);
 
+    // Patient self-service: list the caller's own active program
+    // enrollments with the assigned provider + the program's bookable
+    // provider list. Drives the booking widget's program-scoped
+    // provider picker so a patient can only book within programs
+    // they're enrolled in.
+    Route::get('/me/enrollments', [\App\Http\Controllers\Api\ProgramController::class, 'myEnrollments']);
+
     // ===== Screenings =====
     Route::get('/screening-templates', [ScreeningController::class, 'templates']);
     Route::apiResource('screenings', ScreeningController::class)->except(['update', 'destroy']);
@@ -506,6 +513,10 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
         Route::delete('/{program}', [ProgramController::class, 'destroy']);
         Route::post('/{program}/enroll', [ProgramController::class, 'enrollPatient']);
         Route::post('/{program}/unenroll/{enrollment}', [ProgramController::class, 'unenrollPatient']);
+        // Update an existing enrollment in place — used by the practice
+        // admin Programs tab to (re)assign the primary provider on a
+        // patient's program enrollment after they're already enrolled.
+        Route::patch('/{program}/enrollments/{enrollment}', [ProgramController::class, 'updateEnrollment']);
         Route::post('/{program}/providers', [ProgramController::class, 'addProvider']);
         Route::delete('/{program}/providers/{provider}', [ProgramController::class, 'removeProvider']);
         // Eligibility rule CRUD — practice admins use these on the

@@ -29,6 +29,7 @@ import {
   Check,
   XCircle,
   AlertTriangle,
+  UserCog,
 } from "lucide-react";
 import { programService, patientService, providerService, apiFetch, membershipPlanService } from "../../lib/api";
 
@@ -112,6 +113,11 @@ interface MockEnrollment {
   sponsorName: string | null;
   enrolledAt: string;
   expiresAt: string | null;
+  // Optional: provider assigned to this specific enrollment. Drives the
+  // booking widget's program-scoped provider list. Empty = patient
+  // picks any program-attached provider at booking time.
+  assignedProviderId?: string | null;
+  assignedProviderName?: string;
 }
 
 interface MockProgramProvider {
@@ -471,6 +477,11 @@ export function ProgramsSection() {
   const [enrollPatients, setEnrollPatients] = useState<Array<{ id: string; firstName: string; lastName: string }>>([]);
   const [enrollSelectedPatientId, setEnrollSelectedPatientId] = useState<string | null>(null);
   const [enrollSelectedPlanId, setEnrollSelectedPlanId] = useState<string | null>(null);
+  // Optional primary provider for THIS enrollment. Picked from the
+  // program's own provider list (selectedProgram.providers). Empty
+  // means "not assigned yet" — booking widget will show all program
+  // providers for the patient to pick at visit time.
+  const [enrollSelectedProviderId, setEnrollSelectedProviderId] = useState<string | null>(null);
   const [enrollFundingSource, setEnrollFundingSource] = useState<string>("self_pay");
   const [enrollSponsorName, setEnrollSponsorName] = useState("");
   const [enrollSubmitting, setEnrollSubmitting] = useState(false);
@@ -487,6 +498,18 @@ export function ProgramsSection() {
   const [availablePlans, setAvailablePlans] = useState<any[]>([]);
   const [availablePlansLoading, setAvailablePlansLoading] = useState(false);
   const [enrollmentActionLoading, setEnrollmentActionLoading] = useState<string | null>(null);
+  // Re-assign provider modal — patches enrollment.assigned_provider_id
+  // on the backend. Source list comes from selectedProgram.providers
+  // (the program's attached providers, not the practice-wide list).
+  const [reassignProviderModal, setReassignProviderModal] = useState<{
+    enrollmentId: string;
+    patientName: string;
+    currentProviderId: string | null;
+    programId: string;
+    programProviders: MockProgramProvider[];
+  } | null>(null);
+  const [reassignSelectedProviderId, setReassignSelectedProviderId] = useState<string | null>(null);
+  const [reassignSubmitting, setReassignSubmitting] = useState(false);
 
   // ─── Program Plans (real MembershipPlan records) ──────────────────────────
   const [programPlans, setProgramPlans] = useState<RealMembershipPlan[]>([]);
@@ -587,6 +610,14 @@ export function ProgramsSection() {
           sponsorName: (e.sponsorName as string) || null,
           enrolledAt: e.enrolledAt ? new Date(e.enrolledAt as string).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—",
           expiresAt: e.expiresAt ? new Date(e.expiresAt as string).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : null,
+          // ProgramEnrollment::provider() loads the linked Provider row
+          // when the backend show endpoint eager-loads "provider".
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          assignedProviderId: ((e.provider as any)?.id) || (e.assignedProviderId as string | null) || (e.assigned_provider_id as string | null) || null,
+          assignedProviderName: e.provider
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            ? `${(e.provider as any).firstName || (e.provider as any).first_name || ""} ${(e.provider as any).lastName || (e.provider as any).last_name || ""}`.trim()
+            : "",
         }));
     })(),
     providers: (p.providers || p.programProviders || []).map((pv: Record<string, unknown>) => {
@@ -988,6 +1019,9 @@ export function ProgramsSection() {
         planId: enrollSelectedPlanId || undefined,
         fundingSource: enrollFundingSource,
         sponsorName: enrollFundingSource === "sponsor" ? enrollSponsorName : undefined,
+        // Optional — backend accepts null and the booking widget will
+        // surface "no provider yet, pick any program-provider" UX.
+        assignedProviderId: enrollSelectedProviderId || null,
       });
       if (res.error) {
         setEnrollError(res.error);
@@ -1001,6 +1035,7 @@ export function ProgramsSection() {
           setEnrollSuccess(false);
           setEnrollSelectedPatientId(null);
           setEnrollSelectedPlanId(null);
+          setEnrollSelectedProviderId(null);
           setEnrollPatientSearch("");
           setEnrollFundingSource("self_pay");
           setEnrollSponsorName("");
@@ -1011,7 +1046,7 @@ export function ProgramsSection() {
     } finally {
       setEnrollSubmitting(false);
     }
-  }, [enrollProgramId, enrollSelectedPatientId, enrollSelectedPlanId, enrollFundingSource, enrollSponsorName, fetchPrograms]);
+  }, [enrollProgramId, enrollSelectedPatientId, enrollSelectedPlanId, enrollSelectedProviderId, enrollFundingSource, enrollSponsorName, fetchPrograms]);
 
   const openEnrollDialog = useCallback((programId: string) => {
     setEnrollProgramId(programId);
@@ -1020,6 +1055,7 @@ export function ProgramsSection() {
     setEnrollSuccess(false);
     setEnrollSelectedPatientId(null);
     setEnrollSelectedPlanId(null);
+    setEnrollSelectedProviderId(null);
     setEnrollPatientSearch("");
     setEnrollFundingSource("self_pay");
     setEnrollSponsorName("");
@@ -1103,6 +1139,29 @@ export function ProgramsSection() {
                   <label className="block text-sm font-medium text-slate-700 mb-1">Sponsor Name</label>
                   <input type="text" value={enrollSponsorName} onChange={(e) => setEnrollSponsorName(e.target.value)}
                     placeholder="Enter sponsor name" className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:border-transparent" />
+                </div>
+              )}
+              {/* Primary provider for THIS enrollment. Optional — leaving
+                  it unset means the patient picks any program-attached
+                  provider at booking time. Source list is the program's
+                  own providers (NOT the full practice provider list)
+                  because the booking widget enforces program scoping. */}
+              {enrollProgram.providers.length > 0 && (
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Primary Provider <span className="text-xs text-slate-400 font-normal">(optional)</span></label>
+                  <select value={enrollSelectedProviderId || ""} onChange={(e) => setEnrollSelectedProviderId(e.target.value || null)}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2">
+                    <option value="">No primary provider — patient picks at booking</option>
+                    {enrollProgram.providers.filter((pv) => pv.isActive).map((pv) => (
+                      <option key={pv.id} value={pv.id}>{pv.name}{pv.credentials ? `, ${pv.credentials}` : ""}</option>
+                    ))}
+                  </select>
+                  <p className="text-xs text-slate-400 mt-1">Patient can still book with any provider on this program.</p>
+                </div>
+              )}
+              {enrollProgram.providers.length === 0 && (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                  No providers attached to this program yet — add one on the Providers tab so patients have someone to book with.
                 </div>
               )}
             </>
@@ -1633,6 +1692,7 @@ export function ProgramsSection() {
                     <tr style={{ backgroundColor: "#f8fafc" }}>
                       <th className="text-left py-3 px-4 font-semibold text-slate-600">Patient</th>
                       <th className="text-left py-3 px-4 font-semibold text-slate-600">Plan</th>
+                      <th className="text-left py-3 px-4 font-semibold text-slate-600">Provider</th>
                       <th className="text-left py-3 px-4 font-semibold text-slate-600">Status</th>
                       <th className="text-left py-3 px-4 font-semibold text-slate-600">Funding</th>
                       <th className="text-left py-3 px-4 font-semibold text-slate-600">Enrolled</th>
@@ -1655,6 +1715,13 @@ export function ProgramsSection() {
                           </div>
                         </td>
                         <td className="py-3 px-4 text-slate-600">{e.planName}</td>
+                        <td className="py-3 px-4">
+                          {e.assignedProviderName ? (
+                            <span className="text-slate-700 text-sm">{e.assignedProviderName}</span>
+                          ) : (
+                            <span className="text-slate-400 italic text-xs">Not assigned</span>
+                          )}
+                        </td>
                         <td className="py-3 px-4">
                           <EnrollmentStatusBadge status={e.status} />
                         </td>
@@ -1713,6 +1780,26 @@ export function ProgramsSection() {
                                 }}
                               >
                                 <Pencil className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                            {/* Reassign primary provider for this enrollment */}
+                            {(e.status === "active" || e.status === "paused") && (
+                              <button
+                                className="p-1.5 rounded hover:bg-slate-100 text-slate-400 hover:text-teal-600 transition-colors"
+                                title="Assign / change primary provider"
+                                disabled={enrollmentActionLoading === e.id}
+                                onClick={() => {
+                                  setReassignProviderModal({
+                                    enrollmentId: e.id,
+                                    patientName: e.patientName,
+                                    currentProviderId: e.assignedProviderId ?? null,
+                                    programId: selectedProgram.id,
+                                    programProviders: selectedProgram.providers,
+                                  });
+                                  setReassignSelectedProviderId(e.assignedProviderId ?? null);
+                                }}
+                              >
+                                <UserCog className="w-3.5 h-3.5" />
                               </button>
                             )}
                             {/* Cancel */}
@@ -2570,6 +2657,84 @@ export function ProgramsSection() {
               }}
             >
               {addProviderSubmitting ? "Adding..." : "Add Provider"}
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+
+    {/* ─── Reassign Primary Provider Modal ──────────────────────────────
+        Patches enrollment.assigned_provider_id. Source list is the
+        program's attached providers (NOT the practice-wide list).
+        Backend rejects providers that aren't on the program. */}
+    {reassignProviderModal && (
+      <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: "rgba(0,0,0,0.5)" }}>
+        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
+          <div className="px-6 py-4 border-b border-slate-100">
+            <h3 className="text-lg font-bold text-slate-900">Primary Provider</h3>
+            <p className="text-sm text-slate-500 mt-0.5">Set or change {reassignProviderModal.patientName}&apos;s provider for this enrollment.</p>
+          </div>
+          <div className="p-6 space-y-3">
+            {reassignProviderModal.programProviders.length === 0 ? (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                No providers attached to this program. Add one on the Providers tab first.
+              </div>
+            ) : (
+              <>
+                <label className="block text-xs font-medium text-slate-700">Provider</label>
+                <select
+                  value={reassignSelectedProviderId || ""}
+                  onChange={(e) => setReassignSelectedProviderId(e.target.value || null)}
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white"
+                >
+                  <option value="">No primary provider</option>
+                  {reassignProviderModal.programProviders.filter((pv) => pv.isActive).map((pv) => (
+                    <option key={pv.id} value={pv.id}>{pv.name}{pv.credentials ? `, ${pv.credentials}` : ""}</option>
+                  ))}
+                </select>
+                <p className="text-xs text-slate-400">Patient can still book with any provider on this program — this is the default.</p>
+              </>
+            )}
+          </div>
+          <div className="px-6 pb-6 flex justify-end gap-2">
+            <button
+              onClick={() => setReassignProviderModal(null)}
+              disabled={reassignSubmitting}
+              className="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100 disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={async () => {
+                if (!reassignProviderModal) return;
+                setReassignSubmitting(true);
+                const res = await programService.updateEnrollment(
+                  reassignProviderModal.programId,
+                  reassignProviderModal.enrollmentId,
+                  { assignedProviderId: reassignSelectedProviderId },
+                );
+                if (res.error) {
+                  setToast({ message: res.error, type: "error" });
+                  setReassignSubmitting(false);
+                  return;
+                }
+                setToast({ message: "Provider updated.", type: "success" });
+                const programIdToReload = reassignProviderModal.programId;
+                setReassignProviderModal(null);
+                setReassignSelectedProviderId(null);
+                setReassignSubmitting(false);
+                // Refresh both: full programs list + selectedProgram
+                // detail so the row reflects the new provider name.
+                try {
+                  const detail = await programService.get(programIdToReload);
+                  if (detail.data) setSelectedProgram(mapApiProgram(detail.data));
+                } catch { /* ignore */ }
+                fetchPrograms();
+              }}
+              disabled={reassignSubmitting}
+              className="px-4 py-2 rounded-lg text-sm font-semibold text-white bg-teal-600 hover:bg-teal-700 disabled:opacity-60"
+            >
+              {reassignSubmitting ? "Saving…" : "Save"}
             </button>
           </div>
         </div>

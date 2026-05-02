@@ -1689,13 +1689,27 @@ export const programService = {
     if (useMockData()) return mockDelete();
     return apiFetch<void>(`/programs/${id}`, { method: "DELETE" });
   },
-  enrollPatient: async (programId: string, data: { patientId: string; planId?: string; fundingSource?: string; sponsorName?: string }): Promise<ApiResponse<ProgramEnrollment>> => {
+  enrollPatient: async (programId: string, data: { patientId: string; planId?: string; fundingSource?: string; sponsorName?: string; assignedProviderId?: string | null }): Promise<ApiResponse<ProgramEnrollment>> => {
     if (useMockData()) return mockCreate<ProgramEnrollment>(data as Partial<ProgramEnrollment>);
     return apiFetch<ProgramEnrollment>(`/programs/${programId}/enroll`, { method: "POST", body: JSON.stringify(data) });
   },
   unenrollPatient: async (programId: string, enrollmentId: string, data?: { reason?: string }): Promise<ApiResponse<void>> => {
     if (useMockData()) return mockDelete();
     return apiFetch<void>(`/programs/${programId}/unenroll/${enrollmentId}`, { method: "POST", body: JSON.stringify(data || {}) });
+  },
+  // Patch an enrollment in place — today only used to (re)assign the
+  // primary provider on a patient's enrollment in this program. The
+  // backend rejects providers not attached to the program.
+  updateEnrollment: async (programId: string, enrollmentId: string, data: { assignedProviderId?: string | null }): Promise<ApiResponse<ProgramEnrollment>> => {
+    if (useMockData()) return mockUpdate<ProgramEnrollment>(data as Partial<ProgramEnrollment>);
+    return apiFetch<ProgramEnrollment>(`/programs/${programId}/enrollments/${enrollmentId}`, { method: "PATCH", body: JSON.stringify(data) });
+  },
+  // Patient self-service: list the caller's own active enrollments
+  // with assigned + bookable providers for each. Drives the booking
+  // widget's program-scoped picker.
+  myEnrollments: async (): Promise<ApiResponse<unknown[]>> => {
+    if (useMockData()) return { data: [] };
+    return apiFetch<unknown[]>("/me/enrollments");
   },
   addProvider: async (programId: string, data: { providerId: string; role?: string; panelCapacity?: number }): Promise<ApiResponse<ProgramProvider>> => {
     if (useMockData()) return mockCreate<ProgramProvider>(data);
