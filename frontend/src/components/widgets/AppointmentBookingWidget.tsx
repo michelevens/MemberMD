@@ -489,16 +489,41 @@ export function AppointmentBookingWidget({ onClose, onBooked }: AppointmentBooki
           {/* Step 3: Date & Time */}
           {step === 3 && (
             <div className="space-y-5">
-              {/* Calendar */}
-              <div>
+              {/* Mobile: native date picker. Renders as <input type="date">
+                  which on iOS/Android brings up the system date picker —
+                  faster + thumb-friendlier than the custom 7-col calendar
+                  grid, which also overflowed the modal on small screens. */}
+              <div className="md:hidden">
+                <label className="block text-xs font-semibold mb-2" style={{ color: C.slate500 }}>
+                  CHOOSE A DATE
+                </label>
+                <input
+                  type="date"
+                  min={new Date().toISOString().slice(0, 10)}
+                  value={selectedDate ? selectedDate.toISOString().slice(0, 10) : ""}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (!v) { setSelectedDate(null); return; }
+                    // Parse as local date so we don't shift a day in non-UTC timezones.
+                    const [y, m, d] = v.split("-").map(Number);
+                    setSelectedDate(new Date(y, (m ?? 1) - 1, d ?? 1));
+                    setSelectedTime(null);
+                  }}
+                  className="w-full px-3 py-3 rounded-lg border text-base"
+                  style={{ borderColor: C.slate200, color: C.navy800, backgroundColor: C.white }}
+                />
+              </div>
+
+              {/* Desktop: custom calendar (gives a fuller month overview). */}
+              <div className="hidden md:block">
                 <div className="flex items-center justify-between mb-3">
-                  <button onClick={prevMonth} className="p-1.5 rounded-lg hover:bg-slate-100 transition-colors">
+                  <button onClick={prevMonth} className="p-1.5 rounded-lg hover:bg-slate-100 transition-colors shrink-tap">
                     <ChevronLeft className="w-4 h-4" style={{ color: C.slate500 }} />
                   </button>
                   <h3 className="text-sm font-semibold" style={{ color: C.navy800 }}>
                     {calendarMonth.toLocaleDateString("en-US", { month: "long", year: "numeric" })}
                   </h3>
-                  <button onClick={nextMonth} className="p-1.5 rounded-lg hover:bg-slate-100 transition-colors">
+                  <button onClick={nextMonth} className="p-1.5 rounded-lg hover:bg-slate-100 transition-colors shrink-tap">
                     <ChevronRight className="w-4 h-4" style={{ color: C.slate500 }} />
                   </button>
                 </div>
@@ -537,7 +562,7 @@ export function AppointmentBookingWidget({ onClose, onBooked }: AppointmentBooki
                           }
                         }}
                         disabled={!available}
-                        className="aspect-square flex items-center justify-center rounded-lg text-sm transition-all"
+                        className="aspect-square flex items-center justify-center rounded-lg text-sm transition-all shrink-tap"
                         style={{
                           backgroundColor: isSelected ? C.teal500 : "transparent",
                           color: isSelected ? C.white : available ? C.navy800 : C.slate300,
@@ -728,27 +753,36 @@ export function AppointmentBookingWidget({ onClose, onBooked }: AppointmentBooki
                 </div>
               )}
 
-              {/* Book Button */}
-              <button
-                onClick={handleBook}
-                disabled={booking || (selectedType.isTeleHealth && !telehealthConsent)}
-                className="w-full py-3 rounded-xl text-sm font-bold text-white transition-all hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-2"
-                style={{ backgroundColor: C.teal500 }}
+              {/* Book Button — sticky at the bottom of the modal body so
+                  on small screens (where this column overflows) the
+                  primary action stays in reach without scrolling. The
+                  -mx-6 -mb-5 pulls it to the edges of the px-6 py-5
+                  body, mimicking a footer bar. */}
+              <div
+                className="sticky bottom-0 -mx-6 -mb-5 px-6 py-3 mt-2"
+                style={{ backgroundColor: C.white, borderTop: `1px solid ${C.slate200}` }}
               >
-                {booking ? (
-                  <>
-                    <div
-                      className="w-4 h-4 rounded-full animate-spin"
-                      style={{ borderWidth: "2px", borderStyle: "solid", borderColor: C.white, borderTopColor: "transparent" }}
-                    />
-                    Booking...
-                  </>
-                ) : (
-                  <>
-                    <Check className="w-4 h-4" /> Book Appointment
-                  </>
-                )}
-              </button>
+                <button
+                  onClick={handleBook}
+                  disabled={booking || (selectedType.isTeleHealth && !telehealthConsent)}
+                  className="w-full py-3 rounded-xl text-sm font-bold text-white transition-all hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-2"
+                  style={{ backgroundColor: C.teal500 }}
+                >
+                  {booking ? (
+                    <>
+                      <div
+                        className="w-4 h-4 rounded-full animate-spin"
+                        style={{ borderWidth: "2px", borderStyle: "solid", borderColor: C.white, borderTopColor: "transparent" }}
+                      />
+                      Booking...
+                    </>
+                  ) : (
+                    <>
+                      <Check className="w-4 h-4" /> Book Appointment
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
           )}
 

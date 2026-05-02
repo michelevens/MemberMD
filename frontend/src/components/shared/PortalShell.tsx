@@ -79,6 +79,19 @@ interface PortalShellProps {
    * Patient portal opts in; the dense Practice/SuperAdmin portals don't.
    */
   mobileBottomNav?: NavItem[];
+  /**
+   * Optional hex color override (e.g. a practice's primary_color). When
+   * set, the active bottom-tab icon and the header brand mark use this
+   * color instead of the colorMap accent for the chosen `portalColor`.
+   * Lets the patient portal feel like *their* practice's app without
+   * having to add a colorMap entry per tenant.
+   */
+  accentColor?: string;
+  /**
+   * Optional logo URL (e.g. practice logo). When set, replaces the
+   * default portalIcon in the sidebar header.
+   */
+  brandLogoUrl?: string;
 }
 
 // ─── Color palette ──────────────────────────────────────────────────────────
@@ -174,11 +187,16 @@ export function PortalShell({
   headerTitle,
   headerActions,
   mobileBottomNav,
+  accentColor,
+  brandLogoUrl,
 }: PortalShellProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const userMenuRef = useRef<HTMLDivElement>(null);
-  const colors = colorMap[portalColor];
+  const baseColors = colorMap[portalColor];
+  // Per-tenant accent overrides the colorMap so a patient on
+  // BellaCare sees BellaCare colors instead of the platform default.
+  const colors = accentColor ? { ...baseColors, accent: accentColor, badge: "" } : baseColors;
 
   const initials =
     userName
@@ -304,17 +322,28 @@ export function PortalShell({
         lg:relative lg:z-auto lg:translate-x-0
       `}
       >
-        {/* Brand Section */}
+        {/* Brand Section. When a brandLogoUrl is provided (e.g. the
+            patient's practice logo) we render the image instead of the
+            generic portal icon, and the brand square uses the practice
+            accent color. Falls back to the portalIcon + colorMap when
+            no per-tenant branding is set. */}
         <div className={`${isStripe ? "px-4 py-3.5 border-b border-slate-200" : "p-4 border-b border-gray-200/40"}`}>
           <div className="flex items-center gap-2.5">
             <div
               className={
                 isStripe
-                  ? `w-7 h-7 rounded-md bg-[#635bff] flex items-center justify-center text-white font-semibold text-[13px]`
-                  : `w-10 h-10 rounded-xl bg-gradient-to-br ${colors.gradient} flex items-center justify-center text-white font-bold text-lg shadow-md ${colors.glow}`
+                  ? `w-7 h-7 rounded-md flex items-center justify-center text-white font-semibold overflow-hidden`
+                  : `w-10 h-10 rounded-xl bg-gradient-to-br ${colors.gradient} flex items-center justify-center text-white font-bold text-lg shadow-md ${colors.glow} overflow-hidden`
               }
+              style={isStripe ? { backgroundColor: accentColor || "#635bff", fontSize: "13px" } : undefined}
             >
-              {PortalIcon ? <PortalIcon className={isStripe ? "w-3.5 h-3.5" : "w-5 h-5"} /> : "M"}
+              {brandLogoUrl ? (
+                <img src={brandLogoUrl} alt="" className="w-full h-full object-cover" />
+              ) : PortalIcon ? (
+                <PortalIcon className={isStripe ? "w-3.5 h-3.5" : "w-5 h-5"} />
+              ) : (
+                "M"
+              )}
             </div>
             <div className="flex-1 min-w-0">
               <p className={isStripe ? "text-[13px] text-slate-900 font-semibold tracking-tight truncate" : "text-sm text-gray-900 font-bold truncate"}>

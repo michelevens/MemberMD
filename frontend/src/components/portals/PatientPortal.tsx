@@ -940,6 +940,17 @@ export function PatientPortal() {
   const firstName = user?.firstName || patient.firstName || patient.firstName;
   const lastName = user?.lastName || patient.lastName || patient.lastName;
 
+  // Practice branding pulled from auth/me's user.practice payload.
+  // The User type doesn't yet declare `practice`, so cast loosely;
+  // the API guarantees these fields when set on the practice row.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const practice = (user as any)?.practice as
+    | { name?: string; logoUrl?: string | null; primaryColor?: string | null }
+    | undefined;
+  const practiceName = practice?.name?.trim() || "";
+  const practiceLogoUrl = practice?.logoUrl || "";
+  const practiceAccent = practice?.primaryColor || "";
+
   // Sidebar nav for the patient portal — single flat list since the
   // patient surface only has a handful of areas. Layout matches the
   // pattern EnnHealth ClientPortalV3 uses (Dashboard, Appointments,
@@ -2116,9 +2127,15 @@ export function PatientPortal() {
   return (
     <>
       <PortalShell
-        portalTitle="Patient Portal"
+        // Practice name as the title so the patient sees "BellaCare"
+        // (or whatever) instead of the generic "Patient Portal" — the
+        // single biggest "this feels like an app" signal. Falls back
+        // to "Patient Portal" when practice info hasn't loaded yet.
+        portalTitle={practiceName || "Patient Portal"}
         portalIcon={Heart}
         portalColor="stripe"
+        accentColor={practiceAccent || undefined}
+        brandLogoUrl={practiceLogoUrl || undefined}
         userName={fullName}
         userSubtitle={user?.email || patient.email || undefined}
         nav={sidebarNav}

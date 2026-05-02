@@ -861,6 +861,13 @@ class AuthController extends Controller
                 'practice_model' => $practice->practice_model,
                 'tenant_code' => $practice->tenant_code,
                 'operator_id' => $practice->operator_id,
+                // Branding — surfaced so the patient portal can theme its
+                // header / accent color and show the practice logo. Both
+                // are nullable; the portal falls back to the MemberMD
+                // brand when absent.
+                'logo_url' => $practice->logo_url,
+                'primary_color' => $practice->primary_color,
+                'tagline' => $practice->tagline,
             ] : null,
             'operators' => $operators,
         ];
