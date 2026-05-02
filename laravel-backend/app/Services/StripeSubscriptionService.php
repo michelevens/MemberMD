@@ -605,18 +605,28 @@ class StripeSubscriptionService
             // Create or reuse the Product. Stripe upserts via metadata aren't
             // a thing, so we always create on first sync. Re-syncs hit the
             // early-return above unless the plan was nulled out manually.
-            $product = $this->stripe()->products->create(
-                [
-                    'name' => $plan->name,
-                    'description' => $plan->description ?: null,
-                    'metadata' => [
-                        'plan_id' => $plan->id,
-                        'tenant_id' => $practice->id,
-                        'platform' => 'membermd',
-                    ],
+            // Stripe rejects an empty 'description' value (it interprets ''
+            // as an unset attempt, which Product doesn't allow). Only
+            // include the key when we actually have copy to send.
+            $productPayload = [
+                'name' => $plan->name,
+                'metadata' => [
+                    'plan_id' => $plan->id,
+                    'tenant_id' => $practice->id,
+                    'platform' => 'membermd',
                 ],
+            ];
+            if (!empty(trim((string) $plan->description))) {
+                $productPayload['description'] = $plan->description;
+            }
+
+            $product = $this->stripe()->products->create(
+                $productPayload,
                 array_merge($stripeOpts, [
-                    'idempotency_key' => "membermd-product-{$plan->id}",
+                    // v2 suffix busts the idempotency cache after the
+                    // empty-description fix — earlier failed attempts
+                    // would otherwise replay forever with the same error.
+                    'idempotency_key' => "membermd-product-{$plan->id}-v2",
                 ]),
             );
 
