@@ -2263,10 +2263,28 @@ function PatientFieldEditDialog({ mode, patient, onClose, onSaved, onError }: Pa
     }
   };
 
-  const fields = mode === "emergency"
+  // Field metadata. `kind: "select"` triggers a dropdown; `options`
+  // populates it. Mirrors the choices from the public EnrollmentWidget
+  // so the patient sees the same vocabulary at signup vs in-portal edit.
+  type Field = { key: string; label: string; kind?: "text" | "select"; options?: { value: string; label: string }[] };
+  const fields: Field[] = mode === "emergency"
     ? [
         { key: "emergency_contact_name", label: "Name" },
-        { key: "emergency_contact_relationship", label: "Relationship" },
+        {
+          key: "emergency_contact_relationship",
+          label: "Relationship",
+          kind: "select",
+          options: [
+            { value: "spouse", label: "Spouse" },
+            { value: "parent", label: "Parent" },
+            { value: "child", label: "Child" },
+            { value: "sibling", label: "Sibling" },
+            { value: "partner", label: "Partner" },
+            { value: "friend", label: "Friend" },
+            { value: "guardian", label: "Legal guardian" },
+            { value: "other", label: "Other" },
+          ],
+        },
         { key: "emergency_contact_phone", label: "Phone" },
       ]
     : [
@@ -2290,6 +2308,31 @@ function PatientFieldEditDialog({ mode, patient, onClose, onSaved, onError }: Pa
         </h3>
         <div className="space-y-3">
           {fields.map((f) => {
+            // Select fields render a dropdown with prepopulated options
+            // (e.g. the relationship field for emergency contact). Without
+            // this, patients had to type "spouse" / "parent" by hand and
+            // the resulting free-text values were inconsistent across the
+            // tenant. The select normalizes the vocabulary.
+            if (f.kind === "select") {
+              return (
+                <div key={f.key}>
+                  <label className="block text-xs font-medium mb-1" style={{ color: "#475569" }}>
+                    {f.label}
+                  </label>
+                  <select
+                    value={values[f.key] ?? ""}
+                    onChange={(e) => set(f.key, e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-teal-400"
+                  >
+                    <option value="">Select…</option>
+                    {(f.options ?? []).map((opt) => (
+                      <option key={opt.value} value={opt.value}>{opt.label}</option>
+                    ))}
+                  </select>
+                </div>
+              );
+            }
+
             // Pick the right HTML input type + mobile keyboard based on
             // the field key so iOS/Android pop the right keyboard:
             // tel keypad for phone, email pad for email, default text

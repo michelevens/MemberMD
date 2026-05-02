@@ -33,6 +33,37 @@ class PaymentMethodController extends Controller
     }
 
     /**
+     * Resolve the Stripe customer id for a patient. The `patients` table
+     * doesn't have a stripe_customer_id column — Stripe customers are
+     * tracked at the membership level (each subscription is bound to a
+     * customer record on the practice's Connect account) and at the
+     * user level (legacy ensureCustomer path).
+     *
+     * Lookup order: active membership → user → null. Returns null when
+     * the patient has never been billed (no membership AND no legacy
+     * user-level customer).
+     */
+    private function resolveStripeCustomerId(Patient $patient): ?string
+    {
+        $membership = PatientMembership::where('tenant_id', $patient->tenant_id)
+            ->where('patient_id', $patient->id)
+            ->whereIn('status', ['active', 'past_due', 'paused'])
+            ->whereNotNull('stripe_customer_id')
+            ->orderByDesc('created_at')
+            ->first();
+        if ($membership && !empty($membership->stripe_customer_id)) {
+            return $membership->stripe_customer_id;
+        }
+
+        $user = $patient->user;
+        if ($user && !empty($user->stripe_customer_id)) {
+            return $user->stripe_customer_id;
+        }
+
+        return null;
+    }
+
+    /**
      * Create a SetupIntent on the practice's connected account so the
      * patient can submit a new card via Stripe Elements.
      */
@@ -55,7 +86,8 @@ class PaymentMethodController extends Controller
             ], 422);
         }
 
-        if (empty($patient->stripe_customer_id)) {
+        $customerId = $this->resolveStripeCustomerId($patient);
+        if (empty($customerId)) {
             return response()->json([
                 'message' => 'No customer record exists yet. Complete enrollment first.',
             ], 422);
@@ -64,7 +96,7 @@ class PaymentMethodController extends Controller
         try {
             $intent = $this->stripe()->setupIntents->create(
                 [
-                    'customer' => $patient->stripe_customer_id,
+                    'customer' => $customerId,
                     'payment_method_types' => ['card'],
                     'usage' => 'off_session',
                     'metadata' => [
@@ -107,7 +139,8 @@ class PaymentMethodController extends Controller
         $patient = Patient::where('user_id', $user->id)
             ->where('tenant_id', $user->tenant_id)
             ->first();
-        if (!$patient || empty($patient->stripe_customer_id)) {
+        $customerId = $patient ? $this->resolveStripeCustomerId($patient) : null;
+        if (!$patient || empty($customerId)) {
             return response()->json(['message' => 'No customer record on file.'], 422);
         }
 
@@ -124,7 +157,7 @@ class PaymentMethodController extends Controller
         try {
             // Set as the customer's default for invoices going forward.
             $this->stripe()->customers->update(
-                $patient->stripe_customer_id,
+                $customerId,
                 [
                     'invoice_settings' => [
                         'default_payment_method' => $pmId,
@@ -188,7 +221,8 @@ class PaymentMethodController extends Controller
         $patient = Patient::where('user_id', $user->id)
             ->where('tenant_id', $user->tenant_id)
             ->first();
-        if (!$patient || empty($patient->stripe_customer_id)) {
+        $customerId = $patient ? $this->resolveStripeCustomerId($patient) : null;
+        if (!$patient || empty($customerId)) {
             return response()->json(['data' => []]);
         }
 
@@ -200,14 +234,14 @@ class PaymentMethodController extends Controller
         try {
             $list = $this->stripe()->paymentMethods->all(
                 [
-                    'customer' => $patient->stripe_customer_id,
+                    'customer' => $customerId,
                     'type' => 'card',
                 ],
                 ['stripe_account' => $practice->stripe_account_id],
             );
 
             $customer = $this->stripe()->customers->retrieve(
-                $patient->stripe_customer_id,
+                $customerId,
                 [],
                 ['stripe_account' => $practice->stripe_account_id],
             );

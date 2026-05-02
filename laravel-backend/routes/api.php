@@ -266,6 +266,11 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
     Route::post('/appointments/{id}/confirm', [AppointmentController::class, 'confirm']);
     Route::apiResource('appointments', AppointmentController::class);
 
+    // Appointment type list for the booking widgets. Patient-callable
+    // (the self-booking widget loads this on step 2 to populate the
+    // visit-type picker). Tenant-scoped + active-only in the controller.
+    Route::get('/appointment-types', [\App\Http\Controllers\Api\AppointmentTypeController::class, 'index']);
+
     // ===== Encounters =====
     Route::post('/encounters/{id}/sign', [EncounterController::class, 'sign']);
     Route::apiResource('encounters', EncounterController::class)->except(['destroy']);
