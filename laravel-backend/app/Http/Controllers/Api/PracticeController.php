@@ -233,12 +233,20 @@ class PracticeController extends Controller
                 ->where('role', 'practice_admin')
                 ->orderBy('created_at')
                 ->first();
-            if ($admin) {
+            if ($admin && $admin->email) {
+                \Illuminate\Support\Facades\Log::info('Practice approval email dispatch', [
+                    'practice_id' => $practice->id,
+                    'recipient' => $admin->email,
+                ]);
                 \App\Services\MailDispatcher::send(
                     $admin->email,
                     new \App\Mail\PracticeApprovedEmail(user: $admin, practice: $practice),
                     'practice-approved',
                 );
+            } else {
+                \Illuminate\Support\Facades\Log::warning('Approval email skipped — no admin user found', [
+                    'practice_id' => $practice->id,
+                ]);
             }
         } catch (\Throwable $e) {
             \Illuminate\Support\Facades\Log::warning('Approval email failed', [

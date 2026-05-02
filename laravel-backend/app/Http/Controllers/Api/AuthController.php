@@ -329,11 +329,43 @@ class AuthController extends Controller
         }
 
         // Notify Superadmin(s) that a new practice is awaiting review.
+        // Recipient list:
+        //   1. Always include SUPERADMIN_NOTIFICATION_EMAIL when set —
+        //      production uses this to route alerts to a real inbox
+        //      (the seeded super@membermd.io account is for sign-in,
+        //      not necessarily a deliverable address).
+        //   2. Plus every active superadmin user with a deliverable
+        //      email (skip the seed account when its email is the
+        //      placeholder).
         try {
-            $superadmins = User::where('role', 'superadmin')->get();
+            $recipients = [];
+            $envInbox = env('SUPERADMIN_NOTIFICATION_EMAIL');
+            if (is_string($envInbox) && filter_var($envInbox, FILTER_VALIDATE_EMAIL)) {
+                $recipients[] = $envInbox;
+            }
+            $superadmins = User::where('role', 'superadmin')
+                ->where('status', 'active')
+                ->get();
             foreach ($superadmins as $admin) {
+                if (!$admin->email) continue;
+                // Skip the placeholder seed inbox — it points nowhere
+                // real and would just generate failed-send noise in
+                // mail_dispatch_logs. Production should set
+                // SUPERADMIN_NOTIFICATION_EMAIL to override.
+                if ($admin->email === 'super@membermd.io') continue;
+                $recipients[] = $admin->email;
+            }
+            $recipients = array_values(array_unique($recipients));
+
+            \Illuminate\Support\Facades\Log::info('Superadmin new-practice notification dispatch', [
+                'practice_id' => $practice->id,
+                'recipient_count' => count($recipients),
+                'recipients' => $recipients,
+            ]);
+
+            foreach ($recipients as $to) {
                 \App\Services\MailDispatcher::send(
-                    $admin->email,
+                    $to,
                     new \App\Mail\NewPracticeApplicationEmail(
                         practice: $practice,
                         applicantUser: $user,
