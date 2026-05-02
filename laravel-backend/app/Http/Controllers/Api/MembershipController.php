@@ -656,6 +656,85 @@ class MembershipController extends Controller
         ]);
     }
 
+    /**
+     * Patient-initiated "cancel and refund" within the plan's refund window.
+     *
+     * Refunds the latest paid invoice via Stripe, hard-cancels the subscription
+     * (immediately, not at-period-end), and transitions the membership to
+     * cancelled with reason='refund_within_window'. Outside the window this
+     * 422s — the patient should use the standard self-cancel flow instead,
+     * which ends coverage at period close without a refund.
+     *
+     * Comped and manual memberships (no Stripe charge to refund) get a
+     * regular immediate cancel — the refund_amount is 0.
+     */
+    public function selfCancelAndRefund(Request $request, string $id): JsonResponse
+    {
+        $user = $request->user();
+        abort_if(!$user->isPatient(), 403);
+
+        $membership = PatientMembership::where('tenant_id', $user->tenant_id)
+            ->whereHas('patient', fn ($q) => $q->where('user_id', $user->id))
+            ->with('plan')
+            ->findOrFail($id);
+
+        if ($membership->status === 'cancelled') {
+            return response()->json(['message' => 'Membership is already cancelled.'], 422);
+        }
+
+        $windowDays = (int) ($membership->plan->refund_window_days ?? 14);
+        $startedAt = $membership->started_at ?? $membership->created_at;
+        $deadline = $startedAt ? $startedAt->copy()->addDays($windowDays) : null;
+
+        if (!$deadline || $deadline->isPast()) {
+            return response()->json([
+                'message' => "The refund window of {$windowDays} days has passed. You can still cancel — your coverage will continue through the end of the current billing period.",
+            ], 422);
+        }
+
+        $validated = $request->validate([
+            'reason' => 'nullable|string|max:500',
+        ]);
+
+        $refundedAmount = 0.0;
+        if ($membership->billing_mode === 'stripe' && !empty($membership->stripe_subscription_id)) {
+            try {
+                $refundedAmount = $this->subscriptions->refundLatestInvoice($membership);
+            } catch (\Throwable $e) {
+                Log::warning('Refund within window failed', [
+                    'membership_id' => $membership->id,
+                    'error' => $e->getMessage(),
+                ]);
+                return response()->json([
+                    'message' => 'Could not process the refund. Please contact support.',
+                ], 422);
+            }
+        }
+
+        // Hard cancel (immediate) on the Stripe side so the patient isn't
+        // charged again at period end. selfCancel uses cancel_at_period_end —
+        // this flow is different because we just refunded, so the membership
+        // ends now.
+        $this->cancelStripeSubscription($membership, true);
+
+        $reason = trim((string) ($validated['reason'] ?? '')) !== ''
+            ? "refund_within_window: {$validated['reason']}"
+            : 'refund_within_window';
+
+        $this->states->transition($membership, 'cancelled', [
+            'cancelled_at' => now(),
+            'cancel_reason' => $reason,
+        ]);
+
+        return response()->json([
+            'data' => $membership->fresh()->load(['plan']),
+            'refunded_amount' => $refundedAmount,
+            'message' => $refundedAmount > 0
+                ? "Your membership has been cancelled and \${$refundedAmount} was refunded."
+                : 'Your membership has been cancelled.',
+        ]);
+    }
+
     private function cancelStripeSubscription(PatientMembership $membership, bool $immediately): void
     {
         if (empty($membership->stripe_subscription_id)) {

@@ -285,6 +285,7 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
     // which lives in the practice-admin route group below). Patients can only
     // cancel their own membership; the controller enforces ownership.
     Route::post('/memberships/{id}/self-cancel', [MembershipController::class, 'selfCancel']);
+    Route::post('/memberships/{id}/cancel-and-refund', [MembershipController::class, 'selfCancelAndRefund']);
     Route::apiResource('memberships', MembershipController::class)->except(['destroy']);
 
     // ===== Screenings =====

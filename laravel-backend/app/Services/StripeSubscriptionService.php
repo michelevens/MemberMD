@@ -396,6 +396,84 @@ class StripeSubscriptionService
     }
 
     /**
+     * Refund the most recent paid invoice on this subscription. Used by the
+     * patient-portal "cancel and refund within window" flow.
+     *
+     * Stripe-side: looks up the latest paid invoice for the subscription,
+     * pulls its payment_intent, calls refunds->create with reason='requested_by_customer'.
+     * Idempotency-keyed by membership id so re-clicks within the window
+     * don't double-refund.
+     *
+     * Local-side: stamps the matching Invoice row with refunded_at +
+     * refund_amount and flips its status to 'refunded'.
+     *
+     * Returns the refunded amount in dollars (0 if nothing to refund).
+     */
+    public function refundLatestInvoice(PatientMembership $membership): float
+    {
+        if (empty($membership->stripe_subscription_id)) {
+            return 0.0;
+        }
+
+        $practice = $membership->tenant ?? Practice::findOrFail($membership->tenant_id);
+        $stripeOpts = ['stripe_account' => $practice->stripe_account_id];
+
+        try {
+            $invoices = $this->stripe()->invoices->all(
+                [
+                    'subscription' => $membership->stripe_subscription_id,
+                    'status' => 'paid',
+                    'limit' => 1,
+                ],
+                $stripeOpts,
+            );
+
+            $latest = $invoices->data[0] ?? null;
+            if (!$latest || empty($latest->payment_intent)) {
+                return 0.0;
+            }
+
+            $refund = $this->stripe()->refunds->create(
+                [
+                    'payment_intent' => $latest->payment_intent,
+                    'reason' => 'requested_by_customer',
+                    'metadata' => [
+                        'membership_id' => $membership->id,
+                        'platform' => 'membermd',
+                        'flow' => 'self_cancel_within_window',
+                    ],
+                ],
+                array_merge($stripeOpts, [
+                    'idempotency_key' => "membermd-refund-{$membership->id}",
+                ]),
+            );
+        } catch (ApiErrorException $e) {
+            throw new RuntimeException("Failed to issue refund: {$e->getMessage()}", 0, $e);
+        }
+
+        $refundedDollars = ($refund->amount ?? 0) / 100;
+
+        // Stamp the local Invoice row so the patient portal + practice
+        // billing tab reflect the refund without waiting for the
+        // charge.refunded webhook.
+        \App\Models\Invoice::where('tenant_id', $practice->id)
+            ->where('stripe_invoice_id', $latest->id)
+            ->update([
+                'status' => 'refunded',
+                'refund_amount' => $refundedDollars,
+                'refunded_at' => now(),
+            ]);
+
+        $this->audit($practice, $membership, 'subscription_refunded_within_window', [
+            'stripe_invoice_id' => $latest->id,
+            'stripe_refund_id' => $refund->id,
+            'amount' => $refundedDollars,
+        ]);
+
+        return $refundedDollars;
+    }
+
+    /**
      * Record an overage charge on a membership.
      *
      * Always writes a local Invoice row first (`status='pending'`) so the

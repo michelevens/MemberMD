@@ -25,6 +25,7 @@ interface ActiveMembership {
   currentPeriodStart: string | null;
   currentPeriodEnd: string | null;
   billingFrequency: string | null;
+  billingMode: string | null;
   plan: {
     id: string;
     name: string;
@@ -34,6 +35,7 @@ interface ActiveMembership {
     visitsPerMonth: number | null;
     telehealthIncluded: boolean | null;
     messagingIncluded: boolean | null;
+    refundWindowDays: number | null;
   } | null;
 }
 
@@ -88,6 +90,10 @@ export function EntitlementsTab({ patientId }: Props) {
   const [entitlements, setEntitlements] = useState<EntitlementRow[]>([]);
   const [utilization, setUtilization] = useState<UtilizationItem[]>([]);
   const [agreements, setAgreements] = useState<ConsentSignature[]>([]);
+  const [cancelDialog, setCancelDialog] = useState(false);
+  const [cancelLoading, setCancelLoading] = useState(false);
+  const [cancelError, setCancelError] = useState<string | null>(null);
+  const [cancelSuccess, setCancelSuccess] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -159,6 +165,43 @@ export function EntitlementsTab({ patientId }: Props) {
     );
   }
 
+  const refundWindow = (() => {
+    if (!membership || !membership.startedAt || membership.status !== "active") {
+      return { eligible: false, daysLeft: 0, deadline: null as Date | null, windowDays: 0 };
+    }
+    const days = membership.plan?.refundWindowDays ?? 14;
+    const started = new Date(membership.startedAt);
+    if (isNaN(started.getTime())) return { eligible: false, daysLeft: 0, deadline: null, windowDays: days };
+    const deadline = new Date(started.getTime() + days * 86400000);
+    const daysLeft = Math.max(0, Math.ceil((deadline.getTime() - Date.now()) / 86400000));
+    return { eligible: deadline.getTime() > Date.now(), daysLeft, deadline, windowDays: days };
+  })();
+
+  const handleCancelAndRefund = async () => {
+    if (!membership) return;
+    setCancelLoading(true);
+    setCancelError(null);
+    const res = await apiFetch<{ refundedAmount?: number; message?: string }>(
+      `/memberships/${membership.id}/cancel-and-refund`,
+      { method: "POST", body: JSON.stringify({}) },
+    );
+    setCancelLoading(false);
+    if (res.error) {
+      setCancelError(res.error);
+      return;
+    }
+    const amt = (res.data as { refundedAmount?: number } | undefined)?.refundedAmount ?? 0;
+    setCancelSuccess(
+      amt > 0
+        ? `Membership cancelled. $${amt.toFixed(2)} has been refunded.`
+        : "Membership cancelled.",
+    );
+    setCancelDialog(false);
+    setMembership(null);
+    setEntitlements([]);
+    setUtilization([]);
+  };
+
   return (
     <div className="space-y-5">
       {/* Page header */}
@@ -216,6 +259,30 @@ export function EntitlementsTab({ patientId }: Props) {
               </div>
               <Award className="w-6 h-6 shrink-0 text-[#635bff]" />
             </div>
+            {refundWindow.eligible && membership.billingMode === "stripe" && (
+              <div className="mt-4 pt-4 border-t border-slate-100">
+                <div className="flex items-center justify-between gap-3 flex-wrap">
+                  <p className="text-xs text-slate-500">
+                    Not satisfied? Cancel within {refundWindow.windowDays} days for a full refund.{" "}
+                    <span className="font-medium text-slate-700">
+                      {refundWindow.daysLeft} day{refundWindow.daysLeft === 1 ? "" : "s"} left
+                    </span>
+                    .
+                  </p>
+                  <button
+                    onClick={() => { setCancelDialog(true); setCancelError(null); }}
+                    className="text-xs font-medium px-3 py-1.5 rounded-md border border-slate-200 hover:bg-slate-50 transition-colors text-slate-700"
+                  >
+                    Cancel & refund
+                  </button>
+                </div>
+              </div>
+            )}
+            {cancelSuccess && (
+              <div className="mt-4 pt-4 border-t border-slate-100 text-sm text-emerald-700">
+                {cancelSuccess}
+              </div>
+            )}
           </div>
         ) : (
           <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center">
@@ -360,6 +427,51 @@ export function EntitlementsTab({ patientId }: Props) {
           </div>
         )}
       </section>
+
+      {cancelDialog && membership && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: "rgba(15,23,42,0.5)" }}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
+            <div className="px-6 py-4 border-b border-slate-100">
+              <h3 className="text-lg font-semibold text-slate-900">Cancel & refund</h3>
+              <p className="text-sm text-slate-500 mt-0.5">Cancels {membership.plan?.name} immediately and refunds your last payment.</p>
+            </div>
+            <div className="px-6 py-5 space-y-3 text-sm text-slate-700">
+              <p>
+                You're within the {refundWindow.windowDays}-day satisfaction window
+                ({refundWindow.daysLeft} day{refundWindow.daysLeft === 1 ? "" : "s"} left).
+                Confirming will:
+              </p>
+              <ul className="list-disc list-inside space-y-1 text-slate-600">
+                <li>End your membership today (no further charges)</li>
+                <li>Refund your most recent payment in full</li>
+                <li>Remove your access to plan benefits immediately</li>
+              </ul>
+              {cancelError && (
+                <div className="rounded-md bg-red-50 border border-red-200 px-3 py-2 text-xs text-red-700">
+                  {cancelError}
+                </div>
+              )}
+            </div>
+            <div className="px-6 py-4 border-t border-slate-100 flex justify-end gap-3">
+              <button
+                onClick={() => { setCancelDialog(false); setCancelError(null); }}
+                disabled={cancelLoading}
+                className="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100 transition-colors disabled:opacity-50"
+              >
+                Keep membership
+              </button>
+              <button
+                onClick={handleCancelAndRefund}
+                disabled={cancelLoading}
+                className="px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors disabled:opacity-50"
+                style={{ backgroundColor: "#dc2626" }}
+              >
+                {cancelLoading ? "Processing…" : "Confirm cancel & refund"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
