@@ -931,6 +931,8 @@ export function PracticePortal() {
   const [rosterAvailablePlansLoading, setRosterAvailablePlansLoading] = useState(false);
   const [rosterSelectedPlanId, setRosterSelectedPlanId] = useState<string | null>(null);
   const [rosterPlanActionLoading, setRosterPlanActionLoading] = useState(false);
+  const [rosterCompEnabled, setRosterCompEnabled] = useState(false);
+  const [rosterCompReason, setRosterCompReason] = useState("");
 
   // ─── Quick Activity Log Form (patient detail) ─────────────────────────
   const [showQuickActivityLog, setShowQuickActivityLog] = useState(false);
@@ -1473,20 +1475,35 @@ export function PracticePortal() {
           loadPracticeData();
         }
       } else {
+        if (rosterCompEnabled && !rosterCompReason.trim()) {
+          setToast({ message: "Comp reason is required for a comped membership.", type: "error" });
+          setRosterPlanActionLoading(false);
+          return;
+        }
+        const body: Record<string, unknown> = {
+          patientId: rosterPlanDialog.patientId,
+          planId: rosterSelectedPlanId,
+          billingFrequency: "monthly",
+        };
+        if (rosterCompEnabled) {
+          body.comp = true;
+          body.compReason = rosterCompReason.trim();
+        }
         const res = await apiFetch("/memberships", {
           method: "POST",
-          body: JSON.stringify({
-            patientId: rosterPlanDialog.patientId,
-            planId: rosterSelectedPlanId,
-            billingFrequency: "monthly",
-          }),
+          body: JSON.stringify(body),
         });
         if (res.error) {
           setToast({ message: res.error, type: "error" });
         } else {
-          setToast({ message: "Patient enrolled in plan.", type: "success" });
+          setToast({
+            message: rosterCompEnabled ? "Patient enrolled (comped)." : "Patient enrolled in plan.",
+            type: "success",
+          });
           setRosterPlanDialog(null);
           setRosterSelectedPlanId(null);
+          setRosterCompEnabled(false);
+          setRosterCompReason("");
           loadPracticeData();
         }
       }
@@ -1494,7 +1511,7 @@ export function PracticePortal() {
       setToast({ message: rosterPlanDialog.mode === "change" ? "Failed to change plan." : "Failed to enroll patient.", type: "error" });
     }
     setRosterPlanActionLoading(false);
-  }, [rosterPlanDialog, rosterSelectedPlanId, loadPracticeData, setToast]);
+  }, [rosterPlanDialog, rosterSelectedPlanId, rosterCompEnabled, rosterCompReason, loadPracticeData, setToast]);
 
   // ─── Quick activity log submit ─────────────────────────────────────────
   const handleQuickActivityLog = useCallback(async (patientId: string) => {
@@ -9178,22 +9195,64 @@ export function PracticePortal() {
                 </div>
               )}
             </div>
+            {rosterPlanDialog.mode === "enroll" && (
+              <div className="px-6 pb-2">
+                <div className="rounded-lg border border-slate-200 px-4 py-3">
+                  <label className="flex items-start gap-3 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={rosterCompEnabled}
+                      onChange={(e) => setRosterCompEnabled(e.target.checked)}
+                      className="mt-0.5 w-4 h-4 rounded border-slate-300"
+                      style={{ accentColor: "#635bff" }}
+                    />
+                    <div className="flex-1">
+                      <div className="text-sm font-medium text-slate-800">Comp this membership</div>
+                      <div className="text-xs text-slate-500 mt-0.5">
+                        Skip Stripe billing. Used for staff plans, charity care, or beta users. Audit-logged.
+                      </div>
+                    </div>
+                  </label>
+                  {rosterCompEnabled && (
+                    <div className="mt-3">
+                      <label className="block text-xs font-medium text-slate-600 mb-1">
+                        Reason <span style={{ color: "#dc2626" }}>*</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={rosterCompReason}
+                        onChange={(e) => setRosterCompReason(e.target.value)}
+                        placeholder="e.g. Staff plan, charity care, beta tester"
+                        maxLength={500}
+                        className="w-full px-3 py-2 text-sm rounded-md border border-slate-200 focus:outline-none focus:ring-2"
+                        style={{ outlineColor: "#635bff" }}
+                      />
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
             <div className="px-6 pb-6 flex justify-end gap-3">
               <button
-                onClick={() => { setRosterPlanDialog(null); setRosterSelectedPlanId(null); }}
+                onClick={() => {
+                  setRosterPlanDialog(null);
+                  setRosterSelectedPlanId(null);
+                  setRosterCompEnabled(false);
+                  setRosterCompReason("");
+                }}
                 className="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100 transition-colors"
               >
                 Cancel
               </button>
               <button
                 onClick={handleRosterPlanAction}
-                disabled={!rosterSelectedPlanId || rosterPlanActionLoading}
+                disabled={!rosterSelectedPlanId || rosterPlanActionLoading || (rosterCompEnabled && !rosterCompReason.trim())}
                 className="px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors disabled:opacity-50"
                 style={{ backgroundColor: "#0D9488" }}
               >
                 {rosterPlanActionLoading
                   ? (rosterPlanDialog.mode === "change" ? "Changing..." : "Enrolling...")
-                  : (rosterPlanDialog.mode === "change" ? "Change Plan" : "Enroll")}
+                  : (rosterPlanDialog.mode === "change" ? "Change Plan" : (rosterCompEnabled ? "Enroll (Comped)" : "Enroll"))}
               </button>
             </div>
           </div>
