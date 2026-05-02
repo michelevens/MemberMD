@@ -133,15 +133,77 @@ class MembershipController extends Controller
         $patient = Patient::where('tenant_id', $user->tenant_id)
             ->findOrFail($validated['patient_id']);
 
+        return $this->buildOrReusePaymentLink(
+            user: $user,
+            patient: $patient,
+            planId: $validated['plan_id'],
+            billingFrequency: $billingFrequency,
+            sendEmail: true,
+        );
+    }
+
+    /**
+     * Patient-initiated enrollment from the dashboard "Choose your plan"
+     * flow. The patient is already authenticated, so we don't need to
+     * collect anything — just create a Stripe Checkout session for them
+     * and return the URL so the SPA can redirect. Webhook converts the
+     * pending row to a real PatientMembership when payment lands, same
+     * as the admin-sent payment link path.
+     *
+     * No email — they're staring at the dashboard right now and will
+     * be redirected straight to Stripe Checkout.
+     */
+    public function selfEnroll(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        abort_if($user->role !== 'patient', 403);
+
+        $validated = $request->validate([
+            'plan_id' => 'required|uuid|exists:membership_plans,id',
+            'billing_frequency' => 'sometimes|string|in:monthly,annual',
+        ]);
+
+        $patient = Patient::where('tenant_id', $user->tenant_id)
+            ->where('user_id', $user->id)
+            ->first();
+        if (!$patient) {
+            return response()->json([
+                'message' => 'Your account is not linked to a patient record. Contact the practice.',
+            ], 422);
+        }
+
+        return $this->buildOrReusePaymentLink(
+            user: $user,
+            patient: $patient,
+            planId: $validated['plan_id'],
+            billingFrequency: $validated['billing_frequency'] ?? 'monthly',
+            sendEmail: false,
+        );
+    }
+
+    /**
+     * Shared body of sendPaymentLink + selfEnroll. Both paths need the
+     * same active-membership preflight, idempotency check, Stripe
+     * Checkout session creation, and pending-enrollment side row. The
+     * only differences are: who calls it (admin vs patient), and
+     * whether to fire the payment-link email.
+     */
+    private function buildOrReusePaymentLink(
+        \App\Models\User $user,
+        Patient $patient,
+        string $planId,
+        string $billingFrequency,
+        bool $sendEmail,
+    ): JsonResponse {
         if (empty($patient->email)) {
             return response()->json([
-                'message' => 'Patient has no email on file. Add one before sending a payment link.',
+                'message' => 'No email on file. Add one before enrolling.',
             ], 422);
         }
 
         $plan = MembershipPlan::where('tenant_id', $user->tenant_id)
             ->where('is_active', true)
-            ->findOrFail($validated['plan_id']);
+            ->findOrFail($planId);
 
         $practice = Practice::findOrFail($user->tenant_id);
 
@@ -158,7 +220,7 @@ class MembershipController extends Controller
             ->exists();
         if ($hasActive) {
             return response()->json([
-                'message' => 'Patient already has an active membership.',
+                'message' => 'You already have an active membership.',
             ], 422);
         }
 
@@ -172,7 +234,9 @@ class MembershipController extends Controller
             ->first();
 
         if ($existing) {
-            $this->dispatchPaymentLinkEmail($patient, $practice, $plan, $existing);
+            if ($sendEmail) {
+                $this->dispatchPaymentLinkEmail($patient, $practice, $plan, $existing);
+            }
             return response()->json([
                 'data' => [
                     'pending_enrollment_id' => $existing->id,
@@ -180,7 +244,7 @@ class MembershipController extends Controller
                     'expires_at' => $existing->expires_at,
                     'reused' => true,
                 ],
-                'message' => 'Resent existing payment link.',
+                'message' => $sendEmail ? 'Resent existing payment link.' : 'Existing checkout session.',
             ]);
         }
 
@@ -219,7 +283,7 @@ class MembershipController extends Controller
                 'error' => $e->getMessage(),
             ]);
             return response()->json([
-                'message' => 'Could not create payment link: ' . $e->getMessage(),
+                'message' => 'Could not create checkout session: ' . $e->getMessage(),
             ], 422);
         }
 
@@ -230,7 +294,9 @@ class MembershipController extends Controller
             'expires_at' => $session['expires_at'],
         ]);
 
-        $this->dispatchPaymentLinkEmail($patient, $practice, $plan, $pending->fresh());
+        if ($sendEmail) {
+            $this->dispatchPaymentLinkEmail($patient, $practice, $plan, $pending->fresh());
+        }
 
         return response()->json([
             'data' => [
@@ -239,7 +305,7 @@ class MembershipController extends Controller
                 'expires_at' => $pending->expires_at,
                 'reused' => false,
             ],
-            'message' => 'Payment link sent.',
+            'message' => $sendEmail ? 'Payment link sent.' : 'Checkout session created.',
         ], 201);
     }
 

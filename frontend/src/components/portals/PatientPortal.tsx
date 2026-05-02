@@ -43,6 +43,7 @@ import {
   Video,
   Clock,
   Check,
+  X,
   CheckCircle,
   FileText,
   Download,
@@ -517,6 +518,15 @@ export function PatientPortal() {
   const [showBookingWidget, setShowBookingWidget] = useState(false);
   const push = usePushNotifications();
 
+  // Plan-detail modal opened from the dashboard "Choose your plan"
+  // section. Holds the full plan record so the modal can render
+  // features + an Enroll & Pay button that creates a Stripe Checkout
+  // session via /memberships/self-enroll and redirects.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [selectedPlanForDetail, setSelectedPlanForDetail] = useState<any | null>(null);
+  const [enrollingPlanId, setEnrollingPlanId] = useState<string | null>(null);
+  const [enrollError, setEnrollError] = useState<string | null>(null);
+
   const [activeThread, setActiveThread] = useState<string | null>(null);
   const [messageInput, setMessageInput] = useState("");
   const [sendingMessage, setSendingMessage] = useState(false);
@@ -843,6 +853,35 @@ export function PatientPortal() {
   }, []);
 
   // ─── Action handlers ─────────────────────────────────────────────────────
+
+  // Patient self-enrollment from the "Choose your plan" modal. Creates
+  // a Stripe Checkout session via /memberships/self-enroll and
+  // redirects the patient straight to it. Webhook converts the pending
+  // row into a real PatientMembership when payment lands, same flow
+  // as the admin payment-link path.
+  const handleSelfEnroll = useCallback(async (planId: string, billingFrequency: "monthly" | "annual" = "monthly") => {
+    setEnrollingPlanId(planId);
+    setEnrollError(null);
+    try {
+      const res = await apiFetch<{ checkoutUrl?: string }>("/memberships/self-enroll", {
+        method: "POST",
+        body: JSON.stringify({ plan_id: planId, billing_frequency: billingFrequency }),
+      });
+      if (res.error) {
+        setEnrollError(res.error);
+      } else if (res.data?.checkoutUrl) {
+        // Redirect to Stripe Checkout. The patient pays, Stripe fires
+        // checkout.session.completed, webhook creates the membership,
+        // patient lands on /#/enrollment/success.
+        window.location.href = res.data.checkoutUrl;
+      } else {
+        setEnrollError("Could not start checkout. Please try again.");
+      }
+    } catch {
+      setEnrollError("Could not start checkout. Please try again.");
+    }
+    setEnrollingPlanId(null);
+  }, []);
 
   const handleSendMessage = useCallback(async () => {
     const body = messageInput.trim();
@@ -1188,7 +1227,7 @@ export function PatientPortal() {
                 return (
                   <button
                     key={plan.id}
-                    onClick={() => setActiveTab("account")}
+                    onClick={() => setSelectedPlanForDetail(plan)}
                     className="text-left rounded-xl border p-4 transition-colors hover:border-teal-400"
                     style={{ borderColor: COLORS.slate200 }}
                   >
@@ -2356,6 +2395,131 @@ export function PatientPortal() {
           onBooked={() => setShowBookingWidget(false)}
         />
       )}
+
+      {/* Plan-detail modal — opened from the dashboard "Choose your plan"
+          empty state. Renders full plan info (name + price + description
+          + features list) and an Enroll & Pay button that creates a
+          Stripe Checkout session and redirects. */}
+      {selectedPlanForDetail && (() => {
+        const plan = selectedPlanForDetail;
+        const planName = plan.name || "Membership";
+        const monthly = plan.monthlyPrice ?? plan.monthly_price ?? null;
+        const annual = plan.annualPrice ?? plan.annual_price ?? null;
+        const description = plan.description || plan.tagline || "";
+        // features_list is a JSON column on membership_plans; normalize
+        // to an array of strings.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const rawFeatures: any = plan.featuresList ?? plan.features_list ?? plan.features ?? [];
+        const features: string[] = Array.isArray(rawFeatures)
+          ? rawFeatures.map((f) => typeof f === "string" ? f : (f?.label ?? f?.name ?? ""))
+          : [];
+        // Plan entitlements (visits/telehealth/messaging) are surfaced
+        // inline as bullets too — they're the real value drivers.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const entLabels: string[] = (plan.planEntitlements ?? plan.plan_entitlements ?? []).map((e: any) => {
+          const name = e?.entitlementType?.name ?? e?.entitlement_type?.name ?? "Benefit";
+          const qty = e?.quantityLimit ?? e?.quantity_limit;
+          const unlimited = e?.isUnlimited ?? e?.is_unlimited;
+          if (unlimited) return `Unlimited ${name.toLowerCase()}`;
+          if (qty != null && qty > 0) return `${qty} ${name.toLowerCase()}`;
+          return name;
+        }).filter(Boolean);
+        const isLoading = enrollingPlanId === plan.id;
+
+        return (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center p-4"
+            style={{ backgroundColor: "rgba(15, 23, 42, 0.55)" }}
+            onClick={() => { setSelectedPlanForDetail(null); setEnrollError(null); }}
+          >
+            <div
+              className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+                <h3 className="text-lg font-bold text-slate-900">{planName}</h3>
+                <button
+                  onClick={() => { setSelectedPlanForDetail(null); setEnrollError(null); }}
+                  className="p-1 rounded hover:bg-slate-100 text-slate-400"
+                  aria-label="Close"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="p-6 space-y-4">
+                <div className="flex items-baseline gap-1">
+                  {monthly !== null && (
+                    <>
+                      <span className="text-3xl font-bold text-slate-900">${Number(monthly).toFixed(0)}</span>
+                      <span className="text-sm text-slate-500">/month</span>
+                    </>
+                  )}
+                  {monthly === null && annual !== null && (
+                    <>
+                      <span className="text-3xl font-bold text-slate-900">${Number(annual).toFixed(0)}</span>
+                      <span className="text-sm text-slate-500">/year</span>
+                    </>
+                  )}
+                </div>
+
+                {description && (
+                  <p className="text-sm text-slate-600 leading-relaxed">{description}</p>
+                )}
+
+                {(entLabels.length > 0 || features.length > 0) && (
+                  <div>
+                    <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">
+                      What's included
+                    </p>
+                    <ul className="space-y-1.5">
+                      {entLabels.map((label, i) => (
+                        <li key={`e-${i}`} className="flex items-start gap-2 text-sm text-slate-700">
+                          <Check className="w-4 h-4 text-teal-500 mt-0.5 shrink-0" />
+                          <span>{label}</span>
+                        </li>
+                      ))}
+                      {features.map((f, i) => (
+                        <li key={`f-${i}`} className="flex items-start gap-2 text-sm text-slate-700">
+                          <Check className="w-4 h-4 text-teal-500 mt-0.5 shrink-0" />
+                          <span>{f}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {enrollError && (
+                  <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                    {enrollError}
+                  </div>
+                )}
+
+                <p className="text-xs text-slate-400 leading-relaxed">
+                  You'll be redirected to Stripe to enter payment details. You can cancel any time before completing payment.
+                </p>
+              </div>
+
+              <div className="px-6 pb-6 flex flex-col gap-2">
+                <button
+                  onClick={() => handleSelfEnroll(plan.id, "monthly")}
+                  disabled={isLoading || (monthly === null && annual === null)}
+                  className="w-full py-3 rounded-xl text-sm font-semibold text-white transition-colors disabled:opacity-50"
+                  style={{ backgroundColor: COLORS.teal500 }}
+                >
+                  {isLoading ? "Opening Stripe…" : "Enroll & pay"}
+                </button>
+                <button
+                  onClick={() => { setSelectedPlanForDetail(null); setEnrollError(null); }}
+                  className="w-full py-2.5 rounded-xl text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
       <CommandPalette
         open={paletteOpen}
         onClose={() => setPaletteOpen(false)}

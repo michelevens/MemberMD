@@ -305,6 +305,11 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
     Route::post('/memberships/{id}/self-cancel', [MembershipController::class, 'selfCancel']);
     Route::post('/memberships/{id}/cancel-and-refund', [MembershipController::class, 'selfCancelAndRefund']);
     Route::post('/memberships/payment-link', [MembershipController::class, 'sendPaymentLink']);
+    // Patient-initiated self-enrollment from the dashboard "Choose your
+    // plan" flow. Creates a Stripe Checkout session for the caller's own
+    // user and returns the URL so the SPA can redirect. Webhook converts
+    // pending → membership when payment lands.
+    Route::post('/memberships/self-enroll', [MembershipController::class, 'selfEnroll']);
     // Pending-enrollment reconciliation. Lets a practice admin see widget
     // submissions / payment links that haven't yet converted into a real
     // membership, and force-reconcile against Stripe when the
