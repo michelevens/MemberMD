@@ -2535,17 +2535,36 @@ export function ProgramsSection() {
               style={{ backgroundColor: "#0D9488" }}
               disabled={!selectedProviderId || addProviderSubmitting}
               onClick={async () => {
-                if (!selectedProviderId) return;
+                if (!selectedProviderId || !addProviderProgramId) return;
                 setAddProviderSubmitting(true);
                 try {
-                  if (!addProviderProgramId) return;
-                  await programService.addProvider(addProviderProgramId, { providerId: selectedProviderId });
+                  // apiFetch returns { error } on failure (it doesn't throw),
+                  // so the previous try/catch wrapper showed the success
+                  // toast even on 422/403 — surface the real reason instead.
+                  const res = await programService.addProvider(addProviderProgramId, { providerId: selectedProviderId });
+                  if (res.error) {
+                    setToast({ message: res.error, type: "error" });
+                    setAddProviderSubmitting(false);
+                    return;
+                  }
                   setToast({ message: "Provider added to program.", type: "success" });
                   setAddProviderToProgram(false);
                   setSelectedProviderId(null);
+                  // Refresh both: the list (so the count updates on the
+                  // program card) and the in-memory selectedProgram (so the
+                  // Providers tab the user is staring at picks up the new row
+                  // — fetchPrograms alone replaces apiPrograms but leaves
+                  // selectedProgram stale).
+                  try {
+                    const detail = await programService.get(addProviderProgramId);
+                    if (detail.data) {
+                      setSelectedProgram(mapApiProgram(detail.data));
+                    }
+                  } catch { /* ignore */ }
                   fetchPrograms();
-                } catch {
-                  setToast({ message: "Failed to add provider.", type: "error" });
+                } catch (e) {
+                  const msg = e instanceof Error ? e.message : "Failed to add provider.";
+                  setToast({ message: msg, type: "error" });
                 }
                 setAddProviderSubmitting(false);
               }}
