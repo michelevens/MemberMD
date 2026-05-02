@@ -95,6 +95,16 @@ export function BillingTab() {
 
   useEffect(() => {
     let cancelled = false;
+    // Laravel paginated responses come back as { data: { current_page, data: [...] } }
+    // rather than a bare array. Same shape both endpoints use here.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const unwrap = <T,>(payload: any): T[] => {
+      if (Array.isArray(payload)) return payload as T[];
+      if (Array.isArray(payload?.data)) return payload.data as T[];
+      if (Array.isArray(payload?.items)) return payload.items as T[];
+      return [];
+    };
+
     (async () => {
       setLoading(true);
       setError(null);
@@ -102,9 +112,10 @@ export function BillingTab() {
         // /memberships scopes to the current user when role=patient.
         const mr = await membershipService.list({ status: "active" });
         if (cancelled) return;
-        const m = (mr.data || []).find((x: PatientMembership) =>
+        const memberships = unwrap<PatientMembership>(mr.data);
+        const m = memberships.find((x) =>
           ["active", "past_due"].includes(String(x.status))
-        ) || (mr.data || [])[0] || null;
+        ) || memberships[0] || null;
         setMembership(m);
 
         if (m?.id) {
@@ -113,8 +124,8 @@ export function BillingTab() {
             invoiceService.list(),
           ]);
           if (cancelled) return;
-          setEntitlements(er.data || []);
-          setInvoices(ir.data || []);
+          setEntitlements(unwrap<PatientEntitlement>(er.data));
+          setInvoices(unwrap<Invoice>(ir.data));
         } else {
           setEntitlements([]);
           setInvoices([]);

@@ -493,7 +493,10 @@ function SeverityBadge({ severity }: { severity: ScreeningScore["severity"] }) {
 }
 
 function formatDate(dateStr: string) {
-  return new Date(dateStr).toLocaleDateString("en-US", {
+  if (!dateStr) return "—";
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return "—";
+  return d.toLocaleDateString("en-US", {
     month: "short",
     day: "numeric",
     year: "numeric",
@@ -732,10 +735,27 @@ export function PatientPortal() {
           }
         }
 
-        // Dashboard / patient profile
+        // Dashboard / patient profile. /dashboard/patient returns a
+        // composite { patient, membership, entitlement, ... } — merge the
+        // dashboard fields AND the nested patient row onto apiPatient so
+        // tabs that need patient.id (Entitlements, BillingTab) and DOB,
+        // address, etc. have what they need.
         if (results[5].status === "fulfilled") {
           const r = results[5].value;
-          if (r.data) setApiPatient((prev: Record<string, unknown> | null) => ({ ...prev, ...r.data }));
+          if (r.data) {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const dash = r.data as any;
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const p = dash.patient as any | undefined;
+            setApiPatient((prev: Record<string, unknown> | null) => ({
+              ...prev,
+              ...dash,
+              ...(p ?? {}),
+              // Normalize the DOB field name the UI expects ("dob")
+              // regardless of the API casing (dateOfBirth/date_of_birth).
+              dob: p?.dateOfBirth ?? p?.date_of_birth ?? prev?.dob ?? "",
+            }));
+          }
         }
 
         // Auth me → patient profile info

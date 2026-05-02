@@ -137,6 +137,11 @@ class DashboardController extends Controller
 
         return response()->json([
             'data' => [
+                // Patient row — id, dob, address, etc. The patient portal
+                // needs these for tabs that scope to patient_id (Entitlements,
+                // BillingTab) and to render demographic fields. /auth/me only
+                // returns the User row, not the linked Patient row.
+                'patient' => $patient,
                 'membership' => $membership,
                 'entitlement' => $currentEntitlement,
                 'visits_used' => $currentEntitlement?->visits_used ?? 0,
