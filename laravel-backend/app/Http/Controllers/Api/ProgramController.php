@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Program;
+use App\Models\ProgramEligibilityRule;
 use App\Models\ProgramEnrollment;
 use App\Models\ProgramProvider;
 use Illuminate\Http\JsonResponse;
@@ -345,6 +346,84 @@ class ProgramController extends Controller
         $pp->update(['is_active' => false]);
 
         return response()->json(['message' => 'Provider removed from program.']);
+    }
+
+    /**
+     * Add an eligibility rule to a program.
+     *
+     * Rules describe who qualifies (age range, diagnosis code, insurance
+     * type, employer, geography, referral required, custom). The
+     * `value` field is JSON because it may carry arrays (in / not_in),
+     * tuples (between), or single scalars (equals / greater_than).
+     * Validation here is permissive on shape — the rule evaluator
+     * downstream is the right place to enforce per-rule_type schemas.
+     */
+    public function addRule(Request $request, string $program): JsonResponse
+    {
+        $program = Program::findOrFail($program);
+
+        $validated = $request->validate([
+            'rule_type' => 'required|string|in:age_range,diagnosis,insurance_type,employer,geography,referral_required,custom',
+            'operator' => 'nullable|string|in:equals,not_equals,in,not_in,between,greater_than,less_than',
+            'value' => 'required',
+            'description' => 'nullable|string|max:500',
+            'is_required' => 'nullable|boolean',
+        ]);
+
+        $rule = ProgramEligibilityRule::create([
+            'program_id' => $program->id,
+            'rule_type' => $validated['rule_type'],
+            'operator' => $validated['operator'] ?? 'equals',
+            'value' => $validated['value'],
+            'description' => $validated['description'] ?? null,
+            'is_required' => $validated['is_required'] ?? true,
+        ]);
+
+        return response()->json([
+            'data' => $rule,
+            'message' => 'Eligibility rule added.',
+        ], 201);
+    }
+
+    /**
+     * Update an eligibility rule. All fields are optional — partial
+     * updates are fine. The rule must belong to the named program
+     * (defense-in-depth: the URL is the trust boundary).
+     */
+    public function updateRule(Request $request, string $program, string $rule): JsonResponse
+    {
+        $program = Program::findOrFail($program);
+        $rule = ProgramEligibilityRule::where('program_id', $program->id)
+            ->findOrFail($rule);
+
+        $validated = $request->validate([
+            'rule_type' => 'sometimes|string|in:age_range,diagnosis,insurance_type,employer,geography,referral_required,custom',
+            'operator' => 'sometimes|nullable|string|in:equals,not_equals,in,not_in,between,greater_than,less_than',
+            'value' => 'sometimes',
+            'description' => 'sometimes|nullable|string|max:500',
+            'is_required' => 'sometimes|boolean',
+        ]);
+
+        $rule->update($validated);
+
+        return response()->json([
+            'data' => $rule->fresh(),
+            'message' => 'Eligibility rule updated.',
+        ]);
+    }
+
+    /**
+     * Delete an eligibility rule.
+     */
+    public function removeRule(string $program, string $rule): JsonResponse
+    {
+        $program = Program::findOrFail($program);
+        $rule = ProgramEligibilityRule::where('program_id', $program->id)
+            ->findOrFail($rule);
+
+        $rule->delete();
+
+        return response()->json(['message' => 'Eligibility rule removed.']);
     }
 
     /**

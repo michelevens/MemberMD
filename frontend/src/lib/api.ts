@@ -1623,6 +1623,47 @@ export const programService = {
     if (useMockData()) return mockDelete();
     return apiFetch<void>(`/programs/${programId}/providers/${providerId}`, { method: "DELETE" });
   },
+  // Eligibility rules — practice admins manage who qualifies for the
+  // program from the Settings tab. Backend stores `value` as JSON so
+  // the same row can carry a tuple (between), array (in / not_in),
+  // or scalar (equals / greater_than) without per-rule_type tables.
+  addRule: async (
+    programId: string,
+    data: {
+      ruleType: string;
+      operator?: string;
+      value: unknown;
+      description?: string | null;
+      isRequired?: boolean;
+    },
+  ): Promise<ApiResponse<Record<string, unknown>>> => {
+    if (useMockData()) return mockCreate<Record<string, unknown>>(data as Record<string, unknown>);
+    return apiFetch<Record<string, unknown>>(`/programs/${programId}/rules`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  },
+  updateRule: async (
+    programId: string,
+    ruleId: string,
+    data: Partial<{
+      ruleType: string;
+      operator: string | null;
+      value: unknown;
+      description: string | null;
+      isRequired: boolean;
+    }>,
+  ): Promise<ApiResponse<Record<string, unknown>>> => {
+    if (useMockData()) return mockUpdate<Record<string, unknown>>(data as Record<string, unknown>);
+    return apiFetch<Record<string, unknown>>(`/programs/${programId}/rules/${ruleId}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+  },
+  removeRule: async (programId: string, ruleId: string): Promise<ApiResponse<void>> => {
+    if (useMockData()) return mockDelete();
+    return apiFetch<void>(`/programs/${programId}/rules/${ruleId}`, { method: "DELETE" });
+  },
   stats: async (programId: string): Promise<ApiResponse<Record<string, unknown>>> => {
     if (useMockData()) return { data: {} };
     return apiFetch<Record<string, unknown>>(`/programs/${programId}/stats`);

@@ -125,7 +125,15 @@ interface MockProgramProvider {
 }
 
 interface MockEligibilityRule {
+  // Optional: present for API-backed rules (so the UI can edit / remove
+  // them by id), absent for the demo-mode mock rows.
+  id?: string;
   ruleType: string;
+  operator?: string;
+  // Stored as JSON on the backend — could be string/number/array/tuple
+  // depending on operator. We carry it as unknown and let the modal
+  // serialize from a friendly text input.
+  value?: unknown;
   description: string;
   isRequired: boolean;
 }
@@ -436,6 +444,22 @@ export function ProgramsSection() {
   const [providerSearchLoading, setProviderSearchLoading] = useState(false);
   const [addProviderSubmitting, setAddProviderSubmitting] = useState(false);
 
+  // ─── Eligibility Rule Add/Edit Dialog State ─────────────────────────────────
+  // The modal is dual-mode: when ruleEditing is set we're updating that
+  // rule in place; when only ruleProgramId is set, we're adding a new
+  // rule to that program.
+  const [ruleProgramId, setRuleProgramId] = useState<string | null>(null);
+  const [ruleEditing, setRuleEditing] = useState<MockEligibilityRule | null>(null);
+  const [ruleForm, setRuleForm] = useState({
+    ruleType: "age_range",
+    operator: "between",
+    valueText: "",
+    description: "",
+    isRequired: true,
+  });
+  const [ruleSubmitting, setRuleSubmitting] = useState(false);
+  const [ruleRemoveLoading, setRuleRemoveLoading] = useState<string | null>(null);
+
   // ─── API State ──────────────────────────────────────────────────────────────
   const [apiPrograms, setApiPrograms] = useState<MockProgram[]>([]);
   const [loading, setLoading] = useState(true);
@@ -575,7 +599,10 @@ export function ProgramsSection() {
       isActive: pv.isActive !== false && (pv.pivot ? (pv.pivot as Record<string, unknown>).isActive !== false : true),
     })),
     eligibilityRules: (p.eligibilityRules || []).map((r: Record<string, unknown>) => ({
+      id: (r.id as string) || undefined,
       ruleType: (r.ruleType as string) || "",
+      operator: (r.operator as string) || "equals",
+      value: r.value,
       description: (r.description as string) || "",
       isRequired: r.isRequired === true,
     })),
@@ -694,6 +721,100 @@ export function ProgramsSection() {
     } catch { /* ignore */ }
     setAvailablePlansLoading(false);
   }, []);
+
+  // ─── Eligibility Rule Handlers ──────────────────────────────────────────
+  // The modal opens in "add" mode when ruleEditing is null and "edit"
+  // mode otherwise. Both paths populate the form from sensible defaults
+  // before showing.
+  const openAddRule = useCallback((programId: string) => {
+    setRuleProgramId(programId);
+    setRuleEditing(null);
+    setRuleForm({
+      ruleType: "age_range",
+      operator: "between",
+      valueText: "",
+      description: "",
+      isRequired: true,
+    });
+  }, []);
+
+  const openEditRule = useCallback((programId: string, rule: MockEligibilityRule) => {
+    setRuleProgramId(programId);
+    setRuleEditing(rule);
+    // Serialize the JSON value back to a friendly text form for the
+    // input. Arrays become "a, b, c"; tuples ([min, max]) become "min, max".
+    const v = rule.value;
+    const valueText = Array.isArray(v) ? v.join(", ") : v == null ? "" : String(v);
+    setRuleForm({
+      ruleType: rule.ruleType || "age_range",
+      operator: rule.operator || "equals",
+      valueText,
+      description: rule.description || "",
+      isRequired: rule.isRequired !== false,
+    });
+  }, []);
+
+  const closeRuleModal = useCallback(() => {
+    setRuleProgramId(null);
+    setRuleEditing(null);
+  }, []);
+
+  // Parse the friendly text input into the JSON shape the backend wants,
+  // chosen by operator. between → [min, max] of numbers; in/not_in →
+  // string array; everything else → bare string (or number if it parses).
+  const parseRuleValue = (operator: string, raw: string): unknown => {
+    const trimmed = raw.trim();
+    if (operator === "between") {
+      const parts = trimmed.split(",").map((p) => Number(p.trim()));
+      return parts.filter((n) => !Number.isNaN(n));
+    }
+    if (operator === "in" || operator === "not_in") {
+      return trimmed.split(",").map((p) => p.trim()).filter(Boolean);
+    }
+    if (operator === "greater_than" || operator === "less_than") {
+      const n = Number(trimmed);
+      return Number.isNaN(n) ? trimmed : n;
+    }
+    return trimmed;
+  };
+
+  const handleSaveRule = useCallback(async () => {
+    if (!ruleProgramId) return;
+    const payload = {
+      ruleType: ruleForm.ruleType,
+      operator: ruleForm.operator,
+      value: parseRuleValue(ruleForm.operator, ruleForm.valueText),
+      description: ruleForm.description.trim() || null,
+      isRequired: ruleForm.isRequired,
+    };
+    setRuleSubmitting(true);
+    try {
+      if (ruleEditing?.id) {
+        await programService.updateRule(ruleProgramId, ruleEditing.id, payload);
+        setToast({ message: "Rule updated.", type: "success" });
+      } else {
+        await programService.addRule(ruleProgramId, payload);
+        setToast({ message: "Rule added.", type: "success" });
+      }
+      closeRuleModal();
+      fetchPrograms();
+    } catch {
+      setToast({ message: "Failed to save rule.", type: "error" });
+    }
+    setRuleSubmitting(false);
+  }, [ruleProgramId, ruleEditing, ruleForm, closeRuleModal, fetchPrograms, setToast]);
+
+  const handleRemoveRule = useCallback(async (programId: string, ruleId: string) => {
+    setRuleRemoveLoading(ruleId);
+    try {
+      await programService.removeRule(programId, ruleId);
+      setToast({ message: "Rule removed.", type: "success" });
+      fetchPrograms();
+    } catch {
+      setToast({ message: "Failed to remove rule.", type: "error" });
+    }
+    setRuleRemoveLoading(null);
+  }, [fetchPrograms, setToast]);
 
   // ─── Fetch real membership plans for a program ────────────────────────────
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1701,33 +1822,88 @@ export function ProgramsSection() {
           <div className="space-y-6">
             {/* Eligibility Rules */}
             <div className="glass rounded-xl p-6">
-              <h3 className="text-base font-semibold text-slate-800 mb-4">Eligibility Rules</h3>
-              <div className="space-y-3">
-                {selectedProgram.eligibilityRules.map((rule, idx) => (
-                  <div
-                    key={idx}
-                    className="flex items-center justify-between py-2.5 px-3 rounded-lg"
-                    style={{ backgroundColor: "#f8fafc" }}
-                  >
-                    <div className="flex items-center gap-3">
-                      <Shield
-                        className="w-4 h-4"
-                        style={{ color: rule.isRequired ? "#dc2626" : "#94a3b8" }}
-                      />
-                      <span className="text-sm text-slate-700">{rule.description}</span>
-                    </div>
-                    <span
-                      className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium"
-                      style={{
-                        backgroundColor: rule.isRequired ? "#fef2f2" : "#f1f5f9",
-                        color: rule.isRequired ? "#dc2626" : "#64748b",
-                      }}
-                    >
-                      {rule.isRequired ? "Required" : "Optional"}
-                    </span>
-                  </div>
-                ))}
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-base font-semibold text-slate-800">Eligibility Rules</h3>
+                <button
+                  className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-white text-xs font-medium"
+                  style={{ backgroundColor: "#0D9488" }}
+                  onClick={() => openAddRule(selectedProgram.id)}
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  Add Rule
+                </button>
               </div>
+              {selectedProgram.eligibilityRules.length === 0 ? (
+                <div className="text-center py-8">
+                  <Shield className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                  <p className="text-sm text-slate-500">No eligibility rules yet</p>
+                  <p className="text-xs text-slate-400">Add rules to control who qualifies for this program</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {selectedProgram.eligibilityRules.map((rule, idx) => {
+                    const ruleId = rule.id;
+                    return (
+                      <div
+                        key={ruleId || idx}
+                        className="flex items-center justify-between py-2.5 px-3 rounded-lg group"
+                        style={{ backgroundColor: "#f8fafc" }}
+                      >
+                        <div className="flex items-center gap-3 min-w-0 flex-1">
+                          <Shield
+                            className="w-4 h-4 shrink-0"
+                            style={{ color: rule.isRequired ? "#dc2626" : "#94a3b8" }}
+                          />
+                          <div className="min-w-0">
+                            <p className="text-sm text-slate-700 truncate">
+                              {rule.description || `${rule.ruleType.replace(/_/g, " ")}`}
+                            </p>
+                            <p className="text-xs text-slate-400">
+                              {rule.ruleType.replace(/_/g, " ")}
+                              {rule.operator ? ` · ${rule.operator.replace(/_/g, " ")}` : ""}
+                              {rule.value !== undefined && rule.value !== null && rule.value !== ""
+                                ? ` · ${Array.isArray(rule.value) ? rule.value.join(", ") : String(rule.value)}`
+                                : ""}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <span
+                            className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium"
+                            style={{
+                              backgroundColor: rule.isRequired ? "#fef2f2" : "#f1f5f9",
+                              color: rule.isRequired ? "#dc2626" : "#64748b",
+                            }}
+                          >
+                            {rule.isRequired ? "Required" : "Optional"}
+                          </span>
+                          {ruleId && (
+                            <>
+                              <button
+                                className="p-1.5 rounded hover:bg-slate-200 text-slate-400 hover:text-slate-700 transition-colors shrink-tap"
+                                title="Edit rule"
+                                onClick={() => openEditRule(selectedProgram.id, rule)}
+                              >
+                                <Pencil className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                className="p-1.5 rounded hover:bg-red-50 text-slate-400 hover:text-red-600 transition-colors shrink-tap disabled:opacity-50"
+                                title="Remove rule"
+                                disabled={ruleRemoveLoading === ruleId}
+                                onClick={() => handleRemoveRule(selectedProgram.id, ruleId)}
+                              >
+                                {ruleRemoveLoading === ruleId
+                                  ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                  : <X className="w-3.5 h-3.5" />}
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
 
             {/* Funding Sources */}
@@ -2463,6 +2639,117 @@ export function ProgramsSection() {
               style={{ backgroundColor: "#0D9488" }}
             >
               {enrollmentActionLoading === changePlanModal.enrollmentId ? "Changing..." : "Change Plan"}
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+
+    {/* ─── Add / Edit Eligibility Rule Modal ──────────────────────────────── */}
+    {ruleProgramId && (
+      <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: "rgba(0,0,0,0.5)" }}>
+        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
+          <div className="px-6 py-4 border-b border-slate-100">
+            <h3 className="text-lg font-bold text-slate-900">
+              {ruleEditing ? "Edit Eligibility Rule" : "Add Eligibility Rule"}
+            </h3>
+            <p className="text-sm text-slate-500 mt-0.5">Rules control who qualifies for this program.</p>
+          </div>
+          <div className="p-6 space-y-4">
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Rule type</label>
+              <select
+                value={ruleForm.ruleType}
+                onChange={(e) => setRuleForm((f) => ({ ...f, ruleType: e.target.value }))}
+                className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-teal-400"
+              >
+                <option value="age_range">Age range</option>
+                <option value="diagnosis">Diagnosis</option>
+                <option value="insurance_type">Insurance type</option>
+                <option value="employer">Employer</option>
+                <option value="geography">Geography</option>
+                <option value="referral_required">Referral required</option>
+                <option value="custom">Custom</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Operator</label>
+              <select
+                value={ruleForm.operator}
+                onChange={(e) => setRuleForm((f) => ({ ...f, operator: e.target.value }))}
+                className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-teal-400"
+              >
+                <option value="equals">equals</option>
+                <option value="not_equals">not equals</option>
+                <option value="in">in (any of)</option>
+                <option value="not_in">not in</option>
+                <option value="between">between (min, max)</option>
+                <option value="greater_than">greater than</option>
+                <option value="less_than">less than</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">
+                Value
+                <span className="text-slate-400 font-normal ml-1">
+                  {ruleForm.operator === "between" ? "(e.g. 18, 64)"
+                    : ruleForm.operator === "in" || ruleForm.operator === "not_in" ? "(comma-separated)"
+                    : ""}
+                </span>
+              </label>
+              <input
+                type="text"
+                value={ruleForm.valueText}
+                onChange={(e) => setRuleForm((f) => ({ ...f, valueText: e.target.value }))}
+                placeholder={ruleForm.operator === "between" ? "18, 64" : ruleForm.operator === "in" ? "BlueCross, Aetna" : ""}
+                className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Description</label>
+              <input
+                type="text"
+                value={ruleForm.description}
+                onChange={(e) => setRuleForm((f) => ({ ...f, description: e.target.value }))}
+                placeholder="e.g. Adults 18–64 only"
+                className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400"
+              />
+            </div>
+
+            <label className="flex items-start gap-3 cursor-pointer rounded-lg border border-slate-200 px-3 py-2.5">
+              <input
+                type="checkbox"
+                checked={ruleForm.isRequired}
+                onChange={(e) => setRuleForm((f) => ({ ...f, isRequired: e.target.checked }))}
+                className="mt-0.5 w-4 h-4 rounded border-slate-300"
+                style={{ accentColor: "#0D9488" }}
+              />
+              <div className="flex-1">
+                <p className="text-sm font-medium text-slate-800">Required</p>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Patients who don't meet a required rule can't enroll. Optional rules are preferences only.
+                </p>
+              </div>
+            </label>
+          </div>
+          <div className="px-6 pb-6 flex justify-end gap-3">
+            <button
+              onClick={closeRuleModal}
+              disabled={ruleSubmitting}
+              className="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100 transition-colors disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleSaveRule}
+              disabled={ruleSubmitting || !ruleForm.valueText.trim()}
+              className="px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors disabled:opacity-50"
+              style={{ backgroundColor: "#0D9488" }}
+            >
+              {ruleSubmitting ? "Saving..." : ruleEditing ? "Save changes" : "Add rule"}
             </button>
           </div>
         </div>

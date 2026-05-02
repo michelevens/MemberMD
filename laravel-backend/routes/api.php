@@ -492,6 +492,11 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
         Route::post('/{program}/unenroll/{enrollment}', [ProgramController::class, 'unenrollPatient']);
         Route::post('/{program}/providers', [ProgramController::class, 'addProvider']);
         Route::delete('/{program}/providers/{provider}', [ProgramController::class, 'removeProvider']);
+        // Eligibility rule CRUD — practice admins use these on the
+        // Settings tab to define who qualifies for the program.
+        Route::post('/{program}/rules', [ProgramController::class, 'addRule']);
+        Route::put('/{program}/rules/{rule}', [ProgramController::class, 'updateRule']);
+        Route::delete('/{program}/rules/{rule}', [ProgramController::class, 'removeRule']);
         Route::get('/{program}/stats', [ProgramController::class, 'stats']);
     });
 
