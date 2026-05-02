@@ -589,15 +589,35 @@ export function ProgramsSection() {
           expiresAt: e.expiresAt ? new Date(e.expiresAt as string).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : null,
         }));
     })(),
-    providers: (p.providers || p.programProviders || []).map((pv: Record<string, unknown>) => ({
-      id: pv.id || "",
-      name: pv.name || (pv.provider ? `${(pv.provider as Record<string, unknown>).firstName || ""} ${(pv.provider as Record<string, unknown>).lastName || ""}`.trim() : "Unknown"),
-      credentials: (pv.credentials as string) || "",
-      role: (pv.role as string) || (pv.pivot ? (pv.pivot as Record<string, unknown>).role as string : "") || "Provider",
-      panelCapacity: Number(pv.panelCapacity ?? (pv.pivot ? (pv.pivot as Record<string, unknown>).panelCapacity : 0)) || 50,
-      panelCurrent: Number(pv.panelCurrent) || 0,
-      isActive: pv.isActive !== false && (pv.pivot ? (pv.pivot as Record<string, unknown>).isActive !== false : true),
-    })),
+    providers: (p.providers || p.programProviders || []).map((pv: Record<string, unknown>) => {
+      // Program::providers() returns Provider rows directly (BelongsToMany)
+      // with a `pivot` carrying the program-link fields. Earlier this
+      // mapper assumed a nested `provider` object, so even when the
+      // backend correctly returned firstName/lastName at the top level
+      // it always rendered "Unknown" (the second fallback).
+      // Read order: top-level firstName/lastName → nested user relation
+      // (in case the API was loaded with `with('user')`) → "Unknown".
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const top = pv as any;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const nestedProvider = top.provider as any;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const nestedUser = top.user as any;
+      const first = top.firstName ?? top.first_name ?? nestedProvider?.firstName ?? nestedProvider?.first_name ?? nestedUser?.firstName ?? nestedUser?.first_name ?? "";
+      const last = top.lastName ?? top.last_name ?? nestedProvider?.lastName ?? nestedProvider?.last_name ?? nestedUser?.lastName ?? nestedUser?.last_name ?? "";
+      const computedName = `${first} ${last}`.trim();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const pivot = (top.pivot ?? {}) as any;
+      return {
+        id: (top.id as string) || "",
+        name: (top.name as string) || computedName || "Unknown",
+        credentials: (top.credentials as string) || (nestedProvider?.credentials as string) || "",
+        role: (top.role as string) || (pivot.role as string) || "Provider",
+        panelCapacity: Number(top.panelCapacity ?? top.panel_capacity ?? pivot.panelCapacity ?? pivot.panel_capacity ?? 0) || 50,
+        panelCurrent: Number(top.panelCurrent ?? top.panel_current ?? 0) || 0,
+        isActive: top.isActive !== false && top.is_active !== false && pivot.isActive !== false && pivot.is_active !== false,
+      };
+    }),
     eligibilityRules: (p.eligibilityRules || []).map((r: Record<string, unknown>) => ({
       id: (r.id as string) || undefined,
       ruleType: (r.ruleType as string) || "",
