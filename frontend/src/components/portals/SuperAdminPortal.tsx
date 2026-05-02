@@ -1244,6 +1244,46 @@ export function SuperAdminPortal() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedPractice]);
 
+  // Tenant-scoped audit logs — separate from the platform audit list
+  // on the SuperAdmin Audit tab so opening a practice doesn't blow
+  // away that filter state.
+  const [tenantAuditLogs, setTenantAuditLogs] = useState<MockAuditLog[]>([]);
+  const [tenantAuditLoading, setTenantAuditLoading] = useState(false);
+  const [tenantAuditSearch, setTenantAuditSearch] = useState("");
+
+  useEffect(() => {
+    if (!selectedPractice) {
+      setTenantAuditLogs([]);
+      return;
+    }
+    let cancelled = false;
+    setTenantAuditLoading(true);
+    (async () => {
+      try {
+        const r = await auditService.list({ tenant_id: selectedPractice.id, per_page: "100" } as Record<string, string>);
+        if (cancelled) return;
+        if (r.data && Array.isArray(r.data)) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          setTenantAuditLogs((r.data as any[]).map((l: any) => ({
+            id: l.id || "",
+            timestamp: l.timestamp || l.createdAt || l.created_at || "",
+            user: l.user || l.userName || l.user_name || l.causer || "system",
+            action: l.action || l.event || "",
+            resource: l.resource || l.subject || l.description || "",
+            ipAddress: l.ipAddress || l.ip_address || l.ip || "",
+            riskLevel: l.riskLevel || l.risk_level || undefined,
+          })));
+        } else {
+          setTenantAuditLogs([]);
+        }
+      } catch {
+        setTenantAuditLogs([]);
+      }
+      if (!cancelled) setTenantAuditLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, [selectedPractice]);
+
   const submitInternalNote = async () => {
     if (!selectedPractice || !internalNoteDraft.trim()) return;
     setInternalNoteSaving(true);
@@ -2911,6 +2951,134 @@ export function SuperAdminPortal() {
               );
             })}
           </div>
+        </div>
+
+        {/* Per-role user breakdown — superadmin signal that the practice
+            is staffed correctly. Stripe-style flat tiles. */}
+        {tenantSummary && Object.keys(tenantSummary.userCountsByRole).length > 0 && (
+          <div className="rounded-xl border border-slate-200 bg-white p-5">
+            <div className="flex items-baseline justify-between mb-3">
+              <h3 className="text-sm font-semibold text-slate-900">Users by role</h3>
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                {Object.values(tenantSummary.userCountsByRole).reduce((a, b) => a + b, 0)} total
+              </span>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              {Object.entries(tenantSummary.userCountsByRole).map(([role, count]) => (
+                <div key={role} className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2.5">
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                    {role.replace(/_/g, " ")}
+                  </p>
+                  <p className="text-lg font-semibold tabular-nums mt-0.5 text-slate-900">{count}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Tenant-scoped activity log — same shape as the platform
+            audit table on the SuperAdmin Audit tab, filtered to this
+            tenant. Risk-level column derives client-side via inferRisk. */}
+        <div className="rounded-xl border border-slate-200 bg-white">
+          <div className="px-5 py-3 border-b border-slate-100 flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <h3 className="text-sm font-semibold text-slate-900">Tenant activity</h3>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Audit events for this practice — most recent first.
+              </p>
+            </div>
+            <input
+              type="search"
+              value={tenantAuditSearch}
+              onChange={(e) => setTenantAuditSearch(e.target.value)}
+              placeholder="Search action / user…"
+              className="px-3 py-1.5 rounded-md text-xs border border-slate-200 bg-white text-slate-700 focus:outline-none focus:border-slate-400 max-w-xs"
+            />
+          </div>
+
+          {tenantAuditLoading ? (
+            <div className="px-5 py-8 text-center text-sm text-slate-400">Loading activity…</div>
+          ) : tenantAuditLogs.length === 0 ? (
+            <div className="px-5 py-8 text-center text-sm text-slate-400">
+              No audit events recorded for this tenant yet.
+            </div>
+          ) : (() => {
+            const q = tenantAuditSearch.trim().toLowerCase();
+            const filtered = q
+              ? tenantAuditLogs.filter((log) =>
+                  (log.action || "").toLowerCase().includes(q)
+                  || (log.user || "").toLowerCase().includes(q)
+                  || (log.resource || "").toLowerCase().includes(q),
+                )
+              : tenantAuditLogs;
+
+            const inferRiskRow = (log: MockAuditLog): "low" | "medium" | "high" | "critical" => {
+              if (log.riskLevel) return log.riskLevel;
+              const a = (log.action || "").toLowerCase();
+              if (a.includes("delete") || a.includes("destroy") || a.includes("purge")) return "critical";
+              if (a.includes("impersonate") || a.includes("login_as") || a.includes("refund") || a.includes("password")) return "high";
+              if (a.includes("suspend") || a.includes("approve") || a.includes("reject") || a.includes("plan_change")) return "high";
+              if (a.includes("update") || a.includes("modify") || a.includes("publish")) return "medium";
+              return "low";
+            };
+            const riskColors: Record<string, { bg: string; fg: string }> = {
+              low: { bg: "#f1f5f9", fg: "#475569" },
+              medium: { bg: "#fef3c7", fg: "#92400e" },
+              high: { bg: "#ffedd5", fg: "#c2410c" },
+              critical: { bg: "#fee2e2", fg: "#b91c1c" },
+            };
+
+            return (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-slate-50 border-b border-slate-200">
+                    <tr>
+                      <th className="text-left px-4 py-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">When</th>
+                      <th className="text-left px-4 py-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">Actor</th>
+                      <th className="text-left px-4 py-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">Action</th>
+                      <th className="text-left px-4 py-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500 hidden md:table-cell">Resource</th>
+                      <th className="text-left px-4 py-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500 hidden md:table-cell">Risk</th>
+                      <th className="text-left px-4 py-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500 hidden lg:table-cell">IP</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filtered.slice(0, 50).map((log) => {
+                      const r = inferRiskRow(log);
+                      const c = riskColors[r];
+                      return (
+                        <tr key={log.id} className="border-b border-slate-100 last:border-b-0 hover:bg-slate-50/60">
+                          <td className="px-4 py-2 text-xs text-slate-500 font-mono tabular-nums whitespace-nowrap">
+                            {log.timestamp ? new Date(log.timestamp).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "—"}
+                          </td>
+                          <td className="px-4 py-2 text-sm text-slate-700">{log.user}</td>
+                          <td className="px-4 py-2">
+                            <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium font-mono bg-slate-100 text-slate-700">
+                              {log.action}
+                            </span>
+                          </td>
+                          <td className="px-4 py-2 text-xs text-slate-500 hidden md:table-cell">{log.resource}</td>
+                          <td className="px-4 py-2 hidden md:table-cell">
+                            <span
+                              className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold uppercase tracking-wider"
+                              style={{ backgroundColor: c.bg, color: c.fg }}
+                            >
+                              {r}
+                            </span>
+                          </td>
+                          <td className="px-4 py-2 text-xs text-slate-400 font-mono tabular-nums hidden lg:table-cell">{log.ipAddress || "—"}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+                {filtered.length > 50 && (
+                  <div className="px-4 py-2 text-xs text-slate-400 border-t border-slate-100">
+                    Showing 50 of {filtered.length} matching events.
+                  </div>
+                )}
+              </div>
+            );
+          })()}
         </div>
 
         {/* Recent Activity */}
