@@ -4,6 +4,8 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreProviderRequest;
+use App\Models\Appointment;
+use App\Models\Patient;
 use App\Models\Provider;
 use App\Models\ProviderAvailability;
 use App\Models\User;
@@ -232,5 +234,108 @@ class ProviderController extends Controller
             ->paginate($request->input('per_page', 25));
 
         return response()->json(['data' => $appointments]);
+    }
+
+    /**
+     * Patient panel for a provider — what shows on the Provider detail
+     * "Panel" tab. Two sources are merged so the tab is never empty
+     * for an active provider:
+     *   - assigned: patients with primary_provider_id = this provider
+     *     (the formal panel — what gets billed against panel capacity)
+     *   - recent:   patients who've had any appointment with this
+     *     provider in the last 12 months but aren't formally assigned
+     *     yet (so admins can see "Dieudone has been seen here, want to
+     *     add him to the panel?" and act on it)
+     *
+     * The frontend renders both sets and offers an "Add to panel"
+     * button for unassigned recent patients.
+     */
+    public function panelPatients(Request $request, string $id): JsonResponse
+    {
+        $user = $request->user();
+        $provider = Provider::where('tenant_id', $user->tenant_id)->findOrFail($id);
+
+        $assigned = Patient::where('tenant_id', $user->tenant_id)
+            ->where('primary_provider_id', $provider->id)
+            ->orderBy('last_name')
+            ->orderBy('first_name')
+            ->get(['id', 'first_name', 'last_name', 'email', 'is_active', 'primary_provider_id']);
+
+        // "Recent": appointment history with this provider in the past
+        // year, minus anyone already assigned. Excludes cancelled / no-show
+        // since those don't represent established care.
+        $assignedIds = $assigned->pluck('id')->all();
+        $recentPatientIds = Appointment::where('tenant_id', $user->tenant_id)
+            ->where('provider_id', $provider->id)
+            ->whereNotIn('status', ['cancelled', 'no_show'])
+            ->where('scheduled_at', '>=', now()->subYear())
+            ->whereNotIn('patient_id', $assignedIds)
+            ->distinct()
+            ->pluck('patient_id');
+
+        $recent = Patient::where('tenant_id', $user->tenant_id)
+            ->whereIn('id', $recentPatientIds)
+            ->orderBy('last_name')
+            ->orderBy('first_name')
+            ->get(['id', 'first_name', 'last_name', 'email', 'is_active', 'primary_provider_id']);
+
+        return response()->json([
+            'data' => [
+                'assigned' => $assigned,
+                'recent' => $recent,
+                'provider_id' => $provider->id,
+            ],
+        ]);
+    }
+
+    /**
+     * Assign a patient to this provider's panel. Sets the patient's
+     * primary_provider_id. Idempotent — re-assigning the same patient
+     * is a no-op. Tenant-scoped: patient must belong to the same
+     * tenant as the provider.
+     */
+    public function assignPatient(Request $request, string $id): JsonResponse
+    {
+        $user = $request->user();
+        abort_if(!in_array($user->role, ['practice_admin', 'staff', 'provider']), 403);
+
+        $provider = Provider::where('tenant_id', $user->tenant_id)->findOrFail($id);
+
+        $validated = $request->validate([
+            'patient_id' => 'required|uuid|exists:patients,id',
+        ]);
+
+        $patient = Patient::where('tenant_id', $user->tenant_id)
+            ->findOrFail($validated['patient_id']);
+
+        $patient->update(['primary_provider_id' => $provider->id]);
+
+        return response()->json([
+            'data' => $patient->fresh(),
+            'message' => 'Patient assigned to provider.',
+        ]);
+    }
+
+    /**
+     * Remove a patient from this provider's panel. Sets primary_provider_id
+     * to null on the patient. Doesn't delete the patient or any history.
+     */
+    public function unassignPatient(Request $request, string $id, string $patientId): JsonResponse
+    {
+        $user = $request->user();
+        abort_if(!in_array($user->role, ['practice_admin', 'staff', 'provider']), 403);
+
+        $provider = Provider::where('tenant_id', $user->tenant_id)->findOrFail($id);
+
+        $patient = Patient::where('tenant_id', $user->tenant_id)
+            ->where('primary_provider_id', $provider->id)
+            ->findOrFail($patientId);
+
+        $patient->update(['primary_provider_id' => null]);
+
+        return response()->json([
+            'data' => $patient->fresh(),
+            'message' => 'Patient removed from provider panel.',
+        ]);
     }
 }

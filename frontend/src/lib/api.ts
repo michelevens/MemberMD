@@ -585,6 +585,28 @@ export const providerService = {
     if (useMockData()) return { data: null };
     return apiFetch<unknown>(`/analytics/providers/${id}/revenue`);
   },
+  // Patient panel CRUD — drives the Provider detail "Panel" tab.
+  // Returns { assigned, recent } so the tab can show formal panel
+  // members + appointment-history patients in one view.
+  panelMembers: async (id: string): Promise<ApiResponse<{
+    assigned: Array<Record<string, unknown>>;
+    recent: Array<Record<string, unknown>>;
+    providerId: string;
+  }>> => {
+    if (useMockData()) return { data: { assigned: [], recent: [], providerId: id } };
+    return apiFetch(`/providers/${id}/panel`);
+  },
+  assignToPanel: async (id: string, patientId: string): Promise<ApiResponse<unknown>> => {
+    if (useMockData()) return { data: null };
+    return apiFetch(`/providers/${id}/panel/assign`, {
+      method: "POST",
+      body: JSON.stringify({ patientId }),
+    });
+  },
+  unassignFromPanel: async (id: string, patientId: string): Promise<ApiResponse<unknown>> => {
+    if (useMockData()) return { data: null };
+    return apiFetch(`/providers/${id}/panel/${patientId}`, { method: "DELETE" });
+  },
 };
 
 // ─── Membership Plans ───────────────────────────────────────────────────────

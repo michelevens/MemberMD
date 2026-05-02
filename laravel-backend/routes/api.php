@@ -411,6 +411,12 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
     Route::get('/providers/{id}/availability', [ProviderController::class, 'availability']);
     Route::put('/providers/{id}/availability', [ProviderController::class, 'updateAvailability']);
     Route::get('/providers/{id}/appointments', [ProviderController::class, 'appointments']);
+    // Patient panel endpoints — drives the Provider detail "Panel" tab.
+    // panelPatients returns assigned + appointment-history; assign/unassign
+    // mutate the patient.primary_provider_id link.
+    Route::get('/providers/{id}/panel', [ProviderController::class, 'panelPatients']);
+    Route::post('/providers/{id}/panel/assign', [ProviderController::class, 'assignPatient']);
+    Route::delete('/providers/{id}/panel/{patientId}', [ProviderController::class, 'unassignPatient']);
     Route::apiResource('providers', ProviderController::class)->except(['destroy']);
 
     // ===== Coupons =====

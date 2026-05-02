@@ -18,7 +18,7 @@ class Patient extends Model
     use HasFactory, HasUuids, BelongsToTenant, Auditable, SoftDeletes, TolerantEncryptedCasts;
 
     protected $fillable = [
-        'tenant_id', 'user_id',
+        'tenant_id', 'user_id', 'primary_provider_id',
         'first_name', 'last_name', 'preferred_name',
         'date_of_birth', 'gender', 'pronouns',
         'phone', 'phone_blind_index',
@@ -82,6 +82,7 @@ class Patient extends Model
     ];
 
     public function user(): BelongsTo { return $this->belongsTo(User::class); }
+    public function primaryProvider(): BelongsTo { return $this->belongsTo(Provider::class, 'primary_provider_id'); }
     public function memberships(): HasMany { return $this->hasMany(PatientMembership::class); }
     public function activeMembership()
     {

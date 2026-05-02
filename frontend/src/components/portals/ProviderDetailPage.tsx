@@ -9,8 +9,8 @@ import {
   Settings as SettingsIcon, Loader2, Search, Save, Video, Mail, Hash,
   CheckCircle2, AlertTriangle,
 } from "lucide-react";
-import { providerService, patientService } from "../../lib/api";
-import type { Provider, ProviderAvailability, Patient, Appointment } from "../../types";
+import { providerService } from "../../lib/api";
+import type { Provider, ProviderAvailability, Appointment } from "../../types";
 
 const US_STATES = [
   "AL","AK","AZ","AR","CA","CO","CT","DE","DC","FL","GA","HI","ID","IL","IN","IA",
@@ -44,15 +44,6 @@ function unwrapAppointments(value: unknown): Appointment[] {
   if (value && typeof value === "object" && "data" in (value as Record<string, unknown>)) {
     const inner = (value as { data: unknown }).data;
     if (Array.isArray(inner)) return inner as Appointment[];
-  }
-  return [];
-}
-
-function unwrapPatients(value: unknown): Patient[] {
-  if (Array.isArray(value)) return value as Patient[];
-  if (value && typeof value === "object" && "data" in (value as Record<string, unknown>)) {
-    const inner = (value as { data: unknown }).data;
-    if (Array.isArray(inner)) return inner as Patient[];
   }
   return [];
 }
@@ -608,95 +599,192 @@ function ScheduleTab({ providerId, setToast }: ScheduleTabProps) {
 
 function PanelTab({ providerId }: { providerId: string }) {
   const navigate = useNavigate();
-  const [patients, setPatients] = useState<Patient[]>([]);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [assigned, setAssigned] = useState<any[]>([]);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [recent, setRecent] = useState<any[]>([]);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
+
+  const reload = useCallback(async () => {
+    const res = await providerService.panelMembers(providerId);
+    if (res.data) {
+      setAssigned(res.data.assigned ?? []);
+      setRecent(res.data.recent ?? []);
+    }
+    setLoading(false);
+  }, [providerId]);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      // Use the standard patient list endpoint and filter by providerId
-      // client-side; the backend's analytics panel endpoint returns
-      // aggregates, not the raw patient list.
-      const res = await patientService.list();
+      try { await reload(); } catch { /* ignore */ }
       if (cancelled) return;
-      const list = unwrapPatients(res.data).filter(p =>
-        p.primaryProviderId === providerId
-      );
-      setPatients(list);
-      setLoading(false);
     })();
     return () => { cancelled = true; };
-  }, [providerId]);
+  }, [reload]);
 
-  const filtered = useMemo(() => {
-    if (!search) return patients;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const matchesSearch = useCallback((p: any) => {
+    if (!search) return true;
     const q = search.toLowerCase();
-    return patients.filter(p =>
-      `${p.firstName} ${p.lastName}`.toLowerCase().includes(q) ||
-      (p.email || "").toLowerCase().includes(q)
-    );
-  }, [patients, search]);
+    const name = `${p.firstName ?? p.first_name ?? ""} ${p.lastName ?? p.last_name ?? ""}`.toLowerCase();
+    const email = String(p.email ?? "").toLowerCase();
+    return name.includes(q) || email.includes(q);
+  }, [search]);
+
+  const filteredAssigned = useMemo(() => assigned.filter(matchesSearch), [assigned, matchesSearch]);
+  const filteredRecent = useMemo(() => recent.filter(matchesSearch), [recent, matchesSearch]);
+
+  const handleAssign = async (patientId: string) => {
+    setActionLoading(patientId);
+    try {
+      await providerService.assignToPanel(providerId, patientId);
+      await reload();
+    } catch { /* ignore */ }
+    setActionLoading(null);
+  };
+
+  const handleUnassign = async (patientId: string) => {
+    setActionLoading(patientId);
+    try {
+      await providerService.unassignFromPanel(providerId, patientId);
+      await reload();
+    } catch { /* ignore */ }
+    setActionLoading(null);
+  };
 
   if (loading) {
     return <div className="flex justify-center py-16"><Loader2 className="w-6 h-6 animate-spin text-teal-500" /></div>;
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const renderRow = (p: any, isAssigned: boolean) => {
+    const name = `${p.firstName ?? p.first_name ?? ""} ${p.lastName ?? p.last_name ?? ""}`.trim() || "Unknown";
+    const email = p.email || "—";
+    const isActive = p.isActive !== false && p.is_active !== false;
+    return (
+      <tr key={p.id} className="border-b border-slate-100 last:border-b-0 hover:bg-slate-50">
+        <td className="py-3 pr-4 font-medium text-slate-800">{name}</td>
+        <td className="py-3 pr-4 text-slate-600">{email}</td>
+        <td className="py-3 pr-4">
+          <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+            isActive ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600"
+          }`}>{isActive ? "active" : "inactive"}</span>
+        </td>
+        <td className="py-3 text-right">
+          <div className="flex items-center justify-end gap-3">
+            {isAssigned ? (
+              <button
+                onClick={() => handleUnassign(p.id)}
+                disabled={actionLoading === p.id}
+                className="text-xs font-medium text-red-600 hover:text-red-700 disabled:opacity-50"
+              >
+                {actionLoading === p.id ? "Removing…" : "Remove"}
+              </button>
+            ) : (
+              <button
+                onClick={() => handleAssign(p.id)}
+                disabled={actionLoading === p.id}
+                className="text-xs font-medium text-teal-600 hover:text-teal-700 disabled:opacity-50"
+              >
+                {actionLoading === p.id ? "Adding…" : "Add to panel"}
+              </button>
+            )}
+            <button
+              onClick={() => navigate(`/practice?patient=${p.id}`)}
+              className="text-teal-600 hover:text-teal-700 text-sm font-medium"
+            >
+              View
+            </button>
+          </div>
+        </td>
+      </tr>
+    );
+  };
+
   return (
-    <div className="glass rounded-2xl border border-gray-200/50 p-6">
-      <div className="flex items-center justify-between gap-4 mb-6">
+    <div className="space-y-4">
+      {/* Search bar */}
+      <div className="flex items-center justify-between gap-4">
         <div>
           <h3 className="text-sm font-semibold text-slate-900">Patient panel</h3>
-          <p className="text-xs text-slate-500">{patients.length} patients assigned to this provider</p>
+          <p className="text-xs text-slate-500">
+            {assigned.length} assigned · {recent.length} recent (last 12 months)
+          </p>
         </div>
         <div className="relative w-72">
           <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
           <input
             value={search}
-            onChange={e => setSearch(e.target.value)}
+            onChange={(e) => setSearch(e.target.value)}
             placeholder="Search name or email"
             className="w-full pl-9 pr-3 py-2 border border-slate-200 rounded-lg text-sm"
           />
         </div>
       </div>
 
-      {filtered.length === 0 ? (
-        <div className="text-center py-12 text-sm text-slate-500">
-          {patients.length === 0 ? "No patients on this provider's panel yet." : `No matches for "${search}".`}
-        </div>
-      ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-left text-xs font-medium text-slate-500 border-b border-slate-200">
-                <th className="pb-3 pr-4">Name</th>
-                <th className="pb-3 pr-4">Email</th>
-                <th className="pb-3 pr-4">Status</th>
-                <th className="pb-3"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map(p => (
-                <tr key={p.id} className="border-b border-slate-100 last:border-b-0 hover:bg-slate-50">
-                  <td className="py-3 pr-4 font-medium text-slate-800">{p.firstName} {p.lastName}</td>
-                  <td className="py-3 pr-4 text-slate-600">{p.email || "—"}</td>
-                  <td className="py-3 pr-4">
-                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
-                      p.status === "active" ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600"
-                    }`}>{p.status}</span>
-                  </td>
-                  <td className="py-3 text-right">
-                    <button
-                      onClick={() => navigate(`/practice?patient=${p.id}`)}
-                      className="text-teal-600 hover:text-teal-700 text-sm font-medium"
-                    >
-                      View
-                    </button>
-                  </td>
+      {/* Assigned panel */}
+      <div className="glass rounded-2xl border border-gray-200/50 p-6">
+        <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-3">
+          Assigned to this provider
+        </h4>
+        {filteredAssigned.length === 0 ? (
+          <div className="text-center py-8 text-sm text-slate-500">
+            {assigned.length === 0
+              ? "No patients formally on this provider's panel yet. Add one from the Recent list below."
+              : `No matches for "${search}".`}
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-xs font-medium text-slate-500 border-b border-slate-200">
+                  <th className="pb-3 pr-4">Name</th>
+                  <th className="pb-3 pr-4">Email</th>
+                  <th className="pb-3 pr-4">Status</th>
+                  <th className="pb-3"></th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {filteredAssigned.map((p) => renderRow(p, true))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* Recent (appointment history but not assigned) */}
+      {recent.length > 0 && (
+        <div className="glass rounded-2xl border border-gray-200/50 p-6">
+          <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1">
+            Recently seen by this provider
+          </h4>
+          <p className="text-xs text-slate-400 mb-3">
+            Patients with appointments in the last 12 months who aren't formally assigned. Click "Add to panel" to formalize the relationship.
+          </p>
+          {filteredRecent.length === 0 ? (
+            <div className="text-center py-6 text-sm text-slate-500">
+              No matches for "{search}".
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-xs font-medium text-slate-500 border-b border-slate-200">
+                    <th className="pb-3 pr-4">Name</th>
+                    <th className="pb-3 pr-4">Email</th>
+                    <th className="pb-3 pr-4">Status</th>
+                    <th className="pb-3"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredRecent.map((p) => renderRow(p, false))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
     </div>

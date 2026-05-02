@@ -43,6 +43,10 @@ class UpdatePatientRequest extends FormRequest
             'pharmacy_phone' => 'nullable|string|max:20',
             'referral_source' => 'nullable|string|max:100',
             'photo_url' => 'nullable|string|max:500',
+            // Optional reassignment of primary provider. Same-tenant
+            // enforcement is the controller's job (provider must belong
+            // to this tenant); existence is checked here.
+            'primary_provider_id' => 'nullable|uuid|exists:providers,id',
         ];
     }
 }
