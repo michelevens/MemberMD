@@ -26,6 +26,8 @@ import {
   dashboardService,
   authService,
   telehealthService,
+  membershipPlanService,
+  apiFetch,
   isUsingMockData,
 } from "../../lib/api";
 import {
@@ -599,6 +601,14 @@ export function PatientPortal() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [apiDocuments, setApiDocuments] = useState<any[] | null>(null);
 
+  // Plans + pending payment links — used by the no-active-membership
+  // empty state so a fresh patient sees something actionable on login
+  // instead of a blank "Welcome back" card.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [availablePlans, setAvailablePlans] = useState<any[]>([]);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [pendingPaymentLinks, setPendingPaymentLinks] = useState<any[]>([]);
+
   const loadPatientData = useCallback(async () => {
     // In production we MUST avoid leaving the api* state slots null
     // when the API rejects — the useMemo fallbacks below would then
@@ -787,6 +797,51 @@ export function PatientPortal() {
 
   useEffect(() => { loadPatientData(); }, [loadPatientData]);
 
+  // Fetch available plans + any pending payment links the patient has.
+  // Surfaces both on the dashboard when there's no active membership so
+  // a fresh patient (e.g. Jerry, who got a payment link from the practice
+  // but never received the email) sees a "Choose your plan" hero or a
+  // "complete your enrollment" banner instead of a blank welcome.
+  useEffect(() => {
+    if (isUsingMockData()) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const [plansRes, pendingsRes] = await Promise.allSettled([
+          membershipPlanService.list(),
+          apiFetch<unknown>("/memberships/pending"),
+        ]);
+        if (cancelled) return;
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const unwrap = (payload: any): any[] => {
+          if (Array.isArray(payload)) return payload;
+          if (Array.isArray(payload?.data)) return payload.data;
+          if (Array.isArray(payload?.items)) return payload.items;
+          return [];
+        };
+
+        if (plansRes.status === "fulfilled" && plansRes.value.data) {
+          setAvailablePlans(unwrap(plansRes.value.data));
+        }
+        if (pendingsRes.status === "fulfilled" && pendingsRes.value.data) {
+          // Only show rows that are still actionable (status=pending,
+          // not yet expired). Anything claimed already has a real
+          // membership and the patient should see that flow instead.
+          const all = unwrap(pendingsRes.value.data);
+          const live = all.filter((p) => {
+            const status = String(p.status ?? "").toLowerCase();
+            const expiresAt = p.expiresAt ?? p.expires_at;
+            const notExpired = !expiresAt || new Date(expiresAt) > new Date();
+            return status === "pending" && notExpired;
+          });
+          setPendingPaymentLinks(live);
+        }
+      } catch { /* silent — empty list is the safe default */ }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
   // ─── Action handlers ─────────────────────────────────────────────────────
 
   const handleSendMessage = useCallback(async () => {
@@ -951,6 +1006,20 @@ export function PatientPortal() {
   const practiceLogoUrl = practice?.logoUrl || "";
   const practiceAccent = practice?.primaryColor || "";
 
+  // Active-membership detection. /dashboard/patient returns the active
+  // membership inline; we also fall back to patient.planName for the
+  // demo seed data path. Used to flip the dashboard between the
+  // membership card (has plan) and the choose-a-plan empty state.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const apiMembership = (apiPatient as any)?.membership;
+  const hasActiveMembership = Boolean(
+    apiMembership && ["active", "past_due", "trialing"].includes(String(apiMembership.status ?? "").toLowerCase())
+  ) || (demoMode && Boolean(patient.planName));
+  // First live pending link surfaces in a banner above the dashboard
+  // even when active membership exists (rare but possible mid-upgrade)
+  // and especially when there's no membership (the new-patient case).
+  const pendingLink = pendingPaymentLinks[0];
+
   // Sidebar nav for the patient portal — single flat list since the
   // patient surface only has a handful of areas. Layout matches the
   // pattern EnnHealth ClientPortalV3 uses (Dashboard, Appointments,
@@ -984,7 +1053,51 @@ export function PatientPortal() {
         </p>
       </div>
 
-      {/* Membership Card */}
+      {/* Pending payment link banner — surfaces when the practice sent
+          an admin-created Stripe Checkout link but the patient hasn't
+          completed payment yet. The email may have failed to deliver
+          (Resend outage, blocked recipient, typo) so the in-app surface
+          here is the safety net the user reported was missing. */}
+      {pendingLink && pendingLink.checkoutUrl && (
+        <div
+          className="rounded-2xl p-5 border"
+          style={{ backgroundColor: "#fffbeb", borderColor: "#fde68a" }}
+        >
+          <div className="flex items-start gap-3">
+            <div
+              className="w-10 h-10 rounded-full flex items-center justify-center shrink-0"
+              style={{ backgroundColor: "#fef3c7" }}
+            >
+              <CreditCard className="w-5 h-5" style={{ color: "#92400e" }} />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold" style={{ color: "#78350f" }}>
+                Complete your enrollment
+              </p>
+              <p className="text-xs mt-1 leading-relaxed" style={{ color: "#92400e" }}>
+                {practiceName || "Your practice"} sent you a secure payment link
+                {pendingLink.plan?.name ? ` for the ${pendingLink.plan.name} plan` : ""}. Tap below to finish enrolling.
+              </p>
+              <a
+                href={pendingLink.checkoutUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-block mt-3 px-4 py-2 rounded-lg text-sm font-semibold text-white transition-colors"
+                style={{ backgroundColor: "#d97706" }}
+              >
+                Complete enrollment
+              </a>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Membership Card — only when the patient actually has an active
+          membership. Without this gate, fresh patients (e.g. Jerry,
+          enrolled-but-unpaid) saw an empty navy gradient with blank
+          plan name + member id, which read as "broken portal" rather
+          than "you haven't picked a plan yet." */}
+      {hasActiveMembership && (
       <div
         className="relative overflow-hidden rounded-2xl p-6 shadow-xl"
         style={{
@@ -1008,7 +1121,7 @@ export function PatientPortal() {
 
         <div className="relative z-10">
           <div className="flex items-center gap-2 mb-4">
-            <span className="text-white text-lg font-bold tracking-wide">MemberMD</span>
+            <span className="text-white text-lg font-bold tracking-wide">{practiceName || "MemberMD"}</span>
           </div>
           <h2 className="text-white text-xl font-bold mb-1">
             {firstName} {lastName}
@@ -1038,8 +1151,87 @@ export function PatientPortal() {
           </div>
         </div>
       </div>
+      )}
 
-      {/* Benefits Tracker */}
+      {/* Choose Your Plan empty state — shown when no active membership.
+          Replaces the misleading blank membership card with a real CTA.
+          Each plan card opens the Billing tab where the patient can
+          enroll via Stripe Checkout (or contact the practice). */}
+      {!hasActiveMembership && (
+        <div className="rounded-2xl border border-slate-200 bg-white p-6">
+          <div className="flex items-start gap-3 mb-4">
+            <div
+              className="w-10 h-10 rounded-full flex items-center justify-center shrink-0"
+              style={{ backgroundColor: "#e6f7f2" }}
+            >
+              <Star className="w-5 h-5" style={{ color: COLORS.teal500 }} />
+            </div>
+            <div>
+              <h2 className="text-base font-semibold" style={{ color: COLORS.navy800 }}>
+                {pendingLink ? "Pick a different plan?" : "Choose your plan"}
+              </h2>
+              <p className="text-sm mt-0.5" style={{ color: COLORS.slate500 }}>
+                {availablePlans.length === 0
+                  ? `${practiceName || "Your practice"} hasn't published any plans yet. Reach out to schedule directly.`
+                  : `${practiceName || "Your practice"} offers ${availablePlans.length} membership ${availablePlans.length === 1 ? "plan" : "plans"}. Pick one to get started.`}
+              </p>
+            </div>
+          </div>
+
+          {availablePlans.length > 0 && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {availablePlans.slice(0, 4).map((plan) => {
+                const planName = plan.name || "Membership";
+                const monthly = plan.monthlyPrice ?? plan.monthly_price ?? null;
+                const annual = plan.annualPrice ?? plan.annual_price ?? null;
+                const description = plan.description || plan.tagline || "";
+                return (
+                  <button
+                    key={plan.id}
+                    onClick={() => setActiveTab("account")}
+                    className="text-left rounded-xl border p-4 transition-colors hover:border-teal-400"
+                    style={{ borderColor: COLORS.slate200 }}
+                  >
+                    <p className="text-sm font-semibold" style={{ color: COLORS.navy800 }}>{planName}</p>
+                    <div className="flex items-baseline gap-1 mt-1">
+                      {monthly !== null && (
+                        <>
+                          <span className="text-xl font-bold" style={{ color: COLORS.navy900 }}>
+                            ${Number(monthly).toFixed(0)}
+                          </span>
+                          <span className="text-xs" style={{ color: COLORS.slate500 }}>/month</span>
+                        </>
+                      )}
+                      {monthly === null && annual !== null && (
+                        <>
+                          <span className="text-xl font-bold" style={{ color: COLORS.navy900 }}>
+                            ${Number(annual).toFixed(0)}
+                          </span>
+                          <span className="text-xs" style={{ color: COLORS.slate500 }}>/year</span>
+                        </>
+                      )}
+                    </div>
+                    {description && (
+                      <p className="text-xs mt-2 line-clamp-2" style={{ color: COLORS.slate500 }}>
+                        {description}
+                      </p>
+                    )}
+                    <div className="mt-3 flex items-center gap-1 text-xs font-semibold" style={{ color: COLORS.teal500 }}>
+                      View details <ChevronRight className="w-3 h-3" />
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Benefits Tracker — only when there's an active membership.
+          Without this gate, fresh patients saw "1/2 visits used" with
+          a fake "Next renewal" date pulled from the empty fallback,
+          which read as broken state. */}
+      {hasActiveMembership && (
       <div className="glass rounded-2xl p-5">
         <h3 className="text-sm font-semibold mb-4" style={{ color: COLORS.navy800 }}>
           Your Benefits
@@ -1086,6 +1278,7 @@ export function PatientPortal() {
           </span>
         </div>
       </div>
+      )}
 
       {/* Quick Actions */}
       <div className="grid grid-cols-2 gap-3">

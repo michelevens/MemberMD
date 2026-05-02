@@ -249,6 +249,8 @@ class MembershipController extends Controller
         MembershipPlan $plan,
         PendingEnrollment $pending,
     ): void {
+        // 1) Email — best-effort. If Resend is down or the address is
+        //    bad, MailDispatcher logs and continues.
         try {
             \App\Services\MailDispatcher::send(
                 $patient->email,
@@ -266,6 +268,27 @@ class MembershipController extends Controller
                 'error' => $e->getMessage(),
             ]);
         }
+
+        // 2) In-app notification — independent of email so the patient
+        //    sees the link in their portal bell even if email never
+        //    landed (which is what the user reported: Jerry never
+        //    received the email and had no portal-side surface either).
+        //    Requires the patient to have a linked User row. Best-effort.
+        try {
+            $patient->loadMissing('user');
+            if ($patient->user) {
+                $patient->user->notify(new \App\Notifications\PaymentLinkSent(
+                    pending: $pending,
+                    planName: $plan->name ?? 'Membership',
+                    practiceName: $practice->name ?? 'Your practice',
+                ));
+            }
+        } catch (\Throwable $e) {
+            Log::warning('Payment link in-app notify failed', [
+                'pending_enrollment_id' => $pending->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
     }
 
     /**
@@ -279,14 +302,25 @@ class MembershipController extends Controller
     public function pendingEnrollments(Request $request): JsonResponse
     {
         $user = $request->user();
-        abort_if(!in_array($user->role, ['practice_admin', 'staff']), 403);
+        // Staff/admin can list any patient's pending rows (or all of them).
+        // Patients can list their own only — this is what surfaces a
+        // pending payment link on the patient dashboard when the email
+        // didn't deliver.
+        $isStaff = in_array($user->role, ['practice_admin', 'staff']);
+        $isPatient = $user->role === 'patient';
+        abort_if(!$isStaff && !$isPatient, 403);
 
         $query = PendingEnrollment::where('tenant_id', $user->tenant_id)
             ->with(['patient:id,first_name,last_name,email', 'plan:id,name,monthly_price,annual_price']);
 
-        if ($request->filled('patient_id')) {
+        if ($isPatient) {
+            // Lock the query to the caller's own patient row so a patient
+            // can't snoop other patients' pending links.
+            $query->whereHas('patient', fn ($q) => $q->where('user_id', $user->id));
+        } elseif ($request->filled('patient_id')) {
             $query->where('patient_id', $request->input('patient_id'));
         }
+
         if ($request->filled('status')) {
             $query->where('status', $request->input('status'));
         }
