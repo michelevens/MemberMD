@@ -15,6 +15,7 @@ import { CommandPalette, useCommandPaletteShortcut } from "../shared/CommandPale
 import { RefreshButton } from "../shared/RefreshButton";
 import { BillingTab } from "./patient/BillingTab";
 import { EntitlementsTab } from "./patient/EntitlementsTab";
+import { LabResultsTab } from "./patient/LabResultsTab";
 import { usePushNotifications } from "../../hooks/usePushNotifications";
 import {
   familyService,
@@ -27,6 +28,8 @@ import {
   authService,
   telehealthService,
   membershipPlanService,
+  programService,
+  encounterService,
   apiFetch,
   isUsingMockData,
 } from "../../lib/api";
@@ -58,11 +61,23 @@ import {
   AlertCircle,
   Activity,
   Award,
+  Users,
+  FlaskConical,
+  Stethoscope,
 } from "lucide-react";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
-type TabId = "home" | "appointments" | "messages" | "health" | "entitlements" | "account" | "profile";
+type TabId =
+  | "home"
+  | "appointments"
+  | "messages"
+  | "health"
+  | "care-team"
+  | "lab-results"
+  | "entitlements"
+  | "account"
+  | "profile";
 
 interface Appointment {
   id: string;
@@ -703,6 +718,16 @@ export function PatientPortal() {
   const [apiMedications, setApiMedications] = useState<Medication[] | null>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [apiDocuments, setApiDocuments] = useState<any[] | null>(null);
+  // Patient's enrollments (with bookable_providers per program). Drives
+  // the Care Team tab — which is just the dedupe-flatten of every
+  // bookable provider across active enrollments. null = still loading;
+  // [] = no programs yet (empty state).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [apiEnrollments, setApiEnrollments] = useState<any[] | null>(null);
+  // Patient's signed encounter history. Drives the new Encounters
+  // section on the Health Records tab.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [apiEncounters, setApiEncounters] = useState<any[] | null>(null);
 
   // Plans + pending payment links — used by the no-active-membership
   // empty state so a fresh patient sees something actionable on login
@@ -725,6 +750,8 @@ export function PatientPortal() {
         setApiThreads([]);
         setApiMedications([]);
         setApiDocuments([]);
+        setApiEnrollments([]);
+        setApiEncounters([]);
       }
       try {
         const results = await Promise.allSettled([
@@ -740,6 +767,13 @@ export function PatientPortal() {
           documentService.list(),
           dashboardService.getPatientStats(),
           authService.me(),
+          // Active enrollments + bookable providers per program. Drives
+          // the Care Team tab.
+          programService.myEnrollments(),
+          // Encounter history — drives the new Encounters section on
+          // Health Records. Backend index allows patient role and
+          // auto-scopes via whereHas patient.user_id.
+          encounterService.list(),
         ]);
 
         // Helpers for the appointment mappers below.
@@ -948,6 +982,27 @@ export function PatientPortal() {
               phone: u.phone,
             }));
           }
+        }
+
+        // Enrollments → Care Team tab. Each enrollment carries a
+        // bookable_providers list; the page dedupes them across all
+        // enrollments by provider id.
+        if (results[7].status === "fulfilled") {
+          const r = results[7].value;
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const list: any[] = Array.isArray(r.data) ? r.data : (r.data as any)?.data || [];
+          setApiEnrollments(list);
+        }
+
+        // Encounters → Health Records "Encounters" section. Backend
+        // returns the same paginated envelope as appointments and labs.
+        if (results[8].status === "fulfilled") {
+          const r = results[8].value;
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const raw = r.data as any;
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const list: any[] = Array.isArray(raw) ? raw : (raw?.data ?? []);
+          setApiEncounters(list);
         }
       } catch {
         // keep mock data on network failure
@@ -1296,10 +1351,13 @@ export function PatientPortal() {
 
   // Categorized sidebar — matches the admin/provider portal grouping
   // pattern and the Figma "Mobile flow for membership system" design.
-  // Four buckets: Main / Health Records / (Care & Resources is reserved
-  // for Tier 2 — Care Team, Wellness, Health Library, Locations) /
-  // Account. Empty Care & Resources isn't rendered; PortalShell drops
-  // sections with zero items.
+  // Four buckets:
+  //   Main           — daily-action surfaces (Dashboard, Appointments, Messages)
+  //   Health Records — clinical reads (current Health Records hub, Lab Results)
+  //   Care & Resources — providers + future Wellness / Health Library / Locations
+  //   Account        — billing / entitlements / profile
+  // Tier 3 items (Wellness, Health Library, Locations, Family) live in
+  // a separate doc and aren't surfaced here yet.
   const sidebarNav: NavSection[] = [
     {
       id: "main",
@@ -1315,6 +1373,14 @@ export function PatientPortal() {
       label: "Health Records",
       items: [
         { id: "health", label: "Health Records", icon: Heart },
+        { id: "lab-results", label: "Lab Results", icon: FlaskConical },
+      ],
+    },
+    {
+      id: "care-resources",
+      label: "Care & Resources",
+      items: [
+        { id: "care-team", label: "Care Team", icon: Users },
       ],
     },
     {
@@ -1405,6 +1471,15 @@ export function PatientPortal() {
           || (m?.planName as string)
           || patient.planName
           || "Member";
+        // Program name — eager-loaded by DashboardController::patient
+        // since commit 50cfc1f. Falls back to plan.program if backend
+        // hasn't been redeployed yet. Shown as the line above the
+        // patient's name (the program is *what they signed up for*;
+        // the plan is just the price tier).
+        const programName: string =
+          (m?.program?.name as string)
+          || (m?.plan?.program?.name as string)
+          || "";
         const memberSince: string =
           (m?.startDate as string)
           || (m?.start_date as string)
@@ -1460,6 +1535,11 @@ export function PatientPortal() {
               <div className="flex items-center gap-2 mb-4">
                 <span className="text-white text-lg font-bold tracking-wide">{practiceName || "MemberMD"}</span>
               </div>
+              {programName && (
+                <p className="text-white/70 text-xs uppercase tracking-wider mb-1">
+                  {programName}
+                </p>
+              )}
               <h2 className="text-white text-xl font-bold mb-1">
                 {firstName} {lastName}
               </h2>
@@ -2440,6 +2520,61 @@ export function PatientPortal() {
         </div>
       </div>
 
+      {/* Visit History (Encounters) — shows the patient's signed
+          encounter history. Patients see what was charted (chief
+          complaint, type, date, provider). Click-into-detail isn't
+          built yet; this is read-only. */}
+      <div className="glass rounded-2xl p-5">
+        <div className="flex items-center gap-2 mb-4">
+          <Stethoscope className="w-4 h-4" style={{ color: COLORS.teal500 }} />
+          <h3 className="text-sm font-semibold" style={{ color: COLORS.navy800 }}>
+            Visit History
+          </h3>
+        </div>
+        {(apiEncounters === null || (apiEncounters && apiEncounters.length === 0)) && (
+          <p className="text-xs italic" style={{ color: COLORS.slate400 }}>
+            {apiEncounters === null ? "Loading visit history…" : "No encounters on file yet."}
+          </p>
+        )}
+        <div className="space-y-2">
+          {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+          {(apiEncounters ?? []).slice(0, 8).map((e: any) => {
+            const date = e.encounterDate ?? e.encounter_date ?? null;
+            const dateStr = date ? new Date(date).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" }) : "—";
+            const provUser = e.provider?.user ?? null;
+            const provFirst = provUser?.firstName ?? provUser?.first_name ?? "";
+            const provLast = provUser?.lastName ?? provUser?.last_name ?? "";
+            const provName = [provFirst, provLast].filter(Boolean).join(" ").trim() || "—";
+            const type = (e.encounterType ?? e.encounter_type ?? "").replace(/_/g, " ");
+            const typeLabel = type ? type.charAt(0).toUpperCase() + type.slice(1) : "Visit";
+            const chief = e.chiefComplaint ?? e.chief_complaint ?? "";
+            return (
+              <div
+                key={e.id}
+                className="rounded-xl p-3 border-l-4"
+                style={{ backgroundColor: COLORS.slate50, borderLeftColor: COLORS.teal500 }}
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-semibold truncate" style={{ color: COLORS.navy800 }}>
+                      {typeLabel}
+                    </p>
+                    <p className="text-xs mt-0.5 truncate" style={{ color: COLORS.slate500 }}>
+                      {dateStr} · {provName}
+                    </p>
+                    {chief && (
+                      <p className="text-xs mt-1 italic truncate" style={{ color: COLORS.slate600 }}>
+                        {chief}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
       {/* Documents */}
       <div className="glass rounded-2xl p-5">
         <div className="flex items-center gap-2 mb-4">
@@ -2484,6 +2619,162 @@ export function PatientPortal() {
       </div>
     </div>
   );
+
+  // ─── Care Team Tab ─────────────────────────────────────────────────────
+  // Source: programService.myEnrollments() — already fetched in
+  // loadPatientData. Each enrollment carries bookable_providers; we
+  // dedupe across all enrollments by provider id, since the same
+  // provider can appear on multiple programs.
+  const careTeamProviders = useMemo(() => {
+    if (!apiEnrollments) return [];
+    type Prov = {
+      id: string;
+      firstName: string;
+      lastName: string;
+      credentials: string;
+      specialty: string;
+      programs: string[];
+      isAssigned: boolean;
+    };
+    const byId = new Map<string, Prov>();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    for (const e of apiEnrollments as any[]) {
+      const programName = e.program?.name ?? "";
+      const assignedId = e.assignedProvider?.id ?? e.assigned_provider?.id ?? null;
+      const list = e.bookableProviders ?? e.bookable_providers ?? [];
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      for (const p of list as any[]) {
+        const id = p.id;
+        if (!id) continue;
+        if (!byId.has(id)) {
+          byId.set(id, {
+            id,
+            firstName: p.firstName ?? p.first_name ?? "",
+            lastName: p.lastName ?? p.last_name ?? "",
+            credentials: p.credentials ?? "",
+            specialty: p.specialty ?? "",
+            programs: programName ? [programName] : [],
+            isAssigned: id === assignedId,
+          });
+        } else {
+          const existing = byId.get(id)!;
+          if (programName && !existing.programs.includes(programName)) {
+            existing.programs.push(programName);
+          }
+          if (id === assignedId) existing.isAssigned = true;
+        }
+      }
+    }
+    // Assigned providers first; then alphabetical by last name.
+    return Array.from(byId.values()).sort((a, b) => {
+      if (a.isAssigned !== b.isAssigned) return a.isAssigned ? -1 : 1;
+      return (a.lastName + a.firstName).localeCompare(b.lastName + b.firstName);
+    });
+  }, [apiEnrollments]);
+
+  const renderCareTeam = () => (
+    <div className="space-y-5">
+      <div>
+        <h1 className="text-2xl font-semibold tracking-tight" style={{ color: COLORS.navy800 }}>
+          Care Team
+        </h1>
+        <p className="text-sm mt-0.5" style={{ color: COLORS.slate500 }}>
+          Providers attached to your active programs
+        </p>
+      </div>
+
+      {/* Loading skeleton */}
+      {apiEnrollments === null && (
+        <div className="rounded-2xl border border-dashed border-slate-200 bg-white p-8 text-center">
+          <p className="text-sm" style={{ color: COLORS.slate500 }}>Loading your care team…</p>
+        </div>
+      )}
+
+      {/* Empty state — patient has no active enrollments. The
+          membership card on the dashboard already steers them to enroll;
+          we keep this short. */}
+      {apiEnrollments && careTeamProviders.length === 0 && (
+        <div className="rounded-2xl border border-dashed border-slate-200 bg-white p-8 text-center">
+          <Users className="w-8 h-8 mx-auto mb-2" style={{ color: COLORS.slate300 }} />
+          <p className="text-sm font-medium" style={{ color: COLORS.navy800 }}>
+            No care team yet
+          </p>
+          <p className="text-xs mt-1" style={{ color: COLORS.slate500 }}>
+            Once you're enrolled in a program, the providers attached to that program will appear here.
+          </p>
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {careTeamProviders.map((p) => {
+          const fullName = [p.firstName, p.lastName].filter(Boolean).join(" ").trim() || "Provider";
+          const initials = ((p.firstName[0] || "") + (p.lastName[0] || "")).toUpperCase() || "??";
+          return (
+            <div key={p.id} className="glass rounded-2xl p-5">
+              <div className="flex items-start gap-4 mb-3">
+                <div
+                  className="w-14 h-14 rounded-full flex items-center justify-center shrink-0 text-base font-bold text-white"
+                  style={{ background: `linear-gradient(135deg, ${COLORS.navy700}, ${COLORS.teal500})` }}
+                >
+                  {initials}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <p className="text-sm font-semibold" style={{ color: COLORS.navy800 }}>
+                      {fullName}{p.credentials ? `, ${p.credentials}` : ""}
+                    </p>
+                    {p.isAssigned && (
+                      <span
+                        className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full"
+                        style={{ backgroundColor: "#e6fffa", color: COLORS.teal600 }}
+                      >
+                        Your provider
+                      </span>
+                    )}
+                  </div>
+                  {p.specialty && (
+                    <p className="text-xs mt-0.5" style={{ color: COLORS.slate500 }}>
+                      {p.specialty}
+                    </p>
+                  )}
+                  {p.programs.length > 0 && (
+                    <p className="text-xs mt-2" style={{ color: COLORS.slate400 }}>
+                      Available through: {p.programs.join(" · ")}
+                    </p>
+                  )}
+                </div>
+              </div>
+              <div className="flex gap-2 mt-3">
+                <button
+                  onClick={() => setActiveTab("messages")}
+                  className="flex-1 inline-flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-medium transition-colors"
+                  style={{ backgroundColor: "#e6fffa", color: COLORS.teal600 }}
+                >
+                  <MessageSquare className="w-3.5 h-3.5" />
+                  Message
+                </button>
+                <button
+                  onClick={() => setShowBookingWidget(true)}
+                  className="flex-1 inline-flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-medium border transition-colors hover:bg-slate-50"
+                  style={{ borderColor: COLORS.slate200, color: COLORS.slate600 }}
+                >
+                  <Calendar className="w-3.5 h-3.5" />
+                  Book visit
+                </button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+
+  // ─── Lab Results Tab ───────────────────────────────────────────────────
+  // Patient-self read of /lab-orders (LabOrder + nested LabResult).
+  // The list endpoint is paginated, so we unwrap the same envelope shape
+  // we handle for appointments. LabOrderController::index now allows the
+  // patient role and auto-scopes the query to the caller's own labs.
+  const renderLabResults = () => <LabResultsTab />;
 
   // ─── Account Tab ───────────────────────────────────────────────────────
 
@@ -2718,6 +3009,10 @@ export function PatientPortal() {
         return renderMessages();
       case "health":
         return renderHealth();
+      case "care-team":
+        return renderCareTeam();
+      case "lab-results":
+        return renderLabResults();
       case "entitlements":
         return <EntitlementsTab patientId={patient.id} />;
       case "account":
@@ -2738,6 +3033,8 @@ export function PatientPortal() {
     appointments: "Appointments",
     messages: "Messages",
     health: "Health Records",
+    "care-team": "Care Team",
+    "lab-results": "Lab Results",
     entitlements: "Entitlements",
     account: "Billing & Account",
     profile: "Profile",

@@ -13,16 +13,31 @@ class LabOrderController extends Controller
     public function index(Request $request): JsonResponse
     {
         $user = $request->user();
-        abort_if(!in_array($user->role, ['superadmin', 'practice_admin', 'provider']), 403, 'Unauthorized.');
+        // Patients reach this endpoint to read their own results — the
+        // patient portal Lab Results tab. The query is auto-scoped to
+        // the caller's own patient_id below; staff/admin/provider can
+        // query across patients with the explicit patient_id filter.
+        abort_if(!in_array($user->role, ['superadmin', 'practice_admin', 'provider', 'patient']), 403, 'Unauthorized.');
 
         $query = LabOrder::where('tenant_id', $user->tenant_id)
-            ->with(['patient', 'provider']);
+            ->with(['patient', 'provider', 'results']);
 
         if ($user->role === 'provider') {
             $query->where('provider_id', $user->id);
         }
 
-        if ($request->filled('patient_id')) {
+        // Patient role: enforce caller-only scope. Ignores any
+        // patient_id query param a misbehaving client might pass —
+        // the linked Patient row from auth is the source of truth.
+        if ($user->role === 'patient') {
+            $patient = $user->patient;
+            if (!$patient) {
+                return response()->json(['data' => ['data' => []]]);
+            }
+            $query->where('patient_id', $patient->id);
+        }
+
+        if ($request->filled('patient_id') && $user->role !== 'patient') {
             $query->where('patient_id', $request->patient_id);
         }
 

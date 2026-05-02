@@ -1845,6 +1845,24 @@ export const programService = {
   },
 };
 
+// ─── Lab Orders ──────────────────────────────────────────────────────────────
+// LabOrderController::index returns a Laravel-paginated envelope —
+// { data: { data: [...], current_page, total } } — and includes the
+// nested `results` relation when patient (or other) callers fetch.
+// Patient role is auto-scoped server-side to caller's own labs (see
+// LabOrderController commit ae3010c... actually d6bd33a → tier 2),
+// so no patient_id filter needed when role=patient.
+
+export const labService = {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  list: async (params?: Record<string, string>): Promise<ApiResponse<any>> => {
+    if (useMockData()) return { data: [] };
+    const query = params ? "?" + new URLSearchParams(params).toString() : "";
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return apiFetch<any>(`/lab-orders${query}`);
+  },
+};
+
 // ===== Engagement Service =====
 
 export const engagementService = {

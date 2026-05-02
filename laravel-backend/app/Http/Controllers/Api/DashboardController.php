@@ -102,8 +102,12 @@ class DashboardController extends Controller
             ]], 404);
         }
 
-        // Active membership & entitlements
-        $membership = $patient->activeMembership?->load('plan');
+        // Active membership & entitlements. Eager-load program too so
+        // the patient portal's membership card can show the program
+        // name ("Concierge Medicine") above the plan badge
+        // ("Comprehensive") — that distinction is what the patient
+        // signed up for, the plan is just the price tier.
+        $membership = $patient->activeMembership?->load('plan', 'program');
         $currentEntitlement = null;
 
         if ($membership) {
