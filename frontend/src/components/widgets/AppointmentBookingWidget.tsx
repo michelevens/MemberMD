@@ -245,10 +245,31 @@ export function AppointmentBookingWidget({ onClose, onBooked }: AppointmentBooki
     setBooking(true);
     setBookingError(null);
 
-    // Combine selected date + time HH:MM into an ISO datetime
-    const [hours, minutes] = selectedTime.split(":").map(Number);
+    // selectedTime is rendered as 12h "h:mm AM/PM" (e.g. "1:00 PM"),
+    // so naive split-on-colon would book "1:00 PM" as 01:00 UTC
+    // and the backend's `after:now` rule would reject every PM slot
+    // for the rest of the day. Parse the meridiem too.
+    const tm = selectedTime.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)?$/i);
+    let hours = 0;
+    let minutes = 0;
+    if (tm) {
+      hours = parseInt(tm[1], 10);
+      minutes = parseInt(tm[2], 10);
+      const meridiem = tm[3]?.toUpperCase();
+      if (meridiem === "PM" && hours < 12) hours += 12;
+      if (meridiem === "AM" && hours === 12) hours = 0;
+    }
     const scheduled = new Date(selectedDate);
-    scheduled.setHours(hours || 0, minutes || 0, 0, 0);
+    scheduled.setHours(hours, minutes, 0, 0);
+
+    // Belt-and-suspenders: backend rejects past times with a generic
+    // "scheduled_at must be a date after now" — catch it here with a
+    // friendlier message that points at what to change.
+    if (scheduled.getTime() <= Date.now()) {
+      setBooking(false);
+      setBookingError("That time is in the past. Pick a later time or a future date.");
+      return;
+    }
 
     // In demo mode, return a fabricated appointment so the UI flow still
     // demos. In production we make a real API call — without this, success
@@ -601,18 +622,36 @@ export function AppointmentBookingWidget({ onClose, onBooked }: AppointmentBooki
                   <div className="grid grid-cols-2 gap-2">
                     {MOCK_TIME_SLOTS.map((slot) => {
                       const selected = selectedTime === slot;
+                      // Disable slots that are already in the past when
+                      // the patient is booking for today — the backend
+                      // would reject them with `scheduled_at after:now`.
+                      const m = slot.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)?$/i);
+                      let slotHour = 0;
+                      let slotMin = 0;
+                      if (m) {
+                        slotHour = parseInt(m[1], 10);
+                        slotMin = parseInt(m[2], 10);
+                        const mer = m[3]?.toUpperCase();
+                        if (mer === "PM" && slotHour < 12) slotHour += 12;
+                        if (mer === "AM" && slotHour === 12) slotHour = 0;
+                      }
+                      const slotDate = new Date(selectedDate);
+                      slotDate.setHours(slotHour, slotMin, 0, 0);
+                      const isPast = slotDate.getTime() <= Date.now();
                       return (
                         <button
                           key={slot}
+                          disabled={isPast}
                           onClick={() => {
                             setSelectedTime(slot);
                             setStep(4);
                           }}
-                          className="py-2.5 rounded-lg text-sm font-medium transition-all"
+                          className="py-2.5 rounded-lg text-sm font-medium transition-all disabled:cursor-not-allowed"
                           style={{
                             border: `1.5px solid ${selected ? C.teal500 : C.slate200}`,
                             backgroundColor: selected ? C.teal50 : C.white,
-                            color: selected ? C.teal600 : C.slate600,
+                            color: isPast ? C.slate300 : (selected ? C.teal600 : C.slate600),
+                            textDecoration: isPast ? "line-through" : "none",
                           }}
                         >
                           {slot}
