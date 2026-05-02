@@ -548,7 +548,23 @@ class ProgramController extends Controller
             return response()->json(['data' => []]);
         }
 
-        $enrollments = ProgramEnrollment::where('patient_id', $user->patient->id)
+        return response()->json(['data' => self::enrollmentsForPatient($user->patient->id)]);
+    }
+
+    /**
+     * Shared payload shape for enrollments returned to a booking flow,
+     * keyed by patient id. Used by:
+     *   - GET /me/enrollments (patient self-service)
+     *   - GET /patients/{id}/enrollments (staff booking on behalf of a
+     *     patient — same shape so the SPA can reuse the booking widget
+     *     in either mode without diverging data parsing)
+     *
+     * Returns active + pending enrollments only — cancelled/completed
+     * shouldn't surface a bookable provider list.
+     */
+    public static function enrollmentsForPatient(string $patientId): array
+    {
+        $enrollments = ProgramEnrollment::where('patient_id', $patientId)
             ->whereIn('status', ['active', 'pending'])
             ->with([
                 'program',
@@ -561,7 +577,7 @@ class ProgramController extends Controller
             ->orderByDesc('enrolled_at')
             ->get();
 
-        $payload = $enrollments->map(function ($e) {
+        return $enrollments->map(function ($e) {
             $assigned = $e->provider;
             $programProviders = $e->program?->providers ?? collect();
             return [
@@ -592,8 +608,6 @@ class ProgramController extends Controller
                     ];
                 })->values(),
             ];
-        });
-
-        return response()->json(['data' => $payload]);
+        })->all();
     }
 }

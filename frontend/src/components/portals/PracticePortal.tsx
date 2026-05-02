@@ -759,9 +759,15 @@ export function PracticePortal() {
   const [confirmDialog, setConfirmDialog] = useState<{ title: string; message: string; onConfirm: () => void; confirmLabel?: string; danger?: boolean } | null>(null);
 
   // ─── Book Appointment Modal ─────────────────────────────────────────
+  // showBookAppointment renders AppointmentBookingWidget in staff mode.
+  // bookApptStaffPatient* are passed as props so the widget pre-fills
+  // the patient context when staff opens this from a specific patient's
+  // profile (skipping its built-in Step 0 patient picker).
   const [showBookAppointment, setShowBookAppointment] = useState(false);
-  const [bookApptForm, setBookApptForm] = useState({ patientId: "", appointmentTypeId: "", scheduledAt: "", scheduledTime: "09:00", durationMinutes: "30", providerId: "", isTeleHealth: false, programId: "", notes: "" });
-  const [bookApptLoading, setBookApptLoading] = useState(false);
+  const [bookApptStaffPatientId, setBookApptStaffPatientId] = useState<string | null>(null);
+  const [bookApptStaffPatientName, setBookApptStaffPatientName] = useState<string>("");
+  // (bookApptForm + handleBookAppointment removed — the widget owns
+  // both the form state and the submit path now.)
 
   // ─── New Encounter Modal ────────────────────────────────────────────
   const [showNewEncounter, setShowNewEncounter] = useState(false);
@@ -1711,37 +1717,8 @@ export function PracticePortal() {
     setAddPatientLoading(false);
   };
 
-  // ─── Book Appointment Handler ──────────────────────────────────────
-  const handleBookAppointment = async () => {
-    if (!bookApptForm.patientId || !bookApptForm.scheduledAt) {
-      setToast({ message: "Patient and date are required.", type: "error" });
-      return;
-    }
-    setBookApptLoading(true);
-    try {
-      const scheduledAt = `${bookApptForm.scheduledAt}T${bookApptForm.scheduledTime}:00`;
-      const res = await appointmentService.create({
-        patientId: bookApptForm.patientId,
-        appointmentTypeId: bookApptForm.appointmentTypeId || undefined,
-        scheduledAt,
-        durationMinutes: parseInt(bookApptForm.durationMinutes) || 30,
-        providerId: bookApptForm.providerId || undefined,
-        isTeleHealth: bookApptForm.isTeleHealth,
-        notes: bookApptForm.notes || undefined,
-      });
-      if (res.data || !res.error) {
-        setToast({ message: "Appointment booked successfully.", type: "success" });
-        setShowBookAppointment(false);
-        setBookApptForm({ patientId: "", appointmentTypeId: "", scheduledAt: "", scheduledTime: "09:00", durationMinutes: "30", providerId: "", isTeleHealth: false, programId: "", notes: "" });
-        loadPracticeData();
-      } else {
-        setToast({ message: res.error || "Failed to book appointment.", type: "error" });
-      }
-    } catch (err: unknown) {
-      setToast({ message: err instanceof Error ? err.message : "Failed to book appointment.", type: "error" });
-    }
-    setBookApptLoading(false);
-  };
+  // (handleBookAppointment removed — AppointmentBookingWidget now owns
+  // the staff booking flow including the API call.)
 
   // ─── New Encounter Handler ─────────────────────────────────────────
   const handleCreateEncounter = async () => {
@@ -2784,7 +2761,7 @@ export function PracticePortal() {
     const rowActions = (patient: Pt): import("../shared/stripe-ui").KebabAction[] => [
       { label: "View details", onClick: () => { setSelectedPatient(patient); setPatientDetailTab("demographics"); } },
       { label: "Edit", onClick: () => openEditPatient(patient) },
-      { label: "Book appointment", onClick: () => { setBookApptForm(f => ({ ...f, patientId: patient.id })); setShowBookAppointment(true); } },
+      { label: "Book appointment", onClick: () => { setBookApptStaffPatientId(patient.id); setBookApptStaffPatientName(patient.name || ""); setShowBookAppointment(true); } },
       { label: "Send message", onClick: () => { setSelectedPatient(patient); setPatientDetailTab("messages"); } },
       { label: "Log activity", onClick: () => { setActiveTab("activity-log"); } },
       { label: "Create encounter", onClick: () => { setEncounterForm(f => ({ ...f, patientId: patient.id })); setShowNewEncounter(true); } },
@@ -3277,7 +3254,7 @@ export function PracticePortal() {
             <button
               className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium border transition-colors"
               style={{ borderColor: "#334e68", color: "#334e68" }}
-              onClick={() => { if (pt) { setBookApptForm(f => ({ ...f, patientId: pt.id })); setShowBookAppointment(true); } }}
+              onClick={() => { if (pt) { setBookApptStaffPatientId(pt.id); setBookApptStaffPatientName(pt.name || ""); setShowBookAppointment(true); } }}
             >
               <Calendar className="w-4 h-4" /> Book Appointment
             </button>
@@ -9652,96 +9629,29 @@ export function PracticePortal() {
         </div>
       )}
 
-      {/* ─── Book Appointment Modal ──────────────────────────────────────── */}
+      {/* ─── Book Appointment Modal ────────────────────────────────────────
+          Replaced the previous hand-rolled modal with the shared
+          AppointmentBookingWidget mounted in staff mode. Same widget
+          patients use, with a Step 0 patient picker on the front and
+          a few patient-only gates skipped (telehealth consent, "must
+          enroll first"). */}
       {showBookAppointment && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: "rgba(0,0,0,0.5)" }}>
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden">
-            <div className="px-6 py-4 border-b border-slate-100">
-              <h3 className="text-base font-semibold text-slate-900">Book appointment</h3>
-              <p className="text-sm text-slate-500 mt-0.5">Schedule a new appointment for a patient.</p>
-            </div>
-            <div className="p-6 space-y-4 max-h-96 overflow-y-auto">
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Patient *</label>
-                <select className="w-full border rounded-lg px-3 py-2 text-sm" value={bookApptForm.patientId} onChange={e => setBookApptForm(f => ({ ...f, patientId: e.target.value }))}>
-                  <option value="">Select patient...</option>
-                  {(apiPatients || (isDemoMode ? MOCK_PATIENTS : [])).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                </select>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Date *</label>
-                  <input type="date" className="w-full border rounded-lg px-3 py-2 text-sm" value={bookApptForm.scheduledAt} onChange={e => setBookApptForm(f => ({ ...f, scheduledAt: e.target.value }))} />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Time *</label>
-                  <input type="time" className="w-full border rounded-lg px-3 py-2 text-sm" value={bookApptForm.scheduledTime} onChange={e => setBookApptForm(f => ({ ...f, scheduledTime: e.target.value }))} />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Duration (min)</label>
-                  <select className="w-full border rounded-lg px-3 py-2 text-sm" value={bookApptForm.durationMinutes} onChange={e => setBookApptForm(f => ({ ...f, durationMinutes: e.target.value }))}>
-                    <option value="15">15 min</option>
-                    <option value="20">20 min</option>
-                    <option value="30">30 min</option>
-                    <option value="45">45 min</option>
-                    <option value="60">60 min</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Type</label>
-                  <select className="w-full border rounded-lg px-3 py-2 text-sm" value={bookApptForm.appointmentTypeId} onChange={e => setBookApptForm(f => ({ ...f, appointmentTypeId: e.target.value }))}>
-                    <option value="">General Visit</option>
-                    <option value="follow_up">Follow-Up</option>
-                    <option value="initial">Initial Evaluation</option>
-                    <option value="telehealth">Telehealth</option>
-                    <option value="lab_review">Lab Review</option>
-                    <option value="wellness">Wellness Check</option>
-                  </select>
-                </div>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Program</label>
-                <select className="w-full border rounded-lg px-3 py-2 text-sm" value={bookApptForm.programId} onChange={e => setBookApptForm(f => ({ ...f, programId: e.target.value }))}>
-                  <option value="">No program</option>
-                  {apiPrograms.map((p: { id: string; name: string }) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                  {apiPrograms.length === 0 && isDemoMode && <>
-                    <option value="dpc">DPC Membership</option>
-                    <option value="ccm">CCM</option>
-                    <option value="rpm">RPM</option>
-                  </>}
-                </select>
-                {apiPrograms.length === 0 && !isDemoMode && (
-                  <p className="text-xs text-slate-400 mt-1">
-                    No programs configured yet. Visit Practice → Programs to set them up, or leave as "No program".
-                  </p>
-                )}
-              </div>
-              <div className="flex items-center gap-3">
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input type="checkbox" checked={bookApptForm.isTeleHealth} onChange={e => setBookApptForm(f => ({ ...f, isTeleHealth: e.target.checked }))} className="accent-teal-600" />
-                  <span className="text-sm text-slate-700">Telehealth visit</span>
-                </label>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Notes</label>
-                <textarea className="w-full border rounded-lg px-3 py-2 text-sm" rows={2} value={bookApptForm.notes} onChange={e => setBookApptForm(f => ({ ...f, notes: e.target.value }))} placeholder="Optional notes..." />
-              </div>
-            </div>
-            <div className="px-6 pb-6 flex items-center justify-end gap-3">
-              <button className="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100 transition-colors" onClick={() => setShowBookAppointment(false)}>Cancel</button>
-              <button
-                className="px-6 py-2 rounded-lg text-sm font-medium text-white transition-colors"
-                style={{ backgroundColor: "#635bff" }}
-                onClick={handleBookAppointment}
-                disabled={bookApptLoading}
-              >
-                {bookApptLoading ? "Booking..." : "Book Appointment"}
-              </button>
-            </div>
-          </div>
-        </div>
+        <AppointmentBookingWidget
+          mode="staff"
+          staffPatientId={bookApptStaffPatientId ?? undefined}
+          staffPatientName={bookApptStaffPatientName}
+          onClose={() => {
+            setShowBookAppointment(false);
+            setBookApptStaffPatientId(null);
+            setBookApptStaffPatientName("");
+          }}
+          onBooked={() => {
+            // Refresh appointment lists when staff completes a booking
+            // — the widget closes itself via onClose after the success
+            // screen, so we just need to re-pull dashboards/rosters.
+            loadPracticeData();
+          }}
+        />
       )}
 
       {/* ─── New Encounter Modal ─────────────────────────────────────────── */}

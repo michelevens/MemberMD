@@ -187,6 +187,25 @@ class PatientController extends Controller
         return response()->json(['data' => $memberships]);
     }
 
+    /**
+     * GET /patients/{id}/enrollments — staff-side counterpart to
+     * /me/enrollments. Same payload shape (active+pending enrollments
+     * with assigned provider + bookable_providers list) so the booking
+     * widget can reuse one parser. Tenant-scoped + Patient policy
+     * authorize check; patient role can't reach this — they have
+     * /me/enrollments instead.
+     */
+    public function enrollments(Request $request, string $id): JsonResponse
+    {
+        $user = $request->user();
+        $patient = Patient::where('tenant_id', $user->tenant_id)->findOrFail($id);
+        $this->authorize('view', $patient);
+
+        return response()->json([
+            'data' => \App\Http\Controllers\Api\ProgramController::enrollmentsForPatient($patient->id),
+        ]);
+    }
+
     public function appointments(Request $request, string $id): JsonResponse
     {
         $user = $request->user();

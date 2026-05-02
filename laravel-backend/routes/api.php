@@ -253,6 +253,10 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
     Route::apiResource('patients', PatientController::class);
     Route::get('/patients/{id}/memberships', [PatientController::class, 'memberships']);
     Route::get('/patients/{id}/appointments', [PatientController::class, 'appointments']);
+    // Staff-side counterpart to /me/enrollments — used by the
+    // AppointmentBookingWidget when mounted in staff mode (booking on
+    // behalf of a patient). Same payload shape as /me/enrollments.
+    Route::get('/patients/{id}/enrollments', [PatientController::class, 'enrollments']);
     Route::get('/patients/{id}/encounters', [PatientController::class, 'encounters']);
     Route::get('/patients/{id}/prescriptions', [PatientController::class, 'prescriptions']);
     Route::get('/patients/{id}/screenings', [PatientController::class, 'screenings']);

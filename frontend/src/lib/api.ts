@@ -1761,6 +1761,13 @@ export const programService = {
     if (useMockData()) return { data: [] };
     return apiFetch<unknown[]>("/me/enrollments");
   },
+  // Staff-side counterpart to myEnrollments — used by the booking
+  // widget when mounted in staff mode. Same payload shape; the SPA
+  // can route through one parser regardless of mode.
+  patientEnrollments: async (patientId: string): Promise<ApiResponse<unknown[]>> => {
+    if (useMockData()) return { data: [] };
+    return apiFetch<unknown[]>(`/patients/${patientId}/enrollments`);
+  },
   addProvider: async (programId: string, data: { providerId: string; role?: string; panelCapacity?: number }): Promise<ApiResponse<ProgramProvider>> => {
     if (useMockData()) return mockCreate<ProgramProvider>(data);
     return apiFetch<ProgramProvider>(`/programs/${programId}/providers`, { method: "POST", body: JSON.stringify(data) });

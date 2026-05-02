@@ -18,7 +18,7 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import type { Appointment, ProviderAvailability } from "../../types";
-import { appointmentService, providerService, isUsingMockData, authService, apiFetch, programService, clinicalSettingsService } from "../../lib/api";
+import { appointmentService, providerService, isUsingMockData, authService, apiFetch, programService, clinicalSettingsService, patientService } from "../../lib/api";
 
 // ─── Colors ──────────────────────────────────────────────────────────────────
 
@@ -119,15 +119,64 @@ const MOCK_TIME_SLOTS = [
   "1:00 PM", "1:30 PM", "2:00 PM", "2:30 PM", "3:00 PM", "3:30 PM", "4:00 PM",
 ];
 
-type BookingStep = 1 | 2 | 3 | 4 | "success";
+// Staff mode adds a Step 0 (pick which patient this booking is for)
+// before the four patient-mode steps. "patient" mode is the default
+// and matches every existing call site.
+type BookingStep = 0 | 1 | 2 | 3 | 4 | "success";
+
+interface StaffPatientOption {
+  id: string;
+  firstName?: string;
+  lastName?: string;
+  name?: string;
+  email?: string;
+}
 
 interface AppointmentBookingWidgetProps {
   onClose: () => void;
   onBooked?: (appointment: Appointment) => void;
+  /**
+   * "patient" (default) — logged-in user is the patient. Skips Step 0,
+   *  enforces the enrollment gate, and adds the telehealth-consent
+   *  checkbox before booking.
+   * "staff" — staff is booking on behalf of a patient. Adds Step 0
+   *  (pick patient) when staffPatientId isn't provided. Skips the
+   *  enrollment gate (staff can book ad-hoc — the practice may want
+   *  to schedule before formally enrolling) and the telehealth
+   *  consent checkbox (consent is verbal/already on file).
+   */
+  mode?: "patient" | "staff";
+  /**
+   * Staff mode only — pre-select the patient and skip Step 0. Set when
+   *  staff opens the widget from a specific patient's profile so they
+   *  don't have to re-pick a patient they already chose.
+   */
+  staffPatientId?: string;
+  staffPatientName?: string;
 }
 
-export function AppointmentBookingWidget({ onClose, onBooked }: AppointmentBookingWidgetProps) {
-  const [step, setStep] = useState<BookingStep>(1);
+export function AppointmentBookingWidget({
+  onClose,
+  onBooked,
+  mode = "patient",
+  staffPatientId,
+  staffPatientName,
+}: AppointmentBookingWidgetProps) {
+  const isStaffMode = mode === "staff";
+  // Staff mode starts at 0 (pick patient) unless a patient was
+  // pre-selected via the staffPatientId prop, in which case we skip
+  // straight to provider selection.
+  const initialStep: BookingStep = isStaffMode && !staffPatientId ? 0 : 1;
+  const [step, setStep] = useState<BookingStep>(initialStep);
+  // The patient this booking is for. In patient mode this is always
+  // the logged-in user (resolved by /auth/me). In staff mode it's
+  // either the staffPatientId prop or whoever the staff picks at
+  // Step 0.
+  const [staffSelectedPatient, setStaffSelectedPatient] = useState<StaffPatientOption | null>(
+    isStaffMode && staffPatientId
+      ? { id: staffPatientId, name: staffPatientName ?? "" }
+      : null,
+  );
   const [selectedProvider, setSelectedProvider] = useState<MockProvider | null>(null);
   const [selectedType, setSelectedType] = useState<MockAppointmentType | null>(null);
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
@@ -157,7 +206,16 @@ export function AppointmentBookingWidget({ onClose, onBooked }: AppointmentBooki
   const [apiProviders, setApiProviders] = useState<MockProvider[] | null>(null);
   const [apiTypes, setApiTypes] = useState<MockAppointmentType[] | null>(null);
   const [typesError, setTypesError] = useState<string | null>(null);
-  const [patientId, setPatientId] = useState<string | null>(null);
+  // Backend StoreAppointmentRequest needs patient_id. In patient mode
+  // this comes from /auth/me; in staff mode from the staffPatientId
+  // prop or the patient picked on Step 0.
+  const [patientId, setPatientId] = useState<string | null>(
+    isStaffMode && staffPatientId ? staffPatientId : null,
+  );
+  // Staff mode only — patient picker state for Step 0.
+  const [staffPatientSearch, setStaffPatientSearch] = useState("");
+  const [staffPatientOptions, setStaffPatientOptions] = useState<StaffPatientOption[]>([]);
+  const [staffPatientLoading, setStaffPatientLoading] = useState(false);
   // Provider's weekly working windows from /providers/{id}/availability.
   // Used to render only valid time slots on step 3 and to grey out days
   // the provider doesn't work in the calendar — matches the backend's
@@ -188,14 +246,19 @@ export function AppointmentBookingWidget({ onClose, onBooked }: AppointmentBooki
     let cancelled = false;
     if (isUsingMockData()) return;
     (async () => {
-      // 1) Resolve patient_id for the authenticated user. /auth/me
-      //    returns the User; we need the linked Patient row id.
+      // 1) Resolve patient_id (patient mode only — in staff mode the
+      //    patient is the staffPatientId prop or whoever the staff
+      //    picks on Step 0). Practice tz is fetched in either mode
+      //    so the slot picker has its fallback when provider tz is
+      //    unset.
       try {
         const meRes = await authService.me();
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const meData = meRes.data as any;
-        const pid = meData?.patient?.id ?? meData?.patientId ?? null;
-        if (!cancelled && pid) setPatientId(pid);
+        if (!isStaffMode) {
+          const pid = meData?.patient?.id ?? meData?.patientId ?? null;
+          if (!cancelled && pid) setPatientId(pid);
+        }
         const ptz = meData?.practice?.timezone ?? null;
         if (!cancelled && ptz) setPracticeTz(ptz);
       } catch { /* ignore */ }
@@ -252,11 +315,51 @@ export function AppointmentBookingWidget({ onClose, onBooked }: AppointmentBooki
         setApiTypes([]);
       }
 
-      // 4) Patient's active program enrollments. Drives the
-      //    program-scoped provider list — the patient can only book
-      //    with providers attached to programs they're enrolled in.
+      // (Enrollments are fetched in a separate effect below — they
+      // depend on patientId which is set asynchronously above in
+      // patient mode and via prop / Step 0 in staff mode.)
+
+      // 5) Practice-curated visit reasons. Drives the required
+      //    "Reason for visit" dropdown on Step 4. Empty list = the
+      //    practice hasn't configured any; we hide the dropdown and
+      //    leave only the free-text notes field as a fallback.
       try {
-        const enrollRes = await programService.myEnrollments();
+        const vrRes = await clinicalSettingsService.list("visit_reasons");
+        if (cancelled) return;
+        const opts = (vrRes.data ?? [])
+          .filter((r) => r.isActive !== false)
+          .map((r) => ({ id: r.id, label: r.label }));
+        setVisitReasonOptions(opts);
+      } catch {
+        if (cancelled) return;
+        setVisitReasonOptions([]);
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Fetch active enrollments. Re-runs whenever the active patient id
+  // changes — patient mode resolves it once via /auth/me; staff mode
+  // sets it from the staffPatientId prop or the Step 0 picker.
+  // Endpoint differs per mode (/me/enrollments vs
+  // /patients/{id}/enrollments) but the payload shape is identical so
+  // the parser is shared.
+  useEffect(() => {
+    if (isUsingMockData()) return;
+    if (!patientId) {
+      // No patient resolved yet (staff mode pre-Step-0). Don't show
+      // the "no enrollments" gate; just leave the state as null so
+      // Step 1 renders the "loading" skeleton.
+      setMyEnrollments(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const enrollRes = isStaffMode
+          ? await programService.patientEnrollments(patientId)
+          : await programService.myEnrollments();
         if (cancelled) return;
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const list: any[] = Array.isArray(enrollRes.data) ? enrollRes.data : (enrollRes.data as any)?.data || [];
@@ -290,25 +393,41 @@ export function AppointmentBookingWidget({ onClose, onBooked }: AppointmentBooki
         if (cancelled) return;
         setMyEnrollments([]);
       }
-
-      // 5) Practice-curated visit reasons. Drives the required
-      //    "Reason for visit" dropdown on Step 4. Empty list = the
-      //    practice hasn't configured any; we hide the dropdown and
-      //    leave only the free-text notes field as a fallback.
-      try {
-        const vrRes = await clinicalSettingsService.list("visit_reasons");
-        if (cancelled) return;
-        const opts = (vrRes.data ?? [])
-          .filter((r) => r.isActive !== false)
-          .map((r) => ({ id: r.id, label: r.label }));
-        setVisitReasonOptions(opts);
-      } catch {
-        if (cancelled) return;
-        setVisitReasonOptions([]);
-      }
     })();
     return () => { cancelled = true; };
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [patientId, isStaffMode]);
+
+  // Staff Step 0 — debounced patient search. Re-runs every 350ms after
+  // the staff types in the search box. Two-character minimum so we
+  // don't pull every patient on every keystroke. Skipped entirely in
+  // patient mode and when staff has already pre-selected a patient.
+  useEffect(() => {
+    if (!isStaffMode || isUsingMockData()) return;
+    if (staffPatientSearch.trim().length < 2) {
+      setStaffPatientOptions([]);
+      return;
+    }
+    let cancelled = false;
+    setStaffPatientLoading(true);
+    const timer = setTimeout(async () => {
+      const res = await patientService.list({ search: staffPatientSearch.trim() });
+      if (cancelled) return;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const list: any[] = Array.isArray(res.data) ? res.data : (res.data as any)?.data || [];
+      setStaffPatientOptions(list.slice(0, 20).map((p) => ({
+        id: p.id,
+        firstName: p.firstName ?? p.first_name ?? "",
+        lastName: p.lastName ?? p.last_name ?? "",
+        email: p.email ?? "",
+      })));
+      setStaffPatientLoading(false);
+    }, 350);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [isStaffMode, staffPatientSearch]);
 
   // Fetch the chosen provider's weekly availability whenever the patient
   // picks a provider. Skipped in demo mode (the mock time slots are fine
@@ -640,7 +759,10 @@ export function AppointmentBookingWidget({ onClose, onBooked }: AppointmentBooki
   // ─── Step Titles ───────────────────────────────────────────────────────────
 
   const stepTitles: Record<string, string> = {
-    "1": "Select Provider",
+    "0": "Select Patient",
+    "1": isStaffMode && staffSelectedPatient
+      ? `Provider for ${staffSelectedPatient.name || "patient"}`
+      : "Select Provider",
     "2": "Appointment Type",
     "3": "Date & Time",
     "4": "Review & Confirm",
@@ -661,9 +783,15 @@ export function AppointmentBookingWidget({ onClose, onBooked }: AppointmentBooki
           style={{ borderBottom: `1px solid ${C.slate200}` }}
         >
           <div className="flex items-center gap-3">
-            {step !== 1 && step !== "success" && (
+            {/* Back button: hidden on the first navigable step (1 in
+                patient mode, 0 in staff-mode-no-preselect) and on
+                success. In staff mode, going back from Step 1 returns
+                to the patient picker — but only when no patient was
+                pre-selected (otherwise back would just bounce them
+                somewhere they can't change anything). */}
+            {step !== "success" && step !== initialStep && (
               <button
-                onClick={() => setStep(((Number(step) - 1) || 1) as BookingStep)}
+                onClick={() => setStep(((Number(step) - 1) || initialStep) as BookingStep)}
                 className="p-1.5 rounded-lg transition-colors hover:bg-slate-100"
               >
                 <ChevronLeft className="w-4 h-4" style={{ color: C.slate500 }} />
@@ -700,6 +828,61 @@ export function AppointmentBookingWidget({ onClose, onBooked }: AppointmentBooki
         {/* Content */}
         <div className="flex-1 overflow-y-auto px-6 py-5">
 
+          {/* Step 0: Pick patient — staff mode only, hidden when a
+              patient was pre-selected via the staffPatientId prop. */}
+          {step === 0 && isStaffMode && (
+            <div className="space-y-3">
+              <p className="text-xs" style={{ color: C.slate500 }}>
+                Which patient is this booking for?
+              </p>
+              <div className="relative">
+                <input
+                  autoFocus
+                  value={staffPatientSearch}
+                  onChange={(e) => setStaffPatientSearch(e.target.value)}
+                  placeholder="Search by name or email…"
+                  className="w-full px-3 py-2 rounded-lg border text-sm"
+                  style={{ borderColor: C.slate200, color: C.navy800 }}
+                />
+                {staffPatientLoading && (
+                  <div className="absolute right-3 top-1/2 -translate-y-1/2 text-xs" style={{ color: C.slate400 }}>
+                    Searching…
+                  </div>
+                )}
+              </div>
+              {staffPatientSearch.trim().length < 2 && (
+                <p className="text-xs italic" style={{ color: C.slate400 }}>
+                  Type at least two characters to search.
+                </p>
+              )}
+              {staffPatientSearch.trim().length >= 2 && !staffPatientLoading && staffPatientOptions.length === 0 && (
+                <p className="text-xs" style={{ color: C.slate500 }}>
+                  No matching patients found.
+                </p>
+              )}
+              <div className="space-y-2">
+                {staffPatientOptions.map((p) => {
+                  const fullName = [p.firstName, p.lastName].filter(Boolean).join(" ").trim() || "Unknown";
+                  return (
+                    <button
+                      key={p.id}
+                      onClick={() => {
+                        setStaffSelectedPatient({ ...p, name: fullName });
+                        setPatientId(p.id);
+                        setStep(1);
+                      }}
+                      className="w-full text-left p-3 rounded-xl transition-all"
+                      style={{ border: `2px solid ${C.slate200}`, backgroundColor: C.white }}
+                    >
+                      <p className="text-sm font-semibold" style={{ color: C.navy800 }}>{fullName}</p>
+                      {p.email && <p className="text-xs mt-0.5" style={{ color: C.slate500 }}>{p.email}</p>}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           {/* Step 1: Select Provider — gated on enrollment.
               Three sub-cases for API mode:
                 a) loading: show a spinner-ish placeholder.
@@ -718,8 +901,12 @@ export function AppointmentBookingWidget({ onClose, onBooked }: AppointmentBooki
                 </div>
               )}
 
-              {/* (b) zero active enrollments — block booking */}
-              {!demoMode && myEnrollments && myEnrollments.length === 0 && (
+              {/* (b) zero active enrollments — block booking in patient
+                  mode, allow ad-hoc booking in staff mode (the practice
+                  may want to schedule the patient before formally
+                  enrolling them). The staff banner is informational so
+                  they can decide to enroll first if desired. */}
+              {!demoMode && myEnrollments && myEnrollments.length === 0 && !isStaffMode && (
                 <div className="rounded-2xl border border-amber-200 bg-amber-50 p-6 text-center">
                   <AlertTriangle className="w-8 h-8 mx-auto mb-2" style={{ color: C.amber600 }} />
                   <p className="text-sm font-semibold" style={{ color: C.navy800 }}>
@@ -735,6 +922,11 @@ export function AppointmentBookingWidget({ onClose, onBooked }: AppointmentBooki
                   >
                     Back to dashboard
                   </button>
+                </div>
+              )}
+              {!demoMode && isStaffMode && myEnrollments && myEnrollments.length === 0 && (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs mb-2" style={{ color: C.amber600 }}>
+                  This patient isn't enrolled in any program. You can still book — all practice providers will be shown.
                 </div>
               )}
 
@@ -767,8 +959,14 @@ export function AppointmentBookingWidget({ onClose, onBooked }: AppointmentBooki
 
               {/* (d) program chosen (or single-enrollment auto-pick) →
                   show that program's bookable providers. Assigned
-                  provider sorted to top. */}
-              {(demoMode || (myEnrollments && (selectedEnrollmentId || myEnrollments.length === 1))) && (
+                  provider sorted to top. Staff mode also reaches this
+                  branch when the patient has zero enrollments — the
+                  provider filter falls through to "all providers"
+                  because activeEnrollment is null. */}
+              {(demoMode
+                || (myEnrollments && (selectedEnrollmentId || myEnrollments.length === 1))
+                || (isStaffMode && myEnrollments && myEnrollments.length === 0)
+              ) && (
                 <>
                   {!demoMode && activeEnrollment && (
                     <div className="flex items-center justify-between mb-2 px-1">
@@ -1245,8 +1443,11 @@ export function AppointmentBookingWidget({ onClose, onBooked }: AppointmentBooki
                 </div>
               )}
 
-              {/* Telehealth Consent */}
-              {selectedType.isTeleHealth && (
+              {/* Telehealth Consent — patient mode only. In staff mode
+                  consent is verbal/already on file; the checkbox would
+                  imply staff is consenting on the patient's behalf
+                  which is the wrong record-keeping model. */}
+              {selectedType.isTeleHealth && !isStaffMode && (
                 <label className="flex items-start gap-3 p-3 rounded-xl cursor-pointer" style={{ backgroundColor: C.teal50, border: `1px solid ${C.teal500}` }}>
                   <input
                     type="checkbox"
@@ -1284,9 +1485,13 @@ export function AppointmentBookingWidget({ onClose, onBooked }: AppointmentBooki
                   onClick={handleBook}
                   disabled={
                     booking
-                    || (selectedType.isTeleHealth && !telehealthConsent)
+                    // Telehealth consent gate is patient-mode only.
+                    || (!isStaffMode && selectedType.isTeleHealth && !telehealthConsent)
                     // Block submit when the practice has visit reasons
-                    // configured but the patient hasn't picked one.
+                    // configured but the user hasn't picked one. Same
+                    // rule applies in both modes — structured chief
+                    // complaint is useful for the provider regardless
+                    // of who's typing.
                     || (!!visitReasonOptions && visitReasonOptions.length > 0 && !selectedVisitReason)
                   }
                   className="w-full py-3 rounded-xl text-sm font-bold text-white transition-all hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-2"
