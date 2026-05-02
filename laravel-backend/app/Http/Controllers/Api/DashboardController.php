@@ -91,7 +91,11 @@ class DashboardController extends Controller
         $user = $request->user();
         abort_if(!$user->isPatient(), 403);
 
-        $patient = $user->patient;
+        // Eager-load primaryProvider.user so the patient portal's
+        // membership card can render "Provider: Dr. Nageley Michel"
+        // without a second round-trip. Patient.primary_provider_id is
+        // set by the practice when assigning the patient to a panel.
+        $patient = $user->patient()->with('primaryProvider.user')->first();
         if (!$patient) {
             return response()->json(['data' => [
                 'message' => 'No patient record found.',

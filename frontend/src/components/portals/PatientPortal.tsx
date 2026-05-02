@@ -1315,61 +1315,105 @@ export function PatientPortal() {
           enrolled-but-unpaid) saw an empty navy gradient with blank
           plan name + member id, which read as "broken portal" rather
           than "you haven't picked a plan yet." */}
-      {hasActiveMembership && (
-      <div
-        className="relative overflow-hidden rounded-2xl p-6 shadow-xl"
-        style={{
-          background: `linear-gradient(135deg, ${COLORS.navy900} 0%, ${COLORS.navy700} 40%, ${COLORS.teal600} 100%)`,
-          minHeight: "200px",
-        }}
-      >
-        {/* Watermark */}
-        <div className="absolute top-4 right-4 opacity-10">
-          <Shield className="w-20 h-20 text-white" />
-        </div>
-        {/* Decorative circles */}
-        <div
-          className="absolute -bottom-10 -right-10 w-40 h-40 rounded-full opacity-10"
-          style={{ backgroundColor: COLORS.teal400 }}
-        />
-        <div
-          className="absolute -top-6 -left-6 w-24 h-24 rounded-full opacity-5"
-          style={{ backgroundColor: COLORS.white }}
-        />
+      {hasActiveMembership && (() => {
+        // Pull live values directly from the API responses so the card
+        // renders correctly the first time a real patient logs in. The
+        // legacy patient.* fields were derived from the demo seed and
+        // stayed empty for real users, leaving the card looking blank.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const apiP = (apiPatient ?? {}) as any;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const m = apiMembership as any | undefined;
+        const planName: string =
+          (m?.plan?.name as string)
+          || (m?.planName as string)
+          || patient.planName
+          || "Member";
+        const memberSince: string =
+          (m?.startDate as string)
+          || (m?.start_date as string)
+          || (m?.createdAt as string)
+          || (m?.created_at as string)
+          || patient.memberSince
+          || "";
+        const memberId: string =
+          (m?.memberNumber as string)
+          || (m?.member_number as string)
+          || patient.memberId
+          || "";
+        // primaryProvider.user.{first,last}_name eager-loaded by
+        // DashboardController::patient. Fall back through legacy keys
+        // and finally the demo seed string so existing users never
+        // see "Provider: " with nothing after it.
+        const ppUser = apiP.primaryProvider?.user
+          ?? apiP.primary_provider?.user
+          ?? null;
+        const ppFirst = ppUser?.firstName ?? ppUser?.first_name ?? "";
+        const ppLast = ppUser?.lastName ?? ppUser?.last_name ?? "";
+        const ppCreds = apiP.primaryProvider?.credentials
+          ?? apiP.primary_provider?.credentials
+          ?? "";
+        const providerLabel: string =
+          [ppFirst, ppLast].filter(Boolean).join(" ").trim()
+            ? `${[ppFirst, ppLast].filter(Boolean).join(" ")}${ppCreds ? `, ${ppCreds}` : ""}`
+            : (patient.provider || "Not yet assigned");
 
-        <div className="relative z-10">
-          <div className="flex items-center gap-2 mb-4">
-            <span className="text-white text-lg font-bold tracking-wide">{practiceName || "MemberMD"}</span>
-          </div>
-          <h2 className="text-white text-xl font-bold mb-1">
-            {firstName} {lastName}
-          </h2>
-          <div className="flex items-center gap-2 mb-4">
-            <span
-              className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold"
-              style={{ backgroundColor: "rgba(233,185,73,0.2)", color: COLORS.gold }}
-            >
-              <Star className="w-3 h-3" />
-              {patient.planName}
-            </span>
-          </div>
-          <div className="grid grid-cols-2 gap-3 text-sm">
-            <div>
-              <p className="text-white/50 text-xs uppercase tracking-wider">Member Since</p>
-              <p className="text-white font-medium">{formatDate(patient.memberSince)}</p>
+        return (
+          <div
+            className="relative overflow-hidden rounded-2xl p-6 shadow-xl"
+            style={{
+              background: `linear-gradient(135deg, ${COLORS.navy900} 0%, ${COLORS.navy700} 40%, ${COLORS.teal600} 100%)`,
+              minHeight: "200px",
+            }}
+          >
+            {/* Watermark */}
+            <div className="absolute top-4 right-4 opacity-10">
+              <Shield className="w-20 h-20 text-white" />
             </div>
-            <div>
-              <p className="text-white/50 text-xs uppercase tracking-wider">Member ID</p>
-              <p className="text-white font-medium">{patient.memberId}</p>
-            </div>
-            <div className="col-span-2">
-              <p className="text-white/50 text-xs uppercase tracking-wider">Provider</p>
-              <p className="text-white font-medium">{patient.provider}</p>
+            {/* Decorative circles */}
+            <div
+              className="absolute -bottom-10 -right-10 w-40 h-40 rounded-full opacity-10"
+              style={{ backgroundColor: COLORS.teal400 }}
+            />
+            <div
+              className="absolute -top-6 -left-6 w-24 h-24 rounded-full opacity-5"
+              style={{ backgroundColor: COLORS.white }}
+            />
+
+            <div className="relative z-10">
+              <div className="flex items-center gap-2 mb-4">
+                <span className="text-white text-lg font-bold tracking-wide">{practiceName || "MemberMD"}</span>
+              </div>
+              <h2 className="text-white text-xl font-bold mb-1">
+                {firstName} {lastName}
+              </h2>
+              <div className="flex items-center gap-2 mb-4">
+                <span
+                  className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold"
+                  style={{ backgroundColor: "rgba(233,185,73,0.2)", color: COLORS.gold }}
+                >
+                  <Star className="w-3 h-3" />
+                  {planName}
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-3 text-sm">
+                <div>
+                  <p className="text-white/50 text-xs uppercase tracking-wider">Member Since</p>
+                  <p className="text-white font-medium">{memberSince ? formatDate(memberSince) : "—"}</p>
+                </div>
+                <div>
+                  <p className="text-white/50 text-xs uppercase tracking-wider">Member ID</p>
+                  <p className="text-white font-medium">{memberId || "—"}</p>
+                </div>
+                <div className="col-span-2">
+                  <p className="text-white/50 text-xs uppercase tracking-wider">Provider</p>
+                  <p className="text-white font-medium">{providerLabel}</p>
+                </div>
+              </div>
             </div>
           </div>
-        </div>
-      </div>
-      )}
+        );
+      })()}
 
       {/* Choose Your Plan empty state — shown when no active membership.
           Replaces the misleading blank membership card with a real CTA.
