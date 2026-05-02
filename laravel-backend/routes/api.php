@@ -279,6 +279,7 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
     Route::post('/membership-plans/{id}/reset-to-template', [MembershipPlanController::class, 'resetToTemplate']);
     Route::post('/membership-plans/{id}/sync-from-template', [MembershipPlanController::class, 'syncFromTemplate']);
     Route::post('/membership-plans/{id}/detach-template', [MembershipPlanController::class, 'detachFromTemplate']);
+    Route::post('/membership-plans/{id}/sync-to-stripe', [MembershipPlanController::class, 'syncToStripe']);
     Route::apiResource('membership-plans', MembershipPlanController::class);
 
     // ===== Memberships (Patient Enrollments) =====

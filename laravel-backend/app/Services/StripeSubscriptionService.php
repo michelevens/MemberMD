@@ -573,6 +573,119 @@ class StripeSubscriptionService
         return $invoice;
     }
 
+    /**
+     * Create Stripe Product + recurring Prices on the practice's Connect
+     * account so this plan can be sold via subscriptions. Idempotent: if
+     * the plan already has stripe_monthly_price_id / stripe_annual_price_id
+     * those are left alone. Missing ones are created.
+     *
+     * One Product per plan, one Price per (plan × frequency). Prices are
+     * billed in USD on the practice's connected account; the platform skim
+     * is applied per-subscription via application_fee_percent.
+     */
+    public function syncPlanPricesToStripe(Practice $practice, MembershipPlan $plan): MembershipPlan
+    {
+        $this->assertPracticeReady($practice);
+
+        $stripeOpts = ['stripe_account' => $practice->stripe_account_id];
+
+        // Reuse an existing Product across re-syncs by storing its id in
+        // the plan's metadata bag — Stripe doesn't have a native "lookup
+        // by metadata" call so we cache locally. First sync creates it.
+        // (We tuck it into the price ids — no separate column needed since
+        // Stripe accepts product_data inline on price creation.)
+        $needsMonthly = empty($plan->stripe_monthly_price_id) && $plan->monthly_price > 0;
+        $needsAnnual = empty($plan->stripe_annual_price_id) && $plan->annual_price > 0;
+
+        if (!$needsMonthly && !$needsAnnual) {
+            return $plan;
+        }
+
+        try {
+            // Create or reuse the Product. Stripe upserts via metadata aren't
+            // a thing, so we always create on first sync. Re-syncs hit the
+            // early-return above unless the plan was nulled out manually.
+            $product = $this->stripe()->products->create(
+                [
+                    'name' => $plan->name,
+                    'description' => $plan->description ?: null,
+                    'metadata' => [
+                        'plan_id' => $plan->id,
+                        'tenant_id' => $practice->id,
+                        'platform' => 'membermd',
+                    ],
+                ],
+                array_merge($stripeOpts, [
+                    'idempotency_key' => "membermd-product-{$plan->id}",
+                ]),
+            );
+
+            $updates = [];
+
+            if ($needsMonthly) {
+                $monthly = $this->stripe()->prices->create(
+                    [
+                        'product' => $product->id,
+                        'unit_amount' => (int) round(((float) $plan->monthly_price) * 100),
+                        'currency' => 'usd',
+                        'recurring' => ['interval' => 'month'],
+                        'metadata' => [
+                            'plan_id' => $plan->id,
+                            'frequency' => 'monthly',
+                        ],
+                    ],
+                    array_merge($stripeOpts, [
+                        'idempotency_key' => "membermd-price-{$plan->id}-monthly",
+                    ]),
+                );
+                $updates['stripe_monthly_price_id'] = $monthly->id;
+            }
+
+            if ($needsAnnual) {
+                $annual = $this->stripe()->prices->create(
+                    [
+                        'product' => $product->id,
+                        'unit_amount' => (int) round(((float) $plan->annual_price) * 100),
+                        'currency' => 'usd',
+                        'recurring' => ['interval' => 'year'],
+                        'metadata' => [
+                            'plan_id' => $plan->id,
+                            'frequency' => 'annual',
+                        ],
+                    ],
+                    array_merge($stripeOpts, [
+                        'idempotency_key' => "membermd-price-{$plan->id}-annual",
+                    ]),
+                );
+                $updates['stripe_annual_price_id'] = $annual->id;
+            }
+
+            if (!empty($updates)) {
+                $plan->update($updates);
+            }
+        } catch (ApiErrorException $e) {
+            throw new RuntimeException("Failed to sync plan prices to Stripe: {$e->getMessage()}", 0, $e);
+        }
+
+        try {
+            AuditLog::create([
+                'tenant_id' => $practice->id,
+                'action' => 'plan_synced_to_stripe',
+                'resource' => 'MembershipPlan',
+                'resource_id' => $plan->id,
+                'metadata' => [
+                    'product_id' => $product->id ?? null,
+                    'monthly_price_id' => $plan->stripe_monthly_price_id,
+                    'annual_price_id' => $plan->stripe_annual_price_id,
+                ],
+            ]);
+        } catch (\Throwable) {
+            // non-fatal
+        }
+
+        return $plan->fresh();
+    }
+
     private function assertPracticeReady(Practice $practice): void
     {
         if (empty($practice->stripe_account_id)) {

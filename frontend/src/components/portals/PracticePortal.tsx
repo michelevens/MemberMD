@@ -840,6 +840,23 @@ export function PracticePortal() {
   const [createPlanForm, setCreatePlanForm] = useState({ name: "", monthlyPrice: "", annualPrice: "", description: "" });
   const [createPlanLoading, setCreatePlanLoading] = useState(false);
 
+  // ─── Plan Stripe price sync ───────────────────────────────────────
+  const [planSyncingId, setPlanSyncingId] = useState<string | null>(null);
+  const handleSyncPlanToStripe = useCallback(async (planId: string) => {
+    setPlanSyncingId(planId);
+    const res = await apiFetch(`/membership-plans/${planId}/sync-to-stripe`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+    setPlanSyncingId(null);
+    if (res.error) {
+      setToast({ message: res.error, type: "error" });
+      return;
+    }
+    setToast({ message: "Plan synced to Stripe.", type: "success" });
+    loadPracticeData();
+  }, [setToast]);
+
   // ─── Edit Plan Modal ──────────────────────────────────────────────
   const [showEditPlan, setShowEditPlan] = useState(false);
   const [editPlanForm, setEditPlanForm] = useState({ id: "", name: "", monthlyPrice: "", annualPrice: "", description: "" });
@@ -5540,6 +5557,32 @@ export function PracticePortal() {
                       </p>
                     </div>
                   </div>
+                  {/* Stripe price wiring status — required for billing_enforced=true */}
+                  {(() => {
+                    const stripePriceId = plan.stripeMonthlyPriceId || plan.stripe_monthly_price_id;
+                    const synced = !!stripePriceId;
+                    const syncing = planSyncingId === plan.id;
+                    return (
+                      <div className="rounded-lg border border-slate-200 px-3 py-2 flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Stripe</p>
+                          <p className="text-xs mt-0.5" style={{ color: synced ? "#166534" : "#92400e" }}>
+                            {synced ? "Connected" : "Not synced"}
+                          </p>
+                        </div>
+                        {!synced && (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleSyncPlanToStripe(plan.id); }}
+                            disabled={syncing}
+                            className="px-2.5 py-1 rounded-md text-xs font-medium text-white transition-colors disabled:opacity-50 shrink-0"
+                            style={{ backgroundColor: "#635bff" }}
+                          >
+                            {syncing ? "Syncing…" : "Sync to Stripe"}
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })()}
                   <div className="flex gap-2">
                     <button
                       className="flex-1 px-3 py-2 rounded-lg text-sm font-medium border transition-colors"

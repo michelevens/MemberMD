@@ -4,14 +4,18 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\MembershipPlan;
+use App\Models\Practice;
 use App\Services\PlanSyncService;
+use App\Services\StripeSubscriptionService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 class MembershipPlanController extends Controller
 {
-    public function __construct(private readonly PlanSyncService $sync)
-    {
+    public function __construct(
+        private readonly PlanSyncService $sync,
+        private readonly StripeSubscriptionService $subscriptions,
+    ) {
     }
 
     public function index(Request $request): JsonResponse
@@ -229,5 +233,36 @@ class MembershipPlanController extends Controller
         $plan = $this->sync->detach($plan);
 
         return response()->json(['data' => $plan]);
+    }
+
+    /**
+     * Practice-admin: create Stripe Product + Price on the practice's Connect
+     * account for this plan, and stash the price IDs on the plan row.
+     *
+     * Idempotent — if both monthly and annual prices already exist on the plan,
+     * returns immediately with no Stripe calls. Used by the "Sync to Stripe"
+     * button in the plan settings UI to wire a plan up for billing without
+     * the practice ever touching the Stripe Dashboard.
+     */
+    public function syncToStripe(Request $request, string $id): JsonResponse
+    {
+        $user = $request->user();
+        abort_if(!$user->isPracticeAdmin(), 403);
+
+        $plan = MembershipPlan::where('tenant_id', $user->tenant_id)->findOrFail($id);
+        $practice = Practice::findOrFail($user->tenant_id);
+
+        try {
+            $plan = $this->subscriptions->syncPlanPricesToStripe($practice, $plan);
+        } catch (\Throwable $e) {
+            return response()->json([
+                'message' => 'Could not sync plan to Stripe: ' . $e->getMessage(),
+            ], 422);
+        }
+
+        return response()->json([
+            'data' => $plan->fresh(),
+            'message' => 'Plan synced to Stripe.',
+        ]);
     }
 }
