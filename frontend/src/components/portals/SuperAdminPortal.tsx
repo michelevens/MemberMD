@@ -1064,7 +1064,10 @@ export function SuperAdminPortal() {
               name: p.name || "",
               specialty: p.specialty || "",
               model: p.practiceModel || p.practice_model || "",
-              city: (p.city || "") + (p.state ? ", " + p.state : ""),
+              // Keep city + state in their own fields so the detail page
+              // can render them independently. The list table joins them
+              // for display via [city, state].filter(Boolean).join(", ").
+              city: p.city || "",
               state: p.state || "",
               providers: p.providerCount || p.providers_count || 0,
               members: p.memberCount || p.member_count || p.patients_count || 0,
@@ -1075,6 +1078,18 @@ export function SuperAdminPortal() {
               trialEndsAt: p.trialEndsAt || p.trial_ends_at || null,
               stripeConnectStatus: (p.stripeConnectStatus || p.stripe_connect_status || undefined) as MockPractice["stripeConnectStatus"],
               stripeChargesEnabled: Boolean(p.stripeChargesEnabled || p.stripe_charges_enabled),
+              // Detail-only fields the previous mapper dropped, which
+              // forced the detail page to render bogus "(555) 000-0000"
+              // and "123 Main St" placeholders. Real values now flow
+              // through.
+              phone: p.phone || "",
+              address: p.address || "",
+              website: p.website || "",
+              npi: p.npi || "",
+              taxId: p.taxId || p.tax_id || "",
+              tenantCode: p.tenantCode || p.tenant_code || "",
+              ownerEmail: p.ownerEmail || p.owner_email || "",
+              ownerName: p.ownerName || p.owner_name || "",
             };
           }));
         }
@@ -2857,11 +2872,11 @@ export function SuperAdminPortal() {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <div className="space-y-3">
               {[
-                { icon: Building2, label: "Name", value: p.name },
-                { icon: Stethoscope, label: "Specialty", value: p.specialty },
-                { icon: Star, label: "Practice Model", value: p.model },
-                { icon: Hash, label: "Tenant Code", value: p.tenantCode || `TC${p.id.toUpperCase().slice(0, 4)}` },
-                { icon: Mail, label: "Owner Email", value: p.ownerEmail || `admin@${p.name.toLowerCase().replace(/\s+/g, "")}.com` },
+                { icon: Building2, label: "Name", value: p.name || "—" },
+                { icon: Stethoscope, label: "Specialty", value: p.specialty || "—" },
+                { icon: Star, label: "Practice Model", value: p.model || "—" },
+                { icon: Hash, label: "Tenant Code", value: p.tenantCode || "—" },
+                { icon: Mail, label: "Owner Email", value: p.ownerEmail || "—" },
               ].map((item) => {
                 const Icon = item.icon;
                 return (
@@ -2875,12 +2890,12 @@ export function SuperAdminPortal() {
             </div>
             <div className="space-y-3">
               {[
-                { icon: Phone, label: "Phone", value: p.phone || "(555) 000-0000" },
-                { icon: MapPin, label: "Address", value: p.address || "123 Main St" },
-                { icon: MapPin, label: "City/State", value: `${p.city}, ${p.state}` },
-                { icon: Globe, label: "Website", value: p.website || "-" },
-                { icon: Hash, label: "NPI", value: p.npi || "-" },
-                { icon: FileText, label: "Tax ID", value: p.taxId || "-" },
+                { icon: Phone, label: "Phone", value: p.phone || "—" },
+                { icon: MapPin, label: "Address", value: p.address || "—" },
+                { icon: MapPin, label: "City/State", value: [p.city, p.state].filter(Boolean).join(", ") || "—" },
+                { icon: Globe, label: "Website", value: p.website || "—" },
+                { icon: Hash, label: "NPI", value: p.npi || "—" },
+                { icon: FileText, label: "Tax ID", value: p.taxId || "—" },
               ].map((item, idx) => {
                 const Icon = item.icon;
                 return (

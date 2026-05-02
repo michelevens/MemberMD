@@ -486,12 +486,17 @@ class AuthController extends Controller
         $actor = $request->user();
         abort_if(!$actor->isPracticeAdmin() && !$actor->isSuperAdmin(), 403);
 
-        $target = User::where('id', $userId)
-            ->where('tenant_id', $actor->tenant_id)
-            ->first();
+        // Superadmin can target any user in any tenant (used for support
+        // when a practice admin reports "I never got the reset email").
+        // Practice admins can only target users in their own tenant.
+        $query = User::where('id', $userId);
+        if (!$actor->isSuperAdmin()) {
+            $query->where('tenant_id', $actor->tenant_id);
+        }
+        $target = $query->first();
 
         if (!$target) {
-            return response()->json(['message' => 'User not found in this practice.'], 404);
+            return response()->json(['message' => 'User not found.'], 404);
         }
 
         $token = Password::broker()->createToken($target);
