@@ -1006,9 +1006,7 @@ export function PracticePortal() {
     if (patientsRes.status === "fulfilled" && patientsRes.value.data) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const patientList = Array.isArray(patientsRes.value.data) ? patientsRes.value.data : (patientsRes.value.data as any).data || [];
-      if (patientList.length > 0) console.log("[MemberMD] First patient raw data:", JSON.stringify(patientList[0]).slice(0, 500));
       setApiPatients(patientList.map((p: any) => {
-        if (p.activeMembership) console.log("[MemberMD] Patient membership:", p.firstName, "plan:", p.activeMembership?.plan?.name, "memberNumber:", p.activeMembership?.memberNumber);
         return {
         id: p.id,
         userId: p.userId || p.user_id || p.user?.id || null,
@@ -1511,10 +1509,8 @@ export function PracticePortal() {
       const res = await apiFetch<unknown>(`/entitlement-usage/patient/${membershipId}`);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const raw = res.data as any;
-      console.log("[MemberMD] Utilization raw response:", JSON.stringify(raw).slice(0, 500));
       // API returns { entitlements: [...], totalSavings, plan, ... }
       const list = raw?.entitlements || (Array.isArray(raw) ? raw : raw?.data || []);
-      console.log("[MemberMD] Utilization items count:", list.length, "first item:", list[0] ? JSON.stringify(list[0]).slice(0, 200) : "none");
       setPatientUtilization(list);
     } catch {
       setPatientUtilization([]);
