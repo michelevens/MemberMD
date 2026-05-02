@@ -36,6 +36,43 @@ class PatientMembership extends Model
                 $random = strtoupper(\Illuminate\Support\Str::random(4));
                 $membership->member_number = "{$prefix}-{$date}-{$random}";
             }
+
+            // Backfill program_id from the plan when the caller didn't
+            // pass one. Most call sites (Stripe checkout webhook,
+            // patient self-enroll) just pass plan_id; the program is
+            // implicit on the plan. Without this fill the booking
+            // widget's enrollment gate sees no program even though
+            // the patient paid for one tied to a program.
+            if (!$membership->program_id && $membership->plan_id) {
+                $plan = MembershipPlan::find($membership->plan_id);
+                if ($plan && $plan->program_id) {
+                    $membership->program_id = $plan->program_id;
+                }
+            }
+        });
+
+        // After create/update, sync the matching ProgramEnrollment row
+        // so the booking widget's enrollment gate stays consistent
+        // with billing reality. Idempotent — keyed on
+        // (patient_id, program_id). Skipped when there's no program
+        // (a plan that doesn't belong to a program — rare but allowed).
+        static::saved(function (PatientMembership $membership) {
+            if (!$membership->program_id || !$membership->patient_id) return;
+            // Only project active-ish memberships into the enrollment
+            // table. cancelled/expired memberships shouldn't keep a
+            // patient in the booking flow.
+            $isActive = in_array($membership->status, ['active', 'trialing', 'past_due', 'pending'], true);
+            $enrollment = ProgramEnrollment::firstOrNew([
+                'program_id' => $membership->program_id,
+                'patient_id' => $membership->patient_id,
+            ]);
+            $enrollment->tenant_id = $membership->tenant_id;
+            $enrollment->plan_id = $enrollment->plan_id ?? null; // ProgramEnrollment.plan_id FKs program_plans, not membership_plans — leave null
+            $enrollment->membership_id = $membership->id;
+            $enrollment->status = $isActive ? 'active' : ($membership->status === 'cancelled' ? 'cancelled' : 'paused');
+            $enrollment->enrolled_at = $enrollment->enrolled_at ?? ($membership->started_at ?? now());
+            $enrollment->started_at = $enrollment->started_at ?? ($membership->started_at ?? now());
+            $enrollment->save();
         });
     }
 
