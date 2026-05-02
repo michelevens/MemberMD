@@ -669,6 +669,56 @@ export const credentialService = {
   },
 };
 
+// ─── Clinical Settings Lists ───────────────────────────────────────────────
+// Five practice-scoped lists managed from Practice Settings → Clinical.
+// Each list has its own backend table for sharp FKs, but the frontend
+// only sees a uniform CRUD shape: list / create / update / delete /
+// bulkReplace (the natural fit for the inline-array editor in the
+// Settings UI). Adding a sixth list is a one-line addition to
+// CLINICAL_LIST_TYPES — backend already accepts any value the
+// controller's allowlist includes.
+
+export type ClinicalListType =
+  | "visit_statuses"
+  | "visit_reasons"
+  | "conditions"
+  | "treatment_modalities"
+  | "patient_populations";
+
+export interface ClinicalListItem {
+  id: string;
+  tenantId?: string;
+  label: string;
+  description?: string | null;
+  sortOrder?: number;
+  isActive?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export const clinicalSettingsService = {
+  list: async (type: ClinicalListType): Promise<ApiResponse<ClinicalListItem[]>> => {
+    if (useMockData()) return { data: [] };
+    return apiFetch<ClinicalListItem[]>(`/clinical-settings/${type}`);
+  },
+  create: async (type: ClinicalListType, data: Partial<ClinicalListItem>): Promise<ApiResponse<ClinicalListItem>> => {
+    if (useMockData()) return mockCreate<ClinicalListItem>(data);
+    return apiFetch<ClinicalListItem>(`/clinical-settings/${type}`, { method: "POST", body: JSON.stringify(data) });
+  },
+  update: async (type: ClinicalListType, id: string, data: Partial<ClinicalListItem>): Promise<ApiResponse<ClinicalListItem>> => {
+    if (useMockData()) return mockUpdate<ClinicalListItem>(data);
+    return apiFetch<ClinicalListItem>(`/clinical-settings/${type}/${id}`, { method: "PUT", body: JSON.stringify(data) });
+  },
+  delete: async (type: ClinicalListType, id: string): Promise<ApiResponse<void>> => {
+    if (useMockData()) return mockDelete();
+    return apiFetch<void>(`/clinical-settings/${type}/${id}`, { method: "DELETE" });
+  },
+  bulkReplace: async (type: ClinicalListType, items: Partial<ClinicalListItem>[]): Promise<ApiResponse<ClinicalListItem[]>> => {
+    if (useMockData()) return { data: items as ClinicalListItem[] };
+    return apiFetch<ClinicalListItem[]>(`/clinical-settings/${type}/bulk`, { method: "PUT", body: JSON.stringify({ items }) });
+  },
+};
+
 // ─── Membership Plans ───────────────────────────────────────────────────────
 
 export const membershipPlanService = {

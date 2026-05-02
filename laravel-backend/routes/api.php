@@ -328,6 +328,20 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
     // they're enrolled in.
     Route::get('/me/enrollments', [\App\Http\Controllers\Api\ProgramController::class, 'myEnrollments']);
 
+    // ===== Clinical settings lists =====
+    // Five short configurable lists the practice admin manages from
+    // Practice Settings → Clinical: visit_statuses, visit_reasons,
+    // conditions, treatment_modalities, patient_populations. Each has
+    // its own table + model (sharp FKs, independent column evolution);
+    // one parameterized controller serves the CRUD pattern. The bulk
+    // endpoint is the natural fit for the inline-array UI those
+    // sections use.
+    Route::get('/clinical-settings/{type}', [\App\Http\Controllers\Api\ClinicalSettingsListController::class, 'index']);
+    Route::post('/clinical-settings/{type}', [\App\Http\Controllers\Api\ClinicalSettingsListController::class, 'store']);
+    Route::put('/clinical-settings/{type}/bulk', [\App\Http\Controllers\Api\ClinicalSettingsListController::class, 'bulkReplace']);
+    Route::put('/clinical-settings/{type}/{id}', [\App\Http\Controllers\Api\ClinicalSettingsListController::class, 'update']);
+    Route::delete('/clinical-settings/{type}/{id}', [\App\Http\Controllers\Api\ClinicalSettingsListController::class, 'destroy']);
+
     // ===== Screenings =====
     Route::get('/screening-templates', [ScreeningController::class, 'templates']);
     Route::apiResource('screenings', ScreeningController::class)->except(['update', 'destroy']);
