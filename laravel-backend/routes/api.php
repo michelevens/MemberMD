@@ -332,6 +332,18 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
     // they're enrolled in.
     Route::get('/me/enrollments', [\App\Http\Controllers\Api\ProgramController::class, 'myEnrollments']);
 
+    // Patient self-service: family members (dependents) on the
+    // caller's active membership. Backed by the same Stripe-quantity
+    // logic admin uses (POST/DELETE /memberships/{id}/dependents),
+    // but resolves the primary membership from the caller so the
+    // patient never sees membership ids in their URLs. Plan must be
+    // family_eligible — the controller returns a 422 with a friendly
+    // message if not. The id returned by GET is the dependent's
+    // PatientMembership id; the patient deletes by that.
+    Route::get('/family/members', [\App\Http\Controllers\Api\MembershipController::class, 'myFamilyMembers']);
+    Route::post('/family/members', [\App\Http\Controllers\Api\MembershipController::class, 'addMyFamilyMember']);
+    Route::delete('/family/members/{membershipId}', [\App\Http\Controllers\Api\MembershipController::class, 'removeMyFamilyMember']);
+
     // ===== Clinical settings lists =====
     // Five short configurable lists the practice admin manages from
     // Practice Settings → Clinical: visit_statuses, visit_reasons,

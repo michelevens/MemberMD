@@ -1372,4 +1372,211 @@ class MembershipController extends Controller
             'stripe_warning' => $stripeWarning,
         ]));
     }
+
+    /**
+     * GET /family/members — patient self-serve listing of dependents
+     * on their active membership. Mirrors the response shape the
+     * frontend's familyService.list() expects: a flat array of
+     * {id, firstName, lastName, relationship, dateOfBirth, email,
+     * phone, status} per dependent, derived from the dependent
+     * PatientMembership rows.
+     */
+    public function myFamilyMembers(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        abort_if(!$user->isPatient() || !$user->patient, 403, 'Patient role required.');
+
+        $primary = $user->patient->activeMembership;
+        if (!$primary) {
+            return response()->json(['data' => []]);
+        }
+
+        // Walk dependents → join to Patient + the patient_family_members
+        // row to get the relationship label. Cancelled dependents stay
+        // visible but flagged via status; the patient-side UI hides
+        // them by default. firstOrCreate on the PatientFamilyMember
+        // row in addDependent above is what guarantees the link
+        // exists.
+        $dependents = PatientMembership::where('tenant_id', $user->tenant_id)
+            ->where('parent_membership_id', $primary->id)
+            ->with('patient')
+            ->orderByDesc('created_at')
+            ->get();
+
+        $links = \App\Models\PatientFamilyMember::where('tenant_id', $user->tenant_id)
+            ->where('primary_patient_id', $primary->patient_id)
+            ->get()
+            ->keyBy('member_patient_id');
+
+        $payload = $dependents->map(function ($m) use ($links) {
+            $p = $m->patient;
+            $rel = $links->get($m->patient_id)?->relationship ?? null;
+            return [
+                'id' => $m->id, // membership id — what the patient deletes against
+                'patient_id' => $m->patient_id,
+                'first_name' => $p?->first_name ?? '',
+                'last_name' => $p?->last_name ?? '',
+                'date_of_birth' => $p?->date_of_birth?->toDateString(),
+                'relationship' => $rel ?? 'other',
+                'email' => $p?->email,
+                'phone' => $p?->phone,
+                'status' => $m->status,
+            ];
+        });
+
+        return response()->json(['data' => $payload]);
+    }
+
+    /**
+     * POST /family/members — patient self-serve add a dependent to
+     * their own active membership. Reuses the validation + Stripe
+     * quantity-bump logic from addDependent above; the only difference
+     * is the auth gate (must be patient role) and the membership id
+     * is resolved from the caller, not passed in.
+     *
+     * Plan must have family_eligible=true; primary membership must be
+     * active. Both checks come from addDependent and are inlined here
+     * to keep the response shapes consistent.
+     */
+    public function addMyFamilyMember(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        abort_if(!$user->isPatient() || !$user->patient, 403, 'Patient role required.');
+
+        $primary = $user->patient->activeMembership()->with('plan')->first();
+        if (!$primary) {
+            return response()->json(['message' => 'You need an active membership to add family members.'], 422);
+        }
+        if (!$primary->plan || !$primary->plan->family_eligible) {
+            return response()->json(['message' => "Your current plan doesn't support family members. Contact your practice to upgrade."], 422);
+        }
+        if ($primary->status !== 'active') {
+            return response()->json(['message' => 'Your membership must be active to add a dependent.'], 422);
+        }
+        if (!empty($primary->parent_membership_id)) {
+            return response()->json(['message' => 'You are a dependent on another family membership; only the primary holder can add members.'], 422);
+        }
+
+        $validated = $request->validate([
+            'first_name' => 'required|string|max:100',
+            'last_name' => 'required|string|max:100',
+            'date_of_birth' => 'required|date|before:today',
+            'relationship' => 'required|string|in:spouse,child,parent,other',
+            'email' => 'nullable|email',
+            'phone' => 'nullable|string|max:30',
+        ]);
+
+        $dependent = Patient::create([
+            'tenant_id' => $user->tenant_id,
+            'first_name' => $validated['first_name'],
+            'last_name' => $validated['last_name'],
+            'date_of_birth' => $validated['date_of_birth'],
+            'email' => $validated['email'] ?? null,
+            'phone' => $validated['phone'] ?? '',
+            'is_active' => true,
+        ]);
+
+        \App\Models\PatientFamilyMember::firstOrCreate([
+            'tenant_id' => $user->tenant_id,
+            'primary_patient_id' => $primary->patient_id,
+            'member_patient_id' => $dependent->id,
+        ], [
+            'relationship' => $validated['relationship'],
+        ]);
+
+        $dependentMembership = PatientMembership::create([
+            'tenant_id' => $user->tenant_id,
+            'patient_id' => $dependent->id,
+            'plan_id' => $primary->plan_id,
+            'parent_membership_id' => $primary->id,
+            'status' => 'active',
+            'billing_frequency' => $primary->billing_frequency,
+            'started_at' => now(),
+            'current_period_start' => $primary->current_period_start,
+            'current_period_end' => $primary->current_period_end,
+        ]);
+
+        $stripeWarning = null;
+        if (!empty($primary->stripe_subscription_id)) {
+            try {
+                $this->subscriptions->adjustSubscriptionQuantity($primary, +1);
+            } catch (\Throwable $e) {
+                Log::warning('Stripe quantity bump failed on addMyFamilyMember', [
+                    'membership_id' => $primary->id,
+                    'error' => $e->getMessage(),
+                ]);
+                $stripeWarning = 'Family member added but billing update is pending. Your practice will reconcile.';
+            }
+        }
+
+        return response()->json(array_filter([
+            'data' => [
+                'id' => $dependentMembership->id,
+                'patient_id' => $dependent->id,
+                'first_name' => $dependent->first_name,
+                'last_name' => $dependent->last_name,
+                'date_of_birth' => $dependent->date_of_birth?->toDateString(),
+                'relationship' => $validated['relationship'],
+                'email' => $dependent->email,
+                'phone' => $dependent->phone,
+                'status' => 'active',
+            ],
+            'message' => 'Family member added.',
+            'stripe_warning' => $stripeWarning,
+        ]), 201);
+    }
+
+    /**
+     * DELETE /family/members/{membershipId} — patient self-serve
+     * removal. The membership id is what familyService.list() returns
+     * as `id`, so the patient's UI doesn't need to know about the
+     * primary id. Auth: caller must be the primary holder.
+     */
+    public function removeMyFamilyMember(Request $request, string $membershipId): JsonResponse
+    {
+        $user = $request->user();
+        abort_if(!$user->isPatient() || !$user->patient, 403, 'Patient role required.');
+
+        $primary = $user->patient->activeMembership;
+        if (!$primary) {
+            return response()->json(['message' => 'No active membership found.'], 404);
+        }
+
+        $dependent = PatientMembership::where('tenant_id', $user->tenant_id)
+            ->where('parent_membership_id', $primary->id)
+            ->where('id', $membershipId)
+            ->first();
+        if (!$dependent) {
+            return response()->json(['message' => 'Dependent not found on your membership.'], 404);
+        }
+        if ($dependent->status === 'cancelled') {
+            return response()->json(['message' => 'This family member was already removed.'], 422);
+        }
+
+        $dependent->update([
+            'status' => 'cancelled',
+            'cancelled_at' => now(),
+            'cancel_reason' => 'family_dependent_removed',
+            'expires_at' => now(),
+        ]);
+
+        $stripeWarning = null;
+        if (!empty($primary->stripe_subscription_id)) {
+            try {
+                $this->subscriptions->adjustSubscriptionQuantity($primary, -1);
+            } catch (\Throwable $e) {
+                Log::warning('Stripe quantity decrement failed on removeMyFamilyMember', [
+                    'membership_id' => $primary->id,
+                    'error' => $e->getMessage(),
+                ]);
+                $stripeWarning = 'Family member removed but billing update is pending. Your practice will reconcile.';
+            }
+        }
+
+        return response()->json(array_filter([
+            'data' => ['removed' => true, 'membership_id' => $dependent->id],
+            'message' => 'Family member removed.',
+            'stripe_warning' => $stripeWarning,
+        ]));
+    }
 }

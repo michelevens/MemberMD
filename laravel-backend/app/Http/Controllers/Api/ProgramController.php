@@ -598,6 +598,13 @@ class ProgramController extends Controller
                 'bookable_providers' => $programProviders->map(function ($p) {
                     return [
                         'id' => $p->id,
+                        // user_id is what the messaging endpoint needs
+                        // as recipient_id — the provider record itself
+                        // isn't a User, but provider.user_id is. Surface
+                        // it here so the patient portal's compose-new
+                        // dialog can address a message without a
+                        // separate provider→user lookup.
+                        'user_id' => $p->user_id,
                         'first_name' => $p->user?->first_name ?? $p->first_name,
                         'last_name' => $p->user?->last_name ?? $p->last_name,
                         'credentials' => $p->credentials,

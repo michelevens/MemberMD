@@ -637,6 +637,16 @@ export function PatientPortal() {
 
   const [activeThread, setActiveThread] = useState<string | null>(null);
   const [messageInput, setMessageInput] = useState("");
+  // Compose-new-message dialog state. Recipient is a User id from
+  // the patient's care team (provider.user_id, surfaced by
+  // /me/enrollments). thread_id is left null so the backend mints a
+  // new uuid; subsequent replies in this thread will reuse it via
+  // the existing reply path on Messages.
+  const [composeOpen, setComposeOpen] = useState(false);
+  const [composeRecipientUserId, setComposeRecipientUserId] = useState("");
+  const [composeBody, setComposeBody] = useState("");
+  const [composeSubmitting, setComposeSubmitting] = useState(false);
+  const [composeError, setComposeError] = useState<string | null>(null);
   const [sendingMessage, setSendingMessage] = useState(false);
   const [refillingId, setRefillingId] = useState<string | null>(null);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
@@ -1238,6 +1248,44 @@ export function PatientPortal() {
       setSendingMessage(false);
     }
   }, [messageInput, sendingMessage, activeThread, apiThreads, showFlash]);
+
+  /** Compose-new-message handler — used by the "+ New Message" button
+   *  and the empty-state CTA. Posts to /messages with no thread_id so
+   *  the backend mints a fresh uuid; we then refresh the list and
+   *  open the new thread. */
+  const handleComposeNew = useCallback(async () => {
+    const body = composeBody.trim();
+    if (!body || !composeRecipientUserId) {
+      setComposeError("Pick a provider and write a message.");
+      return;
+    }
+    setComposeSubmitting(true);
+    setComposeError(null);
+    try {
+      const r = await messageService.send({
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        recipientId: composeRecipientUserId as any,
+        body,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      } as any);
+      if (r.error) {
+        setComposeError(r.error);
+        return;
+      }
+      // Reset + close + refresh. Refresh is what surfaces the new
+      // thread in messageThreads; clicking it from there opens the
+      // existing thread view.
+      setComposeOpen(false);
+      setComposeRecipientUserId("");
+      setComposeBody("");
+      showFlash("success", "Message sent.");
+      loadPatientData();
+    } catch (e) {
+      setComposeError(e instanceof Error ? e.message : "Send failed.");
+    } finally {
+      setComposeSubmitting(false);
+    }
+  }, [composeBody, composeRecipientUserId, showFlash, loadPatientData]);
 
   const handleRefill = useCallback(async (medId: string) => {
     if (refillingId) return;
@@ -2186,6 +2234,7 @@ export function PatientPortal() {
             <div className="flex items-center gap-2">
               <RefreshButton onRefresh={loadPatientData} title="Refresh messages" />
               <button
+                onClick={() => setComposeOpen(true)}
                 className="px-3 py-1.5 rounded-lg text-sm font-semibold text-white"
                 style={{ backgroundColor: COLORS.teal500 }}
               >
@@ -2193,6 +2242,24 @@ export function PatientPortal() {
               </button>
             </div>
           </div>
+          {messageThreads.length === 0 && (
+            <div className="rounded-2xl border border-dashed border-slate-200 bg-white p-8 text-center">
+              <MessageSquare className="w-8 h-8 mx-auto mb-2" style={{ color: COLORS.slate300 }} />
+              <p className="text-sm font-medium" style={{ color: COLORS.navy800 }}>
+                No messages yet
+              </p>
+              <p className="text-xs mt-1 mb-4" style={{ color: COLORS.slate500 }}>
+                Start a conversation with your care team — questions, refill requests, anything you'd normally ask in-office.
+              </p>
+              <button
+                onClick={() => setComposeOpen(true)}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-white"
+                style={{ backgroundColor: COLORS.teal500 }}
+              >
+                <Send className="w-4 h-4" /> Send your first message
+              </button>
+            </div>
+          )}
           <div className="space-y-2">
             {messageThreads.map((thread) => (
               <button
@@ -2629,6 +2696,9 @@ export function PatientPortal() {
     if (!apiEnrollments) return [];
     type Prov = {
       id: string;
+      // user_id of the linked Provider — needed for messageService.send
+      // recipient_id. Surfaced by /me/enrollments since 2026-05-03.
+      userId: string | null;
       firstName: string;
       lastName: string;
       credentials: string;
@@ -2649,6 +2719,7 @@ export function PatientPortal() {
         if (!byId.has(id)) {
           byId.set(id, {
             id,
+            userId: p.userId ?? p.user_id ?? null,
             firstName: p.firstName ?? p.first_name ?? "",
             lastName: p.lastName ?? p.last_name ?? "",
             credentials: p.credentials ?? "",
@@ -3366,6 +3437,100 @@ export function PatientPortal() {
         })))}
         onSelect={(id) => setActiveTab(id as TabId)}
       />
+
+      {/* Compose new message — recipient picker pulls from the care
+          team list (providers attached to enrolled programs). When the
+          patient has no enrollments yet, the dialog explains that
+          rather than rendering an empty dropdown. */}
+      {composeOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ backgroundColor: "rgba(15, 23, 42, 0.55)" }}
+          onClick={() => !composeSubmitting && setComposeOpen(false)}
+        >
+          <div
+            className="bg-white rounded-2xl shadow-2xl w-full max-w-md"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+              <h3 className="text-lg font-bold text-slate-900">New message</h3>
+              <button
+                onClick={() => setComposeOpen(false)}
+                className="p-1 rounded hover:bg-slate-100 text-slate-400"
+                aria-label="Close"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              {careTeamProviders.length === 0 ? (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-800">
+                  Your care team isn't set up yet. Once your practice assigns providers to your program, you can message them from here.
+                </div>
+              ) : (
+                <>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">To</label>
+                    <select
+                      value={composeRecipientUserId}
+                      onChange={(e) => setComposeRecipientUserId(e.target.value)}
+                      className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-teal-400"
+                    >
+                      <option value="">Choose a provider…</option>
+                      {careTeamProviders
+                        .filter((p) => !!p.userId)
+                        .map((p) => {
+                          const fullName = [p.firstName, p.lastName].filter(Boolean).join(" ").trim() || "Provider";
+                          return (
+                            <option key={p.id} value={p.userId as string}>
+                              {fullName}{p.credentials ? `, ${p.credentials}` : ""}
+                            </option>
+                          );
+                        })}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">Message</label>
+                    <textarea
+                      value={composeBody}
+                      onChange={(e) => setComposeBody(e.target.value)}
+                      rows={5}
+                      maxLength={5000}
+                      placeholder="Type your message…"
+                      className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-teal-400"
+                    />
+                    <p className="text-xs text-slate-400 mt-1">
+                      For urgent issues, call your practice or 911. Messages aren't monitored 24/7.
+                    </p>
+                  </div>
+                </>
+              )}
+              {composeError && (
+                <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                  {composeError}
+                </div>
+              )}
+            </div>
+            <div className="px-6 pb-6 flex justify-end gap-2">
+              <button
+                onClick={() => setComposeOpen(false)}
+                disabled={composeSubmitting}
+                className="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100 transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => void handleComposeNew()}
+                disabled={composeSubmitting || careTeamProviders.length === 0 || !composeRecipientUserId || !composeBody.trim()}
+                className="px-4 py-2 rounded-lg text-sm font-semibold text-white transition-colors disabled:opacity-50"
+                style={{ backgroundColor: COLORS.teal500 }}
+              >
+                {composeSubmitting ? "Sending…" : "Send"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Flash banner (top-right). 3s auto-dismiss; setFlash(null) on click. */}
       {flash && (
