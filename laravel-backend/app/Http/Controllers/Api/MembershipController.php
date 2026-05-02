@@ -416,10 +416,21 @@ class MembershipController extends Controller
     public function syncInvoicesFromStripe(Request $request, string $id): JsonResponse
     {
         $user = $request->user();
-        abort_if(!in_array($user->role, ['practice_admin', 'staff']), 403);
+        // Practice admins/staff can sync any membership in their tenant.
+        // Patients can sync their own membership (read-only Stripe fetch +
+        // idempotent local writes — low risk to expose).
+        $isStaff = in_array($user->role, ['practice_admin', 'staff']);
+        $isPatient = $user->role === 'patient';
+        abort_if(!$isStaff && !$isPatient, 403);
 
         $membership = PatientMembership::where('tenant_id', $user->tenant_id)
             ->findOrFail($id);
+
+        if ($isPatient) {
+            // Patient can only sync if the membership is theirs.
+            $owns = $membership->patient && $membership->patient->user_id === $user->id;
+            abort_unless($owns, 403);
+        }
 
         if (empty($membership->stripe_subscription_id)) {
             return response()->json([

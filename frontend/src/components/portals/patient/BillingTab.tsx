@@ -20,6 +20,7 @@ import {
   invoiceService,
   paymentMethodService,
   entitlementService,
+  apiFetch,
 } from "../../../lib/api";
 import { MyAgreementsSection } from "./MyAgreementsSection";
 import type { PatientMembership, Invoice, PatientEntitlement } from "../../../types";
@@ -84,6 +85,7 @@ export function BillingTab() {
   const [cancelOpen, setCancelOpen] = useState(false);
   const [cardsOpen, setCardsOpen] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
+  const [syncingFromStripe, setSyncingFromStripe] = useState(false);
 
   useEffect(() => {
     if (!toast) return;
@@ -128,6 +130,39 @@ export function BillingTab() {
   }, [refreshKey]);
 
   const refresh = () => setRefreshKey((k) => k + 1);
+
+  // Pull invoices live from Stripe — patient-facing safety valve for the
+  // case where invoice.paid webhooks didn't reach our backend and the
+  // local Invoice list is missing real charges. Idempotent on the
+  // backend; safe to retry.
+  const handleRefreshFromStripe = async () => {
+    if (!membership?.id) return;
+    setSyncingFromStripe(true);
+    try {
+      const res = await apiFetch<{
+        invoicesSeen?: number;
+        invoicesCreated?: number;
+      }>(`/memberships/${membership.id}/sync-invoices`, { method: "POST" });
+      if (res.error) {
+        setToast({ message: res.error, type: "error" });
+      } else {
+        const seen = res.data?.invoicesSeen ?? 0;
+        const created = res.data?.invoicesCreated ?? 0;
+        setToast({
+          message: seen === 0
+            ? "No invoices on file with Stripe yet."
+            : `Refreshed ${seen} invoice${seen === 1 ? "" : "s"} from Stripe (${created} new).`,
+          type: "success",
+        });
+        if (created > 0) {
+          refresh();
+        }
+      }
+    } catch {
+      setToast({ message: "Could not refresh from Stripe.", type: "error" });
+    }
+    setSyncingFromStripe(false);
+  };
 
   // ─── Derived: trial status ────────────────────────────────────────────────
   // PatientMembership type doesn't (yet) declare trial_ends_at — the API
@@ -320,7 +355,18 @@ export function BillingTab() {
           <h3 className="text-sm font-semibold" style={{ color: C.navy800 }}>
             Recent Invoices
           </h3>
-          <Receipt className="w-4 h-4" style={{ color: C.slate400 }} />
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleRefreshFromStripe}
+              disabled={syncingFromStripe}
+              className="text-xs font-semibold disabled:opacity-50"
+              style={{ color: C.teal500 }}
+              title="Refresh invoices live from Stripe"
+            >
+              {syncingFromStripe ? "Refreshing…" : "Refresh"}
+            </button>
+            <Receipt className="w-4 h-4" style={{ color: C.slate400 }} />
+          </div>
         </div>
         {invoices.length === 0 ? (
           <p className="text-sm text-center py-8" style={{ color: C.slate400 }}>
