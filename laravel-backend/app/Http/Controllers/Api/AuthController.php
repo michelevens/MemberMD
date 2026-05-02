@@ -834,6 +834,11 @@ class AuthController extends Controller
             ];
         })->filter()->values();
 
+        // Linked patient row id — surfaced for role=patient so the SPA
+        // can submit appointment / billing requests scoped by patient_id
+        // without a separate /patients/me round-trip. Null for staff/admin.
+        $patientId = $user->role === 'patient' && $user->patient ? $user->patient->id : null;
+
         return [
             'id' => $user->id,
             'first_name' => $user->first_name,
@@ -848,6 +853,7 @@ class AuthController extends Controller
             'mfa_enabled' => $user->mfa_enabled,
             'onboarding_completed' => $user->onboarding_completed,
             'last_login_at' => $user->last_login_at,
+            'patient_id' => $patientId,
             'practice' => $practice ? [
                 'id' => $practice->id,
                 'name' => $practice->name,

@@ -151,8 +151,47 @@ class EncounterController extends Controller
             $encounter->appointment()->update(['status' => 'completed']);
         }
 
+        // Auto-decrement the patient's visit entitlement on sign. This is
+        // the single source of truth for "a visit happened" — booking
+        // alone doesn't consume the counter (no-shows shouldn't), and
+        // staff manually clicking recordVisit was easy to forget.
+        // Fail-soft: any error is logged, the encounter sign still succeeds.
+        $this->autoConsumeVisitEntitlement($encounter);
+
         return response()->json([
             'data' => $encounter->fresh()->load(['patient', 'provider.user', 'signer'])
         ]);
+    }
+
+    /**
+     * On encounter sign, find the patient's active membership and current
+     * entitlement period, and increment visits_used. No cap enforcement
+     * (a real visit already happened — we're recording it after the fact),
+     * no overage charge logic (that's a billing concern handled elsewhere).
+     * Idempotent on the encounter via signed_at — calling sign twice would
+     * already be blocked by the "already signed" guard.
+     */
+    private function autoConsumeVisitEntitlement(Encounter $encounter): void
+    {
+        try {
+            $patient = $encounter->patient;
+            if (!$patient) return;
+
+            $membership = $patient->activeMembership;
+            if (!$membership) return;
+
+            $entitlement = $membership->entitlements()
+                ->where('period_start', '<=', now())
+                ->where('period_end', '>=', now())
+                ->first();
+            if (!$entitlement) return;
+
+            $entitlement->increment('visits_used');
+        } catch (\Throwable $e) {
+            \Log::warning('Auto-consume visit entitlement failed on sign', [
+                'encounter_id' => $encounter->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
     }
 }

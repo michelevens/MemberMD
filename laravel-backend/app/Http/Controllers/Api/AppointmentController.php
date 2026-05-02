@@ -87,6 +87,20 @@ class AppointmentController extends Controller
 
         $validated = $request->validated();
 
+        // Patient self-booking — force patient_id to the caller's own record
+        // so a patient can't book under another patient's id, and stamp
+        // confirmed_at=null so staff know it needs review/confirmation.
+        // Staff bookings are auto-confirmed (the historical default).
+        $isPatientBooking = $user->isPatient();
+        if ($isPatientBooking) {
+            if (!$user->patient) {
+                return response()->json([
+                    'message' => 'Your account is not linked to a patient record. Contact the practice.',
+                ], 422);
+            }
+            $validated['patient_id'] = $user->patient->id;
+        }
+
         // Validate provider availability (check day of week)
         $scheduledAt = \Carbon\Carbon::parse($validated['scheduled_at']);
         $dayOfWeek = $scheduledAt->dayOfWeek;
@@ -135,6 +149,10 @@ class AppointmentController extends Controller
 
         $validated['tenant_id'] = $user->tenant_id;
         $validated['status'] = 'scheduled';
+        // Patient self-booked → unconfirmed (staff confirms via update);
+        // Staff-booked → auto-confirmed since the booking actor IS the
+        // person who would otherwise confirm.
+        $validated['confirmed_at'] = $isPatientBooking ? null : now();
 
         $appointment = Appointment::create($validated);
 
@@ -205,11 +223,52 @@ class AppointmentController extends Controller
 
         $validated = $request->validated();
 
+        // Patients can only change reschedule-relevant fields. They can't
+        // confirm their own appointment, reassign provider, change type,
+        // or move it to in_progress / completed. Anything else they pass
+        // is silently dropped — the policy already gated WHO can update.
+        if ($user->isPatient()) {
+            $validated = array_intersect_key($validated, array_flip(['scheduled_at', 'duration_minutes', 'notes']));
+            // Reschedules invalidate any prior confirmation — staff have to
+            // re-confirm the new time.
+            if (!empty($validated['scheduled_at'])) {
+                $validated['confirmed_at'] = null;
+            }
+        }
+
+        // Staff explicitly setting status=confirmed stamps confirmed_at.
+        if (isset($validated['status']) && $validated['status'] === 'confirmed') {
+            $validated['confirmed_at'] = $appointment->confirmed_at ?? now();
+        }
         if (isset($validated['status']) && $validated['status'] === 'cancelled') {
             $validated['cancelled_at'] = now();
         }
 
         $appointment->update($validated);
+
+        return response()->json([
+            'data' => $appointment->fresh()->load(['patient', 'provider.user', 'appointmentType'])
+        ]);
+    }
+
+    /**
+     * Staff/provider explicit-confirm shortcut. Equivalent to PATCH with
+     * status=confirmed but separate so the frontend can wire a single
+     * "Confirm" button without thinking about the full update payload.
+     * Patients can't call this — the policy on update enforces that.
+     */
+    public function confirm(Request $request, string $id): JsonResponse
+    {
+        $user = $request->user();
+        $appointment = Appointment::where('tenant_id', $user->tenant_id)->findOrFail($id);
+
+        $this->authorize('update', $appointment);
+        abort_if($user->isPatient(), 403);
+
+        $appointment->update([
+            'status' => 'confirmed',
+            'confirmed_at' => $appointment->confirmed_at ?? now(),
+        ]);
 
         return response()->json([
             'data' => $appointment->fresh()->load(['patient', 'provider.user', 'appointmentType'])

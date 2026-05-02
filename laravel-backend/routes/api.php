@@ -261,6 +261,9 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
 
     // ===== Appointments =====
     Route::get('/appointments/today', [AppointmentController::class, 'today']);
+    // Staff/provider one-click "Confirm" for a patient-self-booked appointment.
+    // Patient-callable would be a no-op (policy blocks them); see controller.
+    Route::post('/appointments/{id}/confirm', [AppointmentController::class, 'confirm']);
     Route::apiResource('appointments', AppointmentController::class);
 
     // ===== Encounters =====

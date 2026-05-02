@@ -43,18 +43,24 @@ class AppointmentPolicy extends BasePolicy
     /**
      * Can the user create an appointment?
      * superadmin/practice_admin/provider/staff: yes
-     * patient: no (patients book via separate flow)
+     * patient: yes — self-booking opened up. The controller forces
+     *   patient_id to the caller's own record and stamps the new
+     *   appointment as 'scheduled' with confirmed_at=null so staff
+     *   know it needs review.
      */
     public function create(User $user): bool
     {
-        return $this->isStaffOrAbove($user);
+        return $this->isStaffOrAbove($user) || $this->isPatient($user);
     }
 
     /**
      * Can the user update this appointment?
      * superadmin/practice_admin: same tenant
      * provider: own appointments only
-     * staff/patient: no
+     * staff: same tenant (confirm / reschedule on behalf of patient)
+     * patient: own appointments only, AND only while not yet completed
+     *   (reschedule path; the controller restricts which fields they
+     *   can change so they can't reassign provider, change duration, etc.)
      */
     public function update(User $user, Appointment $appointment): bool
     {
@@ -62,11 +68,19 @@ class AppointmentPolicy extends BasePolicy
             return false;
         }
 
+        if ($this->isPatient($user)) {
+            if (!$this->isOwnPatientRecord($user, $appointment)) {
+                return false;
+            }
+            // Once the visit happened we're past the point of patient edits.
+            return !in_array($appointment->status, ['completed', 'in_progress', 'checked_in', 'cancelled', 'no_show'], true);
+        }
+
         if ($this->isProvider($user)) {
             return $this->isOwnProviderRecord($user, $appointment);
         }
 
-        return $this->isAdmin($user);
+        return $this->isAdmin($user) || $this->isStaff($user);
     }
 
     /**

@@ -69,6 +69,9 @@ interface Appointment {
   type: string;
   status: "upcoming" | "completed" | "cancelled";
   isVideo: boolean;
+  // Null = staff hasn't confirmed yet (patient self-booked, awaiting review).
+  // Non-null = confirmed timestamp.
+  confirmedAt?: string | null;
   chiefComplaint?: string;
   assessment?: string;
   plan?: string;
@@ -639,6 +642,10 @@ export function PatientPortal() {
               type: (a.type as string) || (a.appointmentType as string) || (a.appointment_type as string) || "",
               status: "upcoming" as const,
               isVideo: !!(a.isVideo ?? a.is_video ?? a.isTelehealth ?? a.is_telehealth),
+              // Patient self-booked appointments land with confirmedAt=null
+              // until staff confirms — surface that as a pending pill in the
+              // UI so the patient knows the booking isn't final yet.
+              confirmedAt: (a.confirmedAt as string | null) ?? (a.confirmed_at as string | null) ?? null,
             })));
           }
         }
@@ -1147,9 +1154,20 @@ export function PatientPortal() {
                 </span>
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium truncate" style={{ color: COLORS.navy800 }}>
-                  {apt.type}
-                </p>
+                <div className="flex items-center gap-2">
+                  <p className="text-sm font-medium truncate" style={{ color: COLORS.navy800 }}>
+                    {apt.type}
+                  </p>
+                  {!apt.confirmedAt && (
+                    <span
+                      className="shrink-0 px-1.5 py-0.5 rounded text-xs font-semibold"
+                      style={{ backgroundColor: "#fef3c7", color: "#92400e", fontSize: "10px" }}
+                      title="Awaiting practice confirmation"
+                    >
+                      PENDING
+                    </span>
+                  )}
+                </div>
                 <p className="text-xs" style={{ color: COLORS.slate500 }}>
                   {apt.time} &middot; {apt.provider.split(",")[0]}
                 </p>
@@ -1292,7 +1310,7 @@ export function PatientPortal() {
                   <p className="text-xs mt-0.5" style={{ color: COLORS.slate500 }}>
                     {apt.time} &middot; {apt.provider.split(",")[0]}
                   </p>
-                  <div className="flex items-center gap-1 mt-1">
+                  <div className="flex items-center gap-1 mt-1 flex-wrap">
                     {apt.isVideo ? (
                       <span
                         className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full"
@@ -1306,6 +1324,15 @@ export function PatientPortal() {
                         style={{ backgroundColor: COLORS.slate100, color: COLORS.slate500 }}
                       >
                         <MapPin className="w-3 h-3" /> In-Office
+                      </span>
+                    )}
+                    {!apt.confirmedAt && (
+                      <span
+                        className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full"
+                        style={{ backgroundColor: "#fef3c7", color: "#92400e" }}
+                        title="Awaiting practice confirmation"
+                      >
+                        Pending confirmation
                       </span>
                     )}
                   </div>
