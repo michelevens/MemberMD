@@ -800,7 +800,7 @@ export function PracticePortal() {
 
   // ─── Add Provider Modal ───────────────────────────────────────────────
   const [showAddProvider, setShowAddProvider] = useState(false);
-  const [providerForm, setProviderForm] = useState({ firstName: "", lastName: "", credentials: "", specialty: "", npiNumber: "", email: "", phone: "", telehealth: false });
+  const [providerForm, setProviderForm] = useState({ firstName: "", lastName: "", credentials: "", specialty: "", npiNumber: "", email: "", phone: "", telehealth: false, consultationFee: "" });
   const [addProviderLoading, setAddProviderLoading] = useState(false);
 
   // ─── Edit Provider Modal ──────────────────────────────────────────────
@@ -2204,11 +2204,14 @@ export function PracticePortal() {
         email: providerForm.email,
         phone: providerForm.phone || undefined,
         telehealth: providerForm.telehealth,
+        // consultation_fee is stored as a numeric — empty string means
+        // "leave null" (no fee set).
+        consultationFee: providerForm.consultationFee ? parseFloat(providerForm.consultationFee) : undefined,
       } as Record<string, unknown>);
       if (res.data || !res.error) {
         setToast({ message: "Provider added successfully.", type: "success" });
         setShowAddProvider(false);
-        setProviderForm({ firstName: "", lastName: "", credentials: "", specialty: "", npiNumber: "", email: "", phone: "", telehealth: false });
+        setProviderForm({ firstName: "", lastName: "", credentials: "", specialty: "", npiNumber: "", email: "", phone: "", telehealth: false, consultationFee: "" });
         setProvidersLoaded(false);
         loadPracticeData();
       } else {
@@ -10201,6 +10204,19 @@ export function PracticePortal() {
                   <label className="block text-sm font-medium text-slate-700 mb-1">Phone</label>
                   <input type="tel" className="w-full border rounded-lg px-3 py-2 text-sm" value={providerForm.phone} onChange={e => setProviderForm(f => ({ ...f, phone: e.target.value }))} placeholder="(407) 555-1234" />
                 </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Consultation Fee (USD)</label>
+                <input
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  className="w-full max-w-xs border rounded-lg px-3 py-2 text-sm"
+                  value={providerForm.consultationFee}
+                  onChange={e => setProviderForm(f => ({ ...f, consultationFee: e.target.value }))}
+                  placeholder="e.g. 150.00"
+                />
+                <p className="text-xs text-slate-500 mt-1">Default fee for visits that don't have a per-type override. Leave blank to skip.</p>
               </div>
               <div className="flex items-center gap-3">
                 <label className="flex items-center gap-2 cursor-pointer">

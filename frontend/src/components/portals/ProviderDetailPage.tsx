@@ -7,9 +7,11 @@ import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   ArrowLeft, User as UserIcon, Calendar, Users as UsersIcon, Clock, Award,
   Settings as SettingsIcon, Loader2, Search, Save, Video, Mail, Hash,
-  CheckCircle2, AlertTriangle,
+  CheckCircle2, AlertTriangle, Copy, RefreshCw, ShieldCheck, Plus,
+  Trash2, Pencil, FileCheck2, X as XIcon, Upload,
 } from "lucide-react";
-import { providerService } from "../../lib/api";
+import { providerService, calendarService, credentialService } from "../../lib/api";
+import type { ProviderCredentialDTO } from "../../lib/api";
 import type { Provider, ProviderAvailability, Appointment } from "../../types";
 
 const US_STATES = [
@@ -21,7 +23,7 @@ const US_STATES = [
 
 const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
-type TabKey = "overview" | "profile" | "schedule" | "panel" | "appointments" | "licensing" | "settings";
+type TabKey = "overview" | "profile" | "schedule" | "panel" | "appointments" | "licensing" | "credentials" | "settings";
 
 const TABS: { key: TabKey; label: string; icon: typeof UserIcon }[] = [
   { key: "overview", label: "Overview", icon: UserIcon },
@@ -30,6 +32,7 @@ const TABS: { key: TabKey; label: string; icon: typeof UserIcon }[] = [
   { key: "panel", label: "Panel", icon: UsersIcon },
   { key: "appointments", label: "Appointments", icon: Clock },
   { key: "licensing", label: "Licensing", icon: Award },
+  { key: "credentials", label: "Credentials", icon: ShieldCheck },
   { key: "settings", label: "Settings", icon: SettingsIcon },
 ];
 
@@ -244,6 +247,7 @@ export function ProviderDetailPage({ providerId, embedded = false, onBack, mode 
         {activeTab === "panel" && <PanelTab providerId={provider.id} />}
         {activeTab === "appointments" && <AppointmentsTab providerId={provider.id} />}
         {activeTab === "licensing" && <LicensingTab provider={provider} onSaved={loadProvider} setToast={setToast} />}
+        {activeTab === "credentials" && <CredentialsTab provider={provider} setToast={setToast} mode={mode} />}
         {activeTab === "settings" && <SettingsTab provider={provider} onSaved={loadProvider} setToast={setToast} mode={mode} />}
       </div>
 
@@ -369,9 +373,21 @@ function ProfileTab({ provider, onSaved, setToast }: ProfileTabProps) {
     credentials: (provider as unknown as { credentials?: string }).credentials || "",
     bio: provider.bio || "",
     npiNumber: provider.npi || "",
+    languages: Array.isArray(provider.languages) ? provider.languages : [],
   });
   const [saving, setSaving] = useState(false);
   const [npiLoading, setNpiLoading] = useState(false);
+  const [languageInput, setLanguageInput] = useState("");
+
+  const addLanguage = (raw: string) => {
+    const lang = raw.trim();
+    if (!lang) return;
+    setForm(f => f.languages.includes(lang) ? f : { ...f, languages: [...f.languages, lang] });
+    setLanguageInput("");
+  };
+  const removeLanguage = (lang: string) => {
+    setForm(f => ({ ...f, languages: f.languages.filter(l => l !== lang) }));
+  };
 
   const lookupNpi = async () => {
     if (!/^\d{10}$/.test(form.npiNumber)) {
@@ -456,6 +472,53 @@ function ProfileTab({ provider, onSaved, setToast }: ProfileTabProps) {
             value={form.bio}
             onChange={e => setForm(f => ({ ...f, bio: e.target.value }))}
             placeholder="Patient-facing professional bio"
+          />
+        </div>
+
+        <div className="sm:col-span-2">
+          <label className="block text-xs font-medium text-slate-700 mb-1.5">Languages spoken</label>
+          <p className="text-xs text-slate-500 mb-2">Patients see these on the booking widget. Type a language and press Enter or comma.</p>
+          {form.languages.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 mb-2">
+              {form.languages.map(lang => (
+                <span
+                  key={lang}
+                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-slate-100 text-slate-700 border border-slate-200"
+                >
+                  {lang}
+                  <button
+                    type="button"
+                    onClick={() => removeLanguage(lang)}
+                    className="text-slate-400 hover:text-slate-700"
+                    aria-label={`Remove ${lang}`}
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+          <input
+            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm"
+            value={languageInput}
+            onChange={e => {
+              const v = e.target.value;
+              // Comma submits — handy for paste-list workflows.
+              if (v.endsWith(",")) {
+                addLanguage(v.slice(0, -1));
+              } else {
+                setLanguageInput(v);
+              }
+            }}
+            onKeyDown={e => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                addLanguage(languageInput);
+              } else if (e.key === "Backspace" && !languageInput && form.languages.length > 0) {
+                removeLanguage(form.languages[form.languages.length - 1]);
+              }
+            }}
+            placeholder="e.g. English, Spanish, Haitian Creole"
           />
         </div>
       </div>
@@ -910,14 +973,37 @@ function LicensingTab({ provider, onSaved, setToast }: LicensingTabProps) {
     licenseNumber: provider.licenseNumber || "",
     licenseState: provider.licenseState || "",
     deaNumber: provider.deaNumber || "",
+    licensedStates: Array.isArray(provider.licensedStates) ? provider.licensedStates : [],
   });
   const [saving, setSaving] = useState(false);
+
+  // Toggle a state in the multi-state list. Adding the primary
+  // licenseState to the list automatically when it's set ensures the
+  // primary state always shows in the chip set; we don't enforce the
+  // inverse (you can have a primary state without listing it as
+  // secondary).
+  const toggleState = (s: string) => {
+    setForm(f => ({
+      ...f,
+      licensedStates: f.licensedStates.includes(s)
+        ? f.licensedStates.filter(x => x !== s)
+        : [...f.licensedStates, s].sort(),
+    }));
+  };
 
   const save = async () => {
     setSaving(true);
     const res = await providerService.update(provider.id, {
       licenseNumber: form.licenseNumber,
       licenseState: form.licenseState,
+      // licensedStates maps to licensed_states JSONB on the backend.
+      // toProviderApiPayload doesn't translate it specially — we
+      // include the primary licenseState in the array so the column
+      // is self-consistent even if a downstream feature only reads
+      // licensed_states.
+      licensedStates: form.licenseState && !form.licensedStates.includes(form.licenseState)
+        ? [...form.licensedStates, form.licenseState].sort()
+        : form.licensedStates,
     });
     if (res.error) {
       setToast({ message: res.error, type: "error" });
@@ -936,7 +1022,7 @@ function LicensingTab({ provider, onSaved, setToast }: LicensingTabProps) {
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <Field label="License number" value={form.licenseNumber} onChange={v => setForm(f => ({ ...f, licenseNumber: v }))} />
         <div>
-          <label className="block text-xs font-medium text-slate-700 mb-1.5">License state</label>
+          <label className="block text-xs font-medium text-slate-700 mb-1.5">Primary license state</label>
           <select
             value={form.licenseState}
             onChange={e => setForm(f => ({ ...f, licenseState: e.target.value }))}
@@ -948,6 +1034,47 @@ function LicensingTab({ provider, onSaved, setToast }: LicensingTabProps) {
         </div>
         <div className="sm:col-span-2">
           <Field label="DEA number (read-only — contact support to update)" value={form.deaNumber} onChange={() => {}} />
+        </div>
+
+        <div className="sm:col-span-2">
+          <label className="block text-xs font-medium text-slate-700 mb-1.5">All licensed states</label>
+          <p className="text-xs text-slate-500 mb-2">
+            Click a state to toggle. Telehealth bookings into states you're not licensed in will fail their compliance check.
+          </p>
+          {form.licensedStates.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 mb-3">
+              {form.licensedStates.map(s => (
+                <button
+                  key={s}
+                  onClick={() => toggleState(s)}
+                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-teal-50 text-teal-700 border border-teal-200 hover:bg-teal-100"
+                  type="button"
+                >
+                  {s}
+                  <span aria-hidden className="text-teal-500 ml-0.5">×</span>
+                </button>
+              ))}
+            </div>
+          )}
+          <div className="grid grid-cols-8 sm:grid-cols-10 gap-1">
+            {US_STATES.map(s => {
+              const selected = form.licensedStates.includes(s);
+              return (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => toggleState(s)}
+                  className={`px-2 py-1.5 rounded text-xs font-medium transition-colors ${
+                    selected
+                      ? "bg-teal-600 text-white"
+                      : "bg-slate-50 text-slate-600 hover:bg-slate-100 border border-slate-200"
+                  }`}
+                >
+                  {s}
+                </button>
+              );
+            })}
+          </div>
         </div>
       </div>
 
@@ -976,21 +1103,25 @@ interface SettingsTabProps {
 
 function SettingsTab({ provider, onSaved, setToast, mode = "admin" }: SettingsTabProps) {
   const isSelf = mode === "self";
+  const initialFee = (provider.consultationFee !== undefined && provider.consultationFee !== null)
+    ? String(provider.consultationFee)
+    : "";
   const [form, setForm] = useState({
     panelCapacity: provider.maxDailyPatients || 500,
     acceptsNewPatients: provider.acceptingNewPatients ?? true,
     telehealthEnabled: provider.teleHealthCapable ?? false,
     panelStatus: (provider as unknown as { panelStatus?: string }).panelStatus || "open",
+    consultationFee: initialFee,
   });
   const [saving, setSaving] = useState(false);
 
   const save = async () => {
     setSaving(true);
     // In self mode the provider can only flip "Accepts new patients" —
-    // panel capacity, panel status, and the telehealth flag are
-    // practice-policy controls. Don't even include them in the
-    // payload (backend strips them anyway, but this keeps the wire
-    // shape honest about what was edited).
+    // panel capacity, panel status, the telehealth flag, and the
+    // consultation fee are practice-policy controls. Don't even
+    // include them in the payload (backend strips them anyway, but
+    // this keeps the wire shape honest about what was edited).
     const payload = isSelf
       ? { acceptsNewPatients: form.acceptsNewPatients }
       : {
@@ -998,6 +1129,10 @@ function SettingsTab({ provider, onSaved, setToast, mode = "admin" }: SettingsTa
           acceptsNewPatients: form.acceptsNewPatients,
           telehealthEnabled: form.telehealthEnabled,
           panelStatus: form.panelStatus,
+          // Empty string clears the fee (sends null); a number sends
+          // the parsed value. Keeps the column nullable per the
+          // migration default.
+          consultationFee: form.consultationFee === "" ? null : parseFloat(form.consultationFee),
         };
     const res = await providerService.update(provider.id, payload);
     if (res.error) {
@@ -1010,6 +1145,7 @@ function SettingsTab({ provider, onSaved, setToast, mode = "admin" }: SettingsTa
   };
 
   return (
+    <>
     <div className="glass rounded-2xl border border-gray-200/50 p-6 max-w-2xl">
       <h3 className="text-sm font-semibold text-slate-900 mb-1">{isSelf ? "Intake preferences" : "Practice settings"}</h3>
       <p className="text-xs text-slate-500 mb-6">
@@ -1045,6 +1181,20 @@ function SettingsTab({ provider, onSaved, setToast, mode = "admin" }: SettingsTa
                 <option value="closed">Closed — not accepting</option>
               </select>
             </div>
+
+            <div>
+              <label className="block text-xs font-medium text-slate-700 mb-1.5">Consultation fee (USD)</label>
+              <input
+                type="number"
+                min={0}
+                step="0.01"
+                value={form.consultationFee}
+                onChange={e => setForm(f => ({ ...f, consultationFee: e.target.value }))}
+                className="w-full max-w-xs border border-slate-200 rounded-lg px-3 py-2 text-sm"
+                placeholder="e.g. 150.00"
+              />
+              <p className="text-xs text-slate-500 mt-1">Default fee for visits without a per-type override. Leave blank for no default.</p>
+            </div>
           </>
         )}
 
@@ -1061,6 +1211,12 @@ function SettingsTab({ provider, onSaved, setToast, mode = "admin" }: SettingsTa
             <div className="flex items-center justify-between">
               <span className="text-slate-500">Telehealth</span>
               <span className="font-medium text-slate-700">{form.telehealthEnabled ? "Enabled" : "Disabled"}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-slate-500">Consultation fee</span>
+              <span className="font-medium text-slate-700">
+                {form.consultationFee ? `$${parseFloat(form.consultationFee).toFixed(2)}` : "—"}
+              </span>
             </div>
           </div>
         )}
@@ -1100,6 +1256,494 @@ function SettingsTab({ provider, onSaved, setToast, mode = "admin" }: SettingsTa
           Save settings
         </button>
       </div>
+      </div>
+      <CalendarSyncCard provider={provider} mode={mode} setToast={setToast} onSaved={onSaved} />
+    </>
+  );
+}
+
+// ─── Calendar Sync Card ─────────────────────────────────────────────────────
+// Shown beneath the main Settings card. iCal feed is per-provider — the
+// backend's /calendar/ical/generate-token mints a token for the current
+// user, so admins viewing someone else's profile see a stub instead of
+// being able to mint a token they shouldn't have. Google Calendar OAuth
+// is a backend stub today (CalendarController::googleRedirect returns
+// "not yet configured"); the card surfaces that state honestly so the
+// user knows what works.
+
+interface CalendarSyncCardProps {
+  provider: Provider;
+  mode: "admin" | "self";
+  setToast: (t: { message: string; type: "success" | "error" } | null) => void;
+  onSaved: () => void;
+}
+
+function CalendarSyncCard({ provider, mode, setToast, onSaved }: CalendarSyncCardProps) {
+  const isSelf = mode === "self";
+  const [token, setToken] = useState<string | null>(provider.icalFeedToken ?? null);
+  const [generating, setGenerating] = useState(false);
+
+  // The feed URL the backend would expose. Cheaper to construct
+  // client-side than to round-trip every render. The host should
+  // match the backend (api.membermd.io / Railway), so read from the
+  // configured API base URL when available.
+  const apiBase = (import.meta.env.VITE_API_URL as string | undefined) || "/api";
+  const feedUrl = token ? `${apiBase.replace(/\/$/, "")}/calendar/ical/${token}` : null;
+
+  const generate = async () => {
+    setGenerating(true);
+    const res = await calendarService.generateIcalToken();
+    if (res.error || !res.data) {
+      setToast({ message: res.error || "Couldn't generate calendar feed.", type: "error" });
+    } else {
+      setToken(res.data.token);
+      setToast({ message: "Calendar feed ready.", type: "success" });
+      onSaved();
+    }
+    setGenerating(false);
+  };
+
+  const copy = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setToast({ message: "Copied to clipboard.", type: "success" });
+    } catch {
+      setToast({ message: "Couldn't copy. Long-press the URL to select it.", type: "error" });
+    }
+  };
+
+  return (
+    <div className="glass rounded-2xl border border-gray-200/50 p-6 max-w-2xl mt-6">
+      <h3 className="text-sm font-semibold text-slate-900 mb-1">Calendar sync</h3>
+      <p className="text-xs text-slate-500 mb-6">
+        Subscribe in Google Calendar, Apple Calendar, or Outlook to see appointments alongside personal events.
+      </p>
+
+      {/* iCal feed — only the logged-in provider can mint their own
+          token. Admins on someone else's page see an explainer instead
+          of a button that would silently fail. */}
+      <div className="space-y-4">
+        <div className="rounded-lg border border-slate-200 p-4">
+          <div className="flex items-start gap-3 mb-3">
+            <Calendar className="w-5 h-5 text-slate-500 shrink-0 mt-0.5" />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-slate-800">iCal subscribe URL</p>
+              <p className="text-xs text-slate-500 mt-0.5">Read-only. Anyone with this URL can see the appointment list — treat it as a secret.</p>
+            </div>
+          </div>
+
+          {!isSelf && !feedUrl && (
+            <p className="text-xs text-slate-500 italic">
+              The provider can mint their own iCal feed from their My Profile → Settings tab.
+            </p>
+          )}
+
+          {isSelf && !feedUrl && (
+            <button
+              onClick={generate}
+              disabled={generating}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-slate-200 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+            >
+              {generating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
+              Generate feed URL
+            </button>
+          )}
+
+          {feedUrl && (
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <input
+                  readOnly
+                  value={feedUrl}
+                  className="flex-1 border border-slate-200 rounded-lg px-3 py-2 text-xs font-mono text-slate-700 bg-slate-50"
+                  onClick={(e) => (e.target as HTMLInputElement).select()}
+                />
+                <button
+                  onClick={() => copy(feedUrl)}
+                  className="px-3 py-2 rounded-lg border border-slate-200 text-xs font-medium text-slate-700 hover:bg-slate-50 inline-flex items-center gap-1.5"
+                  type="button"
+                >
+                  <Copy className="w-3.5 h-3.5" />
+                  Copy
+                </button>
+              </div>
+              {isSelf && (
+                <button
+                  onClick={generate}
+                  disabled={generating}
+                  className="text-xs text-slate-500 hover:text-slate-700 inline-flex items-center gap-1.5"
+                  type="button"
+                >
+                  <RefreshCw className="w-3 h-3" />
+                  Regenerate (revokes the old URL)
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Google Calendar — backend OAuth is a placeholder today. We
+            surface that state honestly instead of pretending the
+            button works. */}
+        <div className="rounded-lg border border-slate-200 p-4 bg-slate-50/50">
+          <div className="flex items-start gap-3">
+            <div className="w-10 h-10 rounded-full bg-white border border-slate-200 flex items-center justify-center shrink-0">
+              <Calendar className="w-5 h-5 text-slate-400" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-slate-800">Google Calendar (coming soon)</p>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Two-way sync via Google OAuth is on the roadmap. For now, use the iCal subscribe URL above —
+                paste it into Google Calendar's "Subscribe to calendar" by URL. Apple Calendar and Outlook accept the same URL.
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Credentials Tab ────────────────────────────────────────────────────────
+// Lifecycle view of provider_credentials rows. Backend exposes a full
+// CRUD apiResource at /provider-credentials plus auto-status derivation
+// from expiration_date. provider_id on this table is actually the
+// User.id (FK targets users.id per the migration), so we filter and
+// create using provider.userId, not provider.id.
+
+const CREDENTIAL_TYPES: { value: string; label: string }[] = [
+  { value: "medical_license", label: "Medical License" },
+  { value: "dea", label: "DEA Registration" },
+  { value: "board_cert", label: "Board Certification" },
+  { value: "malpractice", label: "Malpractice Insurance" },
+  { value: "cpr", label: "CPR / BLS / ACLS" },
+  { value: "npi", label: "NPI" },
+  { value: "other", label: "Other" },
+];
+
+interface CredentialsTabProps {
+  provider: Provider;
+  setToast: (t: { message: string; type: "success" | "error" } | null) => void;
+  mode: "admin" | "self";
+}
+
+function CredentialsTab({ provider, setToast, mode }: CredentialsTabProps) {
+  // Filter by the User id — provider_credentials.provider_id targets
+  // users.id (see migration 2026_03_20_000007).
+  const ownerUserId = provider.userId;
+  const isSelf = mode === "self";
+
+  type Credential = ProviderCredentialDTO;
+  const [rows, setRows] = useState<Credential[] | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [editing, setEditing] = useState<Partial<Credential> | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState<Credential | null>(null);
+
+  const reload = useCallback(async () => {
+    setLoading(true);
+    const res = await credentialService.list({ providerId: ownerUserId });
+    if (res.error) {
+      setToast({ message: res.error, type: "error" });
+      setRows([]);
+    } else {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const list: any[] = Array.isArray(res.data) ? res.data : (res.data as any)?.data || [];
+      setRows(list as Credential[]);
+    }
+    setLoading(false);
+  }, [ownerUserId, setToast]);
+
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { reload(); }, [reload]);
+
+  const openNew = () => setEditing({
+    type: "medical_license",
+    name: "",
+    credentialNumber: "",
+    issuer: "",
+    issuedDate: "",
+    expirationDate: "",
+    documentUrl: "",
+    notes: "",
+  });
+
+  const openEdit = (c: Credential) => setEditing({ ...c });
+
+  const handleSave = async () => {
+    if (!editing) return;
+    if (!editing.type || !editing.name) {
+      setToast({ message: "Type and name are required.", type: "error" });
+      return;
+    }
+    setSaving(true);
+    const payload: Partial<Credential> & { providerId?: string } = {
+      type: editing.type,
+      name: editing.name,
+      credentialNumber: editing.credentialNumber || null,
+      issuer: editing.issuer || null,
+      issuedDate: editing.issuedDate || null,
+      expirationDate: editing.expirationDate || null,
+      documentUrl: editing.documentUrl || null,
+      notes: editing.notes || null,
+    };
+    let res;
+    if (editing.id) {
+      res = await credentialService.update(editing.id, payload);
+    } else {
+      // The backend's StoreRequest expects provider_id (snake) — apiFetch
+      // camelToSnake transforms it in flight, so providerId on the
+      // wire becomes provider_id at the controller.
+      res = await credentialService.create({ ...payload, providerId: ownerUserId });
+    }
+    if (res.error) {
+      setToast({ message: res.error, type: "error" });
+    } else {
+      setToast({ message: editing.id ? "Credential updated." : "Credential added.", type: "success" });
+      setEditing(null);
+      await reload();
+    }
+    setSaving(false);
+  };
+
+  const handleDelete = async () => {
+    if (!confirmDelete?.id) return;
+    const res = await credentialService.delete(confirmDelete.id);
+    if (res.error) {
+      setToast({ message: res.error, type: "error" });
+    } else {
+      setToast({ message: "Credential removed.", type: "success" });
+      setConfirmDelete(null);
+      await reload();
+    }
+  };
+
+  // Derive a "now" status pill if backend hasn't set one (or to
+  // explain why it picked the value it did). 30 days = expiring_soon
+  // matches ProviderCredentialController::calculateStatus.
+  const statusOf = (c: Credential): { label: string; color: string; bg: string } => {
+    const s = c.status;
+    if (s === "expired") return { label: "Expired", color: "#b91c1c", bg: "#fee2e2" };
+    if (s === "expiring_soon") return { label: "Expiring soon", color: "#b45309", bg: "#fef3c7" };
+    if (s === "pending") return { label: "Pending", color: "#1d4ed8", bg: "#dbeafe" };
+    if (s === "revoked") return { label: "Revoked", color: "#374151", bg: "#e5e7eb" };
+    return { label: "Active", color: "#047857", bg: "#d1fae5" };
+  };
+
+  const formatDate = (d?: string | null) => {
+    if (!d) return "—";
+    const dt = new Date(d);
+    if (isNaN(dt.getTime())) return d;
+    return dt.toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" });
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="text-sm font-semibold text-slate-900">Credentials</h3>
+          <p className="text-xs text-slate-500">
+            Licenses, DEA, board certs, malpractice, and other expiring credentials. Status is derived from the expiration date.
+          </p>
+        </div>
+        <button
+          onClick={openNew}
+          className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-teal-600 text-white text-xs font-semibold hover:bg-teal-700"
+        >
+          <Plus className="w-3.5 h-3.5" />
+          Add credential
+        </button>
+      </div>
+
+      <div className="glass rounded-2xl border border-gray-200/50 p-6">
+        {loading && (
+          <div className="flex justify-center py-10">
+            <Loader2 className="w-5 h-5 animate-spin text-slate-400" />
+          </div>
+        )}
+
+        {!loading && rows && rows.length === 0 && (
+          <div className="text-center py-10">
+            <FileCheck2 className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+            <p className="text-sm text-slate-700 font-medium">No credentials on file yet</p>
+            <p className="text-xs text-slate-500 mt-1">
+              {isSelf
+                ? "Add your medical license, DEA registration, malpractice policy, and any board certifications you hold."
+                : "Click \"Add credential\" to record this provider's licenses, DEA, and board certifications."}
+            </p>
+          </div>
+        )}
+
+        {!loading && rows && rows.length > 0 && (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-xs font-medium text-slate-500 border-b border-slate-200">
+                  <th className="pb-3 pr-4">Type</th>
+                  <th className="pb-3 pr-4">Name</th>
+                  <th className="pb-3 pr-4">Number</th>
+                  <th className="pb-3 pr-4">Expires</th>
+                  <th className="pb-3 pr-4">Status</th>
+                  <th className="pb-3 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((c) => {
+                  const s = statusOf(c);
+                  const typeLabel = CREDENTIAL_TYPES.find(t => t.value === c.type)?.label || c.type;
+                  return (
+                    <tr key={c.id} className="border-b border-slate-100 last:border-b-0 hover:bg-slate-50">
+                      <td className="py-3 pr-4 text-slate-600">{typeLabel}</td>
+                      <td className="py-3 pr-4 font-medium text-slate-800">
+                        {c.name}
+                        {c.issuer && <div className="text-xs text-slate-400">{c.issuer}</div>}
+                      </td>
+                      <td className="py-3 pr-4 text-slate-600 font-mono text-xs">{c.credentialNumber || "—"}</td>
+                      <td className="py-3 pr-4 text-slate-600">{formatDate(c.expirationDate)}</td>
+                      <td className="py-3 pr-4">
+                        <span
+                          className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold"
+                          style={{ color: s.color, backgroundColor: s.bg }}
+                        >
+                          {s.label}
+                        </span>
+                      </td>
+                      <td className="py-3 text-right">
+                        <div className="flex items-center justify-end gap-3">
+                          {c.documentUrl && (
+                            <a
+                              href={c.documentUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-teal-600 hover:text-teal-700 inline-flex items-center gap-1 text-xs"
+                            >
+                              <Upload className="w-3 h-3" />
+                              Document
+                            </a>
+                          )}
+                          <button
+                            onClick={() => openEdit(c)}
+                            className="text-slate-500 hover:text-slate-700"
+                            aria-label="Edit"
+                            type="button"
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => setConfirmDelete(c)}
+                            className="text-red-500 hover:text-red-700"
+                            aria-label="Delete"
+                            type="button"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* Create / edit modal */}
+      {editing && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: "rgba(15, 23, 42, 0.55)" }}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg" onClick={(e) => e.stopPropagation()}>
+            <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+              <h3 className="text-lg font-bold text-slate-900">{editing.id ? "Edit credential" : "Add credential"}</h3>
+              <button onClick={() => setEditing(null)} className="p-1 rounded hover:bg-slate-100 text-slate-400" aria-label="Close" type="button">
+                <XIcon className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1.5">Type *</label>
+                <select
+                  value={editing.type || "medical_license"}
+                  onChange={e => setEditing(s => s ? { ...s, type: e.target.value } : s)}
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm bg-white"
+                >
+                  {CREDENTIAL_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+                </select>
+              </div>
+              <Field label="Name *" value={editing.name || ""} onChange={v => setEditing(s => s ? { ...s, name: v } : s)} placeholder="e.g. New York State Medical License" />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <Field label="Credential number" value={editing.credentialNumber || ""} onChange={v => setEditing(s => s ? { ...s, credentialNumber: v } : s)} placeholder="License / cert number" />
+                <Field label="Issuer" value={editing.issuer || ""} onChange={v => setEditing(s => s ? { ...s, issuer: v } : s)} placeholder="e.g. NY State Department of Health" />
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1.5">Issued date</label>
+                  <input
+                    type="date"
+                    value={editing.issuedDate || ""}
+                    onChange={e => setEditing(s => s ? { ...s, issuedDate: e.target.value } : s)}
+                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1.5">Expiration date</label>
+                  <input
+                    type="date"
+                    value={editing.expirationDate || ""}
+                    onChange={e => setEditing(s => s ? { ...s, expirationDate: e.target.value } : s)}
+                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm"
+                  />
+                </div>
+              </div>
+              <Field
+                label="Document URL"
+                value={editing.documentUrl || ""}
+                onChange={v => setEditing(s => s ? { ...s, documentUrl: v } : s)}
+                placeholder="https://… (Drive, Dropbox, S3, or any sharable link)"
+              />
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1.5">Notes</label>
+                <textarea
+                  rows={3}
+                  value={editing.notes || ""}
+                  onChange={e => setEditing(s => s ? { ...s, notes: e.target.value } : s)}
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm resize-none"
+                  placeholder="Internal notes — restrictions, scope, etc."
+                />
+              </div>
+            </div>
+            <div className="px-6 pb-6 flex justify-end gap-2">
+              <button onClick={() => setEditing(null)} disabled={saving} className="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100 disabled:opacity-50" type="button">
+                Cancel
+              </button>
+              <button onClick={handleSave} disabled={saving} className="px-4 py-2 rounded-lg text-sm font-semibold text-white bg-teal-600 hover:bg-teal-700 disabled:opacity-60 inline-flex items-center gap-2" type="button">
+                {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                {editing.id ? "Save changes" : "Add credential"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirm delete */}
+      {confirmDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: "rgba(15, 23, 42, 0.55)" }}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+            <h3 className="text-base font-bold text-slate-900 mb-1">Remove credential?</h3>
+            <p className="text-sm text-slate-500 mb-4">
+              This deletes <span className="font-medium text-slate-800">{confirmDelete.name}</span> permanently. To
+              record that it was retired or replaced, edit it and set the status instead.
+            </p>
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setConfirmDelete(null)} className="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100" type="button">
+                Cancel
+              </button>
+              <button onClick={handleDelete} className="px-4 py-2 rounded-lg text-sm font-semibold text-white bg-red-600 hover:bg-red-700" type="button">
+                Yes, remove
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

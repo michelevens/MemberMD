@@ -152,6 +152,19 @@ export interface Provider {
   maxDailyPatients: number;
   acceptingNewPatients: boolean;
   teleHealthCapable: boolean;
+  /** Default fee charged for a visit (USD). Per-AppointmentType
+   *  overrides win when present. Null = no fee set. */
+  consultationFee?: number | null;
+  /** JSONB array — multi-state licensing. The denormalized
+   *  licenseState column is the "primary" state; this list is the
+   *  full set the provider is licensed in. */
+  licensedStates?: string[] | null;
+  /** JSONB array — languages the provider speaks, surfaced to
+   *  patients on the booking widget. */
+  languages?: string[] | null;
+  /** Token used to construct the provider's iCal feed URL. Public —
+   *  whoever has the URL can subscribe. Regenerate to revoke. */
+  icalFeedToken?: string | null;
   user?: User;
   specialty?: MasterSpecialty;
   createdAt: string;

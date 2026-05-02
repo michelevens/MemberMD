@@ -158,9 +158,16 @@ class ProviderController extends Controller
             'bio' => 'nullable|string|max:2000',
             'specialties' => 'nullable|array',
             'languages' => 'nullable|array',
+            'languages.*' => 'string|max:60',
             'npi' => 'nullable|string|max:20',
             'license_number' => 'nullable|string|max:50',
             'license_state' => 'nullable|string|max:2',
+            // Multi-state licensing (JSONB column added in
+            // 2026_03_20_600001_add_provider_registration_fields).
+            // licenseState stays as the "primary" state; this list is
+            // every state the provider holds an active license in.
+            'licensed_states' => 'nullable|array',
+            'licensed_states.*' => 'string|size:2',
             'panel_capacity' => 'nullable|integer|min:0',
             'panel_status' => 'nullable|string|in:open,limited,closed',
             'accepts_new_patients' => 'sometimes|boolean',

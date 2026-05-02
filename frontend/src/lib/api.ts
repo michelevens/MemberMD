@@ -533,6 +533,7 @@ function toProviderApiPayload(input: Record<string, unknown>): Record<string, un
   }
   if (Array.isArray(input.specialties)) out.specialties = input.specialties;
   if (Array.isArray(input.languages)) out.languages = input.languages;
+  if (Array.isArray(input.licensedStates)) out.licensed_states = input.licensedStates;
   return out;
 }
 
@@ -606,6 +607,60 @@ export const providerService = {
   unassignFromPanel: async (id: string, patientId: string): Promise<ApiResponse<unknown>> => {
     if (useMockData()) return { data: null };
     return apiFetch(`/providers/${id}/panel/${patientId}`, { method: "DELETE" });
+  },
+};
+
+// ─── Provider Credentials ───────────────────────────────────────────────────
+// Backed by /api/provider-credentials (apiResource) plus two extras:
+//   GET /provider-credentials/expiring?days=N
+//   GET /provider-credentials/compliance-score?provider_id=...
+// The backend auto-derives status from expiration_date when not supplied
+// (active / expiring_soon / expired), so the UI doesn't need to compute it.
+
+export interface ProviderCredentialDTO {
+  id: string;
+  providerId: string;
+  type: string;            // medical_license, dea, board_cert, malpractice, cpr, npi, etc.
+  name: string;
+  credentialNumber?: string | null;
+  issuer?: string | null;
+  issuedDate?: string | null;
+  expirationDate?: string | null;
+  status?: "active" | "expired" | "expiring_soon" | "pending" | "revoked" | null;
+  documentUrl?: string | null;
+  notes?: string | null;
+  verifiedBy?: string | null;
+  verifiedAt?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export const credentialService = {
+  list: async (filters?: { providerId?: string; status?: string; type?: string; search?: string }): Promise<ApiResponse<ProviderCredentialDTO[]>> => {
+    if (useMockData()) return { data: [] };
+    const params = new URLSearchParams();
+    if (filters?.providerId) params.set("provider_id", filters.providerId);
+    if (filters?.status) params.set("status", filters.status);
+    if (filters?.type) params.set("type", filters.type);
+    if (filters?.search) params.set("search", filters.search);
+    const qs = params.toString() ? `?${params.toString()}` : "";
+    return apiFetch<ProviderCredentialDTO[]>(`/provider-credentials${qs}`);
+  },
+  create: async (data: Partial<ProviderCredentialDTO>): Promise<ApiResponse<ProviderCredentialDTO>> => {
+    if (useMockData()) return mockCreate<ProviderCredentialDTO>(data);
+    return apiFetch<ProviderCredentialDTO>("/provider-credentials", { method: "POST", body: JSON.stringify(data) });
+  },
+  update: async (id: string, data: Partial<ProviderCredentialDTO>): Promise<ApiResponse<ProviderCredentialDTO>> => {
+    if (useMockData()) return mockUpdate<ProviderCredentialDTO>(data);
+    return apiFetch<ProviderCredentialDTO>(`/provider-credentials/${id}`, { method: "PUT", body: JSON.stringify(data) });
+  },
+  delete: async (id: string): Promise<ApiResponse<void>> => {
+    if (useMockData()) return mockDelete();
+    return apiFetch<void>(`/provider-credentials/${id}`, { method: "DELETE" });
+  },
+  expiring: async (days: number = 90): Promise<ApiResponse<ProviderCredentialDTO[]>> => {
+    if (useMockData()) return { data: [] };
+    return apiFetch<ProviderCredentialDTO[]>(`/provider-credentials/expiring?days=${days}`);
   },
 };
 
