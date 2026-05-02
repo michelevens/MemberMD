@@ -2637,6 +2637,28 @@ export function PracticePortal() {
           </div>
           <div className="flex items-center gap-2 shrink-0">
             <RefreshButton onRefresh={loadPracticeData} title="Refresh roster" />
+            {/* Bulk-delete sample patients — appears only when at least
+                one sample row exists. Sample emails carry the
+                @membermd-sample.io domain. */}
+            {patients.some((pt) => (pt.email || "").endsWith("@membermd-sample.io")) && (
+              <button
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium border border-red-200 text-red-700 bg-white hover:bg-red-50 transition-colors"
+                onClick={async () => {
+                  if (!window.confirm("Remove all sample patients for this practice? This cannot be undone.")) return;
+                  const r = await onboardingService.removeAllSamplePatients();
+                  if (r.error) {
+                    setToast({ message: r.error, type: "error" });
+                    return;
+                  }
+                  const removed = r.data?.deleted ?? 0;
+                  setToast({ message: `Removed ${removed} sample patient${removed === 1 ? "" : "s"}.`, type: "success" });
+                  loadPracticeData();
+                }}
+                title="Bulk-remove every sample patient before going live"
+              >
+                Clean samples
+              </button>
+            )}
             <button
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium text-slate-600 border border-slate-200 hover:bg-slate-50 transition-colors"
               onClick={async () => {

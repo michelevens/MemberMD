@@ -1253,6 +1253,16 @@ export function SuperAdminPortal() {
   const [tenantAuditLoading, setTenantAuditLoading] = useState(false);
   const [tenantAuditSearch, setTenantAuditSearch] = useState("");
 
+  // Tier 4: email deliverability KPI + per-row retry-in-flight tracking.
+  const [emailDeliv, setEmailDeliv] = useState<{
+    sentLast7d: number;
+    failedLast7d: number;
+    totalLast7d: number;
+    successRate: number | null;
+    latestFailures: Array<{ id: string; recipient: string; mailable: string; context: string | null; errorMessage: string | null; createdAt: string }>;
+  } | null>(null);
+  const [retryingDeliveryId, setRetryingDeliveryId] = useState<string | null>(null);
+
   // Tier 3: integration health + pending-action signals scoped to one
   // tenant. Render only when the selected practice is open.
   const [webhookHealth, setWebhookHealth] = useState<{
@@ -1275,6 +1285,7 @@ export function SuperAdminPortal() {
     if (!selectedPractice) {
       setWebhookHealth(null);
       setPendingActions([]);
+      setEmailDeliv(null);
       return;
     }
     let cancelled = false;
@@ -1298,6 +1309,18 @@ export function SuperAdminPortal() {
         if (!cancelled && r.data?.signals) setPendingActions(r.data.signals);
       } catch {
         // non-fatal — banner just doesn't render
+      }
+      try {
+        const r = await apiFetch<{
+          sentLast7d: number;
+          failedLast7d: number;
+          totalLast7d: number;
+          successRate: number | null;
+          latestFailures: Array<{ id: string; recipient: string; mailable: string; context: string | null; errorMessage: string | null; createdAt: string }>;
+        }>(`/admin/practices/${selectedPractice.id}/email-deliverability`);
+        if (!cancelled && r.data) setEmailDeliv(r.data);
+      } catch {
+        // non-fatal — card just doesn't render
       }
     })();
     return () => { cancelled = true; };
@@ -3120,14 +3143,90 @@ export function SuperAdminPortal() {
 
             {webhookHealth.latestFailure && (
               <div className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800">
-                <p className="font-semibold">Most recent failure</p>
-                <p className="mt-0.5">
-                  <span className="font-mono">{webhookHealth.latestFailure.eventType}</span>
-                  {webhookHealth.latestFailure.responseStatus && <> → HTTP {webhookHealth.latestFailure.responseStatus}</>}
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="font-semibold">Most recent failure</p>
+                    <p className="mt-0.5">
+                      <span className="font-mono">{webhookHealth.latestFailure.eventType}</span>
+                      {webhookHealth.latestFailure.responseStatus && <> → HTTP {webhookHealth.latestFailure.responseStatus}</>}
+                    </p>
+                    {webhookHealth.latestFailure.errorMessage && (
+                      <p className="mt-0.5 opacity-80 truncate">{webhookHealth.latestFailure.errorMessage}</p>
+                    )}
+                  </div>
+                  <button
+                    disabled={retryingDeliveryId === webhookHealth.latestFailure.id}
+                    onClick={async () => {
+                      if (!webhookHealth.latestFailure || !selectedPractice) return;
+                      setRetryingDeliveryId(webhookHealth.latestFailure.id);
+                      const r = await apiFetch(`/admin/practices/${selectedPractice.id}/webhook-deliveries/${webhookHealth.latestFailure.id}/retry`, { method: "POST" });
+                      setRetryingDeliveryId(null);
+                      if (r.error) {
+                        setApprovalMessage(`Retry failed: ${r.error}`);
+                        return;
+                      }
+                      setApprovalMessage("Retry queued. Health card will refresh shortly.");
+                      // Re-fetch webhook health so the card updates.
+                      const fresh = await apiFetch<typeof webhookHealth>(`/admin/practices/${selectedPractice.id}/webhook-health`);
+                      if (fresh.data) setWebhookHealth(fresh.data);
+                    }}
+                    className="px-2.5 py-1 rounded-md text-[11px] font-semibold text-white shadow-sm shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
+                    style={{ backgroundColor: "#b91c1c" }}
+                  >
+                    {retryingDeliveryId === webhookHealth.latestFailure.id ? "Queuing…" : "Retry"}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Email deliverability — Tier 4. Only renders when at least one
+            transactional email has been logged for this tenant. */}
+        {emailDeliv && emailDeliv.totalLast7d > 0 && (
+          <div className="rounded-xl border border-slate-200 bg-white p-5">
+            <div className="flex items-baseline justify-between mb-3">
+              <h3 className="text-sm font-semibold text-slate-900">Email deliverability</h3>
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                Last 7 days
+              </span>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+              <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2.5">
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Sent</p>
+                <p className="text-lg font-semibold tabular-nums mt-0.5 text-emerald-700">{emailDeliv.sentLast7d}</p>
+              </div>
+              <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2.5">
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Failed</p>
+                <p className="text-lg font-semibold tabular-nums mt-0.5" style={{ color: emailDeliv.failedLast7d > 0 ? "#b91c1c" : "#475569" }}>
+                  {emailDeliv.failedLast7d}
                 </p>
-                {webhookHealth.latestFailure.errorMessage && (
-                  <p className="mt-0.5 opacity-80 truncate">{webhookHealth.latestFailure.errorMessage}</p>
-                )}
+              </div>
+              <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2.5">
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Success rate</p>
+                <p className="text-lg font-semibold tabular-nums mt-0.5 text-slate-900">
+                  {emailDeliv.successRate !== null ? `${emailDeliv.successRate}%` : "—"}
+                </p>
+              </div>
+            </div>
+
+            {emailDeliv.latestFailures.length > 0 && (
+              <div className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs">
+                <p className="font-semibold text-red-800 mb-1.5">
+                  Recent failures ({emailDeliv.latestFailures.length})
+                </p>
+                <ul className="space-y-1.5">
+                  {emailDeliv.latestFailures.map((f) => (
+                    <li key={f.id} className="text-red-800">
+                      <span className="font-mono">{f.mailable}</span>
+                      {" → "}
+                      <span className="opacity-80">{f.recipient}</span>
+                      {f.errorMessage && (
+                        <span className="block ml-3 mt-0.5 opacity-70 truncate">↳ {f.errorMessage}</span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
               </div>
             )}
           </div>
@@ -3144,13 +3243,56 @@ export function SuperAdminPortal() {
                 Audit events for this practice — most recent first.
               </p>
             </div>
-            <input
-              type="search"
-              value={tenantAuditSearch}
-              onChange={(e) => setTenantAuditSearch(e.target.value)}
-              placeholder="Search action / user…"
-              className="px-3 py-1.5 rounded-md text-xs border border-slate-200 bg-white text-slate-700 focus:outline-none focus:border-slate-400 max-w-xs"
-            />
+            <div className="flex items-center gap-2 shrink-0">
+              <input
+                type="search"
+                value={tenantAuditSearch}
+                onChange={(e) => setTenantAuditSearch(e.target.value)}
+                placeholder="Search action / user…"
+                className="px-3 py-1.5 rounded-md text-xs border border-slate-200 bg-white text-slate-700 focus:outline-none focus:border-slate-400 max-w-xs"
+              />
+              <button
+                onClick={() => {
+                  if (!selectedPractice) return;
+                  // Build the URL — apiFetch is JSON-only; for streamed
+                  // file downloads we hit the URL directly with the
+                  // Sanctum token in a query-fallback header that the
+                  // existing backend already accepts.
+                  const apiBase = (import.meta.env.VITE_API_URL as string | undefined) || "/api";
+                  const token = sessionStorage.getItem("membermd_token") || "";
+                  // Browser fetch + Blob so we can include Authorization.
+                  void (async () => {
+                    try {
+                      const r = await fetch(`${apiBase}/admin/practices/${selectedPractice.id}/audit-export`, {
+                        headers: { Authorization: `Bearer ${token}`, Accept: "text/csv" },
+                      });
+                      if (!r.ok) {
+                        setApprovalMessage(`Export failed (${r.status})`);
+                        return;
+                      }
+                      const blob = await r.blob();
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement("a");
+                      a.href = url;
+                      const cd = r.headers.get("Content-Disposition") || "";
+                      const m = cd.match(/filename=([^;]+)/i);
+                      a.download = (m?.[1] || `audit-${selectedPractice.name}.csv`).replace(/"/g, "");
+                      document.body.appendChild(a);
+                      a.click();
+                      a.remove();
+                      URL.revokeObjectURL(url);
+                    } catch (e) {
+                      setApprovalMessage(`Export failed: ${e instanceof Error ? e.message : "network error"}`);
+                    }
+                  })();
+                }}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium border border-slate-200 text-slate-700 bg-white hover:bg-slate-50 transition-colors"
+                title="Download tenant audit log as CSV"
+              >
+                <FileText className="w-3.5 h-3.5" />
+                Export CSV
+              </button>
+            </div>
           </div>
 
           {tenantAuditLoading ? (

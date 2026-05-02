@@ -672,6 +672,39 @@ class PracticeController extends Controller
     }
 
     /**
+     * Superadmin-only: re-queue a failed webhook delivery for a tenant.
+     * Same job as the practice-side retry but reachable from the
+     * superadmin practice detail page so we don't have to switch
+     * tenants to fix a stuck delivery.
+     */
+    public function retryWebhookDelivery(Request $request, string $practiceId, string $deliveryId): JsonResponse
+    {
+        abort_if($request->user()->role !== 'superadmin', 403);
+
+        $delivery = \App\Models\WebhookDelivery::withoutGlobalScope('tenant')
+            ->where('tenant_id', $practiceId)
+            ->where('id', $deliveryId)
+            ->firstOrFail();
+
+        if ($delivery->status === \App\Models\WebhookDelivery::STATUS_DELIVERED) {
+            return response()->json([
+                'message' => 'Delivery already succeeded — nothing to retry.',
+            ], 422);
+        }
+
+        \App\Jobs\DeliverWebhook::dispatch($delivery->id);
+        $delivery->update([
+            'status' => \App\Models\WebhookDelivery::STATUS_PENDING,
+            'next_attempt_at' => now(),
+        ]);
+
+        return response()->json([
+            'data' => $delivery->fresh(),
+            'message' => 'Retry queued.',
+        ]);
+    }
+
+    /**
      * Superadmin-only: things-needing-attention signals for one
      * tenant. Surfaces in a single place every signal a superadmin
      * cares about that's currently scattered across separate tabs:
@@ -758,6 +791,95 @@ class PracticeController extends Controller
                 'signals' => $signals,
                 'count' => count($signals),
             ],
+        ]);
+    }
+
+    /**
+     * Superadmin-only: email deliverability summary for one tenant.
+     * Pulls from mail_dispatch_logs (sent/failed counters from the
+     * last 7 days plus the last 5 failures for triage).
+     */
+    public function emailDeliverability(Request $request, string $practiceId): JsonResponse
+    {
+        abort_if($request->user()->role !== 'superadmin', 403);
+
+        $since = now()->subDays(7);
+
+        $sent = \App\Models\MailDispatchLog::where('tenant_id', $practiceId)
+            ->where('status', \App\Models\MailDispatchLog::STATUS_SENT)
+            ->where('created_at', '>=', $since)
+            ->count();
+
+        $failed = \App\Models\MailDispatchLog::where('tenant_id', $practiceId)
+            ->where('status', \App\Models\MailDispatchLog::STATUS_FAILED)
+            ->where('created_at', '>=', $since)
+            ->count();
+
+        $total = $sent + $failed;
+        $successRate = $total > 0 ? round(($sent / $total) * 100, 1) : null;
+
+        $latestFailures = \App\Models\MailDispatchLog::where('tenant_id', $practiceId)
+            ->where('status', \App\Models\MailDispatchLog::STATUS_FAILED)
+            ->orderByDesc('created_at')
+            ->limit(5)
+            ->get(['id', 'recipient', 'mailable', 'context', 'error_message', 'created_at']);
+
+        return response()->json([
+            'data' => [
+                'sent_last_7d' => $sent,
+                'failed_last_7d' => $failed,
+                'total_last_7d' => $total,
+                'success_rate' => $successRate,
+                'latest_failures' => $latestFailures,
+            ],
+        ]);
+    }
+
+    /**
+     * Superadmin-only: stream tenant-scoped audit log as CSV. Used
+     * for compliance asks ("show me everything that happened on
+     * Tenant X between Y and Z"). Streams via response()->streamDownload
+     * so memory stays flat regardless of row count.
+     */
+    public function exportAuditLogCsv(Request $request, string $practiceId): \Symfony\Component\HttpFoundation\StreamedResponse
+    {
+        abort_if($request->user()->role !== 'superadmin', 403);
+
+        $practice = Practice::findOrFail($practiceId);
+
+        $from = $request->query('from'); // YYYY-MM-DD
+        $to = $request->query('to');     // YYYY-MM-DD
+
+        $filename = 'audit-' . preg_replace('/[^a-z0-9_-]/i', '-', strtolower($practice->name)) . '-' . now()->format('Ymd-His') . '.csv';
+
+        return response()->streamDownload(function () use ($practice, $from, $to) {
+            $out = fopen('php://output', 'w');
+            fputcsv($out, ['timestamp', 'action', 'resource', 'resource_id', 'user_id', 'ip_address', 'user_agent', 'metadata']);
+
+            $query = \App\Models\AuditLog::where('tenant_id', $practice->id)
+                ->orderBy('created_at');
+            if ($from) $query->where('created_at', '>=', $from);
+            if ($to) $query->where('created_at', '<=', $to . ' 23:59:59');
+
+            $query->chunk(500, function ($rows) use ($out) {
+                foreach ($rows as $row) {
+                    fputcsv($out, [
+                        $row->created_at?->toIso8601String(),
+                        $row->action,
+                        $row->resource,
+                        $row->resource_id,
+                        $row->user_id,
+                        $row->ip_address,
+                        $row->user_agent,
+                        is_array($row->metadata) ? json_encode($row->metadata) : (string) $row->metadata,
+                    ]);
+                }
+            });
+
+            fclose($out);
+        }, $filename, [
+            'Content-Type' => 'text/csv',
+            'Cache-Control' => 'no-store',
         ]);
     }
 

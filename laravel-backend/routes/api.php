@@ -201,6 +201,12 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
     Route::get('/admin/practices/{id}/webhook-health', [PracticeController::class, 'webhookHealth']);
     Route::get('/admin/practices/{id}/pending-actions', [PracticeController::class, 'pendingActions']);
 
+    // Tier 4 — superadmin tenant maintenance: webhook retry, email
+    // deliverability summary, audit log CSV export.
+    Route::post('/admin/practices/{practiceId}/webhook-deliveries/{deliveryId}/retry', [PracticeController::class, 'retryWebhookDelivery']);
+    Route::get('/admin/practices/{id}/email-deliverability', [PracticeController::class, 'emailDeliverability']);
+    Route::get('/admin/practices/{id}/audit-export', [PracticeController::class, 'exportAuditLogCsv']);
+
     Route::get('/admin/stats', [PracticeController::class, 'platformStats']);
 
     // Practice: own practice
@@ -396,6 +402,7 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
         Route::delete('/{id}', [WebhookEndpointController::class, 'destroy']);
         Route::post('/{id}/regenerate', [WebhookEndpointController::class, 'regenerate']);
         Route::get('/{id}/deliveries', [WebhookEndpointController::class, 'deliveries']);
+        Route::post('/{id}/deliveries/{deliveryId}/retry', [WebhookEndpointController::class, 'retryDelivery']);
     });
 
     // ===== Consent Forms (legacy ConsentFormController) =====

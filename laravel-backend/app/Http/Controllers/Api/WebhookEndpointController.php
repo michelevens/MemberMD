@@ -164,6 +164,44 @@ class WebhookEndpointController extends Controller
         ]);
     }
 
+    /**
+     * POST /api/webhooks/endpoints/{id}/deliveries/{deliveryId}/retry
+     *
+     * Manually re-queue a failed delivery. Superadmin or practice admin
+     * for that tenant. Doesn't reset the attempt counter — keeps the
+     * exponential-backoff history intact so we can see how many times
+     * we've already tried.
+     */
+    public function retryDelivery(Request $request, string $endpointId, string $deliveryId): JsonResponse
+    {
+        $this->assertCanManage($request);
+        $endpoint = $this->findOwned($request, $endpointId);
+
+        $delivery = WebhookDelivery::where('endpoint_id', $endpoint->id)
+            ->where('id', $deliveryId)
+            ->firstOrFail();
+
+        if ($delivery->status === WebhookDelivery::STATUS_DELIVERED) {
+            return response()->json([
+                'message' => 'Delivery already succeeded — nothing to retry.',
+            ], 422);
+        }
+
+        // Re-queue immediately. The job preserves the existing payload
+        // + signature so the practice's idempotency layer keeps working.
+        \App\Jobs\DeliverWebhook::dispatch($delivery->id);
+
+        $delivery->update([
+            'status' => WebhookDelivery::STATUS_PENDING,
+            'next_attempt_at' => now(),
+        ]);
+
+        return response()->json([
+            'data' => $delivery->fresh(),
+            'message' => 'Retry queued.',
+        ]);
+    }
+
     // ─── Helpers ───────────────────────────────────────────────────────────
 
     private function assertCanManage(Request $request): void
