@@ -937,6 +937,7 @@ export function PracticePortal() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [ptPendingEnrollments, setPtPendingEnrollments] = useState<any[]>([]);
   const [ptReconcileLoading, setPtReconcileLoading] = useState<string | null>(null);
+  const [ptSyncInvoicesLoading, setPtSyncInvoicesLoading] = useState(false);
 
   // ─── Roster Cancel Membership Dialog ───────────────────────────────────
   const [rosterCancelDialog, setRosterCancelDialog] = useState<{ patientId: string; patientName: string; membershipId: string } | null>(null);
@@ -1311,6 +1312,45 @@ export function PracticePortal() {
     }
     setPtReconcileLoading(null);
   }, [loadPracticeData, setToast]);
+
+  // Pull invoice + payment rows live from Stripe for the patient's
+  // active membership. Used when invoice.paid webhooks weren't delivered
+  // — the local Invoice table stays empty until we sync.
+  const handleSyncInvoicesFromStripe = useCallback(async (membershipId: string, patientId: string) => {
+    setPtSyncInvoicesLoading(true);
+    try {
+      const res = await apiFetch<{
+        invoicesSeen?: number;
+        invoicesCreated?: number;
+        paymentsCreated?: number;
+      }>(`/memberships/${membershipId}/sync-invoices`, { method: "POST" });
+
+      if (res.error) {
+        setToast({ message: res.error, type: "error" });
+      } else {
+        const seen = res.data?.invoicesSeen ?? 0;
+        const created = res.data?.invoicesCreated ?? 0;
+        setToast({
+          message: seen === 0
+            ? "Stripe returned no invoices for this subscription yet — first payment hasn't landed."
+            : `Synced ${seen} invoice${seen === 1 ? "" : "s"} from Stripe (${created} new).`,
+          type: "success",
+        });
+        if (created > 0) {
+          // Refresh the patient's invoice list so the new rows show up.
+          try {
+            const inv = await invoiceService.list({ patient_id: patientId });
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const list = Array.isArray(inv.data) ? inv.data : ((inv.data as any)?.data || []);
+            setPtApiInvoices(list);
+          } catch { /* non-fatal */ }
+        }
+      }
+    } catch {
+      setToast({ message: "Sync failed.", type: "error" });
+    }
+    setPtSyncInvoicesLoading(false);
+  }, [setToast]);
 
   // ─── Fetch Entitlement Types ─────────────────────────────────────────
   const fetchEntitlementTypes = useCallback(async () => {
@@ -4418,8 +4458,19 @@ export function PracticePortal() {
 
             {/* Invoice History */}
             <div className="glass rounded-xl overflow-hidden">
-              <div className="p-4 border-b border-slate-100">
+              <div className="p-4 border-b border-slate-100 flex items-center justify-between gap-3">
                 <h3 className="font-semibold text-slate-800">Invoice History</h3>
+                {pt.membershipId ? (
+                  <button
+                    onClick={() => handleSyncInvoicesFromStripe(pt.membershipId as string, pt.id)}
+                    disabled={ptSyncInvoicesLoading}
+                    className="px-3 py-1.5 rounded-md text-xs font-medium border transition-colors disabled:opacity-50"
+                    style={{ borderColor: "#635bff", color: "#635bff" }}
+                    title="Pull invoices live from Stripe — useful when invoice.paid webhooks didn't deliver."
+                  >
+                    {ptSyncInvoicesLoading ? "Syncing..." : "Sync from Stripe"}
+                  </button>
+                ) : null}
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">

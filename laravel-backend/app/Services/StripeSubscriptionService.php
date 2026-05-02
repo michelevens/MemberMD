@@ -689,6 +689,114 @@ class StripeSubscriptionService
     }
 
     /**
+     * Backfill local Invoice + Payment rows for a membership by listing
+     * the Stripe subscription's invoices live and mirroring each one.
+     *
+     * Same dual-purpose tool as retrieveCheckoutSession: covers the case
+     * where invoice.paid webhooks aren't subscribed (or fired during a
+     * Railway outage) and a real Stripe payment never made it into our
+     * local Invoice table. The patient's Billing tab shows "No invoices
+     * yet" even though Stripe charged the card.
+     *
+     * Idempotent on stripe_invoice_id (firstOrCreate) so calling this
+     * after the webhook is enabled won't duplicate anything.
+     *
+     * Returns a count of invoices+payments created.
+     */
+    public function backfillInvoicesFromStripe(PatientMembership $membership): array
+    {
+        if (empty($membership->stripe_subscription_id)) {
+            return ['invoices_created' => 0, 'payments_created' => 0, 'invoices_seen' => 0];
+        }
+
+        $practice = $membership->tenant ?? Practice::findOrFail($membership->tenant_id);
+        $this->assertPracticeReady($practice);
+        $stripeOpts = ['stripe_account' => $practice->stripe_account_id];
+
+        $invoicesCreated = 0;
+        $paymentsCreated = 0;
+        $invoicesSeen = 0;
+        $startingAfter = null;
+
+        do {
+            $params = [
+                'subscription' => $membership->stripe_subscription_id,
+                'limit' => 100,
+            ];
+            if ($startingAfter) {
+                $params['starting_after'] = $startingAfter;
+            }
+
+            try {
+                $page = $this->stripe()->invoices->all($params, $stripeOpts);
+            } catch (ApiErrorException $e) {
+                throw new RuntimeException("Failed to list Stripe invoices: {$e->getMessage()}", 0, $e);
+            }
+
+            foreach ($page->data as $stripeInvoice) {
+                $invoicesSeen++;
+                $amount = ($stripeInvoice->amount_paid ?? 0) / 100;
+                $isPaid = ($stripeInvoice->status ?? '') === 'paid';
+
+                $invoice = \App\Models\Invoice::firstOrCreate(
+                    [
+                        'tenant_id' => $practice->id,
+                        'stripe_invoice_id' => $stripeInvoice->id,
+                    ],
+                    [
+                        'patient_id' => $membership->patient_id,
+                        'membership_id' => $membership->id,
+                        'amount' => $amount,
+                        'tax' => 0,
+                        'status' => $isPaid ? 'paid' : ($stripeInvoice->status ?? 'open'),
+                        'paid_at' => $isPaid && !empty($stripeInvoice->status_transitions->paid_at)
+                            ? now()->setTimestamp($stripeInvoice->status_transitions->paid_at)
+                            : ($isPaid ? now() : null),
+                        'pdf_url' => $stripeInvoice->hosted_invoice_url ?? null,
+                        'line_items' => method_exists($this, 'extractLineItems')
+                            ? [] // service doesn't have access — leave empty for now
+                            : [],
+                    ],
+                );
+
+                if ($invoice->wasRecentlyCreated) {
+                    $invoicesCreated++;
+                }
+
+                $chargeId = $stripeInvoice->charge ?? null;
+                if ($chargeId && $isPaid) {
+                    $payment = \App\Models\Payment::firstOrCreate(
+                        [
+                            'tenant_id' => $practice->id,
+                            'stripe_payment_id' => $chargeId,
+                        ],
+                        [
+                            'patient_id' => $membership->patient_id,
+                            'invoice_id' => $invoice->id,
+                            'amount' => $amount,
+                            'method' => 'card',
+                            'status' => 'completed',
+                        ],
+                    );
+                    if ($payment->wasRecentlyCreated) {
+                        $paymentsCreated++;
+                    }
+                }
+            }
+
+            $startingAfter = $page->has_more && !empty($page->data)
+                ? end($page->data)->id
+                : null;
+        } while ($startingAfter);
+
+        return [
+            'invoices_created' => $invoicesCreated,
+            'payments_created' => $paymentsCreated,
+            'invoices_seen' => $invoicesSeen,
+        ];
+    }
+
+    /**
      * Create Stripe Product + recurring Prices on the practice's Connect
      * account so this plan can be sold via subscriptions. Idempotent: if
      * the plan already has stripe_monthly_price_id / stripe_annual_price_id

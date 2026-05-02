@@ -298,6 +298,9 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
     // checkout.session.completed webhook never arrived.
     Route::get('/memberships/pending', [MembershipController::class, 'pendingEnrollments']);
     Route::post('/memberships/pending/{id}/reconcile', [MembershipController::class, 'reconcilePendingEnrollment']);
+    // Pull invoice + payment rows live from Stripe for a membership's
+    // subscription. Used when invoice.paid webhooks weren't delivered.
+    Route::post('/memberships/{id}/sync-invoices', [MembershipController::class, 'syncInvoicesFromStripe']);
     Route::apiResource('memberships', MembershipController::class)->except(['destroy']);
 
     // ===== Screenings =====

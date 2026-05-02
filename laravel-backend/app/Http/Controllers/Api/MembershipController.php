@@ -380,13 +380,71 @@ class MembershipController extends Controller
             ], 422);
         }
 
+        // Backfill invoice + payment rows from Stripe in the same pass.
+        // If checkout.session.completed wasn't subscribed in Stripe Connect,
+        // invoice.paid almost certainly isn't either — so the local
+        // Invoice table will stay empty until we pull the data live.
+        $backfillSummary = ['invoices_created' => 0, 'payments_created' => 0];
+        try {
+            $backfillSummary = $this->subscriptions->backfillInvoicesFromStripe($membership);
+        } catch (\Throwable $e) {
+            Log::warning('Invoice backfill failed during pending reconcile', [
+                'membership_id' => $membership->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
         return response()->json([
             'data' => [
                 'pending' => $pending->fresh(),
                 'membership' => $membership->load(['patient', 'plan']),
                 'reconciled' => true,
+                'backfill' => $backfillSummary,
             ],
             'message' => 'Membership reconciled successfully.',
+        ]);
+    }
+
+    /**
+     * Practice-admin invoice backfill: pulls all Stripe invoices for a
+     * membership's subscription and mirrors them into our Invoice +
+     * Payment tables. Idempotent on stripe_invoice_id, so safe to run
+     * repeatedly. Use this when invoice.paid webhooks weren't delivered
+     * (event not subscribed in Connect, transient outage) and the
+     * patient's billing history is missing real charges.
+     */
+    public function syncInvoicesFromStripe(Request $request, string $id): JsonResponse
+    {
+        $user = $request->user();
+        abort_if(!in_array($user->role, ['practice_admin', 'staff']), 403);
+
+        $membership = PatientMembership::where('tenant_id', $user->tenant_id)
+            ->findOrFail($id);
+
+        if (empty($membership->stripe_subscription_id)) {
+            return response()->json([
+                'message' => 'This membership has no Stripe subscription — nothing to sync.',
+            ], 422);
+        }
+
+        try {
+            $summary = $this->subscriptions->backfillInvoicesFromStripe($membership);
+        } catch (\Throwable $e) {
+            return response()->json([
+                'message' => 'Stripe sync failed: ' . $e->getMessage(),
+            ], 422);
+        }
+
+        return response()->json([
+            'data' => $summary,
+            'message' => sprintf(
+                'Synced %d invoice%s from Stripe (%d new, %d payment%s recorded).',
+                $summary['invoices_seen'],
+                $summary['invoices_seen'] === 1 ? '' : 's',
+                $summary['invoices_created'],
+                $summary['payments_created'],
+                $summary['payments_created'] === 1 ? '' : 's',
+            ),
         ]);
     }
 
