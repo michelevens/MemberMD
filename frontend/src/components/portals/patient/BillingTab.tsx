@@ -215,9 +215,41 @@ export function BillingTab() {
   // ─── Render ──────────────────────────────────────────────────────────────
 
   if (loading) {
+    // Skeleton mirrors the eventual layout: trial banner placeholder
+    // → plan card → entitlement meter → invoice rows. Better than a
+    // spinner because the user sees the page taking shape rather than
+    // staring at a blank screen, and there's no layout shift when the
+    // real content lands.
+    const Bar = ({ w, h }: { w: string; h: string }) => (
+      <div className="rounded-md animate-pulse" style={{ width: w, height: h, backgroundColor: C.slate100 }} />
+    );
     return (
-      <div className="flex items-center justify-center py-16">
-        <Loader2 className="w-6 h-6 animate-spin" style={{ color: C.teal500 }} />
+      <div className="space-y-4">
+        <div className="glass rounded-2xl p-5 space-y-3">
+          <Bar w="40%" h="14px" />
+          <Bar w="70%" h="20px" />
+          <Bar w="50%" h="14px" />
+        </div>
+        <div className="glass rounded-2xl p-5 space-y-3">
+          <Bar w="35%" h="12px" />
+          <Bar w="100%" h="8px" />
+          <Bar w="55%" h="12px" />
+        </div>
+        <div className="glass rounded-2xl p-5 space-y-3">
+          <Bar w="30%" h="14px" />
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="flex items-center justify-between gap-3 py-2">
+              <div className="flex items-center gap-3 flex-1">
+                <div className="w-9 h-9 rounded-lg animate-pulse" style={{ backgroundColor: C.slate100 }} />
+                <div className="flex-1 space-y-1.5">
+                  <Bar w="60%" h="12px" />
+                  <Bar w="40%" h="10px" />
+                </div>
+              </div>
+              <Bar w="56px" h="20px" />
+            </div>
+          ))}
+        </div>
       </div>
     );
   }

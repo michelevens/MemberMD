@@ -148,10 +148,40 @@ export function EntitlementsTab({ patientId }: Props) {
   }, [patientId]);
 
   if (loading) {
+    // Skeleton mirrors the eventual layout (active plan card → benefits
+    // bars → signed agreements list) so there's no layout shift when
+    // the data lands and the user sees structure forming.
+    const Bar = ({ w, h }: { w: string; h: string }) => (
+      <div className="rounded-md animate-pulse" style={{ width: w, height: h, backgroundColor: "#f1f5f9" }} />
+    );
     return (
-      <div className="flex items-center justify-center py-16">
-        <div className="w-5 h-5 border-2 rounded-full animate-spin" style={{ borderColor: "#e2e8f0", borderTopColor: "#635bff" }} />
-        <span className="ml-2 text-sm text-slate-500">Loading entitlements…</span>
+      <div className="space-y-5">
+        <div className="rounded-2xl border border-slate-200 bg-white p-5 space-y-3">
+          <Bar w="30%" h="11px" />
+          <Bar w="55%" h="22px" />
+          <Bar w="40%" h="13px" />
+        </div>
+        <div className="rounded-2xl border border-slate-200 bg-white p-5 space-y-4">
+          <Bar w="40%" h="11px" />
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <Bar w="35%" h="13px" />
+                <Bar w="50px" h="13px" />
+              </div>
+              <Bar w="100%" h="8px" />
+            </div>
+          ))}
+        </div>
+        <div className="rounded-2xl border border-slate-200 bg-white p-5 space-y-3">
+          <Bar w="35%" h="11px" />
+          {[0, 1].map((i) => (
+            <div key={i} className="flex items-center justify-between py-2">
+              <Bar w="60%" h="13px" />
+              <Bar w="60px" h="13px" />
+            </div>
+          ))}
+        </div>
       </div>
     );
   }

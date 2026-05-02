@@ -2289,19 +2289,35 @@ function PatientFieldEditDialog({ mode, patient, onClose, onSaved, onError }: Pa
           {mode === "emergency" ? "Edit Emergency Contact" : "Change Preferred Pharmacy"}
         </h3>
         <div className="space-y-3">
-          {fields.map((f) => (
-            <div key={f.key}>
-              <label className="block text-xs font-medium mb-1" style={{ color: "#475569" }}>
-                {f.label}
-              </label>
-              <input
-                type="text"
-                value={values[f.key] ?? ""}
-                onChange={(e) => set(f.key, e.target.value)}
-                className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400"
-              />
-            </div>
-          ))}
+          {fields.map((f) => {
+            // Pick the right HTML input type + mobile keyboard based on
+            // the field key so iOS/Android pop the right keyboard:
+            // tel keypad for phone, email pad for email, default text
+            // otherwise. autoComplete tokens let password managers and
+            // OS autofill do the right thing.
+            const isPhone = f.key.includes("phone");
+            const isEmail = f.key.includes("email");
+            const isName = f.key.includes("name");
+            const inputType = isPhone ? "tel" : isEmail ? "email" : "text";
+            const inputMode: React.HTMLAttributes<HTMLInputElement>["inputMode"] =
+              isPhone ? "tel" : isEmail ? "email" : "text";
+            const autoComplete = isPhone ? "tel" : isEmail ? "email" : isName ? "name" : undefined;
+            return (
+              <div key={f.key}>
+                <label className="block text-xs font-medium mb-1" style={{ color: "#475569" }}>
+                  {f.label}
+                </label>
+                <input
+                  type={inputType}
+                  inputMode={inputMode}
+                  autoComplete={autoComplete}
+                  value={values[f.key] ?? ""}
+                  onChange={(e) => set(f.key, e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400"
+                />
+              </div>
+            );
+          })}
         </div>
         <div className="flex justify-end gap-2 mt-5">
           <button
