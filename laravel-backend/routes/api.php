@@ -187,6 +187,13 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
     Route::get('/admin/practices/{id}', [PracticeController::class, 'show']);
     Route::post('/admin/practices/{id}/approve', [PracticeController::class, 'approve']);
     Route::post('/admin/practices/{id}/reject', [PracticeController::class, 'reject']);
+
+    // Superadmin god-mode actions on an existing tenant.
+    Route::post('/admin/practices/{id}/impersonate', [PracticeController::class, 'impersonate']);
+    Route::post('/admin/practices/{id}/suspend', [PracticeController::class, 'suspend']);
+    Route::post('/admin/practices/{id}/activate', [PracticeController::class, 'activate']);
+    Route::patch('/admin/practices/{id}/plan', [PracticeController::class, 'changePlan']);
+
     Route::get('/admin/stats', [PracticeController::class, 'platformStats']);
 
     // Practice: own practice

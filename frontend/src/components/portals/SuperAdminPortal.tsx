@@ -3,6 +3,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { practiceService, adminService, auditService, apiFetch } from "../../lib/api";
+import { beginImpersonation } from "../shared/ImpersonationBanner";
 import { ProgramTemplatesTab } from "./ProgramTemplatesTab";
 import { HeaderToolbar } from "../shared/HeaderToolbar";
 import { PlatformSettings } from "../settings/PlatformSettings";
@@ -68,6 +69,7 @@ import {
   Star,
   ClipboardCheck,
   AlertTriangle,
+  LogIn,
   MessageSquare,
   Send,
   RefreshCw,
@@ -127,6 +129,8 @@ interface MockPractice {
   tenantCode?: string;
   stripeConnectStatus?: "not_started" | "pending_onboarding" | "pending_verification" | "restricted" | "active" | "disconnected";
   stripeChargesEnabled?: boolean;
+  subscriptionPlan?: string;
+  trialEndsAt?: string | null;
 }
 
 interface MockPendingPractice extends MockPractice {
@@ -190,6 +194,8 @@ interface MockAuditLog {
   action: string;
   resource: string;
   ipAddress: string;
+  /** Inferred per row from the action verb. low | medium | high | critical. */
+  riskLevel?: "low" | "medium" | "high" | "critical";
 }
 
 interface MockScreeningInstrument {
@@ -1025,19 +1031,33 @@ export function SuperAdminPortal() {
         const practicesRes = results[0].value;
         if (practicesRes.data && Array.isArray(practicesRes.data)) {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          setApiPractices(practicesRes.data.map((p: any) => ({
-            id: p.id || "",
-            name: p.name || "",
-            specialty: p.specialty || "",
-            model: p.practiceModel || p.practice_model || "",
-            city: (p.city || "") + (p.state ? ", " + p.state : ""),
-            state: p.state || "",
-            providers: p.providerCount || p.providers_count || 0,
-            members: p.memberCount || p.member_count || p.patients_count || 0,
-            mrr: 0,
-            status: (p.status || (p.isActive || p.is_active ? "active" : "suspended")) as "active" | "trial" | "suspended",
-            joinedAt: p.createdAt || p.created_at || "",
-          })));
+          setApiPractices(practicesRes.data.map((p: any) => {
+            // subscription_status drives the displayed lifecycle state.
+            // Map it to the UI's narrower 4-state enum so badges + buttons
+            // resolve correctly.
+            const ss = (p.subscriptionStatus || p.subscription_status || "").toLowerCase();
+            let status: "active" | "trial" | "suspended" | "pending";
+            if (ss === "pending_approval") status = "pending";
+            else if (ss === "suspended" || ss === "rejected") status = "suspended";
+            else if (ss === "trial") status = "trial";
+            else status = (p.isActive || p.is_active) ? "active" : "suspended";
+
+            return {
+              id: p.id || "",
+              name: p.name || "",
+              specialty: p.specialty || "",
+              model: p.practiceModel || p.practice_model || "",
+              city: (p.city || "") + (p.state ? ", " + p.state : ""),
+              state: p.state || "",
+              providers: p.providerCount || p.providers_count || 0,
+              members: p.memberCount || p.member_count || p.patients_count || 0,
+              mrr: 0,
+              status,
+              joinedAt: p.createdAt || p.created_at || "",
+              subscriptionPlan: p.subscriptionPlan || p.subscription_plan || "trial",
+              trialEndsAt: p.trialEndsAt || p.trial_ends_at || null,
+            };
+          }));
         }
       }
 
@@ -1121,6 +1141,7 @@ export function SuperAdminPortal() {
             action: l.action || l.event || "",
             resource: l.resource || l.subject || l.description || "",
             ipAddress: l.ipAddress || l.ip_address || l.ip || "",
+            riskLevel: l.riskLevel || l.risk_level || undefined,
           })));
         }
       }
@@ -1999,6 +2020,25 @@ export function SuperAdminPortal() {
             : action.includes("expiring") ? "#92400e"
             : "#475569";
 
+          // Derive a risk level when the row didn't ship one. Anything
+          // money- / auth- / impersonation-related is high; deletions
+          // are critical; reads + bookkeeping are low.
+          const inferRisk = (log: Log): "low" | "medium" | "high" | "critical" => {
+            if (log.riskLevel) return log.riskLevel;
+            const a = (log.action || "").toLowerCase();
+            if (a.includes("delete") || a.includes("destroy") || a.includes("purge")) return "critical";
+            if (a.includes("impersonate") || a.includes("login_as") || a.includes("refund") || a.includes("password")) return "high";
+            if (a.includes("suspend") || a.includes("approve") || a.includes("reject") || a.includes("plan_change")) return "high";
+            if (a.includes("update") || a.includes("modify") || a.includes("publish")) return "medium";
+            return "low";
+          };
+          const riskColors: Record<string, { bg: string; fg: string }> = {
+            low: { bg: "#f1f5f9", fg: "#475569" },
+            medium: { bg: "#fef3c7", fg: "#92400e" },
+            high: { bg: "#ffedd5", fg: "#c2410c" },
+            critical: { bg: "#fee2e2", fg: "#b91c1c" },
+          };
+
           const cols: import("../shared/stripe-ui").DataTableColumn<Log>[] = [
             {
               key: "timestamp",
@@ -2037,6 +2077,23 @@ export function SuperAdminPortal() {
               header: "Resource",
               hideBelow: "md",
               cell: (log) => <span className="text-slate-600">{log.resource}</span>,
+            },
+            {
+              key: "risk",
+              header: "Risk",
+              hideBelow: "md",
+              cell: (log) => {
+                const r = inferRisk(log);
+                const c = riskColors[r];
+                return (
+                  <span
+                    className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold uppercase tracking-wider"
+                    style={{ backgroundColor: c.bg, color: c.fg }}
+                  >
+                    {r}
+                  </span>
+                );
+              },
             },
             {
               key: "ip",
@@ -2303,33 +2360,152 @@ export function SuperAdminPortal() {
                 <p className="text-sm text-slate-500 mt-0.5">{p.specialty} · {p.model} · {p.city}, {p.state}</p>
               </div>
             </div>
-            <div className="flex items-center gap-2 pl-14 sm:pl-0">
-              {p.status === "pending" && (
+            <div className="flex flex-wrap items-center gap-2 pl-14 sm:pl-0">
+              {/* Login As — mints a 2h Sanctum token bound to the
+                  practice owner so superadmin can reproduce a tenant
+                  issue without asking for credentials. */}
+              {p.status !== "suspended" && p.status !== "pending" && (
                 <button
-                  onClick={() => {
-                    setSelectedPractice({ ...p, status: "active" });
-                    setApprovalMessage(`${p.name} has been approved.`);
-                    setPendingPractices((prev) => prev.filter((pp) => pp.id !== p.id));
+                  onClick={async () => {
+                    const r = await apiFetch<{ token: string; tenantId: string; tenantName: string; impersonatedUser: { id: string; firstName: string; lastName: string; email: string; role: string }; expiresAt: string }>(`/admin/practices/${p.id}/impersonate`, { method: "POST" });
+                    if (r.error || !r.data) {
+                      setApprovalMessage(`Login As failed: ${r.error ?? "no token returned"}`);
+                      return;
+                    }
+                    beginImpersonation({
+                      token: r.data.token,
+                      tenantId: r.data.tenantId,
+                      tenantName: r.data.tenantName,
+                      impersonatedUser: r.data.impersonatedUser,
+                      expiresAt: r.data.expiresAt,
+                    });
                   }}
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium text-white shadow-sm transition-colors"
                   style={{ backgroundColor: "#635bff" }}
                   onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#544ee0")}
                   onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "#635bff")}
+                  title="Sign in as this practice's owner for 2 hours"
+                >
+                  <LogIn className="w-4 h-4" />
+                  Login As
+                </button>
+              )}
+
+              {p.status === "pending" && (
+                <button
+                  onClick={async () => {
+                    const r = await apiFetch(`/admin/practices/${p.id}/approve`, { method: "POST" });
+                    if (r.error) {
+                      setApprovalMessage(`Failed to approve ${p.name}: ${r.error}`);
+                      return;
+                    }
+                    setApprovalMessage(`${p.name} has been approved.`);
+                    setPendingPractices((prev) => prev.filter((pp) => pp.id !== p.id));
+                    loadData();
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium text-white shadow-sm transition-colors"
+                  style={{ backgroundColor: "#635bff" }}
                 >
                   <CheckCircle2 className="w-4 h-4" />
                   Approve
                 </button>
               )}
-              {p.status !== "suspended" && (
+
+              {p.status === "suspended" ? (
                 <button
+                  onClick={async () => {
+                    const r = await apiFetch(`/admin/practices/${p.id}/activate`, { method: "POST" });
+                    if (r.error) {
+                      setApprovalMessage(`Activate failed: ${r.error}`);
+                      return;
+                    }
+                    setApprovalMessage(`${p.name} reactivated.`);
+                    loadData();
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium border border-emerald-200 text-emerald-700 bg-white hover:bg-emerald-50 transition-colors"
+                >
+                  <CheckCircle2 className="w-4 h-4" />
+                  Reactivate
+                </button>
+              ) : p.status !== "pending" && (
+                <button
+                  onClick={async () => {
+                    if (!window.confirm(`Suspend ${p.name}? Members will be blocked from sign-in until reactivated.`)) return;
+                    const reason = window.prompt("Optional reason (visible to other superadmins):", "") ?? null;
+                    const r = await apiFetch(`/admin/practices/${p.id}/suspend`, {
+                      method: "POST",
+                      body: JSON.stringify({ reason }),
+                    });
+                    if (r.error) {
+                      setApprovalMessage(`Suspend failed: ${r.error}`);
+                      return;
+                    }
+                    setApprovalMessage(`${p.name} suspended.`);
+                    loadData();
+                  }}
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium border border-red-200 text-red-700 bg-white hover:bg-red-50 transition-colors"
                 >
                   <Shield className="w-4 h-4" />
                   Suspend
                 </button>
               )}
+
+              {/* Plan dropdown — superadmin can change the local
+                  subscription tier without touching Stripe. */}
+              {p.status !== "pending" && (
+                <select
+                  className="px-2.5 py-1.5 rounded-md text-sm font-medium border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 transition-colors"
+                  defaultValue={(p.subscriptionPlan as string | undefined) ?? "trial"}
+                  onChange={async (e) => {
+                    const next = e.target.value;
+                    const r = await apiFetch(`/admin/practices/${p.id}/plan`, {
+                      method: "PATCH",
+                      body: JSON.stringify({ plan: next }),
+                    });
+                    if (r.error) {
+                      setApprovalMessage(`Plan change failed: ${r.error}`);
+                      return;
+                    }
+                    setApprovalMessage(`${p.name} → ${next}.`);
+                    loadData();
+                  }}
+                  title="Change subscription tier"
+                >
+                  <option value="trial">Trial</option>
+                  <option value="starter">Starter</option>
+                  <option value="professional">Professional</option>
+                  <option value="enterprise">Enterprise</option>
+                </select>
+              )}
             </div>
           </div>
+
+          {/* Trial countdown — surfaces only while practice is on trial.
+              Turns red ≤3 days remaining. */}
+          {p.status === "trial" && p.trialEndsAt && (() => {
+            const daysLeft = Math.max(
+              0,
+              Math.ceil((new Date(p.trialEndsAt).getTime() - Date.now()) / 86400000),
+            );
+            const critical = daysLeft <= 3;
+            return (
+              <div
+                className="mt-3 inline-flex items-center gap-2 rounded-md px-3 py-1.5 text-xs"
+                style={{
+                  backgroundColor: critical ? "#fef2f2" : "#fffbeb",
+                  color: critical ? "#b91c1c" : "#92400e",
+                }}
+              >
+                <AlertTriangle className="w-3.5 h-3.5" />
+                <span className="font-semibold">
+                  {daysLeft} day{daysLeft !== 1 ? "s" : ""} left in trial
+                </span>
+                <span className="opacity-75">
+                  (expires {new Date(p.trialEndsAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })})
+                </span>
+              </div>
+            );
+          })()}
         </div>
 
         {/* Stats Row — Stripe-style border tiles */}

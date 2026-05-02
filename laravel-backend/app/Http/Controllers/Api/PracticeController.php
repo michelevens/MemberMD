@@ -309,6 +309,198 @@ class PracticeController extends Controller
     }
 
     /**
+     * Superadmin: log in as the practice's owner.
+     *
+     * Mints a 2-hour Sanctum token bound to the practice_admin owner so
+     * the superadmin can reproduce a tenant-side issue without asking
+     * for credentials. Revokes any prior impersonation tokens for the
+     * same owner first so concurrent impersonation sessions don't
+     * accumulate.
+     *
+     * Every impersonation is audit-logged with both the superadmin and
+     * the owner ids so the tenant can later see who was acting on their
+     * behalf.
+     */
+    public function impersonate(Request $request, string $practiceId): JsonResponse
+    {
+        abort_if($request->user()->role !== 'superadmin', 403);
+
+        $practice = Practice::findOrFail($practiceId);
+
+        $owner = User::where('tenant_id', $practice->id)
+            ->whereIn('role', ['practice_admin', 'provider', 'staff'])
+            ->orderByRaw("CASE role WHEN 'practice_admin' THEN 1 WHEN 'provider' THEN 2 ELSE 3 END")
+            ->orderBy('created_at')
+            ->first();
+
+        if (!$owner) {
+            return response()->json([
+                'message' => 'No practice user found to impersonate.',
+            ], 422);
+        }
+
+        // Revoke prior impersonation tokens so we never have two live
+        // shadow sessions on the same owner.
+        $owner->tokens()->where('name', 'impersonation')->delete();
+
+        $expiresAt = now()->addHours(2);
+        $token = $owner->createToken('impersonation', ['*'], $expiresAt);
+
+        try {
+            \App\Models\AuditLog::create([
+                'tenant_id' => $practice->id,
+                'user_id' => $request->user()->id,
+                'action' => 'superadmin.impersonate',
+                'resource' => 'Practice',
+                'resource_id' => $practice->id,
+                'metadata' => [
+                    'superadmin_id' => $request->user()->id,
+                    'superadmin_email' => $request->user()->email,
+                    'impersonated_user_id' => $owner->id,
+                    'impersonated_user_email' => $owner->email,
+                    'expires_at' => $expiresAt->toIso8601String(),
+                ],
+                'ip_address' => $request->ip(),
+                'user_agent' => substr((string) $request->userAgent(), 0, 512) ?: null,
+            ]);
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('Impersonation audit write failed', [
+                'practice_id' => $practice->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        return response()->json([
+            'data' => [
+                'token' => $token->plainTextToken,
+                'tenant_id' => $practice->id,
+                'tenant_name' => $practice->name,
+                'impersonated_user' => [
+                    'id' => $owner->id,
+                    'first_name' => $owner->first_name,
+                    'last_name' => $owner->last_name,
+                    'email' => $owner->email,
+                    'role' => $owner->role,
+                ],
+                'impersonated_by' => $request->user()->id,
+                'expires_at' => $expiresAt->toIso8601String(),
+            ],
+        ]);
+    }
+
+    /**
+     * Superadmin: suspend an active practice. Sets is_active=false and
+     * subscription_status='suspended'. Patient-facing surfaces hide the
+     * practice; staff sign-in is blocked by the existing pending guard
+     * because suspended != approved-and-active.
+     */
+    public function suspend(Request $request, string $practiceId): JsonResponse
+    {
+        abort_if($request->user()->role !== 'superadmin', 403);
+
+        $data = $request->validate([
+            'reason' => 'nullable|string|max:500',
+        ]);
+
+        $practice = Practice::findOrFail($practiceId);
+        $practice->update([
+            'is_active' => false,
+            'subscription_status' => 'suspended',
+        ]);
+
+        try {
+            \App\Models\AuditLog::create([
+                'tenant_id' => $practice->id,
+                'user_id' => $request->user()->id,
+                'action' => 'superadmin.suspend',
+                'resource' => 'Practice',
+                'resource_id' => $practice->id,
+                'metadata' => ['reason' => $data['reason'] ?? null],
+            ]);
+        } catch (\Throwable) {
+            // Audit best-effort — do not block the action.
+        }
+
+        return response()->json([
+            'data' => $practice->fresh(),
+            'message' => "Suspended {$practice->name}.",
+        ]);
+    }
+
+    /**
+     * Superadmin: re-activate a suspended practice. Restores
+     * is_active=true and subscription_status='trial' (re-onboarded
+     * practices typically resume on trial; superadmin can change plan
+     * inline if not).
+     */
+    public function activate(Request $request, string $practiceId): JsonResponse
+    {
+        abort_if($request->user()->role !== 'superadmin', 403);
+
+        $practice = Practice::findOrFail($practiceId);
+        $practice->update([
+            'is_active' => true,
+            'subscription_status' => 'trial',
+        ]);
+
+        try {
+            \App\Models\AuditLog::create([
+                'tenant_id' => $practice->id,
+                'user_id' => $request->user()->id,
+                'action' => 'superadmin.activate',
+                'resource' => 'Practice',
+                'resource_id' => $practice->id,
+            ]);
+        } catch (\Throwable) {
+            // Audit best-effort.
+        }
+
+        return response()->json([
+            'data' => $practice->fresh(),
+            'message' => "Activated {$practice->name}.",
+        ]);
+    }
+
+    /**
+     * Superadmin: change the practice's subscription plan. Stripe
+     * subscription is NOT touched here (that's a separate billing
+     * surface) — this only flips the local tier so reporting and
+     * feature gating reflect what the practice is actually paying for.
+     */
+    public function changePlan(Request $request, string $practiceId): JsonResponse
+    {
+        abort_if($request->user()->role !== 'superadmin', 403);
+
+        $data = $request->validate([
+            'plan' => 'required|string|in:trial,starter,professional,enterprise',
+        ]);
+
+        $practice = Practice::findOrFail($practiceId);
+        $previous = $practice->subscription_plan;
+        $practice->update([
+            'subscription_plan' => $data['plan'],
+        ]);
+
+        try {
+            \App\Models\AuditLog::create([
+                'tenant_id' => $practice->id,
+                'user_id' => $request->user()->id,
+                'action' => 'superadmin.plan_change',
+                'resource' => 'Practice',
+                'resource_id' => $practice->id,
+                'metadata' => ['from' => $previous, 'to' => $data['plan']],
+            ]);
+        } catch (\Throwable) {
+            // Audit best-effort.
+        }
+
+        return response()->json([
+            'data' => $practice->fresh(),
+            'message' => "Plan changed to {$data['plan']}.",
+        ]);
+    }
+
+    /**
      * Mark the auth user's onboarding checklist as completed. Used to
      * dismiss the dashboard onboarding banner once the practice has
      * worked through the first-day setup steps.

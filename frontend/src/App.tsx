@@ -10,6 +10,7 @@ import { LoginScreen } from "./components/auth/LoginScreen";
 import { ForgotPasswordScreen } from "./components/auth/ForgotPasswordScreen";
 import { ResetPasswordScreen } from "./components/auth/ResetPasswordScreen";
 import { InstallPrompt } from "./components/shared/InstallPrompt";
+import { ImpersonationBannerHost } from "./components/shared/ImpersonationBanner";
 
 // ─── Error Boundary ─────────────────────────────────────────────────────────────
 
@@ -235,6 +236,7 @@ export default function App() {
         <QueryClientProvider client={queryClient}>
           <HashRouter>
             <AuthProvider>
+              <ImpersonationBannerHost />
               <AuthGate />
               <InstallPrompt />
             </AuthProvider>
