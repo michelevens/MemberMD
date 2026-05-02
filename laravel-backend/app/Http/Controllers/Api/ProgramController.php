@@ -78,6 +78,18 @@ class ProgramController extends Controller
 
     /**
      * Get program details with plans, enrollments, and providers.
+     *
+     * The "enrollments" surface is unified: we return both ProgramEnrollment
+     * rows (the explicit cohort table) AND PatientMembership rows whose plan
+     * belongs to this program — because for membership-style programs, the
+     * source of truth for "who's enrolled and being billed" is the membership
+     * row created by the ExternalController / widget / admin enroll path,
+     * NOT the parallel program_enrollments table (which is only populated
+     * when an admin runs the explicit enroll-into-program flow).
+     *
+     * Without this merge, a real Stripe-billed patient (e.g. via the public
+     * enrollment widget on a program-owned plan) wouldn't appear on the
+     * program's Enrollments tab — the screenshot bug Dieudone exposed.
      */
     public function show(string $program): JsonResponse
     {
@@ -97,7 +109,47 @@ class ProgramController extends Controller
             $plan->loadCount('memberships');
         });
 
-        return response()->json(['data' => $program]);
+        // Pull memberships under this program — either via plan.program_id
+        // (membership's plan belongs to this program) or via the membership's
+        // own program_id stamp (set by ProgramController::enrollPatient).
+        $programPlanIds = $program->membershipPlans->pluck('id');
+        $memberships = \App\Models\PatientMembership::with(['patient:id,first_name,last_name,email', 'plan:id,name'])
+            ->where('tenant_id', $program->tenant_id)
+            ->where(function ($q) use ($program, $programPlanIds) {
+                $q->where('program_id', $program->id);
+                if ($programPlanIds->isNotEmpty()) {
+                    $q->orWhereIn('plan_id', $programPlanIds);
+                }
+            })
+            ->orderByDesc('created_at')
+            ->get();
+
+        // Project into the same shape the frontend uses for "enrollments"
+        // (id / patient / plan / status / fundingSource / enrolledAt / expiresAt)
+        // so the UI doesn't need a separate render path. Source flag lets the
+        // UI distinguish a membership-driven row from a program_enrollments row.
+        $membershipEnrollments = $memberships->map(function ($m) {
+            return [
+                'id' => $m->id,
+                'source' => 'membership',
+                'patient' => $m->patient ? [
+                    'id' => $m->patient->id,
+                    'firstName' => $m->patient->first_name,
+                    'lastName' => $m->patient->last_name,
+                ] : null,
+                'plan' => $m->plan ? ['id' => $m->plan->id, 'name' => $m->plan->name] : null,
+                'status' => $m->status,
+                'fundingSource' => $m->billing_mode ?? '—',
+                'sponsorName' => null,
+                'enrolledAt' => $m->started_at?->toIso8601String(),
+                'expiresAt' => $m->cancelled_at?->toIso8601String() ?? $m->current_period_end?->toIso8601String(),
+            ];
+        });
+
+        $payload = $program->toArray();
+        $payload['membership_enrollments'] = $membershipEnrollments;
+
+        return response()->json(['data' => $payload]);
     }
 
     /**
