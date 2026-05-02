@@ -49,6 +49,7 @@ import {
   Ticket,
   UserCog,
   UsersRound,
+  IdCard,
   MessageSquare,
   Bell,
   Settings,
@@ -123,6 +124,7 @@ type TabId =
   | "messages"
   | "notifications"
   | "profile"
+  | "my-profile"
   | "engagement"
   | "analytics"
   | "compliance"
@@ -255,6 +257,11 @@ const NAV_SECTIONS: NavSection[] = [
       // Practice settings \u2014 admin only.
       { id: "practice-settings", label: "Practice Settings", icon: Settings, roles: ["practice_admin", "superadmin"] },
       { id: "branding", label: "Branding", icon: Palette, roles: ["practice_admin", "superadmin"] },
+      // Provider self-service: surfaces ProviderDetailPage in self mode
+      // so the logged-in provider can view/edit their own profile,
+      // schedule, panel, appointments, and licensing without needing
+      // a practice admin to do it for them.
+      { id: "my-profile", label: "My Profile", icon: IdCard, roles: ["provider"] },
     ],
   },
 ];
@@ -9070,6 +9077,30 @@ export function PracticePortal() {
         return renderNotifications();
       case "profile":
         return <ProfilePage onBack={() => setActiveTab("dashboard")} />;
+      case "my-profile": {
+        // Providers reach this via the Settings → My Profile sidebar link.
+        // Mount ProviderDetailPage against the logged-in user's own
+        // provider row id (surfaced by /auth/me as user.providerId).
+        const ownProviderId = (auth.user as { providerId?: string | null } | null)?.providerId;
+        if (!ownProviderId) {
+          return (
+            <div className="rounded-2xl border border-amber-200 bg-amber-50 p-6 max-w-2xl">
+              <p className="text-sm font-semibold text-amber-900 mb-1">Profile not linked</p>
+              <p className="text-sm text-amber-800">
+                Your account isn't linked to a provider record yet. Ask a practice admin to add you as a provider.
+              </p>
+            </div>
+          );
+        }
+        return (
+          <ProviderDetailPage
+            providerId={ownProviderId}
+            embedded
+            mode="self"
+            onBack={() => setActiveTab("dashboard")}
+          />
+        );
+      }
       case "engagement":
         return <EngagementSection />;
       case "analytics":

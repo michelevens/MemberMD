@@ -839,6 +839,12 @@ class AuthController extends Controller
         // without a separate /patients/me round-trip. Null for staff/admin.
         $patientId = $user->role === 'patient' && $user->patient ? $user->patient->id : null;
 
+        // Linked provider row id — surfaced for role=provider so the
+        // provider's "My Profile" view in PracticePortal can mount
+        // ProviderDetailPage against the logged-in provider's own row
+        // without a separate /providers/me lookup.
+        $providerId = $user->role === 'provider' && $user->provider ? $user->provider->id : null;
+
         return [
             'id' => $user->id,
             'first_name' => $user->first_name,
@@ -854,6 +860,7 @@ class AuthController extends Controller
             'onboarding_completed' => $user->onboarding_completed,
             'last_login_at' => $user->last_login_at,
             'patient_id' => $patientId,
+            'provider_id' => $providerId,
             'practice' => $practice ? [
                 'id' => $practice->id,
                 'name' => $practice->name,

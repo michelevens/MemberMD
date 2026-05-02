@@ -79,9 +79,19 @@ interface ProviderDetailPageProps {
    * navigate("/practice") when standalone.
    */
   onBack?: () => void;
+  /**
+   * "admin" (default): full edit access for practice admins.
+   * "self": the logged-in provider is viewing their own row from the
+   *  My Profile tab. Hides admin-only Settings fields (panel capacity,
+   *  panel status, telehealth flag, consultation fee) and reframes the
+   *  page as the provider's own profile rather than a third-party
+   *  detail view. Backend ProviderController::update strips those
+   *  same fields server-side for provider role — defense in depth.
+   */
+  mode?: "admin" | "self";
 }
 
-export function ProviderDetailPage({ providerId, embedded = false, onBack }: ProviderDetailPageProps = {}) {
+export function ProviderDetailPage({ providerId, embedded = false, onBack, mode = "admin" }: ProviderDetailPageProps = {}) {
   const params = useParams<{ id: string }>();
   const id = providerId ?? params.id;
   const navigate = useNavigate();
@@ -170,13 +180,15 @@ export function ProviderDetailPage({ providerId, embedded = false, onBack }: Pro
       {/* Header */}
       <div className={embedded ? "bg-white rounded-t-2xl border border-b-0 border-slate-200" : "bg-white border-b border-slate-200"}>
         <div className={embedded ? "px-6 py-4" : "max-w-6xl mx-auto px-6 py-4"}>
-          <button
-            onClick={handleBack}
-            className="flex items-center gap-2 text-sm text-slate-600 hover:text-slate-900 mb-3"
-          >
-            <ArrowLeft className="w-4 h-4" />
-            Back to Providers
-          </button>
+          {mode !== "self" && (
+            <button
+              onClick={handleBack}
+              className="flex items-center gap-2 text-sm text-slate-600 hover:text-slate-900 mb-3"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              Back to Providers
+            </button>
+          )}
           <div className="flex items-start gap-3">
             <div
               className="w-12 h-12 rounded-lg flex items-center justify-center text-white text-base font-bold shrink-0"
@@ -232,7 +244,7 @@ export function ProviderDetailPage({ providerId, embedded = false, onBack }: Pro
         {activeTab === "panel" && <PanelTab providerId={provider.id} />}
         {activeTab === "appointments" && <AppointmentsTab providerId={provider.id} />}
         {activeTab === "licensing" && <LicensingTab provider={provider} onSaved={loadProvider} setToast={setToast} />}
-        {activeTab === "settings" && <SettingsTab provider={provider} onSaved={loadProvider} setToast={setToast} />}
+        {activeTab === "settings" && <SettingsTab provider={provider} onSaved={loadProvider} setToast={setToast} mode={mode} />}
       </div>
 
       {/* Toast */}
@@ -959,9 +971,11 @@ interface SettingsTabProps {
   provider: Provider;
   onSaved: () => void;
   setToast: (t: { message: string; type: "success" | "error" } | null) => void;
+  mode?: "admin" | "self";
 }
 
-function SettingsTab({ provider, onSaved, setToast }: SettingsTabProps) {
+function SettingsTab({ provider, onSaved, setToast, mode = "admin" }: SettingsTabProps) {
+  const isSelf = mode === "self";
   const [form, setForm] = useState({
     panelCapacity: provider.maxDailyPatients || 500,
     acceptsNewPatients: provider.acceptingNewPatients ?? true,
@@ -972,12 +986,20 @@ function SettingsTab({ provider, onSaved, setToast }: SettingsTabProps) {
 
   const save = async () => {
     setSaving(true);
-    const res = await providerService.update(provider.id, {
-      panelCapacity: form.panelCapacity,
-      acceptsNewPatients: form.acceptsNewPatients,
-      telehealthEnabled: form.telehealthEnabled,
-      panelStatus: form.panelStatus,
-    });
+    // In self mode the provider can only flip "Accepts new patients" —
+    // panel capacity, panel status, and the telehealth flag are
+    // practice-policy controls. Don't even include them in the
+    // payload (backend strips them anyway, but this keeps the wire
+    // shape honest about what was edited).
+    const payload = isSelf
+      ? { acceptsNewPatients: form.acceptsNewPatients }
+      : {
+          panelCapacity: form.panelCapacity,
+          acceptsNewPatients: form.acceptsNewPatients,
+          telehealthEnabled: form.telehealthEnabled,
+          panelStatus: form.panelStatus,
+        };
+    const res = await providerService.update(provider.id, payload);
     if (res.error) {
       setToast({ message: res.error, type: "error" });
     } else {
@@ -989,34 +1011,59 @@ function SettingsTab({ provider, onSaved, setToast }: SettingsTabProps) {
 
   return (
     <div className="glass rounded-2xl border border-gray-200/50 p-6 max-w-2xl">
-      <h3 className="text-sm font-semibold text-slate-900 mb-1">Practice settings</h3>
-      <p className="text-xs text-slate-500 mb-6">Panel size, telehealth, and intake controls.</p>
+      <h3 className="text-sm font-semibold text-slate-900 mb-1">{isSelf ? "Intake preferences" : "Practice settings"}</h3>
+      <p className="text-xs text-slate-500 mb-6">
+        {isSelf
+          ? "Toggle whether you're currently accepting new patients. Panel capacity and telehealth availability are managed by your practice."
+          : "Panel size, telehealth, and intake controls."}
+      </p>
 
       <div className="space-y-5">
-        <div>
-          <label className="block text-xs font-medium text-slate-700 mb-1.5">Panel capacity</label>
-          <input
-            type="number"
-            min={0}
-            value={form.panelCapacity}
-            onChange={e => setForm(f => ({ ...f, panelCapacity: parseInt(e.target.value) || 0 }))}
-            className="w-full max-w-xs border border-slate-200 rounded-lg px-3 py-2 text-sm"
-          />
-          <p className="text-xs text-slate-500 mt-1">Maximum number of active patients on this provider's panel.</p>
-        </div>
+        {!isSelf && (
+          <>
+            <div>
+              <label className="block text-xs font-medium text-slate-700 mb-1.5">Panel capacity</label>
+              <input
+                type="number"
+                min={0}
+                value={form.panelCapacity}
+                onChange={e => setForm(f => ({ ...f, panelCapacity: parseInt(e.target.value) || 0 }))}
+                className="w-full max-w-xs border border-slate-200 rounded-lg px-3 py-2 text-sm"
+              />
+              <p className="text-xs text-slate-500 mt-1">Maximum number of active patients on this provider's panel.</p>
+            </div>
 
-        <div>
-          <label className="block text-xs font-medium text-slate-700 mb-1.5">Panel status</label>
-          <select
-            value={form.panelStatus}
-            onChange={e => setForm(f => ({ ...f, panelStatus: e.target.value }))}
-            className="w-full max-w-xs border border-slate-200 rounded-lg px-3 py-2 text-sm bg-white"
-          >
-            <option value="open">Open — accepting new patients</option>
-            <option value="limited">Limited — selectively accepting</option>
-            <option value="closed">Closed — not accepting</option>
-          </select>
-        </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-700 mb-1.5">Panel status</label>
+              <select
+                value={form.panelStatus}
+                onChange={e => setForm(f => ({ ...f, panelStatus: e.target.value }))}
+                className="w-full max-w-xs border border-slate-200 rounded-lg px-3 py-2 text-sm bg-white"
+              >
+                <option value="open">Open — accepting new patients</option>
+                <option value="limited">Limited — selectively accepting</option>
+                <option value="closed">Closed — not accepting</option>
+              </select>
+            </div>
+          </>
+        )}
+
+        {isSelf && (
+          <div className="rounded-lg bg-slate-50 border border-slate-200 px-4 py-3 text-xs text-slate-600 space-y-1">
+            <div className="flex items-center justify-between">
+              <span className="text-slate-500">Panel capacity</span>
+              <span className="font-medium text-slate-700">{form.panelCapacity}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-slate-500">Panel status</span>
+              <span className="font-medium text-slate-700">{form.panelStatus}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-slate-500">Telehealth</span>
+              <span className="font-medium text-slate-700">{form.telehealthEnabled ? "Enabled" : "Disabled"}</span>
+            </div>
+          </div>
+        )}
 
         <div className="flex items-center gap-3 pt-2">
           <input
@@ -1029,16 +1076,18 @@ function SettingsTab({ provider, onSaved, setToast }: SettingsTabProps) {
           <label htmlFor="acceptsNew" className="text-sm text-slate-700">Accepts new patients</label>
         </div>
 
-        <div className="flex items-center gap-3">
-          <input
-            type="checkbox"
-            id="telehealth"
-            checked={form.telehealthEnabled}
-            onChange={e => setForm(f => ({ ...f, telehealthEnabled: e.target.checked }))}
-            className="w-4 h-4 rounded accent-teal-600"
-          />
-          <label htmlFor="telehealth" className="text-sm text-slate-700">Telehealth enabled</label>
-        </div>
+        {!isSelf && (
+          <div className="flex items-center gap-3">
+            <input
+              type="checkbox"
+              id="telehealth"
+              checked={form.telehealthEnabled}
+              onChange={e => setForm(f => ({ ...f, telehealthEnabled: e.target.checked }))}
+              className="w-4 h-4 rounded accent-teal-600"
+            />
+            <label htmlFor="telehealth" className="text-sm text-slate-700">Telehealth enabled</label>
+          </div>
+        )}
       </div>
 
       <div className="flex justify-end mt-6">

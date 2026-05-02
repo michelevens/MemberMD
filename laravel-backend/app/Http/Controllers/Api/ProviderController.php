@@ -135,11 +135,24 @@ class ProviderController extends Controller
     public function update(Request $request, string $id): JsonResponse
     {
         $user = $request->user();
-        abort_if(!$user->isPracticeAdmin(), 403);
 
+        // Practice admins can edit any provider in their tenant.
+        // Providers can edit only their own row (self-service "My
+        // Profile" tab in the provider's PracticePortal view).
         $provider = Provider::where('tenant_id', $user->tenant_id)->findOrFail($id);
+        if (!$user->isPracticeAdmin() && !$user->isSuperAdmin()) {
+            abort_if(!$user->isProvider() || $provider->user_id !== $user->id, 403);
+        }
 
-        $validated = $request->validate([
+        // Per-field rules. Earlier the validate list omitted
+        // first_name/last_name/email/phone even though the frontend
+        // sent them, so admins typing into the Profile tab quietly lost
+        // their changes. Now accepted for all callers.
+        $rules = [
+            'first_name' => 'sometimes|string|max:100',
+            'last_name' => 'sometimes|string|max:100',
+            'email' => 'sometimes|email|max:255',
+            'phone' => 'sometimes|nullable|string|max:30',
             'title' => 'nullable|string|max:50',
             'credentials' => 'nullable|string|max:50',
             'bio' => 'nullable|string|max:2000',
@@ -153,7 +166,22 @@ class ProviderController extends Controller
             'accepts_new_patients' => 'sometimes|boolean',
             'telehealth_enabled' => 'sometimes|boolean',
             'consultation_fee' => 'nullable|numeric|min:0',
-        ]);
+        ];
+        $validated = $request->validate($rules);
+
+        // Self-edit guardrails: a provider may not raise their own
+        // panel capacity, change panel_status, flip the practice-set
+        // telehealth flag, or set their consultation_fee. These are
+        // admin/practice-policy controls. We strip them silently on
+        // the server even if the SPA sends them — defense in depth.
+        if ($user->isProvider() && !$user->isPracticeAdmin() && !$user->isSuperAdmin()) {
+            unset(
+                $validated['panel_capacity'],
+                $validated['panel_status'],
+                $validated['telehealth_enabled'],
+                $validated['consultation_fee'],
+            );
+        }
 
         $provider->update($validated);
 

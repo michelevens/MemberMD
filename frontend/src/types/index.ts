@@ -67,6 +67,12 @@ export interface User {
   updatedAt: string;
   /** Operator memberships, if any. Empty array for non-operator users. */
   operators?: OperatorMembership[];
+  /** Linked Patient row id when role=patient. */
+  patientId?: string | null;
+  /** Linked Provider row id when role=provider — surfaced by /auth/me
+   *  so the provider's "My Profile" tab can mount ProviderDetailPage
+   *  against their own row without a separate /providers/me lookup. */
+  providerId?: string | null;
 }
 
 // ─── Practice ─────────────────────────────────────────────────────────────────
