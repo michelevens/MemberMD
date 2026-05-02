@@ -12,6 +12,7 @@ use App\Models\MembershipPlan;
 use App\Models\Practice;
 use App\Events\MembershipStateChanged;
 use App\Models\MembershipStateTransition;
+use App\Services\MembershipEnrollmentService;
 use App\Services\MembershipStateMachine;
 use App\Services\ProrationService;
 use App\Services\StripeSubscriptionService;
@@ -24,6 +25,7 @@ class MembershipController extends Controller
     public function __construct(
         private readonly StripeSubscriptionService $subscriptions,
         private readonly MembershipStateMachine $states,
+        private readonly MembershipEnrollmentService $enrollment,
     ) {
     }
 
@@ -78,151 +80,27 @@ class MembershipController extends Controller
             ->where('is_active', true)
             ->findOrFail($validated['plan_id']);
 
-        $existing = PatientMembership::where('tenant_id', $user->tenant_id)
-            ->where('patient_id', $validated['patient_id'])
-            ->where('status', 'active')
-            ->exists();
-
-        if ($existing) {
-            return response()->json([
-                'message' => 'Patient already has an active membership. Cancel or update the existing one first.',
-            ], 422);
-        }
-
+        $patient = Patient::where('tenant_id', $user->tenant_id)
+            ->findOrFail($validated['patient_id']);
         $practice = Practice::findOrFail($user->tenant_id);
 
-        // Resolve billing_mode. Three paths:
-        //
-        //   stripe  — practice can charge AND plan has a Stripe price for the
-        //             chosen frequency. Default for normal enrollment.
-        //   comped  — operator opted in via comp=true. Skips Stripe entirely.
-        //             Requires comp_reason for audit. risk_level=high.
-        //   manual  — practice has billing_enforced=false (still onboarding) OR
-        //             the plan isn't wired to Stripe yet. Membership is created
-        //             without billing; superadmin sees these in the dashboard
-        //             so practices can be nudged to finish setup.
-        //
-        // billing_enforced=true + missing Stripe wiring is the only hard fail —
-        // the operator explicitly said "bill or don't enroll", so we honor it.
-        $billingMode = $this->resolveBillingMode($practice, $plan, $billingFrequency, $isComp);
-
-        if ($billingMode === 'rejected') {
-            return response()->json([
-                'message' => 'Cannot enroll patient: practice requires billing but Stripe is not fully configured. '
-                    . 'Complete Stripe Connect onboarding and set a Stripe price on this plan, or comp the membership.',
-            ], 422);
-        }
-
-        $now = now();
-        $periodEnd = $billingFrequency === 'annual'
-            ? $now->copy()->addYear()
-            : $now->copy()->addMonth();
-
-        $membership = PatientMembership::create([
-            'tenant_id' => $user->tenant_id,
-            'patient_id' => $validated['patient_id'],
-            'plan_id' => $validated['plan_id'],
-            'status' => 'active',
-            'billing_mode' => $billingMode,
-            'comp_reason' => $isComp ? ($validated['comp_reason'] ?? null) : null,
-            'comped_by_user_id' => $isComp ? $user->id : null,
-            'billing_frequency' => $billingFrequency,
-            'started_at' => $now,
-            'current_period_start' => $now,
-            'current_period_end' => $periodEnd,
-            'last_state_change_at' => $now,
-        ]);
-
-        // Stripe path: hand off to StripeSubscriptionService. This creates the
-        // Customer (idempotent), the Subscription against the plan's price,
-        // and writes stripe_subscription_id + stripe_customer_id back onto
-        // the membership. Failure rolls back the membership row — we don't
-        // want a half-billed enrollment.
-        if ($billingMode === 'stripe') {
-            try {
-                $this->subscriptions->createSubscription(
-                    $membership,
-                    $validated['payment_method_id'] ?? null,
-                );
-                $membership->refresh();
-            } catch (\Throwable $e) {
-                Log::warning('Stripe subscription creation failed during enrollment', [
-                    'membership_id' => $membership->id,
-                    'patient_id' => $validated['patient_id'],
-                    'plan_id' => $validated['plan_id'],
-                    'error' => $e->getMessage(),
-                ]);
-                $membership->delete();
-                return response()->json([
-                    'message' => 'Could not start the subscription. ' . $e->getMessage(),
-                ], 422);
-            }
-        }
-
-        // New enrollments fire a synthetic prospect→active transition so
-        // outbound webhooks dispatch member.activated for fresh signups.
-        MembershipStateChanged::dispatch($membership, 'prospect', 'active', [
-            'source' => 'membership.store',
-            'created_by' => $user->id,
-            'billing_mode' => $billingMode,
-        ]);
-
-        PatientEntitlement::create([
-            'tenant_id' => $user->tenant_id,
-            'membership_id' => $membership->id,
-            'patient_id' => $validated['patient_id'],
-            'period_start' => $now->toDateString(),
-            'period_end' => $now->copy()->addMonth()->toDateString(),
-            'visits_allowed' => $plan->visits_per_month,
-            'visits_used' => 0,
-            'telehealth_sessions_used' => 0,
-            'messages_sent' => 0,
-            'rollover_visits' => 0,
-        ]);
-
-        $membership->load(['patient', 'plan', 'entitlements']);
-
-        if ($membership->patient && $membership->patient->email) {
-            \App\Services\MailDispatcher::send(
-                $membership->patient->email,
-                new \App\Mail\MembershipActivated(membership: $membership),
-                'membership-activated',
+        try {
+            $membership = $this->enrollment->enroll(
+                practice: $practice,
+                patient: $patient,
+                plan: $plan,
+                billingFrequency: $billingFrequency,
+                isComp: $isComp,
+                compReason: $validated['comp_reason'] ?? null,
+                sourceUserId: $user->id,
+                paymentMethodId: $validated['payment_method_id'] ?? null,
+                source: 'membership.store',
             );
+        } catch (\RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
         }
 
         return response()->json(['data' => $membership], 201);
-    }
-
-    /**
-     * Resolve which billing path to use for an enrollment.
-     *
-     * Returns one of:
-     *   - 'stripe'   — bill via the practice's Connect account
-     *   - 'comped'   — explicit comp, no billing
-     *   - 'manual'   — practice/plan not Stripe-ready, billing_enforced=false
-     *   - 'rejected' — practice/plan not Stripe-ready, billing_enforced=true
-     */
-    private function resolveBillingMode(
-        Practice $practice,
-        MembershipPlan $plan,
-        string $billingFrequency,
-        bool $isComp,
-    ): string {
-        if ($isComp) {
-            return 'comped';
-        }
-
-        $priceId = $billingFrequency === 'annual'
-            ? $plan->stripe_annual_price_id
-            : $plan->stripe_monthly_price_id;
-
-        $stripeReady = $practice->canAcceptPayments() && !empty($priceId);
-
-        if ($stripeReady) {
-            return 'stripe';
-        }
-
-        return $practice->billing_enforced ? 'rejected' : 'manual';
     }
 
     public function update(Request $request, string $id): JsonResponse

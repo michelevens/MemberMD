@@ -5,10 +5,11 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\MembershipPlan;
 use App\Models\Patient;
-use App\Models\PatientEntitlement;
 use App\Models\PatientMembership;
+use App\Models\Practice;
 use App\Models\User;
 use App\Models\WidgetSubmission;
+use App\Services\MembershipEnrollmentService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -31,6 +32,11 @@ use Illuminate\Support\Str;
  */
 class IntakeController extends Controller
 {
+    public function __construct(
+        private readonly MembershipEnrollmentService $enrollment,
+    ) {
+    }
+
     public function index(Request $request): JsonResponse
     {
         $user = $request->user();
@@ -84,6 +90,13 @@ class IntakeController extends Controller
 
         $data = $request->validate([
             'plan_id' => 'nullable|uuid|exists:membership_plans,id',
+            'billing_frequency' => 'sometimes|string|in:monthly,annual',
+            // Comp path: same semantics as MembershipController::store. When
+            // a practice has billing_enforced=true, this is the operator's
+            // way to bring a lead in without billing them (charity, staff,
+            // beta tester). Required reason for audit.
+            'comp' => 'sometimes|boolean',
+            'comp_reason' => 'required_if:comp,true|nullable|string|max:500',
         ]);
 
         $submission = WidgetSubmission::where('tenant_id', $user->tenant_id)
@@ -108,89 +121,107 @@ class IntakeController extends Controller
             ], 422);
         }
 
-        // Idempotency: if a Patient with this email already exists in
-        // the tenant, attach the new membership to that record instead
-        // of creating a duplicate.
+        // Phase 1: Patient creation (or re-use of existing). Wrapped in a
+        // DB transaction so the User + Patient rows commit together. The
+        // Stripe call lives OUTSIDE this transaction — we don't want a
+        // long-running external API call holding a DB transaction open,
+        // and we don't want a Stripe charge to happen if a later step
+        // rolls back.
         $existingPatient = Patient::where('tenant_id', $submission->tenant_id)
             ->where('email_blind_index', Patient::blindHash($email))
             ->first();
 
-        $result = DB::transaction(function () use ($submission, $existingPatient, $first, $last, $email, $phone, $dob, $data) {
-            $patient = $existingPatient;
-
-            if (!$patient) {
-                $patientUser = User::create([
-                    'tenant_id' => $submission->tenant_id,
-                    'name' => trim(($first ?? '') . ' ' . ($last ?? '')) ?: $email,
-                    'first_name' => $first,
-                    'last_name' => $last,
-                    'email' => $email,
-                    'password' => Hash::make(Str::random(32)),
-                    'role' => 'patient',
-                    'status' => 'active',
-                ]);
-
-                $patient = Patient::create([
-                    'tenant_id' => $submission->tenant_id,
-                    'user_id' => $patientUser->id,
-                    'first_name' => $first ?? 'New',
-                    'last_name' => $last ?? 'Patient',
-                    'email' => $email,
-                    'phone' => $phone,
-                    'date_of_birth' => $dob,
-                    'is_active' => true,
-                ]);
+        $patient = DB::transaction(function () use ($submission, $existingPatient, $first, $last, $email, $phone, $dob) {
+            if ($existingPatient) {
+                return $existingPatient;
             }
 
-            $membership = null;
-            if (!empty($data['plan_id'])) {
-                $plan = MembershipPlan::where('tenant_id', $submission->tenant_id)
-                    ->where('id', $data['plan_id'])
-                    ->first();
-                if ($plan) {
-                    $now = now();
-                    $membership = PatientMembership::create([
-                        'tenant_id' => $submission->tenant_id,
-                        'patient_id' => $patient->id,
-                        'plan_id' => $plan->id,
-                        'status' => 'active',
-                        'billing_frequency' => 'monthly',
-                        'started_at' => $now,
-                        'current_period_start' => $now,
-                        'current_period_end' => $now->copy()->addMonth(),
-                        'last_state_change_at' => $now,
-                    ]);
-
-                    // Seed first-period entitlement counters so the patient
-                    // portal doesn't show 0/0 visits on day one.
-                    PatientEntitlement::create([
-                        'tenant_id' => $submission->tenant_id,
-                        'membership_id' => $membership->id,
-                        'patient_id' => $patient->id,
-                        'period_start' => $now->toDateString(),
-                        'period_end' => $now->copy()->addMonth()->toDateString(),
-                        'visits_allowed' => $plan->visits_per_month ?? 0,
-                        'visits_used' => 0,
-                        'telehealth_sessions_used' => 0,
-                        'messages_sent' => 0,
-                        'rollover_visits' => 0,
-                    ]);
-                }
-            }
-
-            $submission->update([
-                'status' => 'converted',
-                'converted_patient_id' => $patient->id,
-                'converted_at' => now(),
+            $patientUser = User::create([
+                'tenant_id' => $submission->tenant_id,
+                'name' => trim(($first ?? '') . ' ' . ($last ?? '')) ?: $email,
+                'first_name' => $first,
+                'last_name' => $last,
+                'email' => $email,
+                'password' => Hash::make(Str::random(32)),
+                'role' => 'patient',
+                'status' => 'active',
             ]);
 
-            return ['patient' => $patient, 'membership' => $membership];
+            return Patient::create([
+                'tenant_id' => $submission->tenant_id,
+                'user_id' => $patientUser->id,
+                'first_name' => $first ?? 'New',
+                'last_name' => $last ?? 'Patient',
+                'email' => $email,
+                'phone' => $phone,
+                'date_of_birth' => $dob,
+                'is_active' => true,
+            ]);
         });
+
+        // Phase 2: Membership enrollment via the shared service. Honors
+        // billing_mode (stripe / comped / manual / rejected) so a practice
+        // with billing_enforced=true can't accidentally create a free
+        // membership through the intake back door. If no plan_id was
+        // passed, this is a lead-only conversion (Patient created, no
+        // membership) — the practice can enroll later from the patient
+        // detail page.
+        $membership = null;
+        if (!empty($data['plan_id'])) {
+            $plan = MembershipPlan::where('tenant_id', $submission->tenant_id)
+                ->where('id', $data['plan_id'])
+                ->where('is_active', true)
+                ->first();
+
+            if (!$plan) {
+                return response()->json([
+                    'message' => 'Plan not found or inactive.',
+                ], 422);
+            }
+
+            $practice = Practice::findOrFail($submission->tenant_id);
+
+            try {
+                $membership = $this->enrollment->enroll(
+                    practice: $practice,
+                    patient: $patient,
+                    plan: $plan,
+                    billingFrequency: $data['billing_frequency'] ?? 'monthly',
+                    isComp: (bool) ($data['comp'] ?? false),
+                    compReason: $data['comp_reason'] ?? null,
+                    sourceUserId: $user->id,
+                    paymentMethodId: null,
+                    source: 'intake.convert',
+                );
+            } catch (\RuntimeException $e) {
+                // Patient is real and saved — the practice can retry the
+                // membership creation from the patient detail page once
+                // they've fixed the underlying issue (sent a payment link,
+                // finished Connect onboarding, etc.). Submission stays
+                // 'pending' so it remains in the review queue.
+                return response()->json([
+                    'data' => [
+                        'patient' => $patient,
+                        'membership' => null,
+                        'submission_id' => $submission->id,
+                    ],
+                    'message' => 'Patient created but membership could not be set up: ' . $e->getMessage(),
+                ], 422);
+            }
+        }
+
+        // Phase 3: Mark the submission converted. Done last so a failed
+        // membership attempt leaves the submission in the queue.
+        $submission->update([
+            'status' => 'converted',
+            'converted_patient_id' => $patient->id,
+            'converted_at' => now(),
+        ]);
 
         return response()->json([
             'data' => [
-                'patient' => $result['patient'],
-                'membership' => $result['membership'],
+                'patient' => $patient,
+                'membership' => $membership,
                 'submission_id' => $submission->id,
             ],
             'message' => 'Submission converted to patient.',
