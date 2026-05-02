@@ -34,6 +34,7 @@ class Patient extends Model
         'pharmacy_name', 'pharmacy_address', 'pharmacy_phone',
         'referral_source', 'is_active',
         'employer_id', 'employer_group_number',
+        'timezone',
     ];
 
     protected $casts = [

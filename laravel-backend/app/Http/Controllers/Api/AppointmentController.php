@@ -102,14 +102,19 @@ class AppointmentController extends Controller
         }
 
         // Validate provider availability — interpret scheduled_at in the
-        // practice's local timezone, NOT UTC. ProviderAvailability rows
-        // store wall-clock hours ("9–5") meaning 9–5 in the practice's
-        // local time. The frontend sends scheduled_at as ISO UTC, so a
-        // 3:00 PM ET booking arrives as 19:00 UTC; without this
-        // conversion the H:i:s extraction lands at 19:00 and the 9–5
-        // window rejects every afternoon booking outside UTC.
+        // PROVIDER'S local timezone. Working hours ("9–5") mean 9–5 in
+        // the provider's clock, not the practice's, since MemberMD is
+        // telehealth-first and a Florida provider may travel while
+        // still operating on Eastern. Fall back to practice tz when
+        // provider tz is unset (existing rows pre-migration), then to
+        // America/New_York as a final guard. Without this conversion
+        // the H:i:s extraction reads UTC hours and rejects every
+        // afternoon booking outside UTC.
+        $providerRow = \App\Models\Provider::where('tenant_id', $user->tenant_id)
+            ->where('id', $validated['provider_id'])
+            ->first();
         $practice = \App\Models\Practice::find($user->tenant_id);
-        $tz = $practice?->timezone ?: 'America/New_York';
+        $tz = $providerRow?->timezone ?: ($practice?->timezone ?: 'America/New_York');
         $scheduledAt = \Carbon\Carbon::parse($validated['scheduled_at'])->setTimezone($tz);
         $dayOfWeek = $scheduledAt->dayOfWeek;
         $time = $scheduledAt->format('H:i:s');

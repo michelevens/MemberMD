@@ -173,6 +173,11 @@ class ProviderController extends Controller
             'accepts_new_patients' => 'sometimes|boolean',
             'telehealth_enabled' => 'sometimes|boolean',
             'consultation_fee' => 'nullable|numeric|min:0',
+            // IANA tz — "America/New_York", etc. Authoritative for
+            // ProviderAvailability windows in AppointmentController::store.
+            // Validated as a non-empty string here; bad values would
+            // surface as availability misses rather than crashes.
+            'timezone' => 'nullable|string|max:50',
         ];
         $validated = $request->validate($rules);
 

@@ -363,6 +363,18 @@ interface ProfileTabProps {
   setToast: (t: { message: string; type: "success" | "error" } | null) => void;
 }
 
+// Common US tzs the picker exposes. Other IANA tzs can be entered via
+// the freeform field below the dropdown.
+const PROVIDER_TZ_OPTIONS: { value: string; label: string }[] = [
+  { value: "America/New_York", label: "Eastern Time (New York)" },
+  { value: "America/Chicago", label: "Central Time (Chicago)" },
+  { value: "America/Denver", label: "Mountain Time (Denver)" },
+  { value: "America/Phoenix", label: "Arizona (no DST) (Phoenix)" },
+  { value: "America/Los_Angeles", label: "Pacific Time (Los Angeles)" },
+  { value: "America/Anchorage", label: "Alaska Time (Anchorage)" },
+  { value: "Pacific/Honolulu", label: "Hawaii (Honolulu)" },
+];
+
 function ProfileTab({ provider, onSaved, setToast }: ProfileTabProps) {
   const [form, setForm] = useState({
     firstName: provider.user?.firstName || "",
@@ -374,6 +386,7 @@ function ProfileTab({ provider, onSaved, setToast }: ProfileTabProps) {
     bio: provider.bio || "",
     npiNumber: provider.npi || "",
     languages: Array.isArray(provider.languages) ? provider.languages : [],
+    timezone: provider.timezone || "",
   });
   const [saving, setSaving] = useState(false);
   const [npiLoading, setNpiLoading] = useState(false);
@@ -473,6 +486,28 @@ function ProfileTab({ provider, onSaved, setToast }: ProfileTabProps) {
             onChange={e => setForm(f => ({ ...f, bio: e.target.value }))}
             placeholder="Patient-facing professional bio"
           />
+        </div>
+
+        <div className="sm:col-span-2">
+          <label className="block text-xs font-medium text-slate-700 mb-1.5">Working timezone</label>
+          <p className="text-xs text-slate-500 mb-2">
+            Your weekly availability hours are interpreted in this zone. Patients in other zones see slots in their local time with this one shown alongside.
+          </p>
+          <select
+            value={PROVIDER_TZ_OPTIONS.some(o => o.value === form.timezone) ? form.timezone : (form.timezone ? "__custom__" : "")}
+            onChange={e => {
+              const v = e.target.value;
+              if (v === "__custom__") return;
+              setForm(f => ({ ...f, timezone: v }));
+            }}
+            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm bg-white"
+          >
+            <option value="">Use practice default</option>
+            {PROVIDER_TZ_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+            {form.timezone && !PROVIDER_TZ_OPTIONS.some(o => o.value === form.timezone) && (
+              <option value="__custom__">{form.timezone} (custom)</option>
+            )}
+          </select>
         </div>
 
         <div className="sm:col-span-2">

@@ -25,6 +25,7 @@ class Provider extends Model
         'accepts_new_patients', 'telehealth_enabled',
         'consultation_fee',
         'ical_feed_token',
+        'timezone',
     ];
 
     protected $casts = [

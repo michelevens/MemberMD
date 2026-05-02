@@ -165,6 +165,10 @@ export interface Provider {
   /** Token used to construct the provider's iCal feed URL. Public —
    *  whoever has the URL can subscribe. Regenerate to revoke. */
   icalFeedToken?: string | null;
+  /** IANA tz the provider works from ("America/New_York"). Authoritative
+   *  for ProviderAvailability windows in the booking flow. Falls back
+   *  to the practice's tz when null (existing rows pre-migration). */
+  timezone?: string | null;
   user?: User;
   specialty?: MasterSpecialty;
   createdAt: string;

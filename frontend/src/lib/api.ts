@@ -534,6 +534,11 @@ function toProviderApiPayload(input: Record<string, unknown>): Record<string, un
   if (Array.isArray(input.specialties)) out.specialties = input.specialties;
   if (Array.isArray(input.languages)) out.languages = input.languages;
   if (Array.isArray(input.licensedStates)) out.licensed_states = input.licensedStates;
+  if (input.timezone !== undefined) {
+    // Empty string in the picker means "fall back to practice tz" — send
+    // null so the backend column resets to nullable.
+    out.timezone = input.timezone === "" ? null : input.timezone;
+  }
   return out;
 }
 

@@ -54,6 +54,10 @@ interface MockProvider {
   specialty: string;
   avatarInitials: string;
   nextAvailable: string;
+  /** IANA tz string ("America/New_York" etc). Authoritative for the
+   *  ProviderAvailability windows. Falls back to practice tz on the
+   *  backend when unset. Drives the dual-tz labels in the time picker. */
+  timezone?: string | null;
 }
 
 const MOCK_PROVIDERS: MockProvider[] = [
@@ -107,6 +111,11 @@ export function AppointmentBookingWidget({ onClose, onBooked }: AppointmentBooki
   const [selectedType, setSelectedType] = useState<MockAppointmentType | null>(null);
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [selectedTime, setSelectedTime] = useState<string | null>(null);
+  // When a real (API-mode) slot is picked we also stash the underlying
+  // UTC instant — handleBook sends that directly so we don't have to
+  // re-parse the AM/PM label and re-anchor it in browser tz, which is
+  // what was causing the cross-tz booking bug.
+  const [selectedSlotInstant, setSelectedSlotInstant] = useState<Date | null>(null);
   const [notes, setNotes] = useState("");
   const [isRecurring, setIsRecurring] = useState(false);
   const [recurrenceFreq, setRecurrenceFreq] = useState<"weekly" | "biweekly" | "monthly">("weekly");
@@ -135,6 +144,9 @@ export function AppointmentBookingWidget({ onClose, onBooked }: AppointmentBooki
   // patient can't pick a slot that the API would just reject.
   const [providerAvailability, setProviderAvailability] = useState<ProviderAvailability[] | null>(null);
   const [availabilityLoading, setAvailabilityLoading] = useState(false);
+  // Practice tz from /auth/me — fallback when the chosen provider
+  // doesn't have their own tz set yet (existing rows pre-migration).
+  const [practiceTz, setPracticeTz] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -148,6 +160,8 @@ export function AppointmentBookingWidget({ onClose, onBooked }: AppointmentBooki
         const meData = meRes.data as any;
         const pid = meData?.patient?.id ?? meData?.patientId ?? null;
         if (!cancelled && pid) setPatientId(pid);
+        const ptz = meData?.practice?.timezone ?? null;
+        if (!cancelled && ptz) setPracticeTz(ptz);
       } catch { /* ignore */ }
 
       // 2) Load providers + map to the widget's display shape.
@@ -167,6 +181,7 @@ export function AppointmentBookingWidget({ onClose, onBooked }: AppointmentBooki
             specialty: (Array.isArray(p.specialties) ? p.specialties[0] : p.specialty) || "",
             avatarInitials: initials,
             nextAvailable: "",
+            timezone: (p.timezone ?? null) as string | null,
           };
         });
         if (!cancelled) setApiProviders(providers);
@@ -250,9 +265,66 @@ export function AppointmentBookingWidget({ onClose, onBooked }: AppointmentBooki
     return days;
   }, [calendarMonth]);
 
+  // ─── Timezone helpers ──────────────────────────────────────────────────
+  // MemberMD is telehealth-first — a Florida-based provider sees clients
+  // across all five US zones. ProviderAvailability windows are stored as
+  // wall-clock hours in the PROVIDER'S local tz. Slot labels render in
+  // the patient's browser tz so they pick a slot that makes sense to
+  // them. handleBook sends the underlying UTC instant.
+
+  /** Patient browser tz, from Intl. */
+  const patientTz = useMemo(() => Intl.DateTimeFormat().resolvedOptions().timeZone, []);
+
+  /** Provider's effective tz: own value, then practice fallback,
+   *  then America/New_York as a last guard so we never produce
+   *  undefined behavior on a malformed setup. */
+  const providerTz = useMemo(() => {
+    return selectedProvider?.timezone || practiceTz || "America/New_York";
+  }, [selectedProvider, practiceTz]);
+
+  const showDualTz = patientTz !== providerTz;
+
+  /** Compute a Date representing year/month/day at hour:minute interpreted
+   *  IN tz `tz`. The standard trick: take Date.UTC of those wall-clock
+   *  values, then subtract the offset that `tz` would render at that
+   *  instant — `toLocaleString` gives us the tz-localized rendering
+   *  which we re-parse. Handles DST correctly because the runtime
+   *  knows the tz rules for any given moment. */
+  function instantInTz(year: number, month0: number, day: number, hour: number, minute: number, tz: string): Date {
+    const utcMs = Date.UTC(year, month0, day, hour, minute);
+    const localized = new Date(utcMs).toLocaleString("en-US", {
+      timeZone: tz,
+      hour12: false,
+      year: "numeric", month: "2-digit", day: "2-digit",
+      hour: "2-digit", minute: "2-digit", second: "2-digit",
+    });
+    // localized format: "MM/DD/YYYY, HH:MM:SS" — parse back to UTC.
+    const m = localized.match(/(\d+)\/(\d+)\/(\d+),?\s+(\d+):(\d+):(\d+)/);
+    if (!m) return new Date(utcMs);
+    const [, mm, dd, yy, hh, mi, ss] = m.map(Number) as unknown as number[];
+    const tzAsUtcMs = Date.UTC(yy, mm - 1, dd, hh, mi, ss);
+    const offset = tzAsUtcMs - utcMs;
+    return new Date(utcMs - offset);
+  }
+
+  /** Format a Date in a given tz as "h:mm AM/PM". */
+  function fmtTimeInTz(d: Date, tz: string): string {
+    return new Intl.DateTimeFormat("en-US", {
+      timeZone: tz,
+      hour: "numeric", minute: "2-digit", hour12: true,
+    }).format(d);
+  }
+
   // Set of weekday numbers (0=Sun..6=Sat) the provider has at least one
-  // is_available window for. In demo mode, fall back to "Mon–Sat" so the
-  // mock calendar keeps its previous behavior.
+  // is_available window for. Day-of-week is interpreted in PROVIDER tz —
+  // not patient tz — because availability is anchored on the provider's
+  // local calendar. In demo mode, fall back to "Mon–Sat" so the mock
+  // calendar keeps its previous behavior.
+  //
+  // NOTE: We approximate "calendar day overlap" with the simpler
+  // "day-of-week" check, which is correct as long as no provider works
+  // overnight across a date boundary in their tz. The whole codebase
+  // assumes that today.
   const workingDaysOfWeek = useMemo<Set<number>>(() => {
     if (demoMode || !providerAvailability) return new Set([1, 2, 3, 4, 5, 6]);
     const s = new Set<number>();
@@ -270,49 +342,63 @@ export function AppointmentBookingWidget({ onClose, onBooked }: AppointmentBooki
     return workingDaysOfWeek.has(d.getDay());
   }
 
+  /** Each slot is the underlying UTC instant; the labels are derived
+   *  client-side. Booking sends the UTC ISO directly so the backend
+   *  doesn't have to second-guess. */
+  interface SlotInstant {
+    instant: Date;
+    /** Patient-tz label, e.g. "12:00 PM" — what the button shows large. */
+    patientLabel: string;
+    /** Provider-tz label, secondary line shown when tz differs. */
+    providerLabel: string;
+  }
+
   // Generate display time slots from the provider's availability windows
-  // for the selected date. Slots are 30-minute increments, and we stop
-  // emitting them once a slot + visit duration would run past the window
-  // end — so a 60-min visit in a 9:00–10:00 window gets exactly one slot.
-  // Returned strings match the existing 12h "h:mm AM/PM" format that
-  // handleBook already knows how to parse.
-  const computedTimeSlots = useMemo<string[]>(() => {
+  // for the selected date. Slots are 30-minute increments anchored in
+  // PROVIDER tz; each yields a UTC instant, then dual-tz labels.
+  const computedTimeSlots = useMemo<SlotInstant[]>(() => {
     if (demoMode || !selectedDate || !providerAvailability) return [];
+    // The selectedDate came from the calendar grid (browser tz, midnight
+    // local). What we need is "the calendar day in PROVIDER tz". Take
+    // the y/m/d as-rendered in browser, then build instants anchored in
+    // provider tz on those same y/m/d. That keeps the calendar grid
+    // intuitive (clicking "May 2" books slots on May 2 in provider's
+    // local calendar) and matches the day-of-week filter above.
+    const y = selectedDate.getFullYear();
+    const mo = selectedDate.getMonth();
+    const d = selectedDate.getDate();
     const dow = selectedDate.getDay();
     const windows = providerAvailability.filter(a => a.isAvailable && a.dayOfWeek === dow);
     if (windows.length === 0) return [];
     const duration = selectedType?.durationMinutes ?? 30;
-    const out: string[] = [];
-    const seen = new Set<string>();
-    const fmt = (h: number, m: number) => {
-      const meridiem = h >= 12 ? "PM" : "AM";
-      const display = ((h + 11) % 12) + 1;
-      return `${display}:${m.toString().padStart(2, "0")} ${meridiem}`;
-    };
+    const out: SlotInstant[] = [];
+    const seenInstants = new Set<number>();
     for (const w of windows) {
       const [sh, sm] = w.startTime.split(":").map(Number);
       const [eh, em] = w.endTime.split(":").map(Number);
       const startMin = sh * 60 + sm;
       const endMin = eh * 60 + em;
-      // Stop at endMin - duration so the visit fits inside the window;
-      // backend's overlap check would otherwise still pass the start but
-      // a 30-min visit ending 30 min after window close looks wrong.
+      // Stop at endMin - duration so the visit fits inside the window.
       for (let t = startMin; t + duration <= endMin; t += 30) {
         const h = Math.floor(t / 60);
         const m = t % 60;
-        const label = fmt(h, m);
-        if (!seen.has(label)) {
-          seen.add(label);
-          out.push(label);
-        }
+        const instant = instantInTz(y, mo, d, h, m, providerTz);
+        const ms = instant.getTime();
+        if (seenInstants.has(ms)) continue;
+        seenInstants.add(ms);
+        out.push({
+          instant,
+          patientLabel: fmtTimeInTz(instant, patientTz),
+          providerLabel: fmtTimeInTz(instant, providerTz),
+        });
       }
     }
+    out.sort((a, b) => a.instant.getTime() - b.instant.getTime());
     return out;
-  }, [demoMode, selectedDate, providerAvailability, selectedType]);
+  }, [demoMode, selectedDate, providerAvailability, selectedType, providerTz, patientTz]);
 
-  // Final slot list the picker renders: real availability in API mode,
-  // the static demo list in demo mode. handleBook parses both.
-  const visibleTimeSlots = demoMode ? MOCK_TIME_SLOTS : computedTimeSlots;
+  // Demo mode keeps the static label list; API mode uses computed slots.
+  const visibleTimeSlots: (string | SlotInstant)[] = demoMode ? MOCK_TIME_SLOTS : computedTimeSlots;
 
   function prevMonth() {
     setCalendarMonth(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() - 1, 1));
@@ -329,22 +415,30 @@ export function AppointmentBookingWidget({ onClose, onBooked }: AppointmentBooki
     setBooking(true);
     setBookingError(null);
 
-    // selectedTime is rendered as 12h "h:mm AM/PM" (e.g. "1:00 PM"),
-    // so naive split-on-colon would book "1:00 PM" as 01:00 UTC
-    // and the backend's `after:now` rule would reject every PM slot
-    // for the rest of the day. Parse the meridiem too.
-    const tm = selectedTime.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)?$/i);
-    let hours = 0;
-    let minutes = 0;
-    if (tm) {
-      hours = parseInt(tm[1], 10);
-      minutes = parseInt(tm[2], 10);
-      const meridiem = tm[3]?.toUpperCase();
-      if (meridiem === "PM" && hours < 12) hours += 12;
-      if (meridiem === "AM" && hours === 12) hours = 0;
+    // Two paths to compose `scheduled`:
+    //   API mode: we already stashed the precise UTC instant when the
+    //   patient picked a real slot — use it directly. This is what
+    //   keeps the cross-tz math correct (slot was anchored in provider
+    //   tz at generation time).
+    //   Demo mode: parse the 12h label and compose with selectedDate
+    //   in browser tz — fine for the demo flow.
+    let scheduled: Date;
+    if (selectedSlotInstant) {
+      scheduled = selectedSlotInstant;
+    } else {
+      const tm = selectedTime.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)?$/i);
+      let hours = 0;
+      let minutes = 0;
+      if (tm) {
+        hours = parseInt(tm[1], 10);
+        minutes = parseInt(tm[2], 10);
+        const meridiem = tm[3]?.toUpperCase();
+        if (meridiem === "PM" && hours < 12) hours += 12;
+        if (meridiem === "AM" && hours === 12) hours = 0;
+      }
+      scheduled = new Date(selectedDate);
+      scheduled.setHours(hours, minutes, 0, 0);
     }
-    const scheduled = new Date(selectedDate);
-    scheduled.setHours(hours, minutes, 0, 0);
 
     // Belt-and-suspenders: backend rejects past times with a generic
     // "scheduled_at must be a date after now" — catch it here with a
@@ -622,7 +716,7 @@ export function AppointmentBookingWidget({ onClose, onBooked }: AppointmentBooki
                     // Parse as local date so we don't shift a day in non-UTC timezones.
                     const [y, m, d] = v.split("-").map(Number);
                     setSelectedDate(new Date(y, (m ?? 1) - 1, d ?? 1));
-                    setSelectedTime(null);
+                    setSelectedTime(null); setSelectedSlotInstant(null);
                   }}
                   className="w-full px-3 py-3 rounded-lg border text-base"
                   style={{ borderColor: C.slate200, color: C.navy800, backgroundColor: C.white }}
@@ -673,7 +767,7 @@ export function AppointmentBookingWidget({ onClose, onBooked }: AppointmentBooki
                         onClick={() => {
                           if (available) {
                             setSelectedDate(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth(), day));
-                            setSelectedTime(null);
+                            setSelectedTime(null); setSelectedSlotInstant(null);
                           }
                         }}
                         disabled={!available}
@@ -701,7 +795,12 @@ export function AppointmentBookingWidget({ onClose, onBooked }: AppointmentBooki
                     {selectedDate.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}
                   </p>
                   <div className="text-xs mb-2" style={{ color: C.slate400 }}>
-                    Timezone: {Intl.DateTimeFormat().resolvedOptions().timeZone}
+                    Your timezone: {patientTz}
+                    {!demoMode && showDualTz && (
+                      <span className="ml-2 text-amber-600">
+                        · Provider is in {providerTz} — slots show your local time with provider time below.
+                      </span>
+                    )}
                   </div>
                   {!demoMode && availabilityLoading && (
                     <div className="text-center py-6 text-sm" style={{ color: C.slate500 }}>
@@ -717,29 +816,44 @@ export function AppointmentBookingWidget({ onClose, onBooked }: AppointmentBooki
                   )}
                   <div className="grid grid-cols-2 gap-2">
                     {visibleTimeSlots.map((slot) => {
-                      const selected = selectedTime === slot;
-                      // Disable slots that are already in the past when
-                      // the patient is booking for today — the backend
-                      // would reject them with `scheduled_at after:now`.
-                      const m = slot.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)?$/i);
-                      let slotHour = 0;
-                      let slotMin = 0;
-                      if (m) {
-                        slotHour = parseInt(m[1], 10);
-                        slotMin = parseInt(m[2], 10);
-                        const mer = m[3]?.toUpperCase();
-                        if (mer === "PM" && slotHour < 12) slotHour += 12;
-                        if (mer === "AM" && slotHour === 12) slotHour = 0;
+                      // Two slot types: demo strings ("9:00 AM") and real
+                      // SlotInstant objects from computedTimeSlots. Treat
+                      // them uniformly via small extractors.
+                      const isInstant = typeof slot !== "string";
+                      const label = isInstant ? slot.patientLabel : slot;
+                      const subLabel = isInstant && showDualTz ? slot.providerLabel : null;
+                      const key = isInstant ? slot.instant.toISOString() : slot;
+                      const selected = selectedTime === label && (
+                        !isInstant || selectedSlotInstant?.getTime() === slot.instant.getTime()
+                      );
+                      // Past-slot disabling: real slots use the underlying
+                      // UTC instant directly. Demo slots fall back to
+                      // composing into selectedDate in browser tz (good
+                      // enough for the demo flow).
+                      let isPast = false;
+                      if (isInstant) {
+                        isPast = slot.instant.getTime() <= Date.now();
+                      } else {
+                        const m = slot.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)?$/i);
+                        let slotHour = 0; let slotMin = 0;
+                        if (m) {
+                          slotHour = parseInt(m[1], 10);
+                          slotMin = parseInt(m[2], 10);
+                          const mer = m[3]?.toUpperCase();
+                          if (mer === "PM" && slotHour < 12) slotHour += 12;
+                          if (mer === "AM" && slotHour === 12) slotHour = 0;
+                        }
+                        const slotDate = new Date(selectedDate);
+                        slotDate.setHours(slotHour, slotMin, 0, 0);
+                        isPast = slotDate.getTime() <= Date.now();
                       }
-                      const slotDate = new Date(selectedDate);
-                      slotDate.setHours(slotHour, slotMin, 0, 0);
-                      const isPast = slotDate.getTime() <= Date.now();
                       return (
                         <button
-                          key={slot}
+                          key={key}
                           disabled={isPast}
                           onClick={() => {
-                            setSelectedTime(slot);
+                            setSelectedTime(label);
+                            setSelectedSlotInstant(isInstant ? slot.instant : null);
                             setStep(4);
                           }}
                           className="py-2.5 rounded-lg text-sm font-medium transition-all disabled:cursor-not-allowed"
@@ -750,7 +864,12 @@ export function AppointmentBookingWidget({ onClose, onBooked }: AppointmentBooki
                             textDecoration: isPast ? "line-through" : "none",
                           }}
                         >
-                          {slot}
+                          <div>{label}</div>
+                          {subLabel && (
+                            <div className="text-[10px] mt-0.5" style={{ color: C.slate400 }}>
+                              {subLabel} provider
+                            </div>
+                          )}
                         </button>
                       );
                     })}

@@ -875,6 +875,10 @@ class AuthController extends Controller
                 'logo_url' => $practice->logo_url,
                 'primary_color' => $practice->primary_color,
                 'tagline' => $practice->tagline,
+                // Practice tz — used as a fallback when a provider hasn't
+                // set their own tz, and as the anchor for billing /
+                // admin reports that aren't patient-facing.
+                'timezone' => $practice->timezone,
             ] : null,
             'operators' => $operators,
         ];
