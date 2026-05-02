@@ -21,7 +21,12 @@ class MembershipPlanController extends Controller
     public function index(Request $request): JsonResponse
     {
         $user = $request->user();
+        // Eager-load entitlements so patient choosers can render
+        // "What's included" bullets without a per-plan show() round-trip.
+        // Plan lists are short (most practices have 3-5 plans) and admin
+        // tables never paginate this either, so always-include is fine.
         $query = MembershipPlan::where('tenant_id', $user->tenant_id)
+            ->with(['planEntitlements.entitlementType'])
             ->withCount(['memberships', 'planEntitlements']);
 
         // Non-admins only see active plans

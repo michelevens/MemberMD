@@ -509,6 +509,47 @@ function formatDate(dateStr: string) {
   });
 }
 
+/**
+ * Render a PlanEntitlement row as a human-readable bullet — what the
+ * patient sees on the dashboard plan cards + the plan-detail modal.
+ *
+ * Reads quantity_limit + is_unlimited + period_type + entitlementType
+ * .name + .unit_of_measure to produce strings like:
+ *   - "Unlimited telehealth visits"
+ *   - "5 office visits / month"
+ *   - "Up to 10 messages / month"
+ *   - "Lab discount" (when there's no quantity)
+ *
+ * Defensive on shape — we get either snake_case (legacy) or camelCase
+ * (post apiFetch transform) keys depending on how the data arrived.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function formatEntitlementLabel(e: any): string {
+  if (!e) return "";
+  const name: string = e?.entitlementType?.name ?? e?.entitlement_type?.name ?? "Benefit";
+  const unit: string = e?.entitlementType?.unitOfMeasure ?? e?.entitlement_type?.unit_of_measure ?? "";
+  const qty: number | null = e?.quantityLimit ?? e?.quantity_limit ?? null;
+  const unlimited: boolean = Boolean(e?.isUnlimited ?? e?.is_unlimited);
+  const period: string = String(e?.periodType ?? e?.period_type ?? "").toLowerCase();
+
+  // Pluralize unit when qty != 1.
+  const unitDisplay = unit && qty !== 1 ? `${unit}s` : unit;
+  // "/ month" suffix only when the cap is recurring (period present).
+  const periodSuffix = period && period !== "lifetime" ? ` / ${period}` : "";
+
+  if (unlimited) {
+    return unit
+      ? `Unlimited ${name.toLowerCase()} ${unitDisplay}`.trim()
+      : `Unlimited ${name.toLowerCase()}`;
+  }
+  if (qty != null && qty > 0) {
+    return unit
+      ? `${qty} ${name.toLowerCase()} ${unitDisplay}${periodSuffix}`.trim()
+      : `${qty} ${name.toLowerCase()}${periodSuffix}`.trim();
+  }
+  return name;
+}
+
 // ─── Main Component ──────────────────────────────────────────────────────────
 
 export function PatientPortal() {
@@ -526,6 +567,32 @@ export function PatientPortal() {
   const [selectedPlanForDetail, setSelectedPlanForDetail] = useState<any | null>(null);
   const [enrollingPlanId, setEnrollingPlanId] = useState<string | null>(null);
   const [enrollError, setEnrollError] = useState<string | null>(null);
+
+  // Fallback: when the modal opens with a plan that doesn't include
+  // its entitlements (e.g. cached older response shape), fetch the
+  // full plan via getById and merge it in. The user sees the basic
+  // info immediately and the bullets fill in once the fetch lands.
+  useEffect(() => {
+    if (!selectedPlanForDetail) return;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const p: any = selectedPlanForDetail;
+    const hasEntitlements = (p.planEntitlements ?? p.plan_entitlements ?? []).length > 0;
+    if (hasEntitlements) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await membershipPlanService.getById(p.id);
+        if (!cancelled && res.data) {
+          // Merge so we keep the original price/desc but get the
+          // full relations (entitlements, addons, program).
+          setSelectedPlanForDetail((prev: typeof p) =>
+            prev?.id === p.id ? { ...prev, ...res.data } : prev,
+          );
+        }
+      } catch { /* fall through with what we have */ }
+    })();
+    return () => { cancelled = true; };
+  }, [selectedPlanForDetail]);
 
   const [activeThread, setActiveThread] = useState<string | null>(null);
   const [messageInput, setMessageInput] = useState("");
@@ -1224,6 +1291,12 @@ export function PatientPortal() {
                 const monthly = plan.monthlyPrice ?? plan.monthly_price ?? null;
                 const annual = plan.annualPrice ?? plan.annual_price ?? null;
                 const description = plan.description || plan.tagline || "";
+                // Top 3 entitlements as preview bullets so the patient
+                // sees what they get before clicking into the modal.
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                const entRows: any[] = (plan.planEntitlements ?? plan.plan_entitlements ?? []) as any[];
+                const previewLabels = entRows.map(formatEntitlementLabel).filter(Boolean).slice(0, 3);
+                const moreCount = Math.max(0, entRows.length - previewLabels.length);
                 return (
                   <button
                     key={plan.id}
@@ -1254,6 +1327,21 @@ export function PatientPortal() {
                       <p className="text-xs mt-2 line-clamp-2" style={{ color: COLORS.slate500 }}>
                         {description}
                       </p>
+                    )}
+                    {previewLabels.length > 0 && (
+                      <ul className="mt-3 space-y-1">
+                        {previewLabels.map((label, i) => (
+                          <li key={i} className="flex items-start gap-1.5 text-xs" style={{ color: COLORS.slate600 }}>
+                            <Check className="w-3 h-3 mt-0.5 shrink-0" style={{ color: COLORS.teal500 }} />
+                            <span className="truncate">{label}</span>
+                          </li>
+                        ))}
+                        {moreCount > 0 && (
+                          <li className="text-xs pl-4.5" style={{ color: COLORS.slate400, paddingLeft: "18px" }}>
+                            +{moreCount} more
+                          </li>
+                        )}
+                      </ul>
                     )}
                     <div className="mt-3 flex items-center gap-1 text-xs font-semibold" style={{ color: COLORS.teal500 }}>
                       View details <ChevronRight className="w-3 h-3" />
@@ -2414,16 +2502,13 @@ export function PatientPortal() {
           ? rawFeatures.map((f) => typeof f === "string" ? f : (f?.label ?? f?.name ?? ""))
           : [];
         // Plan entitlements (visits/telehealth/messaging) are surfaced
-        // inline as bullets too — they're the real value drivers.
+        // inline as bullets — they're the real value drivers. Uses the
+        // formatEntitlementLabel helper so the modal and the small
+        // dashboard preview render the same vocabulary.
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const entLabels: string[] = (plan.planEntitlements ?? plan.plan_entitlements ?? []).map((e: any) => {
-          const name = e?.entitlementType?.name ?? e?.entitlement_type?.name ?? "Benefit";
-          const qty = e?.quantityLimit ?? e?.quantity_limit;
-          const unlimited = e?.isUnlimited ?? e?.is_unlimited;
-          if (unlimited) return `Unlimited ${name.toLowerCase()}`;
-          if (qty != null && qty > 0) return `${qty} ${name.toLowerCase()}`;
-          return name;
-        }).filter(Boolean);
+        const entLabels: string[] = (plan.planEntitlements ?? plan.plan_entitlements ?? [])
+          .map(formatEntitlementLabel)
+          .filter(Boolean);
         const isLoading = enrollingPlanId === plan.id;
 
         return (
