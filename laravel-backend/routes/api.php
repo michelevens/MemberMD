@@ -182,6 +182,11 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
     // tenant. Bypasses email — admin gets the URL directly to share.
     Route::post('/admin/users/{userId}/password-reset-link', [AuthController::class, 'generateResetLinkForUser']);
 
+    // SuperAdmin: platform-wide system health (mail driver / config /
+    // recent send rate). Distinct from per-tenant deliverability —
+    // answers "is mail wired up at all?" before chasing tenant logs.
+    Route::get('/admin/system/mail-health', [\App\Http\Controllers\Api\SystemHealthController::class, 'mailHealth']);
+
     // SuperAdmin: Platform management
     Route::get('/admin/practices', [PracticeController::class, 'index']);
     Route::get('/admin/practices/pending', [PracticeController::class, 'pendingApprovals']);

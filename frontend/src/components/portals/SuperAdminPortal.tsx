@@ -1216,6 +1216,31 @@ export function SuperAdminPortal() {
 
   useEffect(() => { loadData(); }, [loadData]);
 
+  // Fetch platform-wide mail health on dashboard mount. apiFetch
+  // unwraps the {data: ...} envelope; failure is silent (the card
+  // just doesn't render — the rest of the dashboard still works).
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await apiFetch<{
+          status: "ok" | "warning" | "not_configured";
+          driver: string;
+          configured: boolean;
+          appEnv: string;
+          fromAddress: string;
+          fromName: string;
+          missingEnvVars: string[];
+          sentLast7d: number;
+          failedLast7d: number;
+          successRate: number | null;
+        }>("/admin/system/mail-health");
+        if (!cancelled && res.data) setMailHealth(res.data);
+      } catch { /* non-blocking */ }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
   // Load full detail (plans, members, providers, activity) whenever a
   // practice row is opened. Without this the detail page renders mocks.
   useEffect(() => {
@@ -1295,6 +1320,22 @@ export function SuperAdminPortal() {
     message: string;
     count?: number;
   }>>([]);
+
+  // Platform-wide mail health, surfaced on the dashboard so SuperAdmin
+  // can see at a glance whether transactional email is wired up at all
+  // before chasing per-tenant deliverability.
+  const [mailHealth, setMailHealth] = useState<{
+    status: "ok" | "warning" | "not_configured";
+    driver: string;
+    configured: boolean;
+    appEnv: string;
+    fromAddress: string;
+    fromName: string;
+    missingEnvVars: string[];
+    sentLast7d: number;
+    failedLast7d: number;
+    successRate: number | null;
+  } | null>(null);
 
   type BillingReadiness = {
     billingEnforced: boolean;
@@ -1633,6 +1674,53 @@ export function SuperAdminPortal() {
             );
           })}
         </div>
+
+        {/* System Health — surfaces "is mail wired up?" + last-7d send
+            rate so SuperAdmin can see at a glance whether transactional
+            email is actually working. Only renders when the endpoint
+            returned (failure leaves it null and silent). */}
+        {mailHealth && (() => {
+          const tone = mailHealth.status === "ok"
+            ? { bg: "#ecfdf5", border: "#a7f3d0", icon: "#059669", text: "#065f46", label: "Email working" }
+            : mailHealth.status === "warning"
+            ? { bg: "#fffbeb", border: "#fde68a", icon: "#d97706", text: "#92400e", label: "Email degraded" }
+            : { bg: "#fef2f2", border: "#fecaca", icon: "#dc2626", text: "#991b1b", label: "Email NOT configured" };
+          const summary = mailHealth.status === "not_configured"
+            ? `Driver: ${mailHealth.driver}${mailHealth.missingEnvVars.length > 0 ? ` · Missing: ${mailHealth.missingEnvVars.join(", ")}` : ""}`
+            : mailHealth.status === "warning"
+            ? mailHealth.appEnv === "production" && (mailHealth.driver === "log" || mailHealth.driver === "array")
+              ? `Driver is "${mailHealth.driver}" in production — emails are being thrown away.`
+              : `Success rate ${mailHealth.successRate}% over the last 7 days (${mailHealth.failedLast7d} failed of ${mailHealth.sentLast7d + mailHealth.failedLast7d}).`
+            : mailHealth.sentLast7d > 0
+              ? `${mailHealth.sentLast7d} sent / ${mailHealth.failedLast7d} failed in the last 7 days · ${mailHealth.driver} · ${mailHealth.fromAddress}`
+              : `${mailHealth.driver} · ${mailHealth.fromAddress} · no sends in the last 7 days`;
+          return (
+            <div
+              className="rounded-xl border p-4 flex items-start gap-3"
+              style={{ backgroundColor: tone.bg, borderColor: tone.border }}
+            >
+              <div
+                className="w-10 h-10 rounded-lg flex items-center justify-center shrink-0"
+                style={{ backgroundColor: "white", border: `1px solid ${tone.border}` }}
+              >
+                <Mail className="w-5 h-5" style={{ color: tone.icon }} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold" style={{ color: tone.text }}>
+                  {tone.label}
+                </p>
+                <p className="text-xs mt-0.5" style={{ color: tone.text, opacity: 0.85 }}>
+                  {summary}
+                </p>
+                {mailHealth.status === "not_configured" && (
+                  <p className="text-xs mt-2" style={{ color: tone.text, opacity: 0.75 }}>
+                    Set the missing environment variables on Railway, then redeploy. Patient enrollment emails, payment links, and welcome receipts will silently fail until this is fixed.
+                  </p>
+                )}
+              </div>
+            </div>
+          );
+        })()}
 
         {/* Quick Actions */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
