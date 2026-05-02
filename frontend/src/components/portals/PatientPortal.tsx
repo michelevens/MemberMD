@@ -2127,6 +2127,16 @@ export function PatientPortal() {
         onLogout={logout}
         notificationCount={unreadCount}
         headerTitle={headerTitleByTab[activeTab] ?? "Dashboard"}
+        // Mobile bottom tab bar — 5 most-used tabs, left→right.
+        // Entitlements + Profile remain reachable via the in-app surfaces
+        // (Account → Entitlements section, header avatar dropdown).
+        mobileBottomNav={[
+          { id: "home", label: "Home", icon: Home },
+          { id: "appointments", label: "Visits", icon: Calendar },
+          { id: "messages", label: "Messages", icon: MessageSquare, badge: unreadCount || undefined },
+          { id: "health", label: "Health", icon: Heart },
+          { id: "account", label: "Account", icon: CreditCard },
+        ]}
       >
         {renderContent()}
       </PortalShell>

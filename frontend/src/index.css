@@ -366,3 +366,46 @@ body {
 [data-theme="dark"] ::-webkit-scrollbar-thumb:hover {
   background: #64748b;
 }
+
+/* ─── Mobile ergonomics ─── */
+/* WCAG 2.5.5 / Apple HIG / Material both target 44–48px minimum for
+   tappable controls. We don't want to bump every desktop button — just
+   make sure that on touch-class screens (under 1024px) the standard
+   button / [role=button] / input controls hit the ergonomic minimum.
+   Anchor exclusions: nav inside the bottom tab bar already sets
+   min-height; sidebar nav is hidden on the surfaces that opt in. */
+@media (max-width: 1023px) {
+  button:not(.shrink-tap),
+  a[role="button"]:not(.shrink-tap),
+  [role="tab"]:not(.shrink-tap),
+  input[type="checkbox"],
+  input[type="radio"],
+  input[type="submit"],
+  input[type="button"],
+  select {
+    min-height: 44px;
+  }
+  /* Restore tight inline buttons that live inside dense controls
+     (close-X icons in modals, badge-style inline actions). Add
+     `class="shrink-tap"` to opt out of the 44px floor. */
+
+  /* Form inputs: bigger tap zone for date / text / tel etc. */
+  input[type="text"],
+  input[type="email"],
+  input[type="tel"],
+  input[type="number"],
+  input[type="password"],
+  input[type="date"],
+  input[type="time"],
+  input[type="datetime-local"],
+  input[type="search"],
+  input[type="url"],
+  textarea {
+    min-height: 44px;
+  }
+  textarea {
+    /* Textareas need to grow, not just hit the floor. */
+    min-height: 88px;
+  }
+}
+

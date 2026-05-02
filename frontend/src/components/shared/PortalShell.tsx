@@ -71,6 +71,14 @@ interface PortalShellProps {
   headerTitle?: string;
   /** Custom React content placed in the header right slot before the bell. */
   headerActions?: ReactNode;
+  /**
+   * Optional 5-icon bottom tab bar shown only on mobile (<lg). When set,
+   * the hamburger drawer is hidden by default and these tabs become the
+   * primary nav. Pass 4–5 NavItems (more get truncated). Tabs that
+   * aren't in this list are still reachable through the sidebar drawer.
+   * Patient portal opts in; the dense Practice/SuperAdmin portals don't.
+   */
+  mobileBottomNav?: NavItem[];
 }
 
 // ─── Color palette ──────────────────────────────────────────────────────────
@@ -165,6 +173,7 @@ export function PortalShell({
   children,
   headerTitle,
   headerActions,
+  mobileBottomNav,
 }: PortalShellProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
@@ -400,16 +409,25 @@ export function PortalShell({
 
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-w-0">
-        {/* Top Header */}
-        <header className={
-          isStripe
-            ? "h-14 bg-white border-b border-slate-200 flex items-center justify-between px-4 lg:px-6 flex-shrink-0"
-            : "h-16 bg-white border-b border-gray-200/60 flex items-center justify-between px-4 lg:px-6 flex-shrink-0"
-        }>
+        {/* Top Header. Safe-area inset on top so notched iPhones don't
+            hide the title behind the dynamic island / camera notch. */}
+        <header
+          className={
+            isStripe
+              ? "bg-white border-b border-slate-200 flex items-center justify-between px-4 lg:px-6 flex-shrink-0"
+              : "bg-white border-b border-gray-200/60 flex items-center justify-between px-4 lg:px-6 flex-shrink-0"
+          }
+          style={{
+            minHeight: isStripe ? "56px" : "64px",
+            paddingTop: "env(safe-area-inset-top, 0px)",
+          }}
+        >
           <div className="flex items-center gap-4 min-w-0">
+            {/* Hamburger — hidden when a mobile bottom nav is in use,
+                since the 5 tabs cover the primary navigation. */}
             <button
               onClick={() => setSidebarOpen(true)}
-              className="lg:hidden p-2 rounded-xl hover:bg-gray-100 transition-colors"
+              className={`${mobileBottomNav ? "hidden" : "lg:hidden"} p-2 rounded-xl hover:bg-gray-100 transition-colors`}
               aria-label="Open menu"
             >
               <Menu className="w-5 h-5 text-gray-600" />
@@ -525,8 +543,14 @@ export function PortalShell({
           </div>
         </header>
 
-        {/* Page Content — fades on tab change for a polished feel */}
-        <main className="flex-1 overflow-y-auto p-4 lg:p-6">
+        {/* Page Content — fades on tab change for a polished feel.
+            Bottom padding reserves room for the mobile bottom-tab bar
+            so content + safe-area inset aren't hidden behind it.
+            Desktop sidebar callers (no mobileBottomNav) get no extra pad. */}
+        <main
+          className={`flex-1 overflow-y-auto p-4 lg:p-6 ${mobileBottomNav ? "pb-24 lg:pb-6" : ""}`}
+          style={mobileBottomNav ? { paddingBottom: "calc(6rem + env(safe-area-inset-bottom, 0px))" } : undefined}
+        >
           <motion.div
             key={activeTab}
             initial={{ opacity: 0, y: 8 }}
@@ -536,6 +560,59 @@ export function PortalShell({
             {children}
           </motion.div>
         </main>
+
+        {/* Mobile Bottom Tab Bar — opt-in via mobileBottomNav prop.
+            Hidden on lg+ where the sidebar takes over. Five icons max
+            (more get truncated). Active tab gets the portal accent
+            color; inactive is slate-400. Safe-area inset on the bottom
+            so notched iPhones don't put icons under the home indicator. */}
+        {mobileBottomNav && (
+          <nav
+            className="lg:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 z-30 flex items-stretch justify-around"
+            style={{
+              paddingBottom: "env(safe-area-inset-bottom, 0px)",
+              boxShadow: "0 -1px 0 rgba(0,0,0,0.04), 0 -8px 24px -8px rgba(15,23,42,0.08)",
+            }}
+            aria-label="Primary navigation"
+          >
+            {mobileBottomNav.slice(0, 5).map((item) => {
+              const Icon = item.icon;
+              const isActive = item.id === activeTab;
+              const tint = isActive ? colors.accent : "#94a3b8";
+              return (
+                <button
+                  key={item.id}
+                  onClick={() => onTabChange(item.id)}
+                  className="flex-1 flex flex-col items-center justify-center gap-0.5 relative transition-colors"
+                  style={{ minHeight: "56px", color: tint }}
+                  aria-label={item.label}
+                  aria-current={isActive ? "page" : undefined}
+                >
+                  <Icon className="w-5 h-5" />
+                  <span className="font-medium" style={{ fontSize: "11px", lineHeight: 1 }}>
+                    {item.label}
+                  </span>
+                  {item.badge && item.badge > 0 ? (
+                    <span
+                      className="absolute text-white font-semibold flex items-center justify-center rounded-full"
+                      style={{
+                        top: "6px",
+                        right: "calc(50% - 18px)",
+                        backgroundColor: colors.accent,
+                        fontSize: "10px",
+                        minWidth: "16px",
+                        height: "16px",
+                        padding: "0 4px",
+                      }}
+                    >
+                      {item.badge > 9 ? "9+" : item.badge}
+                    </span>
+                  ) : null}
+                </button>
+              );
+            })}
+          </nav>
+        )}
       </div>
     </div>
   );
