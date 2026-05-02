@@ -18,7 +18,7 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import type { Appointment, ProviderAvailability } from "../../types";
-import { appointmentService, providerService, isUsingMockData, authService, apiFetch, programService } from "../../lib/api";
+import { appointmentService, providerService, isUsingMockData, authService, apiFetch, programService, clinicalSettingsService } from "../../lib/api";
 
 // ─── Colors ──────────────────────────────────────────────────────────────────
 
@@ -176,6 +176,13 @@ export function AppointmentBookingWidget({ onClose, onBooked }: AppointmentBooki
   // If the patient has 2+ enrollments we ask them which one this visit
   // is for. Single-enrollment auto-selects.
   const [selectedEnrollmentId, setSelectedEnrollmentId] = useState<string | null>(null);
+  // Practice-curated reasons for visit. Loaded from /clinical-settings/
+  // visit_reasons; the practice admin manages this list under Practice
+  // Settings → Clinical. Surfaces as a required dropdown on Step 4.
+  // null = still loading; [] = none configured (we hide the dropdown
+  // and fall back to free-text only).
+  const [visitReasonOptions, setVisitReasonOptions] = useState<Array<{ id: string; label: string }> | null>(null);
+  const [selectedVisitReason, setSelectedVisitReason] = useState<string>("");
 
   useEffect(() => {
     let cancelled = false;
@@ -282,6 +289,22 @@ export function AppointmentBookingWidget({ onClose, onBooked }: AppointmentBooki
       } catch {
         if (cancelled) return;
         setMyEnrollments([]);
+      }
+
+      // 5) Practice-curated visit reasons. Drives the required
+      //    "Reason for visit" dropdown on Step 4. Empty list = the
+      //    practice hasn't configured any; we hide the dropdown and
+      //    leave only the free-text notes field as a fallback.
+      try {
+        const vrRes = await clinicalSettingsService.list("visit_reasons");
+        if (cancelled) return;
+        const opts = (vrRes.data ?? [])
+          .filter((r) => r.isActive !== false)
+          .map((r) => ({ id: r.id, label: r.label }));
+        setVisitReasonOptions(opts);
+      } catch {
+        if (cancelled) return;
+        setVisitReasonOptions([]);
       }
     })();
     return () => { cancelled = true; };
@@ -549,6 +572,12 @@ export function AppointmentBookingWidget({ onClose, onBooked }: AppointmentBooki
       return;
     }
 
+    // chief_complaint is a single backend column; merge the structured
+    // reason (when configured) with the optional free-text notes so
+    // the provider sees both. "Anxiety — Sleep has been off the past
+    // two weeks" reads better than two separate truncated fields.
+    const chief = [selectedVisitReason, notes].filter(Boolean).join(" — ").trim() || null;
+
     // In demo mode, return a fabricated appointment so the UI flow still
     // demos. In production we make a real API call — without this, success
     // screens fired with no DB write (audit finding B9, 2026-04-28).
@@ -563,7 +592,7 @@ export function AppointmentBookingWidget({ onClose, onBooked }: AppointmentBooki
         status: "scheduled",
         scheduledAt: scheduled.toISOString(),
         durationMinutes: selectedType.durationMinutes,
-        chiefComplaint: notes || null,
+        chiefComplaint: chief,
         notes: null,
         isTeleHealth: selectedType.isTeleHealth,
         teleHealthUrl: null,
@@ -593,7 +622,7 @@ export function AppointmentBookingWidget({ onClose, onBooked }: AppointmentBooki
       appointmentTypeId: selectedType.id,
       scheduledAt: scheduled.toISOString(),
       durationMinutes: selectedType.durationMinutes,
-      chiefComplaint: notes || null,
+      chiefComplaint: chief,
       isTeleHealth: selectedType.isTeleHealth,
     } as Partial<Appointment>);
 
@@ -1129,10 +1158,34 @@ export function AppointmentBookingWidget({ onClose, onBooked }: AppointmentBooki
                 )}
               </div>
 
-              {/* Notes */}
+              {/* Reason for visit — required dropdown sourced from
+                  Practice Settings → Clinical → Visit Reasons. Hidden
+                  when the practice hasn't configured any options yet. */}
+              {visitReasonOptions && visitReasonOptions.length > 0 && (
+                <div>
+                  <label className="text-xs font-semibold block mb-1" style={{ color: C.slate500 }}>
+                    Reason for visit *
+                  </label>
+                  <select
+                    value={selectedVisitReason}
+                    onChange={(e) => setSelectedVisitReason(e.target.value)}
+                    className="w-full rounded-lg text-sm p-3 focus:outline-none bg-white"
+                    style={{ border: `1px solid ${C.slate200}`, color: C.slate700 }}
+                  >
+                    <option value="">Select a reason…</option>
+                    {visitReasonOptions.map((r) => (
+                      <option key={r.id} value={r.label}>{r.label}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {/* Notes — supplements the reason dropdown when present. */}
               <div>
                 <label className="text-xs font-semibold block mb-1" style={{ color: C.slate500 }}>
-                  Notes for your provider (optional)
+                  {visitReasonOptions && visitReasonOptions.length > 0
+                    ? "Anything else? (optional)"
+                    : "Notes for your provider (optional)"}
                 </label>
                 <textarea
                   value={notes}
@@ -1140,7 +1193,11 @@ export function AppointmentBookingWidget({ onClose, onBooked }: AppointmentBooki
                   rows={3}
                   className="w-full rounded-lg text-sm p-3 resize-none focus:outline-none"
                   style={{ border: `1px solid ${C.slate200}`, color: C.slate700 }}
-                  placeholder="Describe your symptoms or reason for visit..."
+                  placeholder={
+                    visitReasonOptions && visitReasonOptions.length > 0
+                      ? "Add details for your provider…"
+                      : "Describe your symptoms or reason for visit..."
+                  }
                 />
               </div>
 
@@ -1225,7 +1282,13 @@ export function AppointmentBookingWidget({ onClose, onBooked }: AppointmentBooki
               >
                 <button
                   onClick={handleBook}
-                  disabled={booking || (selectedType.isTeleHealth && !telehealthConsent)}
+                  disabled={
+                    booking
+                    || (selectedType.isTeleHealth && !telehealthConsent)
+                    // Block submit when the practice has visit reasons
+                    // configured but the patient hasn't picked one.
+                    || (!!visitReasonOptions && visitReasonOptions.length > 0 && !selectedVisitReason)
+                  }
                   className="w-full py-3 rounded-xl text-sm font-bold text-white transition-all hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-2"
                   style={{ backgroundColor: C.teal500 }}
                 >
