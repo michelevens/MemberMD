@@ -1073,6 +1073,8 @@ export function SuperAdminPortal() {
               joinedAt: p.createdAt || p.created_at || "",
               subscriptionPlan: p.subscriptionPlan || p.subscription_plan || "trial",
               trialEndsAt: p.trialEndsAt || p.trial_ends_at || null,
+              stripeConnectStatus: (p.stripeConnectStatus || p.stripe_connect_status || undefined) as MockPractice["stripeConnectStatus"],
+              stripeChargesEnabled: Boolean(p.stripeChargesEnabled || p.stripe_charges_enabled),
             };
           }));
         }
@@ -1250,6 +1252,56 @@ export function SuperAdminPortal() {
   const [tenantAuditLogs, setTenantAuditLogs] = useState<MockAuditLog[]>([]);
   const [tenantAuditLoading, setTenantAuditLoading] = useState(false);
   const [tenantAuditSearch, setTenantAuditSearch] = useState("");
+
+  // Tier 3: integration health + pending-action signals scoped to one
+  // tenant. Render only when the selected practice is open.
+  const [webhookHealth, setWebhookHealth] = useState<{
+    endpointCount: number;
+    enabledCount: number;
+    failingCount: number;
+    deliveredLast24h: number;
+    failedLast24h: number;
+    successRate: number | null;
+    latestFailure: { id: string; eventType: string; responseStatus: number | null; errorMessage: string | null; attemptedAt: string } | null;
+  } | null>(null);
+  const [pendingActions, setPendingActions] = useState<Array<{
+    severity: "critical" | "warning" | "info";
+    kind: string;
+    message: string;
+    count?: number;
+  }>>([]);
+
+  useEffect(() => {
+    if (!selectedPractice) {
+      setWebhookHealth(null);
+      setPendingActions([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await apiFetch<{
+          endpointCount: number;
+          enabledCount: number;
+          failingCount: number;
+          deliveredLast24h: number;
+          failedLast24h: number;
+          successRate: number | null;
+          latestFailure: { id: string; eventType: string; responseStatus: number | null; errorMessage: string | null; attemptedAt: string } | null;
+        }>(`/admin/practices/${selectedPractice.id}/webhook-health`);
+        if (!cancelled && r.data) setWebhookHealth(r.data);
+      } catch {
+        // non-fatal — card just doesn't render
+      }
+      try {
+        const r = await apiFetch<{ signals: Array<{ severity: "critical" | "warning" | "info"; kind: string; message: string; count?: number }>; count: number }>(`/admin/practices/${selectedPractice.id}/pending-actions`);
+        if (!cancelled && r.data?.signals) setPendingActions(r.data.signals);
+      } catch {
+        // non-fatal — banner just doesn't render
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [selectedPractice]);
 
   useEffect(() => {
     if (!selectedPractice) {
@@ -2449,9 +2501,33 @@ export function SuperAdminPortal() {
                 {p.name.charAt(0)}
               </div>
               <div>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   <h2 className="text-2xl font-semibold tracking-tight text-slate-900">{p.name}</h2>
                   <StatusBadge status={p.status} />
+                  {/* Stripe Connect pill — surfaces money-flow readiness
+                      next to the lifecycle status. Color-graded:
+                      green=active, amber=pending/restricted, gray=other. */}
+                  {p.stripeConnectStatus && (() => {
+                    const cs = p.stripeConnectStatus;
+                    const colors: Record<string, { bg: string; fg: string; label: string }> = {
+                      active: { bg: "#dcfce7", fg: "#166534", label: "Stripe: Active" },
+                      pending_onboarding: { bg: "#fef3c7", fg: "#92400e", label: "Stripe: Onboarding" },
+                      pending_verification: { bg: "#fef3c7", fg: "#92400e", label: "Stripe: Verifying" },
+                      restricted: { bg: "#fee2e2", fg: "#b91c1c", label: "Stripe: Restricted" },
+                      disconnected: { bg: "#f1f5f9", fg: "#475569", label: "Stripe: Disconnected" },
+                      not_started: { bg: "#f1f5f9", fg: "#475569", label: "Stripe: Not started" },
+                    };
+                    const c = colors[cs] ?? colors.not_started;
+                    return (
+                      <span
+                        className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wider"
+                        style={{ backgroundColor: c.bg, color: c.fg }}
+                        title={`stripe_connect_status = ${cs}`}
+                      >
+                        {c.label}
+                      </span>
+                    );
+                  })()}
                 </div>
                 <p className="text-sm text-slate-500 mt-0.5">{p.specialty} · {p.model} · {p.city}, {p.state}</p>
               </div>
@@ -2603,6 +2679,33 @@ export function SuperAdminPortal() {
             );
           })()}
         </div>
+
+        {/* Pending-action signals — single banner row aggregating
+            everything the superadmin should know about this tenant.
+            Only renders when there's at least one signal. */}
+        {pendingActions.length > 0 && (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5 text-amber-700" />
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-semibold text-amber-900">
+                  {pendingActions.length} action{pendingActions.length === 1 ? "" : "s"} need attention
+                </p>
+                <ul className="mt-1.5 space-y-1 text-xs text-amber-800">
+                  {pendingActions.map((sig) => (
+                    <li key={sig.kind} className="flex items-center gap-2">
+                      <span
+                        className="inline-block w-1.5 h-1.5 rounded-full shrink-0"
+                        style={{ backgroundColor: sig.severity === "critical" ? "#b91c1c" : "#d97706" }}
+                      />
+                      <span>{sig.message}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Stats Row — Stripe-style border tiles. Tenant summary numbers
             (lifetime revenue, active memberships) come from the
@@ -2973,6 +3076,60 @@ export function SuperAdminPortal() {
                 </div>
               ))}
             </div>
+          </div>
+        )}
+
+        {/* Integration health — outbound webhook delivery for the last
+            24h. Only renders when the tenant has at least one webhook
+            endpoint registered. */}
+        {webhookHealth && webhookHealth.endpointCount > 0 && (
+          <div className="rounded-xl border border-slate-200 bg-white p-5">
+            <div className="flex items-baseline justify-between mb-3">
+              <h3 className="text-sm font-semibold text-slate-900">Webhook delivery health</h3>
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                Last 24 hours
+              </span>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2.5">
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Endpoints</p>
+                <p className="text-lg font-semibold tabular-nums mt-0.5 text-slate-900">
+                  {webhookHealth.enabledCount}<span className="text-xs font-normal text-slate-400">/{webhookHealth.endpointCount}</span>
+                </p>
+                <p className="text-[10px] text-slate-400 mt-0.5">
+                  {webhookHealth.failingCount > 0 ? `${webhookHealth.failingCount} failing` : "all healthy"}
+                </p>
+              </div>
+              <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2.5">
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Delivered</p>
+                <p className="text-lg font-semibold tabular-nums mt-0.5 text-emerald-700">{webhookHealth.deliveredLast24h}</p>
+              </div>
+              <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2.5">
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Failed</p>
+                <p className="text-lg font-semibold tabular-nums mt-0.5" style={{ color: webhookHealth.failedLast24h > 0 ? "#b91c1c" : "#475569" }}>
+                  {webhookHealth.failedLast24h}
+                </p>
+              </div>
+              <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2.5">
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Success rate</p>
+                <p className="text-lg font-semibold tabular-nums mt-0.5 text-slate-900">
+                  {webhookHealth.successRate !== null ? `${webhookHealth.successRate}%` : "—"}
+                </p>
+              </div>
+            </div>
+
+            {webhookHealth.latestFailure && (
+              <div className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800">
+                <p className="font-semibold">Most recent failure</p>
+                <p className="mt-0.5">
+                  <span className="font-mono">{webhookHealth.latestFailure.eventType}</span>
+                  {webhookHealth.latestFailure.responseStatus && <> → HTTP {webhookHealth.latestFailure.responseStatus}</>}
+                </p>
+                {webhookHealth.latestFailure.errorMessage && (
+                  <p className="mt-0.5 opacity-80 truncate">{webhookHealth.latestFailure.errorMessage}</p>
+                )}
+              </div>
+            )}
           </div>
         )}
 

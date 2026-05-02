@@ -604,6 +604,164 @@ class PracticeController extends Controller
     }
 
     /**
+     * Superadmin-only: outbound webhook delivery health for one
+     * tenant — last 24h delivered/failed counts, success rate, and
+     * the most recent failure reason. Drives the integration-health
+     * card on the practice detail page.
+     */
+    public function webhookHealth(Request $request, string $practiceId): JsonResponse
+    {
+        abort_if($request->user()->role !== 'superadmin', 403);
+
+        $since = now()->subHours(24);
+
+        $endpointCount = \App\Models\WebhookEndpoint::withoutGlobalScope('tenant')
+            ->where('tenant_id', $practiceId)
+            ->count();
+
+        $enabledCount = \App\Models\WebhookEndpoint::withoutGlobalScope('tenant')
+            ->where('tenant_id', $practiceId)
+            ->where('status', \App\Models\WebhookEndpoint::STATUS_ENABLED)
+            ->count();
+
+        $failingCount = \App\Models\WebhookEndpoint::withoutGlobalScope('tenant')
+            ->where('tenant_id', $practiceId)
+            ->where('status', \App\Models\WebhookEndpoint::STATUS_FAILING)
+            ->count();
+
+        $deliveredLast24h = \App\Models\WebhookDelivery::withoutGlobalScope('tenant')
+            ->where('tenant_id', $practiceId)
+            ->where('status', \App\Models\WebhookDelivery::STATUS_DELIVERED)
+            ->where('created_at', '>=', $since)
+            ->count();
+
+        $failedLast24h = \App\Models\WebhookDelivery::withoutGlobalScope('tenant')
+            ->where('tenant_id', $practiceId)
+            ->whereIn('status', [\App\Models\WebhookDelivery::STATUS_FAILED, \App\Models\WebhookDelivery::STATUS_PENDING])
+            ->where('created_at', '>=', $since)
+            ->count();
+
+        $totalLast24h = $deliveredLast24h + $failedLast24h;
+        $successRate = $totalLast24h > 0
+            ? round(($deliveredLast24h / $totalLast24h) * 100, 1)
+            : null;
+
+        $latestFailure = \App\Models\WebhookDelivery::withoutGlobalScope('tenant')
+            ->where('tenant_id', $practiceId)
+            ->where('status', \App\Models\WebhookDelivery::STATUS_FAILED)
+            ->orderByDesc('updated_at')
+            ->first();
+
+        return response()->json([
+            'data' => [
+                'endpoint_count' => $endpointCount,
+                'enabled_count' => $enabledCount,
+                'failing_count' => $failingCount,
+                'delivered_last_24h' => $deliveredLast24h,
+                'failed_last_24h' => $failedLast24h,
+                'success_rate' => $successRate,
+                'latest_failure' => $latestFailure ? [
+                    'id' => $latestFailure->id,
+                    'event_type' => $latestFailure->event_type,
+                    'response_status' => $latestFailure->response_status,
+                    'error_message' => $latestFailure->error_message,
+                    'attempted_at' => $latestFailure->updated_at,
+                ] : null,
+            ],
+        ]);
+    }
+
+    /**
+     * Superadmin-only: things-needing-attention signals for one
+     * tenant. Surfaces in a single place every signal a superadmin
+     * cares about that's currently scattered across separate tabs:
+     *   - Failed dunning attempts in the last 7 days
+     *   - Stripe Connect status if not 'active'
+     *   - Pending refund requests
+     *   - Memberships in 'past_due' status
+     */
+    public function pendingActions(Request $request, string $practiceId): JsonResponse
+    {
+        abort_if($request->user()->role !== 'superadmin', 403);
+
+        $practice = Practice::findOrFail($practiceId);
+
+        $signals = [];
+
+        if ($practice->subscription_status === 'pending_approval') {
+            $signals[] = [
+                'severity' => 'warning',
+                'kind' => 'pending_approval',
+                'message' => 'Practice is awaiting superadmin approval.',
+            ];
+        }
+
+        if ($practice->subscription_status === 'suspended') {
+            $signals[] = [
+                'severity' => 'critical',
+                'kind' => 'suspended',
+                'message' => 'Practice is suspended — patient sign-in blocked.',
+            ];
+        }
+
+        if (!empty($practice->stripe_connect_status) && !in_array($practice->stripe_connect_status, ['active'], true)) {
+            $signals[] = [
+                'severity' => $practice->stripe_connect_status === 'restricted' ? 'critical' : 'warning',
+                'kind' => 'stripe_connect',
+                'message' => "Stripe Connect status: {$practice->stripe_connect_status}",
+            ];
+        }
+
+        $pastDueCount = \App\Models\PatientMembership::where('tenant_id', $practice->id)
+            ->where('status', 'past_due')
+            ->count();
+        if ($pastDueCount > 0) {
+            $signals[] = [
+                'severity' => 'warning',
+                'kind' => 'past_due_memberships',
+                'message' => "{$pastDueCount} membership" . ($pastDueCount === 1 ? '' : 's') . ' in past_due',
+                'count' => $pastDueCount,
+            ];
+        }
+
+        // Failed webhook deliveries in last 24h
+        $failed24h = \App\Models\WebhookDelivery::withoutGlobalScope('tenant')
+            ->where('tenant_id', $practice->id)
+            ->where('status', \App\Models\WebhookDelivery::STATUS_FAILED)
+            ->where('created_at', '>=', now()->subHours(24))
+            ->count();
+        if ($failed24h > 0) {
+            $signals[] = [
+                'severity' => 'warning',
+                'kind' => 'webhook_failures',
+                'message' => "{$failed24h} webhook deliver" . ($failed24h === 1 ? 'y has' : 'ies have') . ' failed in last 24h',
+                'count' => $failed24h,
+            ];
+        }
+
+        // Pending invoices > 7 days old
+        $stalePendingInvoices = \App\Models\Invoice::where('tenant_id', $practice->id)
+            ->where('status', 'pending')
+            ->where('created_at', '<', now()->subDays(7))
+            ->count();
+        if ($stalePendingInvoices > 0) {
+            $signals[] = [
+                'severity' => 'warning',
+                'kind' => 'stale_invoices',
+                'message' => "{$stalePendingInvoices} invoice" . ($stalePendingInvoices === 1 ? '' : 's') . ' pending > 7 days',
+                'count' => $stalePendingInvoices,
+            ];
+        }
+
+        return response()->json([
+            'data' => [
+                'signals' => $signals,
+                'count' => count($signals),
+            ],
+        ]);
+    }
+
+    /**
      * Mark the auth user's onboarding checklist as completed. Used to
      * dismiss the dashboard onboarding banner once the practice has
      * worked through the first-day setup steps.

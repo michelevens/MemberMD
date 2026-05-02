@@ -198,6 +198,8 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
     Route::get('/admin/practices/{id}/notes', [PracticeController::class, 'listInternalNotes']);
     Route::post('/admin/practices/{id}/notes', [PracticeController::class, 'createInternalNote']);
     Route::get('/admin/practices/{id}/summary', [PracticeController::class, 'tenantSummary']);
+    Route::get('/admin/practices/{id}/webhook-health', [PracticeController::class, 'webhookHealth']);
+    Route::get('/admin/practices/{id}/pending-actions', [PracticeController::class, 'pendingActions']);
 
     Route::get('/admin/stats', [PracticeController::class, 'platformStats']);
 
