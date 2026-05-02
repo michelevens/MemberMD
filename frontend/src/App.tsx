@@ -133,6 +133,16 @@ const EnrollmentWidget = namedLazy(
   "EnrollmentWidget"
 );
 
+const EnrollmentSuccessWidget = namedLazy(
+  () => import("./components/widgets/EnrollmentResultWidget"),
+  "EnrollmentSuccessWidget"
+);
+
+const EnrollmentCancelledWidget = namedLazy(
+  () => import("./components/widgets/EnrollmentResultWidget"),
+  "EnrollmentCancelledWidget"
+);
+
 const TelehealthRoom = namedLazy(
   () => import("./components/telehealth/TelehealthRoom"),
   "TelehealthRoom"
@@ -172,6 +182,8 @@ function AuthGate() {
           <Route path="/register" element={<PracticeRegistration />} />
           <Route path="/plans/:tenantCode" element={<PlanWidget />} />
           <Route path="/enroll/:tenantCode" element={<EnrollmentWidget />} />
+          <Route path="/enrollment/success" element={<EnrollmentSuccessWidget />} />
+          <Route path="/enrollment/cancelled" element={<EnrollmentCancelledWidget />} />
           <Route path="/intake/:tenantCode" element={<div className="min-h-screen flex items-center justify-center"><p className="text-slate-500">Patient Intake — Coming Soon</p></div>} />
           <Route path="*" element={<Navigate to="/login" replace />} />
         </Routes>
@@ -194,6 +206,8 @@ function AuthGate() {
         <Route path="/practice/*" element={<PracticePortal />} />
         <Route path="/patient/*" element={<PatientPortal />} />
         <Route path="/telehealth/:sessionId" element={<TelehealthRoom />} />
+        <Route path="/enrollment/success" element={<EnrollmentSuccessWidget />} />
+        <Route path="/enrollment/cancelled" element={<EnrollmentCancelledWidget />} />
         <Route path="*" element={<Navigate to={portalPath} replace />} />
       </Routes>
     </Suspense>

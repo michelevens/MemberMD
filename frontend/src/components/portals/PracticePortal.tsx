@@ -950,6 +950,7 @@ export function PracticePortal() {
   const [rosterPlanActionLoading, setRosterPlanActionLoading] = useState(false);
   const [rosterCompEnabled, setRosterCompEnabled] = useState(false);
   const [rosterCompReason, setRosterCompReason] = useState("");
+  const [rosterPaymentLinkLoading, setRosterPaymentLinkLoading] = useState(false);
 
   // ─── Quick Activity Log Form (patient detail) ─────────────────────────
   const [showQuickActivityLog, setShowQuickActivityLog] = useState(false);
@@ -1529,6 +1530,40 @@ export function PracticePortal() {
     }
     setRosterPlanActionLoading(false);
   }, [rosterPlanDialog, rosterSelectedPlanId, rosterCompEnabled, rosterCompReason, loadPracticeData, setToast]);
+
+  // ─── Send payment link (Stripe Checkout, no card on hand) ─────────────
+  // Creates a PendingEnrollment + Stripe Checkout session and emails the
+  // patient. The webhook converts it to a real membership when they pay.
+  const handleSendPaymentLink = useCallback(async () => {
+    if (!rosterPlanDialog || !rosterSelectedPlanId) return;
+    setRosterPaymentLinkLoading(true);
+    try {
+      const res = await apiFetch("/memberships/payment-link", {
+        method: "POST",
+        body: JSON.stringify({
+          patient_id: rosterPlanDialog.patientId,
+          plan_id: rosterSelectedPlanId,
+          billing_frequency: "monthly",
+        }),
+      });
+      if (res.error) {
+        setToast({ message: res.error, type: "error" });
+      } else {
+        const reused = (res.data as { data?: { reused?: boolean } } | undefined)?.data?.reused;
+        setToast({
+          message: reused ? "Resent existing payment link." : "Payment link sent.",
+          type: "success",
+        });
+        setRosterPlanDialog(null);
+        setRosterSelectedPlanId(null);
+        setRosterCompEnabled(false);
+        setRosterCompReason("");
+      }
+    } catch {
+      setToast({ message: "Failed to send payment link.", type: "error" });
+    }
+    setRosterPaymentLinkLoading(false);
+  }, [rosterPlanDialog, rosterSelectedPlanId, setToast]);
 
   // ─── Quick activity log submit ─────────────────────────────────────────
   const handleQuickActivityLog = useCallback(async (patientId: string) => {
@@ -9275,7 +9310,7 @@ export function PracticePortal() {
                 </div>
               </div>
             )}
-            <div className="px-6 pb-6 flex justify-end gap-3">
+            <div className="px-6 pb-6 flex justify-end gap-3 flex-wrap">
               <button
                 onClick={() => {
                   setRosterPlanDialog(null);
@@ -9287,9 +9322,20 @@ export function PracticePortal() {
               >
                 Cancel
               </button>
+              {rosterPlanDialog.mode === "enroll" && !rosterCompEnabled && (
+                <button
+                  onClick={handleSendPaymentLink}
+                  disabled={!rosterSelectedPlanId || rosterPaymentLinkLoading || rosterPlanActionLoading}
+                  className="px-4 py-2 rounded-lg text-sm font-medium border transition-colors disabled:opacity-50"
+                  style={{ borderColor: "#635bff", color: "#635bff", backgroundColor: "transparent" }}
+                  title="Email the patient a Stripe Checkout link to enter their card themselves."
+                >
+                  {rosterPaymentLinkLoading ? "Sending..." : "Send payment link"}
+                </button>
+              )}
               <button
                 onClick={handleRosterPlanAction}
-                disabled={!rosterSelectedPlanId || rosterPlanActionLoading || (rosterCompEnabled && !rosterCompReason.trim())}
+                disabled={!rosterSelectedPlanId || rosterPlanActionLoading || rosterPaymentLinkLoading || (rosterCompEnabled && !rosterCompReason.trim())}
                 className="px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors disabled:opacity-50"
                 style={{ backgroundColor: "#0D9488" }}
               >

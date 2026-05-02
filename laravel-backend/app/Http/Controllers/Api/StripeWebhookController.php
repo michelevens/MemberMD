@@ -7,10 +7,14 @@ use App\Models\AuditLog;
 use App\Models\Invoice;
 use App\Models\Payment;
 use App\Models\PaymentRefund;
+use App\Models\MembershipPlan;
+use App\Models\Patient;
 use App\Models\PatientMembership;
+use App\Models\PendingEnrollment;
 use App\Models\Practice;
 use App\Models\StripeConnectEvent;
 use App\Services\MembershipCreditService;
+use App\Services\MembershipEnrollmentService;
 use App\Services\MembershipStateMachine;
 use App\Services\StripeConnectService;
 use Illuminate\Http\JsonResponse;
@@ -39,6 +43,7 @@ class StripeWebhookController extends Controller
         private readonly StripeConnectService $connect,
         private readonly MembershipStateMachine $states,
         private readonly MembershipCreditService $credits,
+        private readonly MembershipEnrollmentService $enrollment,
     ) {
     }
 
@@ -219,6 +224,10 @@ class StripeWebhookController extends Controller
 
             case 'charge.refunded':
                 $this->handleChargeRefunded($event, $practice);
+                break;
+
+            case 'checkout.session.completed':
+                $this->handleCheckoutSessionCompleted($event, $practice);
                 break;
 
             default:
@@ -528,6 +537,109 @@ class StripeWebhookController extends Controller
             'stripe_charge_id' => $charge->id,
             'total_refunded' => $totalRefunded,
             'full' => $isFull,
+        ]);
+    }
+
+    /**
+     * checkout.session.completed → convert PendingEnrollment into a real
+     * PatientMembership. The session metadata carries pending_enrollment_id
+     * (we set it at create time) so we look up the side row, run the
+     * shared enrollment service, and stamp the resulting membership back.
+     *
+     * Idempotent: if the pending row was already claimed (webhook
+     * delivered twice), we no-op. Stripe webhooks can fire duplicates,
+     * and we don't want to create two memberships for one paid session.
+     */
+    private function handleCheckoutSessionCompleted(Event $event, ?Practice $practice): void
+    {
+        if (!$practice) return;
+
+        $session = $event->data->object;
+        $pendingId = $session->metadata->pending_enrollment_id ?? null;
+        if (empty($pendingId)) {
+            // Not one of our payment-link sessions — could be a future
+            // self-serve flow that uses checkout for something else. No-op.
+            return;
+        }
+
+        // Confirm payment actually landed. Checkout fires this event in
+        // payment_status='paid' for successful sessions; 'unpaid' or
+        // 'no_payment_required' shouldn't enroll.
+        if (($session->payment_status ?? '') !== 'paid') {
+            Log::info('checkout.session.completed without paid status — skipping enrollment', [
+                'pending_enrollment_id' => $pendingId,
+                'payment_status' => $session->payment_status ?? null,
+            ]);
+            return;
+        }
+
+        $pending = PendingEnrollment::where('tenant_id', $practice->id)
+            ->where('id', $pendingId)
+            ->first();
+        if (!$pending) {
+            Log::warning('PendingEnrollment not found for checkout session', [
+                'pending_enrollment_id' => $pendingId,
+                'tenant_id' => $practice->id,
+            ]);
+            return;
+        }
+
+        // Idempotency: already claimed (duplicate webhook) — no-op.
+        if ($pending->status !== PendingEnrollment::STATUS_PENDING) {
+            return;
+        }
+
+        $patient = Patient::find($pending->patient_id);
+        $plan = MembershipPlan::find($pending->plan_id);
+        if (!$patient || !$plan) {
+            Log::warning('PendingEnrollment refers to missing patient or plan', [
+                'pending_enrollment_id' => $pending->id,
+            ]);
+            return;
+        }
+
+        try {
+            $membership = $this->enrollment->enroll(
+                practice: $practice,
+                patient: $patient,
+                plan: $plan,
+                billingFrequency: $pending->billing_frequency ?? 'monthly',
+                isComp: false,
+                compReason: null,
+                sourceUserId: $pending->created_by_user_id,
+                paymentMethodId: null,
+                source: 'checkout.session.completed',
+                existingStripeSubscriptionId: $session->subscription ?? null,
+                existingStripeCustomerId: $session->customer ?? $pending->stripe_customer_id,
+            );
+        } catch (\Throwable $e) {
+            // Critical path failure — Stripe got money but we couldn't
+            // create the local row. Log loud, leave the pending row in
+            // place so an admin can manually reconcile.
+            Log::error('Failed to convert PendingEnrollment to membership after paid checkout', [
+                'pending_enrollment_id' => $pending->id,
+                'stripe_session_id' => $session->id,
+                'error' => $e->getMessage(),
+            ]);
+            $this->audit($practice, 'tier2_pending_enrollment_conversion_failed', [
+                'pending_enrollment_id' => $pending->id,
+                'stripe_session_id' => $session->id,
+                'error' => $e->getMessage(),
+            ]);
+            return;
+        }
+
+        $pending->update([
+            'status' => PendingEnrollment::STATUS_CLAIMED,
+            'claimed_membership_id' => $membership->id,
+            'claimed_at' => now(),
+        ]);
+
+        $this->audit($practice, 'tier2_payment_link_claimed', [
+            'pending_enrollment_id' => $pending->id,
+            'membership_id' => $membership->id,
+            'stripe_session_id' => $session->id,
+            'stripe_subscription_id' => $session->subscription ?? null,
         ]);
     }
 

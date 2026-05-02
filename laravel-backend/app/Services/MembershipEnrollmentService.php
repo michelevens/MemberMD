@@ -89,6 +89,14 @@ class MembershipEnrollmentService
         ?string $sourceUserId = null,
         ?string $paymentMethodId = null,
         string $source = 'membership.store',
+        // When the caller has already created the Stripe subscription
+        // out-of-band (e.g. checkout.session.completed webhook —
+        // Stripe creates the subscription on Checkout completion, we
+        // just need to record it locally), pass the subscription + customer
+        // ids here. Skips the createSubscription call AND the
+        // missing-payment-method guardrail, since payment is already in.
+        ?string $existingStripeSubscriptionId = null,
+        ?string $existingStripeCustomerId = null,
     ): PatientMembership {
         // Single-active-membership invariant. The DB partial unique index
         // (uniq_active_primary_membership) is the hard backstop; this is
@@ -114,13 +122,13 @@ class MembershipEnrollmentService
             );
         }
 
-        // Stripe path requires a payment method. Without one, Stripe creates
-        // the subscription in 'incomplete' status, attempts to charge a
-        // non-existent default card, and silently dies in dunning weeks
-        // later — a hard-to-trace failure mode dressed up as a working
-        // enrollment. Reject up front and let the caller send a payment
-        // link or collect a card before retrying.
-        if ($billingMode === 'stripe' && empty($paymentMethodId)) {
+        // Stripe path requires either a payment method (admin enrolls with
+        // card on hand) OR a pre-existing subscription (post-checkout
+        // webhook path — Stripe already charged + created the subscription).
+        // Without one or the other, Stripe would create an 'incomplete'
+        // subscription that silently dies in dunning. Reject up front.
+        $hasExistingStripeSubscription = !empty($existingStripeSubscriptionId);
+        if ($billingMode === 'stripe' && empty($paymentMethodId) && !$hasExistingStripeSubscription) {
             throw new RuntimeException(
                 'A payment method is required to enroll this patient on a billed plan. '
                 . 'Send them a payment link, collect a card in the dialog, or comp the membership.'
@@ -145,9 +153,14 @@ class MembershipEnrollmentService
             'current_period_start' => $now,
             'current_period_end' => $periodEnd,
             'last_state_change_at' => $now,
+            // If the caller already paid via Checkout, attach the
+            // pre-existing Stripe IDs so Stripe is the source of truth
+            // for billing and we don't double-create a subscription.
+            'stripe_subscription_id' => $hasExistingStripeSubscription ? $existingStripeSubscriptionId : null,
+            'stripe_customer_id' => $existingStripeCustomerId,
         ]);
 
-        if ($billingMode === 'stripe') {
+        if ($billingMode === 'stripe' && !$hasExistingStripeSubscription) {
             try {
                 $this->subscriptions->createSubscription($membership, $paymentMethodId);
                 $membership->refresh();

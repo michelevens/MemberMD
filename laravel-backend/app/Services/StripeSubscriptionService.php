@@ -574,6 +574,99 @@ class StripeSubscriptionService
     }
 
     /**
+     * Create a Stripe Checkout session in subscription mode for the
+     * send-payment-link flow. The patient lands on Stripe-hosted Checkout,
+     * enters their card, and on completion Stripe both creates the
+     * Subscription and fires checkout.session.completed back to our
+     * webhook — which then converts the PendingEnrollment into a real
+     * PatientMembership via MembershipEnrollmentService.
+     *
+     * Returns the checkout URL + session id. The pending_enrollment_id
+     * is stamped into session metadata so the webhook can find the
+     * pending row at completion time.
+     */
+    public function createPaymentLinkSession(
+        Practice $practice,
+        Patient $patient,
+        MembershipPlan $plan,
+        string $billingFrequency,
+        string $pendingEnrollmentId,
+        string $successUrl,
+        string $cancelUrl,
+    ): array {
+        $this->assertPracticeReady($practice);
+
+        $priceId = $billingFrequency === 'annual'
+            ? $plan->stripe_annual_price_id
+            : $plan->stripe_monthly_price_id;
+
+        if (empty($priceId)) {
+            throw new RuntimeException(
+                "Plan {$plan->id} has no Stripe price for {$billingFrequency} billing."
+            );
+        }
+
+        // Reuse customer if we've billed this patient before — keeps card
+        // on file and consolidates billing history. ensureCustomer is
+        // race-safe + idempotent.
+        $customerId = $this->ensureCustomer($practice, $patient);
+
+        $applicationFeePercent = $practice->platformFeeBps() / 100;
+
+        $params = [
+            'mode' => 'subscription',
+            'customer' => $customerId,
+            'line_items' => [[
+                'price' => $priceId,
+                'quantity' => 1,
+            ]],
+            'success_url' => $successUrl,
+            'cancel_url' => $cancelUrl,
+            'metadata' => [
+                'pending_enrollment_id' => $pendingEnrollmentId,
+                'membership_plan_id' => $plan->id,
+                'patient_id' => $patient->id,
+                'tenant_id' => $practice->id,
+                'platform' => 'membermd',
+            ],
+            'subscription_data' => [
+                'metadata' => [
+                    'pending_enrollment_id' => $pendingEnrollmentId,
+                    'membership_plan_id' => $plan->id,
+                    'patient_id' => $patient->id,
+                    'tenant_id' => $practice->id,
+                    'platform' => 'membermd',
+                ],
+            ],
+        ];
+
+        if ($applicationFeePercent > 0) {
+            $params['subscription_data']['application_fee_percent'] = $applicationFeePercent;
+        }
+
+        try {
+            $session = $this->stripe()->checkout->sessions->create(
+                $params,
+                array_merge(
+                    ['stripe_account' => $practice->stripe_account_id],
+                    ['idempotency_key' => "membermd-checkout-{$pendingEnrollmentId}"],
+                ),
+            );
+        } catch (ApiErrorException $e) {
+            throw new RuntimeException("Failed to create payment link: {$e->getMessage()}", 0, $e);
+        }
+
+        return [
+            'session_id' => $session->id,
+            'url' => $session->url,
+            'customer_id' => $customerId,
+            'expires_at' => $session->expires_at
+                ? now()->setTimestamp($session->expires_at)
+                : now()->addHours(24),
+        ];
+    }
+
+    /**
      * Create Stripe Product + recurring Prices on the practice's Connect
      * account so this plan can be sold via subscriptions. Idempotent: if
      * the plan already has stripe_monthly_price_id / stripe_annual_price_id

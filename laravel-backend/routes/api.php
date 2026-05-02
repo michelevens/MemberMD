@@ -291,6 +291,7 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
     // cancel their own membership; the controller enforces ownership.
     Route::post('/memberships/{id}/self-cancel', [MembershipController::class, 'selfCancel']);
     Route::post('/memberships/{id}/cancel-and-refund', [MembershipController::class, 'selfCancelAndRefund']);
+    Route::post('/memberships/payment-link', [MembershipController::class, 'sendPaymentLink']);
     Route::apiResource('memberships', MembershipController::class)->except(['destroy']);
 
     // ===== Screenings =====

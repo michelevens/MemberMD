@@ -9,6 +9,7 @@ use App\Models\PatientFamilyMember;
 use App\Models\PatientMembership;
 use App\Models\PatientEntitlement;
 use App\Models\MembershipPlan;
+use App\Models\PendingEnrollment;
 use App\Models\Practice;
 use App\Events\MembershipStateChanged;
 use App\Models\MembershipStateTransition;
@@ -101,6 +102,169 @@ class MembershipController extends Controller
         }
 
         return response()->json(['data' => $membership], 201);
+    }
+
+    /**
+     * Practice-admin "Send payment link" — creates a Stripe Checkout
+     * session in subscription mode, stashes a PendingEnrollment row,
+     * and emails the patient a link. The patient lands on Stripe-hosted
+     * Checkout, enters their card, and on completion the
+     * checkout.session.completed webhook converts the pending row into
+     * a real PatientMembership.
+     *
+     * Idempotent per (patient_id, plan_id, status='pending'): a second
+     * click for the same patient/plan returns the existing pending row
+     * if it's still alive.
+     */
+    public function sendPaymentLink(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        abort_if(!in_array($user->role, ['practice_admin', 'staff']), 403);
+
+        $validated = $request->validate([
+            'patient_id' => 'required|uuid|exists:patients,id',
+            'plan_id' => 'required|uuid|exists:membership_plans,id',
+            'billing_frequency' => 'sometimes|string|in:monthly,annual',
+        ]);
+
+        $billingFrequency = $validated['billing_frequency'] ?? 'monthly';
+
+        $patient = Patient::where('tenant_id', $user->tenant_id)
+            ->findOrFail($validated['patient_id']);
+
+        if (empty($patient->email)) {
+            return response()->json([
+                'message' => 'Patient has no email on file. Add one before sending a payment link.',
+            ], 422);
+        }
+
+        $plan = MembershipPlan::where('tenant_id', $user->tenant_id)
+            ->where('is_active', true)
+            ->findOrFail($validated['plan_id']);
+
+        $practice = Practice::findOrFail($user->tenant_id);
+
+        if (!$practice->canAcceptPayments()) {
+            return response()->json([
+                'message' => 'Practice cannot accept payments yet. Complete Stripe Connect onboarding first.',
+            ], 422);
+        }
+
+        // Single-active-membership preflight — same gate as direct enroll.
+        $hasActive = PatientMembership::where('tenant_id', $practice->id)
+            ->where('patient_id', $patient->id)
+            ->where('status', 'active')
+            ->exists();
+        if ($hasActive) {
+            return response()->json([
+                'message' => 'Patient already has an active membership.',
+            ], 422);
+        }
+
+        // Idempotency: reuse an existing live pending enrollment for the
+        // same patient/plan instead of creating a duplicate Stripe session.
+        $existing = PendingEnrollment::where('tenant_id', $practice->id)
+            ->where('patient_id', $patient->id)
+            ->where('plan_id', $plan->id)
+            ->where('status', PendingEnrollment::STATUS_PENDING)
+            ->where('expires_at', '>', now())
+            ->first();
+
+        if ($existing) {
+            $this->dispatchPaymentLinkEmail($patient, $practice, $plan, $existing);
+            return response()->json([
+                'data' => [
+                    'pending_enrollment_id' => $existing->id,
+                    'checkout_url' => $existing->checkout_url,
+                    'expires_at' => $existing->expires_at,
+                    'reused' => true,
+                ],
+                'message' => 'Resent existing payment link.',
+            ]);
+        }
+
+        // Create the pending row first so we have an id to stamp into
+        // Stripe metadata. Update it with checkout details after the
+        // Stripe call lands.
+        $pending = PendingEnrollment::create([
+            'tenant_id' => $practice->id,
+            'patient_id' => $patient->id,
+            'plan_id' => $plan->id,
+            'billing_frequency' => $billingFrequency,
+            'status' => PendingEnrollment::STATUS_PENDING,
+            'created_by_user_id' => $user->id,
+            'expires_at' => now()->addHours(24),
+        ]);
+
+        $appUrl = (string) config('app.frontend_url', config('app.url'));
+        $successUrl = rtrim($appUrl, '/') . '/#/enrollment/success?pe=' . $pending->id;
+        $cancelUrl = rtrim($appUrl, '/') . '/#/enrollment/cancelled?pe=' . $pending->id;
+
+        try {
+            $session = $this->subscriptions->createPaymentLinkSession(
+                practice: $practice,
+                patient: $patient,
+                plan: $plan,
+                billingFrequency: $billingFrequency,
+                pendingEnrollmentId: $pending->id,
+                successUrl: $successUrl,
+                cancelUrl: $cancelUrl,
+            );
+        } catch (\Throwable $e) {
+            $pending->delete();
+            Log::warning('Payment link creation failed', [
+                'patient_id' => $patient->id,
+                'plan_id' => $plan->id,
+                'error' => $e->getMessage(),
+            ]);
+            return response()->json([
+                'message' => 'Could not create payment link: ' . $e->getMessage(),
+            ], 422);
+        }
+
+        $pending->update([
+            'stripe_checkout_session_id' => $session['session_id'],
+            'stripe_customer_id' => $session['customer_id'],
+            'checkout_url' => $session['url'],
+            'expires_at' => $session['expires_at'],
+        ]);
+
+        $this->dispatchPaymentLinkEmail($patient, $practice, $plan, $pending->fresh());
+
+        return response()->json([
+            'data' => [
+                'pending_enrollment_id' => $pending->id,
+                'checkout_url' => $pending->checkout_url,
+                'expires_at' => $pending->expires_at,
+                'reused' => false,
+            ],
+            'message' => 'Payment link sent.',
+        ], 201);
+    }
+
+    private function dispatchPaymentLinkEmail(
+        Patient $patient,
+        Practice $practice,
+        MembershipPlan $plan,
+        PendingEnrollment $pending,
+    ): void {
+        try {
+            \App\Services\MailDispatcher::send(
+                $patient->email,
+                new \App\Mail\PaymentLinkEmail(
+                    patient: $patient,
+                    practice: $practice,
+                    plan: $plan,
+                    pending: $pending,
+                ),
+                'payment-link',
+            );
+        } catch (\Throwable $e) {
+            Log::warning('Payment link email failed (link still usable)', [
+                'pending_enrollment_id' => $pending->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
     }
 
     public function update(Request $request, string $id): JsonResponse
