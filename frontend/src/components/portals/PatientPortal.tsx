@@ -568,6 +568,32 @@ export function PatientPortal() {
   const [enrollingPlanId, setEnrollingPlanId] = useState<string | null>(null);
   const [enrollError, setEnrollError] = useState<string | null>(null);
 
+  // Reschedule + Cancel modals on the patient appointments tab. Both
+  // hit existing endpoints (PATCH /appointments/{id} and
+  // DELETE /appointments/{id}) opened to the patient role in commit
+  // e07b51f. Holding the appointment in state so the modal can show
+  // its current date/provider for context.
+  const [rescheduleDialog, setRescheduleDialog] = useState<{
+    id: string;
+    type: string;
+    provider: string;
+    currentDate: string;
+    currentTime: string;
+  } | null>(null);
+  const [rescheduleNewDate, setRescheduleNewDate] = useState("");
+  const [rescheduleNewTime, setRescheduleNewTime] = useState("");
+  const [rescheduleSubmitting, setRescheduleSubmitting] = useState(false);
+  const [rescheduleError, setRescheduleError] = useState<string | null>(null);
+  const [cancelDialog, setCancelDialog] = useState<{
+    id: string;
+    type: string;
+    provider: string;
+    date: string;
+    time: string;
+  } | null>(null);
+  const [cancelSubmitting, setCancelSubmitting] = useState(false);
+  const [cancelError, setCancelError] = useState<string | null>(null);
+
   // Fallback: when the modal opens with a plan that doesn't include
   // its entitlements (e.g. cached older response shape), fetch the
   // full plan via getById and merge it in. The user sees the basic
@@ -949,6 +975,92 @@ export function PatientPortal() {
     }
     setEnrollingPlanId(null);
   }, []);
+
+  // Open the reschedule dialog with sensible defaults pre-filled.
+  // Patient policy + UpdateAppointmentRequest already restrict the
+  // patient to scheduled_at + duration_minutes + notes — they can't
+  // reassign provider, change type, etc. Reschedule clears
+  // confirmed_at on the backend so staff has to re-confirm.
+  const openRescheduleDialog = useCallback((apt: Appointment) => {
+    setRescheduleDialog({
+      id: apt.id,
+      type: apt.type,
+      provider: apt.provider,
+      currentDate: apt.date,
+      currentTime: apt.time,
+    });
+    // Default to current values so the patient can tweak rather than
+    // start from blank.
+    setRescheduleNewDate(apt.date ? new Date(apt.date).toISOString().slice(0, 10) : "");
+    setRescheduleNewTime(apt.time || "");
+    setRescheduleError(null);
+  }, []);
+
+  const handleRescheduleSubmit = useCallback(async () => {
+    if (!rescheduleDialog) return;
+    if (!rescheduleNewDate || !rescheduleNewTime) {
+      setRescheduleError("Pick a date and time.");
+      return;
+    }
+    // Build an ISO datetime in the patient's local timezone so the
+    // backend stores what they intended, not midnight UTC.
+    const [h, m] = rescheduleNewTime.split(":").map(Number);
+    const [y, mo, d] = rescheduleNewDate.split("-").map(Number);
+    const local = new Date(y, (mo ?? 1) - 1, d ?? 1, h ?? 0, m ?? 0, 0, 0);
+    if (isNaN(local.getTime()) || local.getTime() <= Date.now()) {
+      setRescheduleError("Pick a future date and time.");
+      return;
+    }
+    setRescheduleSubmitting(true);
+    setRescheduleError(null);
+    try {
+      const res = await apiFetch(`/appointments/${rescheduleDialog.id}`, {
+        method: "PUT",
+        body: JSON.stringify({ scheduled_at: local.toISOString() }),
+      });
+      if (res.error) {
+        setRescheduleError(res.error);
+      } else {
+        setRescheduleDialog(null);
+        loadPatientData();
+      }
+    } catch {
+      setRescheduleError("Reschedule failed. Please try again.");
+    }
+    setRescheduleSubmitting(false);
+  }, [rescheduleDialog, rescheduleNewDate, rescheduleNewTime, loadPatientData]);
+
+  const openCancelDialog = useCallback((apt: Appointment) => {
+    setCancelDialog({
+      id: apt.id,
+      type: apt.type,
+      provider: apt.provider,
+      date: apt.date,
+      time: apt.time,
+    });
+    setCancelError(null);
+  }, []);
+
+  const handleCancelSubmit = useCallback(async () => {
+    if (!cancelDialog) return;
+    setCancelSubmitting(true);
+    setCancelError(null);
+    try {
+      const res = await apiFetch(`/appointments/${cancelDialog.id}`, {
+        method: "DELETE",
+        body: JSON.stringify({ cancel_reason: "Cancelled by patient" }),
+      });
+      if (res.error) {
+        setCancelError(res.error);
+      } else {
+        setCancelDialog(null);
+        loadPatientData();
+      }
+    } catch {
+      setCancelError("Cancel failed. Please try again.");
+    }
+    setCancelSubmitting(false);
+  }, [cancelDialog, loadPatientData]);
 
   const handleSendMessage = useCallback(async () => {
     const body = messageInput.trim();
@@ -1619,6 +1731,17 @@ export function PatientPortal() {
         <h2 className="text-sm font-semibold mb-3" style={{ color: COLORS.slate500 }}>
           UPCOMING
         </h2>
+        {upcomingAppointments.length === 0 && (
+          <div className="rounded-2xl border border-dashed border-slate-200 bg-white p-8 text-center">
+            <Calendar className="w-8 h-8 mx-auto mb-2" style={{ color: COLORS.slate300 }} />
+            <p className="text-sm font-medium" style={{ color: COLORS.navy800 }}>
+              No upcoming appointments
+            </p>
+            <p className="text-xs mt-1" style={{ color: COLORS.slate500 }}>
+              Tap "Book Appointment" above to schedule with your care team.
+            </p>
+          </div>
+        )}
         <div className="space-y-3">
           {upcomingAppointments.map((apt) => (
             <div key={apt.id} className="glass rounded-xl p-4">
@@ -1680,13 +1803,15 @@ export function PatientPortal() {
                   </button>
                 )}
                 <button
-                  className="flex-1 py-2 rounded-lg text-sm font-medium border"
+                  onClick={() => openRescheduleDialog(apt)}
+                  className="flex-1 py-2 rounded-lg text-sm font-medium border hover:bg-slate-50 transition-colors"
                   style={{ borderColor: COLORS.slate300, color: COLORS.slate600 }}
                 >
                   Reschedule
                 </button>
                 <button
-                  className="py-2 px-3 rounded-lg text-sm font-medium"
+                  onClick={() => openCancelDialog(apt)}
+                  className="py-2 px-3 rounded-lg text-sm font-medium hover:bg-red-50 transition-colors"
                   style={{ color: COLORS.red500 }}
                 >
                   Cancel
@@ -1702,6 +1827,14 @@ export function PatientPortal() {
         <h2 className="text-sm font-semibold mb-3" style={{ color: COLORS.slate500 }}>
           PAST VISITS
         </h2>
+        {pastAppointments.length === 0 && (
+          <div className="rounded-2xl border border-dashed border-slate-200 bg-white p-6 text-center">
+            <Clock className="w-7 h-7 mx-auto mb-2" style={{ color: COLORS.slate300 }} />
+            <p className="text-sm" style={{ color: COLORS.slate500 }}>
+              Your visit history will appear here once you've had your first appointment.
+            </p>
+          </div>
+        )}
         <div className="space-y-2">
           {pastAppointments.map((apt) => (
             <div key={apt.id} className="glass rounded-xl overflow-hidden">
@@ -2488,6 +2621,149 @@ export function PatientPortal() {
           empty state. Renders full plan info (name + price + description
           + features list) and an Enroll & Pay button that creates a
           Stripe Checkout session and redirects. */}
+      {/* Reschedule appointment dialog. Patient picks a new date+time;
+          PATCH /appointments/{id} with scheduled_at clears confirmed_at
+          on the backend so staff has to re-confirm the new slot. */}
+      {rescheduleDialog && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ backgroundColor: "rgba(15, 23, 42, 0.55)" }}
+          onClick={() => !rescheduleSubmitting && setRescheduleDialog(null)}
+        >
+          <div
+            className="bg-white rounded-2xl shadow-2xl w-full max-w-md"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+              <h3 className="text-lg font-bold text-slate-900">Reschedule appointment</h3>
+              <button
+                onClick={() => !rescheduleSubmitting && setRescheduleDialog(null)}
+                className="p-1 rounded hover:bg-slate-100 text-slate-400"
+                aria-label="Close"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <div className="rounded-lg bg-slate-50 p-3">
+                <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1">Currently</p>
+                <p className="text-sm font-medium text-slate-800">{rescheduleDialog.type}</p>
+                <p className="text-xs text-slate-500">
+                  {formatDate(rescheduleDialog.currentDate)}
+                  {rescheduleDialog.currentTime ? ` · ${rescheduleDialog.currentTime}` : ""}
+                  {rescheduleDialog.provider ? ` · ${rescheduleDialog.provider.split(",")[0]}` : ""}
+                </p>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">New date</label>
+                <input
+                  type="date"
+                  min={new Date().toISOString().slice(0, 10)}
+                  value={rescheduleNewDate}
+                  onChange={(e) => setRescheduleNewDate(e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">New time</label>
+                <input
+                  type="time"
+                  value={rescheduleNewTime}
+                  onChange={(e) => setRescheduleNewTime(e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400"
+                />
+              </div>
+              {rescheduleError && (
+                <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                  {rescheduleError}
+                </div>
+              )}
+              <p className="text-xs text-slate-400">
+                Your practice will need to re-confirm the new time.
+              </p>
+            </div>
+            <div className="px-6 pb-6 flex justify-end gap-2">
+              <button
+                onClick={() => setRescheduleDialog(null)}
+                disabled={rescheduleSubmitting}
+                className="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100 transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleRescheduleSubmit}
+                disabled={rescheduleSubmitting}
+                className="px-4 py-2 rounded-lg text-sm font-semibold text-white transition-colors disabled:opacity-50"
+                style={{ backgroundColor: COLORS.teal500 }}
+              >
+                {rescheduleSubmitting ? "Saving…" : "Reschedule"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Cancel appointment dialog — single Are-you-sure so the patient
+          doesn't accidentally cancel by mis-tapping the small Cancel
+          button on a dense card. DELETE /appointments/{id} flips the
+          status to 'cancelled' on the backend. */}
+      {cancelDialog && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ backgroundColor: "rgba(15, 23, 42, 0.55)" }}
+          onClick={() => !cancelSubmitting && setCancelDialog(null)}
+        >
+          <div
+            className="bg-white rounded-2xl shadow-2xl w-full max-w-md"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="p-6">
+              <div className="flex items-start gap-3 mb-4">
+                <div
+                  className="w-10 h-10 rounded-full flex items-center justify-center shrink-0"
+                  style={{ backgroundColor: "#fee2e2" }}
+                >
+                  <X className="w-5 h-5" style={{ color: COLORS.red500 }} />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">Cancel this appointment?</h3>
+                  <p className="text-sm mt-0.5 text-slate-500">
+                    {cancelDialog.type} on {formatDate(cancelDialog.date)}
+                    {cancelDialog.time ? ` at ${cancelDialog.time}` : ""}
+                    {cancelDialog.provider ? ` with ${cancelDialog.provider.split(",")[0]}` : ""}.
+                  </p>
+                </div>
+              </div>
+              <p className="text-xs text-slate-500 mb-4">
+                Your care team will be notified. You can rebook any time from the Appointments tab.
+              </p>
+              {cancelError && (
+                <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 mb-4">
+                  {cancelError}
+                </div>
+              )}
+              <div className="flex justify-end gap-2">
+                <button
+                  onClick={() => setCancelDialog(null)}
+                  disabled={cancelSubmitting}
+                  className="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100 transition-colors disabled:opacity-50"
+                >
+                  Keep it
+                </button>
+                <button
+                  onClick={handleCancelSubmit}
+                  disabled={cancelSubmitting}
+                  className="px-4 py-2 rounded-lg text-sm font-semibold text-white transition-colors disabled:opacity-50"
+                  style={{ backgroundColor: COLORS.red500 }}
+                >
+                  {cancelSubmitting ? "Cancelling…" : "Yes, cancel"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {selectedPlanForDetail && (() => {
         const plan = selectedPlanForDetail;
         const planName = plan.name || "Membership";
