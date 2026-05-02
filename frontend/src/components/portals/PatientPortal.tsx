@@ -10,7 +10,7 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../contexts/AuthContext";
 import { AppointmentBookingWidget } from "../widgets/AppointmentBookingWidget";
 import { ProfilePage } from "../profile/ProfilePage";
-import { PortalShell, type NavItem } from "../shared/PortalShell";
+import { PortalShell, type NavSection } from "../shared/PortalShell";
 import { CommandPalette, useCommandPaletteShortcut } from "../shared/CommandPalette";
 import { RefreshButton } from "../shared/RefreshButton";
 import { BillingTab } from "./patient/BillingTab";
@@ -1294,20 +1294,40 @@ export function PatientPortal() {
   // and especially when there's no membership (the new-patient case).
   const pendingLink = pendingPaymentLinks[0];
 
-  // Sidebar nav for the patient portal — single flat list since the
-  // patient surface only has a handful of areas. Layout matches the
-  // pattern EnnHealth ClientPortalV3 uses (Dashboard, Appointments,
-  // Records, Messages, etc.). Badges show unread message + upcoming
-  // appointment counts so they're visible without entering the tab.
-  const sidebarNav: NavItem[] = [
-    { id: "home", label: "Dashboard", icon: Home },
-    { id: "appointments", label: "Appointments", icon: Calendar },
-    { id: "messages", label: "Messages", icon: MessageSquare, badge: messageThreads.filter((t) => t.unread).length || undefined },
-    { id: "health", label: "Health Records", icon: Heart },
-    { id: "entitlements", label: "Entitlements", icon: Award },
-    { id: "account", label: "Billing & Account", icon: CreditCard },
-    { id: "profile", label: "Profile", icon: User },
+  // Categorized sidebar — matches the admin/provider portal grouping
+  // pattern and the Figma "Mobile flow for membership system" design.
+  // Four buckets: Main / Health Records / (Care & Resources is reserved
+  // for Tier 2 — Care Team, Wellness, Health Library, Locations) /
+  // Account. Empty Care & Resources isn't rendered; PortalShell drops
+  // sections with zero items.
+  const sidebarNav: NavSection[] = [
+    {
+      id: "main",
+      label: "Main",
+      items: [
+        { id: "home", label: "Dashboard", icon: Home },
+        { id: "appointments", label: "Appointments", icon: Calendar },
+        { id: "messages", label: "Messages", icon: MessageSquare, badge: messageThreads.filter((t) => t.unread).length || undefined },
+      ],
+    },
+    {
+      id: "health-records",
+      label: "Health Records",
+      items: [
+        { id: "health", label: "Health Records", icon: Heart },
+      ],
+    },
+    {
+      id: "account",
+      label: "Account",
+      items: [
+        { id: "account", label: "Billing", icon: CreditCard },
+        { id: "entitlements", label: "Entitlements", icon: Award },
+        { id: "profile", label: "Profile", icon: User },
+      ],
+    },
   ];
+
 
   const unreadCount = useMemo(() => messageThreads.filter((t) => t.unread).length, [messageThreads]);
 
@@ -1798,6 +1818,61 @@ export function PatientPortal() {
           ))}
         </div>
       </div>
+
+      {/* Care Team preview — shows the patient's assigned primary
+          provider from the dashboard endpoint (eager-loaded
+          primaryProvider.user). Tier 2 will broaden to "all program
+          providers"; v1 is one row to confirm the data's there and to
+          give the dashboard the "Your Care Team" widget the Figma
+          design calls for. Quietly hidden when no provider is assigned
+          yet — the membership card already says "Not yet assigned"
+          for that case so we don't repeat the message here. */}
+      {(() => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const apiP = (apiPatient ?? {}) as any;
+        const pp = apiP.primaryProvider ?? apiP.primary_provider;
+        if (!pp) return null;
+        const ppUser = pp.user ?? null;
+        const first = ppUser?.firstName ?? ppUser?.first_name ?? pp.firstName ?? pp.first_name ?? "";
+        const last = ppUser?.lastName ?? ppUser?.last_name ?? pp.lastName ?? pp.last_name ?? "";
+        const fullName = [first, last].filter(Boolean).join(" ").trim();
+        if (!fullName) return null;
+        const creds = pp.credentials ?? "";
+        const specialty = Array.isArray(pp.specialties) ? pp.specialties[0] : (pp.specialty ?? "");
+        const initials = ((first[0] || "") + (last[0] || "")).toUpperCase() || "??";
+        return (
+          <div className="glass rounded-2xl p-5">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-sm font-semibold" style={{ color: COLORS.navy800 }}>
+                Your Care Team
+              </h3>
+            </div>
+            <div className="flex items-center gap-3">
+              <div
+                className="w-12 h-12 rounded-full flex items-center justify-center shrink-0 text-sm font-bold text-white"
+                style={{ background: `linear-gradient(135deg, ${COLORS.navy700}, ${COLORS.teal500})` }}
+              >
+                {initials}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold truncate" style={{ color: COLORS.navy800 }}>
+                  {fullName}{creds ? `, ${creds}` : ""}
+                </p>
+                <p className="text-xs truncate" style={{ color: COLORS.slate500 }}>
+                  {specialty || "Primary Provider"}
+                </p>
+              </div>
+              <button
+                onClick={() => setActiveTab("messages")}
+                className="text-xs font-medium px-3 py-1.5 rounded-lg transition-colors"
+                style={{ backgroundColor: "#e6fffa", color: COLORS.teal600 }}
+              >
+                Message
+              </button>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 
@@ -2984,11 +3059,14 @@ export function PatientPortal() {
       <CommandPalette
         open={paletteOpen}
         onClose={() => setPaletteOpen(false)}
-        items={sidebarNav.map((it) => ({
+        // Flatten the categorized sidebar so the palette stays a single
+        // searchable list. Order is preserved (Main → Health Records →
+        // Account) which matches the visual sidebar order.
+        items={sidebarNav.flatMap((s) => s.items.map((it) => ({
           id: it.id,
           label: it.label,
           icon: it.icon,
-        }))}
+        })))}
         onSelect={(id) => setActiveTab(id as TabId)}
       />
 
