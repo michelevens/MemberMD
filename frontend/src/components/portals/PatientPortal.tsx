@@ -65,6 +65,7 @@ import {
   Users,
   FlaskConical,
   Stethoscope,
+  Settings as SettingsIcon,
 } from "lucide-react";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -79,7 +80,8 @@ type TabId =
   | "entitlements"
   | "account"
   | "family"
-  | "profile";
+  | "profile"
+  | "settings";
 
 interface Appointment {
   id: string;
@@ -1441,6 +1443,7 @@ export function PatientPortal() {
         { id: "entitlements", label: "Entitlements", icon: Award },
         { id: "family", label: "Family Members", icon: Heart },
         { id: "profile", label: "Profile", icon: User },
+        { id: "settings", label: "Settings", icon: SettingsIcon },
       ],
     },
   ];
@@ -2413,16 +2416,16 @@ export function PatientPortal() {
           Health records
         </h1>
         <p className="text-sm mt-0.5" style={{ color: COLORS.slate500 }}>
-          Medications, screenings, allergies, and documents on file
+          Prescriptions, screenings, allergies, and documents on file
         </p>
       </div>
 
-      {/* Active Medications */}
+      {/* Active Prescriptions */}
       <div className="glass rounded-2xl p-5">
         <div className="flex items-center gap-2 mb-4">
           <Pill className="w-4 h-4" style={{ color: COLORS.teal500 }} />
           <h3 className="text-sm font-semibold" style={{ color: COLORS.navy800 }}>
-            Active Medications
+            Active Prescriptions
           </h3>
         </div>
         <div className="space-y-3">
@@ -3106,7 +3109,14 @@ export function PatientPortal() {
           </div>
         );
       case "profile":
-        return <ProfilePage onBack={() => setActiveTab("home")} />;
+        // Profile-tab landing — personal info pane preselected.
+        return <ProfilePage onBack={() => setActiveTab("home")} initialTab="profile" />;
+      case "settings":
+        // Settings-tab landing — security pane preselected (password +
+        // MFA controls live in there). Same component as Profile so
+        // the inner navigation stays consistent if the patient
+        // switches between the two without a reload.
+        return <ProfilePage onBack={() => setActiveTab("home")} initialTab="password" />;
       default:
         return renderHome();
     }
@@ -3127,6 +3137,7 @@ export function PatientPortal() {
     account: "Billing & Account",
     family: "Family Members",
     profile: "Profile",
+    settings: "Settings",
   };
 
   const fullName = [user?.firstName, user?.lastName].filter(Boolean).join(" ")

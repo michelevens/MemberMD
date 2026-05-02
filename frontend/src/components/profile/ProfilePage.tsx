@@ -11,11 +11,20 @@ type ProfileTab = "profile" | "password" | "mfa";
 
 interface ProfilePageProps {
   onBack: () => void;
+  /**
+   * Pre-select one of the inner tabs. Lets the patient portal mount
+   * the same component twice — once for the "Profile" sidebar item
+   * (initialTab="profile") and once for "Settings" (initialTab="password",
+   * which is the first security pane and where password + MFA live).
+   * Defaults to "profile" so existing callers (and the standalone
+   * route) behave the same as before.
+   */
+  initialTab?: ProfileTab;
 }
 
-export function ProfilePage({ onBack }: ProfilePageProps) {
+export function ProfilePage({ onBack, initialTab = "profile" }: ProfilePageProps) {
   const { user, updateUser } = useAuth();
-  const [activeTab, setActiveTab] = useState<ProfileTab>("profile");
+  const [activeTab, setActiveTab] = useState<ProfileTab>(initialTab);
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
 
   // Profile form
