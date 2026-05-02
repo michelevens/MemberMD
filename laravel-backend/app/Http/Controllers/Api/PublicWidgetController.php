@@ -208,6 +208,62 @@ class PublicWidgetController extends Controller
             'referrer_url' => $request->header('Referer'),
         ]);
 
+        // Send applicant acknowledgement email when the submission carries
+        // an email address. Best-effort — never blocks the widget response.
+        $applicantEmail = $validated['data']['email']
+            ?? $validated['data']['applicant_email']
+            ?? $validated['data']['contact_email']
+            ?? null;
+        if ($applicantEmail && filter_var($applicantEmail, FILTER_VALIDATE_EMAIL)) {
+            try {
+                $applicantName = $validated['data']['first_name']
+                    ?? $validated['data']['firstName']
+                    ?? $validated['data']['name']
+                    ?? null;
+                \App\Services\MailDispatcher::send(
+                    $applicantEmail,
+                    new \App\Mail\WidgetSubmissionReceivedEmail(
+                        practice: $practice,
+                        submissionType: $type,
+                        applicantName: is_string($applicantName) ? $applicantName : null,
+                    ),
+                    'widget-submission-received',
+                );
+            } catch (\Throwable $e) {
+                \Illuminate\Support\Facades\Log::warning('Widget submission ack email failed', [
+                    'submission_id' => $submission->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
+        // Notify the practice's admins so they can review the new
+        // submission. Pulls the same superadmin-style notification
+        // routing pattern: every active practice_admin user.
+        try {
+            $admins = \App\Models\User::where('tenant_id', $practice->id)
+                ->where('role', 'practice_admin')
+                ->where('status', 'active')
+                ->get();
+            foreach ($admins as $admin) {
+                if (!$admin->email) continue;
+                \App\Services\MailDispatcher::send(
+                    $admin->email,
+                    new \App\Mail\NewWidgetSubmissionEmail(
+                        practice: $practice,
+                        submissionType: $type,
+                        submissionData: $validated['data'],
+                    ),
+                    'widget-submission-new',
+                );
+            }
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('Widget submission practice notification failed', [
+                'submission_id' => $submission->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
         return response()->json([
             'message' => $config->settings['success_message'] ?? 'Thank you for your submission!',
             'submission_id' => $submission->id,

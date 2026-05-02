@@ -5,6 +5,7 @@ use App\Http\Controllers\Api\ExternalController;
 use App\Http\Controllers\Api\MasterDataController;
 use App\Http\Controllers\Api\PracticeController;
 use App\Http\Controllers\Api\PatientController;
+use App\Http\Controllers\Api\IntakeController;
 use App\Http\Controllers\Api\AppointmentController;
 use App\Http\Controllers\Api\EncounterController;
 use App\Http\Controllers\Api\PrescriptionController;
@@ -247,6 +248,12 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
     Route::get('/patients/{id}/prescriptions', [PatientController::class, 'prescriptions']);
     Route::get('/patients/{id}/screenings', [PatientController::class, 'screenings']);
     Route::get('/patients/{id}/documents', [PatientController::class, 'documents']);
+
+    // ===== Intakes — public widget submissions awaiting practice review =====
+    Route::get('/intakes', [IntakeController::class, 'index']);
+    Route::get('/intakes/{id}', [IntakeController::class, 'show']);
+    Route::post('/intakes/{id}/convert', [IntakeController::class, 'convert']);
+    Route::post('/intakes/{id}/archive', [IntakeController::class, 'archive']);
 
     // ===== Appointments =====
     Route::get('/appointments/today', [AppointmentController::class, 'today']);

@@ -15,10 +15,12 @@ class WidgetSubmission extends Model
     protected $fillable = [
         'tenant_id', 'widget_config_id', 'type', 'status',
         'data', 'ip_address', 'user_agent', 'referrer_url',
+        'converted_patient_id', 'converted_at', 'archived_reason',
     ];
 
     protected $casts = [
         'data' => 'array',
+        'converted_at' => 'datetime',
     ];
 
     public function widgetConfig(): BelongsTo { return $this->belongsTo(WidgetConfig::class); }
