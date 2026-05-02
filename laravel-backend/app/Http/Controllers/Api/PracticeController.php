@@ -165,6 +165,150 @@ class PracticeController extends Controller
     }
 
     /**
+     * Superadmin: list every practice in pending_approval state.
+     * Drives the SuperAdmin "Pending Approvals" tab.
+     */
+    public function pendingApprovals(Request $request): JsonResponse
+    {
+        abort_if($request->user()->role !== 'superadmin', 403);
+
+        $rows = Practice::where('subscription_status', 'pending_approval')
+            ->orderByDesc('created_at')
+            ->get();
+
+        $data = $rows->map(function (Practice $p) {
+            // Find the registering admin user for the applicant column
+            $applicant = User::where('tenant_id', $p->id)
+                ->where('role', 'practice_admin')
+                ->orderBy('created_at')
+                ->first();
+
+            return [
+                'id' => $p->id,
+                'name' => $p->name,
+                'specialty' => $p->specialty,
+                'practice_model' => $p->practice_model,
+                'email' => $p->email,
+                'phone' => $p->phone,
+                'website' => $p->website,
+                'city' => $p->city,
+                'state' => $p->state,
+                'submitted_at' => $p->created_at,
+                'applicant' => $applicant ? [
+                    'name' => trim(($applicant->first_name ?? '') . ' ' . ($applicant->last_name ?? '')) ?: $applicant->name,
+                    'email' => $applicant->email,
+                ] : null,
+            ];
+        });
+
+        return response()->json(['data' => $data]);
+    }
+
+    /**
+     * Superadmin: approve a pending practice.
+     * Activates the tenant, fires PracticeApprovedEmail, sets approved_at.
+     */
+    public function approve(Request $request, string $practiceId): JsonResponse
+    {
+        abort_if($request->user()->role !== 'superadmin', 403);
+
+        $practice = Practice::findOrFail($practiceId);
+
+        if ($practice->subscription_status !== 'pending_approval') {
+            return response()->json([
+                'message' => "Practice is in '{$practice->subscription_status}' state — already approved or rejected.",
+            ], 422);
+        }
+
+        $practice->update([
+            'is_active' => true,
+            'subscription_status' => 'trial',
+            'approved_at' => now(),
+            'approved_by' => $request->user()->id,
+        ]);
+
+        // Notify the practice admin so they know they can sign in now.
+        try {
+            $admin = User::where('tenant_id', $practice->id)
+                ->where('role', 'practice_admin')
+                ->orderBy('created_at')
+                ->first();
+            if ($admin) {
+                \App\Services\MailDispatcher::send(
+                    $admin->email,
+                    new \App\Mail\PracticeApprovedEmail(user: $admin, practice: $practice),
+                    'practice-approved',
+                );
+            }
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('Approval email failed', [
+                'practice_id' => $practice->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        return response()->json([
+            'data' => $practice->fresh(),
+            'message' => "Approved {$practice->name}.",
+        ]);
+    }
+
+    /**
+     * Superadmin: reject a pending practice with an optional reason.
+     */
+    public function reject(Request $request, string $practiceId): JsonResponse
+    {
+        abort_if($request->user()->role !== 'superadmin', 403);
+
+        $data = $request->validate([
+            'reason' => 'nullable|string|max:500',
+        ]);
+
+        $practice = Practice::findOrFail($practiceId);
+
+        if ($practice->subscription_status !== 'pending_approval') {
+            return response()->json([
+                'message' => "Practice is in '{$practice->subscription_status}' state — cannot reject.",
+            ], 422);
+        }
+
+        $practice->update([
+            'is_active' => false,
+            'subscription_status' => 'rejected',
+            'rejected_at' => now(),
+            'rejection_reason' => $data['reason'] ?? null,
+        ]);
+
+        try {
+            $admin = User::where('tenant_id', $practice->id)
+                ->where('role', 'practice_admin')
+                ->orderBy('created_at')
+                ->first();
+            if ($admin) {
+                \App\Services\MailDispatcher::send(
+                    $admin->email,
+                    new \App\Mail\PracticeRejectedEmail(
+                        user: $admin,
+                        practice: $practice,
+                        reason: $data['reason'] ?? null,
+                    ),
+                    'practice-rejected',
+                );
+            }
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('Rejection email failed', [
+                'practice_id' => $practice->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        return response()->json([
+            'data' => $practice->fresh(),
+            'message' => "Rejected {$practice->name}.",
+        ]);
+    }
+
+    /**
      * Mark the auth user's onboarding checklist as completed. Used to
      * dismiss the dashboard onboarding banner once the practice has
      * worked through the first-day setup steps.

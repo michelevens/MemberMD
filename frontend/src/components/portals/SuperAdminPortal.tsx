@@ -2,7 +2,7 @@
 // Platform admin dashboard for managing all practices (tenants) on MemberMD
 
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { practiceService, adminService, auditService } from "../../lib/api";
+import { practiceService, adminService, auditService, apiFetch } from "../../lib/api";
 import { ProgramTemplatesTab } from "./ProgramTemplatesTab";
 import { HeaderToolbar } from "../shared/HeaderToolbar";
 import { PlatformSettings } from "../settings/PlatformSettings";
@@ -1017,6 +1017,7 @@ export function SuperAdminPortal() {
         adminService.getScreenings(),
         adminService.getConsents(),
         auditService.list(),
+        apiFetch<unknown[]>("/admin/practices/pending"),
       ]);
 
       // Practices
@@ -1121,6 +1122,35 @@ export function SuperAdminPortal() {
             resource: l.resource || l.subject || l.description || "",
             ipAddress: l.ipAddress || l.ip_address || l.ip || "",
           })));
+        }
+      }
+
+      // Pending approvals — practices in 'pending_approval' state.
+      // Real applications from /auth/register populate this list; the
+      // mock fallback only fires in demo mode so live super-admin sees
+      // an honest empty state when there's nothing to review.
+      if (results[6].status === "fulfilled") {
+        const pendingRes = results[6].value;
+        if (pendingRes.data && Array.isArray(pendingRes.data)) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          setPendingPractices(pendingRes.data.map((p: any) => ({
+            id: p.id || "",
+            name: p.name || "",
+            specialty: p.specialty || "",
+            ownerName: p.applicant?.name || "—",
+            ownerEmail: p.applicant?.email || p.email || "",
+            submittedAt: p.submittedAt
+              ? new Date(p.submittedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+              : "",
+            // Carry the full row so the detail drawer / approve flow has
+            // address + phone + practice_model without a second fetch.
+            city: p.city || "",
+            state: p.state || "",
+            phone: p.phone || "",
+            website: p.website || "",
+            practiceModel: p.practiceModel || p.practice_model || "",
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          })) as any);
         }
       }
     } catch {
@@ -2115,19 +2145,34 @@ export function SuperAdminPortal() {
             { label: "View details", onClick: () => setSelectedPractice(practice) },
             {
               label: "Approve",
-              onClick: () => {
+              onClick: async () => {
+                const r = await apiFetch(`/admin/practices/${practice.id}/approve`, { method: "POST" });
+                if (r.error) {
+                  setApprovalMessage(`Failed to approve ${practice.name}: ${r.error}`);
+                  return;
+                }
                 setApprovalMessage(`${practice.name} has been approved and is now active.`);
                 setPendingPractices((prev) => prev.filter((p) => p.id !== practice.id));
+                // Refresh the main practices list so the newly-active row appears.
+                loadData();
               },
             },
             {
               label: "Reject",
               danger: true,
-              onClick: () => {
-                if (window.confirm(`Reject ${practice.name}? This cannot be undone.`)) {
-                  setPendingPractices((prev) => prev.filter((p) => p.id !== practice.id));
-                  setApprovalMessage(`${practice.name} has been rejected.`);
+              onClick: async () => {
+                const reason = window.prompt(`Reject ${practice.name}? Optional reason (sent to applicant):`, "");
+                if (reason === null) return; // user cancelled
+                const r = await apiFetch(`/admin/practices/${practice.id}/reject`, {
+                  method: "POST",
+                  body: JSON.stringify({ reason: reason || null }),
+                });
+                if (r.error) {
+                  setApprovalMessage(`Failed to reject ${practice.name}: ${r.error}`);
+                  return;
                 }
+                setPendingPractices((prev) => prev.filter((p) => p.id !== practice.id));
+                setApprovalMessage(`${practice.name} has been rejected.`);
               },
             },
           ];
@@ -2166,6 +2211,11 @@ export function SuperAdminPortal() {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const detail = practiceDetail as any;
 
+    // Real data from /admin/practices/{id} maps cleanly when present.
+    // When the API returns nothing for a section we fall back to the
+    // mock generators ONLY in demo mode so the showcase tenant looks
+    // populated. Live super-admin sees real empty states for fresh
+    // tenants — no fake $X MRR or fake doctors.
     type PlanCard = { name: string; price: number; visits: number; features: string[] };
     const plans: PlanCard[] = detail?.plans?.length
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -2180,7 +2230,7 @@ export function SuperAdminPortal() {
                 pl.messaging_included ? "Messaging" : null,
               ].filter(Boolean) as string[]),
         }))
-      : getMockPlans(p.specialty);
+      : (isDemoMode ? getMockPlans(p.specialty) : []);
 
     const members: MockMember[] = (detail?.members?.length
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -2200,7 +2250,7 @@ export function SuperAdminPortal() {
             lastVisit: "-",
           };
         })
-      : getMockMembers(p.name, p.specialty));
+      : (isDemoMode ? getMockMembers(p.name, p.specialty) : []));
 
     const providers: MockProvider[] = (detail?.providers?.length
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -2213,7 +2263,7 @@ export function SuperAdminPortal() {
           panelCurrent: pr.panel_current || 0,
           panelStatus: (pr.panel_status === "closed" ? "closed" : "open") as "open" | "closed",
         }))
-      : getMockProviders(p.name, p.providers));
+      : (isDemoMode ? getMockProviders(p.name, p.providers) : []));
 
     const activity: MockActivityEvent[] = (detail?.activity?.length
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -2224,7 +2274,7 @@ export function SuperAdminPortal() {
           icon: Activity,
           color: "#0369a1",
         }))
-      : getMockActivity(p.name));
+      : (isDemoMode ? getMockActivity(p.name) : []));
 
     return (
       <div className="animate-page-in space-y-5">

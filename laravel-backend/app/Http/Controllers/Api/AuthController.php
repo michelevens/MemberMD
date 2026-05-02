@@ -78,6 +78,28 @@ class AuthController extends Controller
         // network-level signal, not a per-account one.
         RateLimiter::clear($emailKey);
 
+        // Pending-approval guard. Practices in 'pending_approval' or
+        // 'rejected' state can't sign in until a Superadmin reviews
+        // them. Superadmin role bypasses since they need to log in to
+        // approve other practices.
+        if ($user->role !== 'superadmin' && $user->tenant_id) {
+            $practice = \App\Models\Practice::find($user->tenant_id);
+            if ($practice) {
+                if ($practice->subscription_status === 'pending_approval') {
+                    return response()->json([
+                        'message' => 'Your practice is awaiting Superadmin approval. We will email you when your account is activated.',
+                        'errors' => ['email' => ['Account pending approval.']],
+                    ], 403);
+                }
+                if ($practice->subscription_status === 'rejected') {
+                    return response()->json([
+                        'message' => 'Your practice application was not approved. Contact support@membermd.io for details.',
+                        'errors' => ['email' => ['Account not approved.']],
+                    ], 403);
+                }
+            }
+        }
+
         // If MFA is enabled, return a temporary token for MFA verification
         if ($user->mfa_enabled) {
             $mfaToken = $user->createToken('mfa-pending', ['mfa-pending'], now()->addMinutes(5))->plainTextToken;
@@ -143,7 +165,10 @@ class AuthController extends Controller
             'use_starter_plans' => 'nullable|boolean',
         ]);
 
-        // Create the practice (tenant)
+        // Create the practice (tenant). Land in pending_approval so a
+        // Superadmin reviews + approves before the practice can take real
+        // bookings. is_active stays false until approval; the login guard
+        // blocks sign-in attempts in this window with a friendly message.
         $slug = \Illuminate\Support\Str::slug($validated['practice_name']);
         $practice = Practice::create([
             'name' => $validated['practice_name'],
@@ -160,7 +185,8 @@ class AuthController extends Controller
             'state' => $validated['state'] ?? null,
             'zip' => $validated['zip'] ?? null,
             'npi' => $validated['npi'] ?? null,
-            'is_active' => true,
+            'is_active' => false,
+            'subscription_status' => 'pending_approval',
         ]);
 
         // Bootstrap practice with specialty defaults (plans, appointment types, screenings, consents, settings)
@@ -284,31 +310,55 @@ class AuthController extends Controller
             \Illuminate\Support\Facades\Log::warning('Provider creation during registration failed: ' . $e->getMessage());
         }
 
-        // Send branded welcome email — Mailable + Blade template, with
-        // per-practice branding injected by the View::composer so the
-        // email matches the practice's logo/colors immediately.
-        \App\Services\MailDispatcher::send(
-            $validated['email'],
-            new \App\Mail\WelcomeEmail(
-                user: $user,
-                practice: $practice,
-                planCount: $provisioningSummary['plans'] ?? 0,
-                appointmentTypeCount: $provisioningSummary['appointment_types'] ?? 0,
-                screeningCount: $provisioningSummary['screening_templates'] ?? 0,
-            ),
-            'practice-welcome',
-        );
+        // Send "received your application" confirmation email. The
+        // branded Welcome email fires later when the Superadmin approves.
+        try {
+            \App\Services\MailDispatcher::send(
+                $validated['email'],
+                new \App\Mail\RegistrationReceivedEmail(
+                    user: $user,
+                    practice: $practice,
+                ),
+                'practice-registration-received',
+            );
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('Registration confirmation email failed', [
+                'practice_id' => $practice->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
 
-        $user->update(['last_login_at' => now()]);
+        // Notify Superadmin(s) that a new practice is awaiting review.
+        try {
+            $superadmins = User::where('role', 'superadmin')->get();
+            foreach ($superadmins as $admin) {
+                \App\Services\MailDispatcher::send(
+                    $admin->email,
+                    new \App\Mail\NewPracticeApplicationEmail(
+                        practice: $practice,
+                        applicantUser: $user,
+                    ),
+                    'superadmin-new-practice',
+                );
+            }
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('Superadmin notification failed', [
+                'practice_id' => $practice->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
 
-        $token = $user->createToken('auth-token')->plainTextToken;
-
+        // Pending-approval registrations DO NOT auto-login. Returning a
+        // token would let them into the portal, but the login guard
+        // would block their next request anyway. Better UX: tell them
+        // up front, no token issued.
         return response()->json([
             'data' => [
-                'access_token' => $token,
-                'token_type' => 'Bearer',
-                'expires_in' => (int) (config('sanctum.expiration', 60) * 60),
-                'user' => $this->userPayload($user),
+                'status' => 'pending_approval',
+                'practice_id' => $practice->id,
+                'practice_name' => $practice->name,
+                'applicant_email' => $validated['email'],
+                'message' => 'Your application has been received. A Superadmin will review and activate your account — we\'ll email you when it\'s ready.',
                 'provisioning' => $provisioningSummary,
                 'bootstrap_status' => $bootstrapStatus,
                 'bootstrap_errors' => $bootstrapErrors,

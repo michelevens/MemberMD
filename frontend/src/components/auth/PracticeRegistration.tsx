@@ -7,7 +7,7 @@ import { useNavigate } from "react-router-dom";
 import {
   Brain, Heart, Baby, Stethoscope, Scan, Activity, Users, Leaf, Crown,
   Flame, Shield, Zap, ArrowLeft, ArrowRight, Check, Loader2, Eye, EyeOff,
-  Building2, User, Lock, ClipboardList, Sparkles, ChevronRight, Layers,
+  Building2, User, Lock, ClipboardList, Sparkles, Layers,
   Search, Plus, Trash2, Copy, AlertTriangle,
 } from "lucide-react";
 import { AddressAutocomplete } from "../shared/AddressAutocomplete";
@@ -688,43 +688,45 @@ export function PracticeRegistration() {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-50 px-4">
         <div className="animate-page-in w-full max-w-lg text-center">
-          <div className="glass rounded-2xl p-10 shadow-navy">
-            {/* Celebration icon */}
-            <div
-              className="w-20 h-20 rounded-full mx-auto mb-6 flex items-center justify-center"
-              style={{ background: "linear-gradient(135deg, #27ab83, #147d64)" }}
-            >
-              <Sparkles className="w-10 h-10 text-white" />
+          <div className="rounded-xl border border-slate-200 bg-white p-10 shadow-sm">
+            {/* Stripe-purple sigil */}
+            <div className="w-14 h-14 rounded-full mx-auto mb-5 flex items-center justify-center bg-[#635bff]">
+              <Check className="w-7 h-7 text-white" />
             </div>
 
-            <h1 className="text-3xl font-bold text-navy-800 mb-2">Welcome to MemberMD!</h1>
-            <p className="text-slate-500 mb-8">
-              Your {specialtyName} practice has been provisioned.
+            <h1 className="text-2xl font-semibold tracking-tight text-slate-900 mb-2">
+              Application received
+            </h1>
+            <p className="text-sm text-slate-500 mb-6 leading-relaxed">
+              Your {specialtyName} practice application is in queue.
+              A MemberMD Superadmin will review and activate your account —
+              we'll email <strong className="text-slate-700">{accountInfo.email}</strong> when you can sign in.
             </p>
 
-            {/* Provisioned items */}
-            <div className="text-left space-y-3 mb-8">
-              {provisionedItems.map((item) => (
-                <div key={item} className="flex items-center gap-3 px-4 py-2.5 rounded-xl bg-teal-50 border border-teal-100">
-                  <div
-                    className="w-6 h-6 rounded-full flex items-center justify-center shrink-0"
-                    style={{ background: "#27ab83" }}
-                  >
-                    <Check className="w-3.5 h-3.5 text-white" />
-                  </div>
-                  <span className="text-sm font-medium text-navy-700">{item}</span>
-                </div>
-              ))}
+            <div className="text-left rounded-lg bg-slate-50 border border-slate-200 px-4 py-3 mb-6">
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-2">What we set up</p>
+              <ul className="space-y-1.5">
+                {provisionedItems.map((item) => (
+                  <li key={item} className="flex items-center gap-2 text-xs text-slate-600">
+                    <Check className="w-3 h-3 text-emerald-500 shrink-0" />
+                    {item}
+                  </li>
+                ))}
+              </ul>
             </div>
 
             <button
-              onClick={() => navigate("/practice")}
-              className="w-full py-3 rounded-xl text-white font-semibold text-sm transition-all duration-200 hover:opacity-90"
-              style={{ background: "linear-gradient(135deg, #27ab83, #147d64)" }}
+              onClick={() => navigate("/login")}
+              className="w-full py-2.5 rounded-md text-white font-medium text-sm transition-colors"
+              style={{ backgroundColor: "#635bff" }}
+              onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#544ee0")}
+              onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "#635bff")}
             >
-              Go to My Practice
-              <ChevronRight className="inline-block w-4 h-4 ml-1" />
+              Back to sign in
             </button>
+            <p className="text-xs text-slate-400 mt-3">
+              Questions? Email <a href="mailto:support@membermd.io" className="text-[#635bff] hover:underline">support@membermd.io</a>
+            </p>
           </div>
         </div>
       </div>

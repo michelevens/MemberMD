@@ -183,7 +183,10 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
 
     // SuperAdmin: Platform management
     Route::get('/admin/practices', [PracticeController::class, 'index']);
+    Route::get('/admin/practices/pending', [PracticeController::class, 'pendingApprovals']);
     Route::get('/admin/practices/{id}', [PracticeController::class, 'show']);
+    Route::post('/admin/practices/{id}/approve', [PracticeController::class, 'approve']);
+    Route::post('/admin/practices/{id}/reject', [PracticeController::class, 'reject']);
     Route::get('/admin/stats', [PracticeController::class, 'platformStats']);
 
     // Practice: own practice
