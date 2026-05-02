@@ -3,7 +3,7 @@
 // Notifications, Team, Compliance, Integrations
 
 import { useEffect, useState } from "react";
-import { apiFetch } from "../../lib/api";
+import { apiFetch, clinicalSettingsService, type ClinicalListType, type ClinicalListItem } from "../../lib/api";
 import {
   Building2,
   Palette,
@@ -649,14 +649,13 @@ export function PracticeSettings({ initialTab }: { initialTab?: string }) {
     "Initial Consultation", "Follow-up", "Medication Management",
     "Therapy Session", "Crisis Intervention",
   ]);
-  const [visitStatuses, setVisitStatuses] = useState<string[]>([
-    "Scheduled", "Confirmed", "In Progress", "Completed",
-    "No Show", "Cancelled", "Rescheduled",
-  ]);
-  const [visitReasons, setVisitReasons] = useState<string[]>([
-    "Depression", "Anxiety", "Bipolar", "PTSD", "ADHD",
-    "Substance Use", "Sleep Disorders", "Eating Disorders",
-  ]);
+  // The five lists below are now backed by /clinical-settings/{type}.
+  // Each list holds full ClinicalListItem rows so we have stable ids
+  // for update/delete (chip removes by index would otherwise need a
+  // round-trip to look up the id by label). Initial empty arrays —
+  // populated by the fetchClinicalLists effect on mount.
+  const [visitStatuses, setVisitStatuses] = useState<ClinicalListItem[]>([]);
+  const [visitReasons, setVisitReasons] = useState<ClinicalListItem[]>([]);
   const [providerTypes, setProviderTypes] = useState<string[]>([
     "MD", "DO", "NP", "PA", "Therapist", "Counselor",
   ]);
@@ -667,18 +666,78 @@ export function PracticeSettings({ initialTab }: { initialTab?: string }) {
   const [providerLanguages, setProviderLanguages] = useState<string[]>([
     "English", "Spanish", "French", "Haitian Creole",
   ]);
-  const [clinicalConditions, setClinicalConditions] = useState<string[]>([
-    "Major Depressive Disorder", "Generalized Anxiety Disorder",
-    "Bipolar Disorder", "PTSD", "ADHD", "OCD",
-  ]);
-  const [clinicalModalities, setClinicalModalities] = useState<string[]>([
-    "CBT", "DBT", "Supportive Therapy", "EMDR",
-    "Medication Management", "Family Therapy",
-  ]);
-  const [patientPopulations, setPatientPopulations] = useState<string[]>([
-    "Adults", "Adolescents", "Geriatric", "LGBTQ+",
-    "Veterans", "Perinatal",
-  ]);
+  const [clinicalConditions, setClinicalConditions] = useState<ClinicalListItem[]>([]);
+  const [clinicalModalities, setClinicalModalities] = useState<ClinicalListItem[]>([]);
+  const [patientPopulations, setPatientPopulations] = useState<ClinicalListItem[]>([]);
+
+  // Map list-type → setter so add/remove helpers can stay generic. Each
+  // helper does the API call first, then updates state with the
+  // backend-canonical row (preserves the server-assigned id and
+  // sort_order). On failure the error toast surfaces; the UI doesn't
+  // optimistically apply, so an admin retrying after a 422 (duplicate
+  // label) doesn't see a ghost chip.
+  const clinicalSetters: Record<ClinicalListType, React.Dispatch<React.SetStateAction<ClinicalListItem[]>>> = {
+    visit_statuses: setVisitStatuses,
+    visit_reasons: setVisitReasons,
+    conditions: setClinicalConditions,
+    treatment_modalities: setClinicalModalities,
+    patient_populations: setPatientPopulations,
+  };
+
+  // Fetch all five clinical lists on mount. Runs once; the helpers
+  // below mutate state in place after each individual API call.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const types: ClinicalListType[] = [
+        "visit_statuses", "visit_reasons", "conditions",
+        "treatment_modalities", "patient_populations",
+      ];
+      await Promise.all(types.map(async (t) => {
+        const res = await clinicalSettingsService.list(t);
+        if (cancelled || res.error || !res.data) return;
+        clinicalSetters[t](res.data);
+      }));
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /** Add an item to one of the clinical lists. Persists via POST and
+   *  appends the server-returned row (which carries the id we need
+   *  for delete). Empty input is a no-op. */
+  const addClinicalItem = async (type: ClinicalListType, label: string) => {
+    const trimmed = label.trim();
+    if (!trimmed) return;
+    const res = await clinicalSettingsService.create(type, { label: trimmed });
+    if (res.error) {
+      // Surface as alert so the admin sees the duplicate-label or
+      // permission error rather than the chip silently failing to
+      // appear. SectionCard doesn't have a toast slot here.
+      window.alert(res.error);
+      return;
+    }
+    if (res.data) clinicalSetters[type]((prev) => [...prev, res.data!]);
+  };
+
+  /** Remove a clinical-list item by index → soft-delete via the
+   *  controller. We carry the id on the row so this is a direct
+   *  DELETE; on success we drop it from state. */
+  const removeClinicalItem = async (type: ClinicalListType, idx: number) => {
+    const setter = clinicalSetters[type];
+    let target: ClinicalListItem | undefined;
+    setter((prev) => {
+      target = prev[idx];
+      return prev;
+    });
+    if (!target?.id) return;
+    const res = await clinicalSettingsService.delete(type, target.id);
+    if (res.error) {
+      window.alert(res.error);
+      return;
+    }
+    setter((prev) => prev.filter((_, i) => i !== idx));
+  };
   const [noteTemplates, setNoteTemplates] = useState<string[]>([
     "SOAP — Med Management", "SOAP — Therapy Session",
     "Initial Psychiatric Evaluation", "Follow-up Visit",
@@ -1717,19 +1776,19 @@ export function PracticeSettings({ initialTab }: { initialTab?: string }) {
         })}
         {renderChipList({
           title: "Visit Statuses",
-          helper: "Lifecycle states an appointment can move through.",
-          items: visitStatuses,
+          helper: "Lifecycle states an appointment can move through. Saved to /clinical-settings/visit_statuses.",
+          items: visitStatuses.map((i) => i.label),
           placeholder: "e.g. Waiting Room",
-          onAdd: (v) => setVisitStatuses([...visitStatuses, v]),
-          onRemove: (i) => setVisitStatuses(visitStatuses.filter((_, idx) => idx !== i)),
+          onAdd: (v) => addClinicalItem("visit_statuses", v),
+          onRemove: (i) => removeClinicalItem("visit_statuses", i),
         })}
         {renderChipList({
           title: "Visit Reasons",
-          helper: "Common chief complaints used in intake and reporting.",
-          items: visitReasons,
+          helper: "Common chief complaints. Surfaces as the \"Reason for visit\" dropdown on the patient booking flow.",
+          items: visitReasons.map((i) => i.label),
           placeholder: "e.g. Sleep Disorders",
-          onAdd: (v) => setVisitReasons([...visitReasons, v]),
-          onRemove: (i) => setVisitReasons(visitReasons.filter((_, idx) => idx !== i)),
+          onAdd: (v) => addClinicalItem("visit_reasons", v),
+          onRemove: (i) => removeClinicalItem("visit_reasons", i),
         })}
 
         {/* Provider Configuration */}
@@ -1771,27 +1830,27 @@ export function PracticeSettings({ initialTab }: { initialTab?: string }) {
         </div>
         {renderChipList({
           title: "Conditions",
-          helper: "Diagnosable conditions your practice treats — feeds the chart and screenings.",
-          items: clinicalConditions,
+          helper: "Diagnosable conditions your practice treats. Saved to /clinical-settings/conditions.",
+          items: clinicalConditions.map((i) => i.label),
           placeholder: "e.g. Persistent Depressive Disorder",
-          onAdd: (v) => setClinicalConditions([...clinicalConditions, v]),
-          onRemove: (i) => setClinicalConditions(clinicalConditions.filter((_, idx) => idx !== i)),
+          onAdd: (v) => addClinicalItem("conditions", v),
+          onRemove: (i) => removeClinicalItem("conditions", i),
         })}
         {renderChipList({
           title: "Treatment Modalities",
-          helper: "Therapeutic approaches used in encounters.",
-          items: clinicalModalities,
+          helper: "Therapeutic approaches used in encounters. Saved to /clinical-settings/treatment_modalities.",
+          items: clinicalModalities.map((i) => i.label),
           placeholder: "e.g. Mindfulness-Based CBT",
-          onAdd: (v) => setClinicalModalities([...clinicalModalities, v]),
-          onRemove: (i) => setClinicalModalities(clinicalModalities.filter((_, idx) => idx !== i)),
+          onAdd: (v) => addClinicalItem("treatment_modalities", v),
+          onRemove: (i) => removeClinicalItem("treatment_modalities", i),
         })}
         {renderChipList({
           title: "Patient Populations",
-          helper: "Populations your practice serves — surfaces in matching and outreach.",
-          items: patientPopulations,
+          helper: "Populations your practice serves. Saved to /clinical-settings/patient_populations.",
+          items: patientPopulations.map((i) => i.label),
           placeholder: "e.g. First Responders",
-          onAdd: (v) => setPatientPopulations([...patientPopulations, v]),
-          onRemove: (i) => setPatientPopulations(patientPopulations.filter((_, idx) => idx !== i)),
+          onAdd: (v) => addClinicalItem("patient_populations", v),
+          onRemove: (i) => removeClinicalItem("patient_populations", i),
         })}
 
         {/* Templates */}
