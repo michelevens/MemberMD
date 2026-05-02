@@ -17,7 +17,7 @@ import {
   Repeat,
   AlertTriangle,
 } from "lucide-react";
-import type { Appointment } from "../../types";
+import type { Appointment, ProviderAvailability } from "../../types";
 import { appointmentService, providerService, isUsingMockData, authService, apiFetch } from "../../lib/api";
 
 // ─── Colors ──────────────────────────────────────────────────────────────────
@@ -128,6 +128,13 @@ export function AppointmentBookingWidget({ onClose, onBooked }: AppointmentBooki
   const [apiTypes, setApiTypes] = useState<MockAppointmentType[] | null>(null);
   const [typesError, setTypesError] = useState<string | null>(null);
   const [patientId, setPatientId] = useState<string | null>(null);
+  // Provider's weekly working windows from /providers/{id}/availability.
+  // Used to render only valid time slots on step 3 and to grey out days
+  // the provider doesn't work in the calendar — matches the backend's
+  // ProviderAvailability check in AppointmentController::store so the
+  // patient can't pick a slot that the API would just reject.
+  const [providerAvailability, setProviderAvailability] = useState<ProviderAvailability[] | null>(null);
+  const [availabilityLoading, setAvailabilityLoading] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -197,6 +204,28 @@ export function AppointmentBookingWidget({ onClose, onBooked }: AppointmentBooki
     return () => { cancelled = true; };
   }, []);
 
+  // Fetch the chosen provider's weekly availability whenever the patient
+  // picks a provider. Skipped in demo mode (the mock time slots are fine
+  // for the demo flow) and when no provider is selected yet.
+  useEffect(() => {
+    if (isUsingMockData() || !selectedProvider) return;
+    let cancelled = false;
+    setAvailabilityLoading(true);
+    (async () => {
+      const res = await providerService.getAvailability(selectedProvider.id);
+      if (cancelled) return;
+      if (res.error) {
+        setProviderAvailability([]);
+      } else {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const list: any[] = Array.isArray(res.data) ? res.data : (res.data as any)?.data || [];
+        setProviderAvailability(list as ProviderAvailability[]);
+      }
+      setAvailabilityLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, [selectedProvider]);
+
   // The lists the widget actually renders. Switch by demoMode.
   const demoMode = isUsingMockData();
   const providers: MockProvider[] = demoMode ? MOCK_PROVIDERS : (apiProviders || []);
@@ -221,14 +250,69 @@ export function AppointmentBookingWidget({ onClose, onBooked }: AppointmentBooki
     return days;
   }, [calendarMonth]);
 
+  // Set of weekday numbers (0=Sun..6=Sat) the provider has at least one
+  // is_available window for. In demo mode, fall back to "Mon–Sat" so the
+  // mock calendar keeps its previous behavior.
+  const workingDaysOfWeek = useMemo<Set<number>>(() => {
+    if (demoMode || !providerAvailability) return new Set([1, 2, 3, 4, 5, 6]);
+    const s = new Set<number>();
+    for (const a of providerAvailability) {
+      if (a.isAvailable) s.add(a.dayOfWeek);
+    }
+    return s;
+  }, [demoMode, providerAvailability]);
+
   function isDateAvailable(day: number): boolean {
     const d = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth(), day);
-    const dow = d.getDay();
-    if (dow === 0) return false; // Sunday
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    return d >= today;
+    if (d < today) return false;
+    return workingDaysOfWeek.has(d.getDay());
   }
+
+  // Generate display time slots from the provider's availability windows
+  // for the selected date. Slots are 30-minute increments, and we stop
+  // emitting them once a slot + visit duration would run past the window
+  // end — so a 60-min visit in a 9:00–10:00 window gets exactly one slot.
+  // Returned strings match the existing 12h "h:mm AM/PM" format that
+  // handleBook already knows how to parse.
+  const computedTimeSlots = useMemo<string[]>(() => {
+    if (demoMode || !selectedDate || !providerAvailability) return [];
+    const dow = selectedDate.getDay();
+    const windows = providerAvailability.filter(a => a.isAvailable && a.dayOfWeek === dow);
+    if (windows.length === 0) return [];
+    const duration = selectedType?.durationMinutes ?? 30;
+    const out: string[] = [];
+    const seen = new Set<string>();
+    const fmt = (h: number, m: number) => {
+      const meridiem = h >= 12 ? "PM" : "AM";
+      const display = ((h + 11) % 12) + 1;
+      return `${display}:${m.toString().padStart(2, "0")} ${meridiem}`;
+    };
+    for (const w of windows) {
+      const [sh, sm] = w.startTime.split(":").map(Number);
+      const [eh, em] = w.endTime.split(":").map(Number);
+      const startMin = sh * 60 + sm;
+      const endMin = eh * 60 + em;
+      // Stop at endMin - duration so the visit fits inside the window;
+      // backend's overlap check would otherwise still pass the start but
+      // a 30-min visit ending 30 min after window close looks wrong.
+      for (let t = startMin; t + duration <= endMin; t += 30) {
+        const h = Math.floor(t / 60);
+        const m = t % 60;
+        const label = fmt(h, m);
+        if (!seen.has(label)) {
+          seen.add(label);
+          out.push(label);
+        }
+      }
+    }
+    return out;
+  }, [demoMode, selectedDate, providerAvailability, selectedType]);
+
+  // Final slot list the picker renders: real availability in API mode,
+  // the static demo list in demo mode. handleBook parses both.
+  const visibleTimeSlots = demoMode ? MOCK_TIME_SLOTS : computedTimeSlots;
 
   function prevMonth() {
     setCalendarMonth(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() - 1, 1));
@@ -619,8 +703,20 @@ export function AppointmentBookingWidget({ onClose, onBooked }: AppointmentBooki
                   <div className="text-xs mb-2" style={{ color: C.slate400 }}>
                     Timezone: {Intl.DateTimeFormat().resolvedOptions().timeZone}
                   </div>
+                  {!demoMode && availabilityLoading && (
+                    <div className="text-center py-6 text-sm" style={{ color: C.slate500 }}>
+                      Loading available times…
+                    </div>
+                  )}
+                  {!demoMode && !availabilityLoading && visibleTimeSlots.length === 0 && (
+                    <div className="text-center py-6 text-sm" style={{ color: C.slate500 }}>
+                      {(providerAvailability && providerAvailability.length > 0)
+                        ? "Provider isn't working this day. Pick another date."
+                        : "Provider hasn't set their availability yet. Contact the practice."}
+                    </div>
+                  )}
                   <div className="grid grid-cols-2 gap-2">
-                    {MOCK_TIME_SLOTS.map((slot) => {
+                    {visibleTimeSlots.map((slot) => {
                       const selected = selectedTime === slot;
                       // Disable slots that are already in the past when
                       // the patient is booking for today — the backend
