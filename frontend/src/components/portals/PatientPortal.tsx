@@ -14,6 +14,7 @@ import { PortalShell, type NavItem } from "../shared/PortalShell";
 import { CommandPalette, useCommandPaletteShortcut } from "../shared/CommandPalette";
 import { RefreshButton } from "../shared/RefreshButton";
 import { BillingTab } from "./patient/BillingTab";
+import { EntitlementsTab } from "./patient/EntitlementsTab";
 import { usePushNotifications } from "../../hooks/usePushNotifications";
 import {
   familyService,
@@ -53,11 +54,12 @@ import {
   ChevronDown,
   AlertCircle,
   Activity,
+  Award,
 } from "lucide-react";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
-type TabId = "home" | "appointments" | "messages" | "health" | "account" | "profile";
+type TabId = "home" | "appointments" | "messages" | "health" | "entitlements" | "account" | "profile";
 
 interface Appointment {
   id: string;
@@ -921,6 +923,7 @@ export function PatientPortal() {
     { id: "appointments", label: "Appointments", icon: Calendar },
     { id: "messages", label: "Messages", icon: MessageSquare, badge: messageThreads.filter((t) => t.unread).length || undefined },
     { id: "health", label: "Health Records", icon: Heart },
+    { id: "entitlements", label: "Entitlements", icon: Award },
     { id: "account", label: "Billing & Account", icon: CreditCard },
     { id: "profile", label: "Profile", icon: User },
   ];
@@ -2029,6 +2032,8 @@ export function PatientPortal() {
         return renderMessages();
       case "health":
         return renderHealth();
+      case "entitlements":
+        return <EntitlementsTab patientId={patient.id} />;
       case "account":
         return renderAccount();
       case "profile":
@@ -2047,6 +2052,7 @@ export function PatientPortal() {
     appointments: "Appointments",
     messages: "Messages",
     health: "Health Records",
+    entitlements: "Entitlements",
     account: "Billing & Account",
     profile: "Profile",
   };
