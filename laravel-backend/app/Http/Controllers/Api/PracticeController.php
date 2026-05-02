@@ -501,6 +501,109 @@ class PracticeController extends Controller
     }
 
     /**
+     * Superadmin-only: list internal notes about a tenant. NEVER
+     * exposed to tenant users. Notes are append-only from the UI;
+     * the full thread reads like a CRM history.
+     */
+    public function listInternalNotes(Request $request, string $practiceId): JsonResponse
+    {
+        abort_if($request->user()->role !== 'superadmin', 403);
+
+        $rows = \App\Models\PracticeInternalNote::with('author:id,first_name,last_name,email,name')
+            ->where('tenant_id', $practiceId)
+            ->orderByDesc('created_at')
+            ->limit(200)
+            ->get();
+
+        return response()->json([
+            'data' => $rows->map(fn ($n) => [
+                'id' => $n->id,
+                'body' => $n->body,
+                'category' => $n->category,
+                'created_at' => $n->created_at,
+                'author' => $n->author ? [
+                    'id' => $n->author->id,
+                    'name' => trim(($n->author->first_name ?? '') . ' ' . ($n->author->last_name ?? '')) ?: $n->author->name,
+                    'email' => $n->author->email,
+                ] : null,
+            ])->values(),
+        ]);
+    }
+
+    /**
+     * Superadmin-only: create an internal note about a tenant.
+     */
+    public function createInternalNote(Request $request, string $practiceId): JsonResponse
+    {
+        abort_if($request->user()->role !== 'superadmin', 403);
+
+        $data = $request->validate([
+            'body' => 'required|string|max:4000',
+            'category' => 'nullable|string|in:general,billing,support,risk',
+        ]);
+
+        Practice::findOrFail($practiceId);
+
+        $note = \App\Models\PracticeInternalNote::create([
+            'tenant_id' => $practiceId,
+            'author_id' => $request->user()->id,
+            'body' => $data['body'],
+            'category' => $data['category'] ?? 'general',
+        ]);
+
+        return response()->json([
+            'data' => [
+                'id' => $note->id,
+                'body' => $note->body,
+                'category' => $note->category,
+                'created_at' => $note->created_at,
+                'author' => [
+                    'id' => $request->user()->id,
+                    'name' => trim(($request->user()->first_name ?? '') . ' ' . ($request->user()->last_name ?? '')) ?: $request->user()->name,
+                    'email' => $request->user()->email,
+                ],
+            ],
+        ], 201);
+    }
+
+    /**
+     * Superadmin-only: lifetime revenue, invoice + active membership +
+     * per-role user counts for one practice. Drives the KPI tiles on
+     * the practice detail header.
+     */
+    public function tenantSummary(Request $request, string $practiceId): JsonResponse
+    {
+        abort_if($request->user()->role !== 'superadmin', 403);
+
+        $practice = Practice::findOrFail($practiceId);
+
+        $lifetimeRevenue = (float) \App\Models\Invoice::where('tenant_id', $practice->id)
+            ->where('status', 'paid')
+            ->sum('amount');
+
+        $invoiceCount = \App\Models\Invoice::where('tenant_id', $practice->id)->count();
+
+        $userCounts = User::where('tenant_id', $practice->id)
+            ->selectRaw('role, count(*) as c')
+            ->groupBy('role')
+            ->pluck('c', 'role');
+
+        $activeMembershipCount = \App\Models\PatientMembership::where('tenant_id', $practice->id)
+            ->where('status', 'active')
+            ->count();
+
+        return response()->json([
+            'data' => [
+                'practice_id' => $practice->id,
+                'lifetime_revenue' => $lifetimeRevenue,
+                'invoice_count' => $invoiceCount,
+                'active_membership_count' => $activeMembershipCount,
+                'user_counts_by_role' => $userCounts,
+            ],
+        ]);
+    }
+
+    /**
      * Mark the auth user's onboarding checklist as completed. Used to
      * dismiss the dashboard onboarding banner once the practice has
      * worked through the first-day setup steps.
