@@ -48,28 +48,41 @@ return new class extends Migration
         ];
 
         foreach ($tables as $table) {
-            if (Schema::hasTable($table)) continue;
-            Schema::create($table, function (Blueprint $t) use ($table) {
-                $t->uuid('id')->primary();
-                $t->uuid('tenant_id');
-                $t->string('label', 200);
-                $t->text('description')->nullable();
-                $t->integer('sort_order')->default(0);
-                $t->boolean('is_active')->default(true);
-                $t->timestamps();
-                $t->softDeletes();
+            if (!Schema::hasTable($table)) {
+                Schema::create($table, function (Blueprint $t) use ($table) {
+                    $t->uuid('id')->primary();
+                    $t->uuid('tenant_id');
+                    $t->string('label', 200);
+                    $t->text('description')->nullable();
+                    $t->integer('sort_order')->default(0);
+                    $t->boolean('is_active')->default(true);
+                    $t->timestamps();
+                    $t->softDeletes();
 
-                $t->foreign('tenant_id')->references('id')->on('practices')->onDelete('cascade');
-                $t->index(['tenant_id', 'sort_order'], "{$table}_tenant_sort_idx");
-                $t->index(['tenant_id', 'is_active'], "{$table}_tenant_active_idx");
-                // Postgres partial unique on label per tenant, only when
-                // not soft-deleted. SQLite (used in tests) doesn't
-                // support partial indexes, so we skip there — the
-                // controller validates uniqueness in app code anyway.
-                if (\DB::getDriverName() !== 'sqlite') {
-                    \DB::statement("CREATE UNIQUE INDEX {$table}_tenant_label_unique ON {$table} (tenant_id, lower(label)) WHERE deleted_at IS NULL");
+                    $t->foreign('tenant_id')->references('id')->on('practices')->onDelete('cascade');
+                    $t->index(['tenant_id', 'sort_order'], "{$table}_tenant_sort_idx");
+                    $t->index(['tenant_id', 'is_active'], "{$table}_tenant_active_idx");
+                });
+            }
+
+            // Partial unique index on (tenant_id, lower(label)) where not
+            // soft-deleted. Done as a separate IF NOT EXISTS DDL outside
+            // the Schema::create closure so a partial-prior-run (table
+            // created, index missed because of an unrelated error) can
+            // re-run cleanly. SQLite (test env) skipped — no partial
+            // indexes there; the controller's app-level guardDuplicate()
+            // covers uniqueness for tests.
+            if (\DB::getDriverName() !== 'sqlite') {
+                try {
+                    \DB::statement("CREATE UNIQUE INDEX IF NOT EXISTS {$table}_tenant_label_unique ON {$table} (tenant_id, lower(label)) WHERE deleted_at IS NULL");
+                } catch (\Throwable $e) {
+                    // Don't block boot on the index — the controller's
+                    // app-level uniqueness check is the source of truth.
+                    \Illuminate\Support\Facades\Log::warning(
+                        "Skipped partial unique index for {$table}: " . $e->getMessage()
+                    );
                 }
-            });
+            }
         }
     }
 
