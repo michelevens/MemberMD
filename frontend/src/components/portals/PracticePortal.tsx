@@ -1460,23 +1460,36 @@ export function PracticePortal() {
     setRosterPlanActionLoading(true);
     try {
       if (rosterPlanDialog.mode === "change" && rosterPlanDialog.membershipId) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const res: any = await apiFetch(`/memberships/${rosterPlanDialog.membershipId}/change-plan`, {
+        const res = await apiFetch(`/memberships/${rosterPlanDialog.membershipId}/change-plan`, {
           method: "POST",
           body: JSON.stringify({ planId: rosterSelectedPlanId }),
         });
-        const msg = res?.message || "Plan changed successfully.";
-        setToast({ message: msg, type: "success" });
+        if (res.error) {
+          setToast({ message: res.error, type: "error" });
+        } else {
+          setToast({ message: "Plan changed successfully.", type: "success" });
+          setRosterPlanDialog(null);
+          setRosterSelectedPlanId(null);
+          loadPracticeData();
+        }
       } else {
-        await apiFetch("/memberships", {
+        const res = await apiFetch("/memberships", {
           method: "POST",
-          body: JSON.stringify({ patientId: rosterPlanDialog.patientId, planId: rosterSelectedPlanId }),
+          body: JSON.stringify({
+            patientId: rosterPlanDialog.patientId,
+            planId: rosterSelectedPlanId,
+            billingFrequency: "monthly",
+          }),
         });
-        setToast({ message: "Patient enrolled in plan.", type: "success" });
+        if (res.error) {
+          setToast({ message: res.error, type: "error" });
+        } else {
+          setToast({ message: "Patient enrolled in plan.", type: "success" });
+          setRosterPlanDialog(null);
+          setRosterSelectedPlanId(null);
+          loadPracticeData();
+        }
       }
-      setRosterPlanDialog(null);
-      setRosterSelectedPlanId(null);
-      loadPracticeData();
     } catch {
       setToast({ message: rosterPlanDialog.mode === "change" ? "Failed to change plan." : "Failed to enroll patient.", type: "error" });
     }
