@@ -20,6 +20,10 @@ class AppointmentControllerTest extends TestCase
 
     private function createPractice(): Practice
     {
+        // Pin the practice's timezone to UTC so wall-clock times in the
+        // tests below match the server's UTC clock — AppointmentController
+        // now interprets scheduled_at in the practice's local tz when
+        // checking ProviderAvailability windows.
         return Practice::create([
             'name' => 'Test Practice',
             'slug' => 'test-practice-' . uniqid(),
@@ -27,6 +31,7 @@ class AppointmentControllerTest extends TestCase
             'phone' => '555-0100',
             'subscription_status' => 'active',
             'is_active' => true,
+            'timezone' => 'UTC',
         ]);
     }
 
