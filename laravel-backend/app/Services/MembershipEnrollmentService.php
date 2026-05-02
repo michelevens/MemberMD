@@ -114,6 +114,19 @@ class MembershipEnrollmentService
             );
         }
 
+        // Stripe path requires a payment method. Without one, Stripe creates
+        // the subscription in 'incomplete' status, attempts to charge a
+        // non-existent default card, and silently dies in dunning weeks
+        // later — a hard-to-trace failure mode dressed up as a working
+        // enrollment. Reject up front and let the caller send a payment
+        // link or collect a card before retrying.
+        if ($billingMode === 'stripe' && empty($paymentMethodId)) {
+            throw new RuntimeException(
+                'A payment method is required to enroll this patient on a billed plan. '
+                . 'Send them a payment link, collect a card in the dialog, or comp the membership.'
+            );
+        }
+
         $now = now();
         $periodEnd = $billingFrequency === 'annual'
             ? $now->copy()->addYear()
