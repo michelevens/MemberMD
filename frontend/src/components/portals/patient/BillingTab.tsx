@@ -523,7 +523,13 @@ function PaymentMethodsDialog({
     (async () => {
       try {
         const res = await paymentMethodService.list();
-        setCards(res.data || []);
+        // Defensive: handle bare array OR paginated envelope.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const d: any = res.data;
+        const list = Array.isArray(d) ? d
+          : Array.isArray(d?.data) ? d.data
+          : [];
+        setCards(list);
       } catch (e) {
         setError((e as Error).message || "Could not load cards.");
       } finally {

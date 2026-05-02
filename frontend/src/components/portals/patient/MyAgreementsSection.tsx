@@ -62,6 +62,15 @@ export function MyAgreementsSection() {
 
   useEffect(() => {
     let cancelled = false;
+    // Laravel paginated responses come back as { data: { current_page, data: [...] } }.
+    // Both consentSignatures and memberships are paginated.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const unwrap = <T,>(payload: any): T[] => {
+      if (Array.isArray(payload)) return payload as T[];
+      if (Array.isArray(payload?.data)) return payload.data as T[];
+      if (Array.isArray(payload?.items)) return payload.items as T[];
+      return [];
+    };
     (async () => {
       try {
         const [sigs, mems] = await Promise.all([
@@ -69,8 +78,8 @@ export function MyAgreementsSection() {
           membershipService.list(),
         ]);
         if (cancelled) return;
-        setSignatures((sigs.data as unknown as SignatureRow[]) || []);
-        setMemberships(mems.data || []);
+        setSignatures(unwrap<SignatureRow>(sigs.data));
+        setMemberships(unwrap(mems.data));
       } catch {
         // Silent fail — empty state is fine for patients with no signatures
       } finally {
