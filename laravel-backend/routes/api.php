@@ -292,6 +292,12 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
     Route::post('/memberships/{id}/self-cancel', [MembershipController::class, 'selfCancel']);
     Route::post('/memberships/{id}/cancel-and-refund', [MembershipController::class, 'selfCancelAndRefund']);
     Route::post('/memberships/payment-link', [MembershipController::class, 'sendPaymentLink']);
+    // Pending-enrollment reconciliation. Lets a practice admin see widget
+    // submissions / payment links that haven't yet converted into a real
+    // membership, and force-reconcile against Stripe when the
+    // checkout.session.completed webhook never arrived.
+    Route::get('/memberships/pending', [MembershipController::class, 'pendingEnrollments']);
+    Route::post('/memberships/pending/{id}/reconcile', [MembershipController::class, 'reconcilePendingEnrollment']);
     Route::apiResource('memberships', MembershipController::class)->except(['destroy']);
 
     // ===== Screenings =====

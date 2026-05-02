@@ -553,24 +553,41 @@ class StripeWebhookController extends Controller
     private function handleCheckoutSessionCompleted(Event $event, ?Practice $practice): void
     {
         if (!$practice) return;
+        $this->convertCheckoutSession($event->data->object, $practice, 'checkout.session.completed');
+    }
 
-        $session = $event->data->object;
-        $pendingId = $session->metadata->pending_enrollment_id ?? null;
+    /**
+     * Conversion logic shared between the webhook handler and the admin
+     * reconcile endpoint. Takes a Stripe Checkout Session object (live
+     * from Stripe API or from a webhook payload) and converts the linked
+     * PendingEnrollment into a real PatientMembership.
+     *
+     * Returns the resulting membership on success, null on any no-op
+     * outcome (already claimed, unpaid, missing references). Throws on
+     * unexpected errors so the caller can decide how to surface.
+     *
+     * Idempotent: safe to call repeatedly with the same session.
+     */
+    public function convertCheckoutSession(
+        object $session,
+        Practice $practice,
+        string $source,
+    ): ?PatientMembership {
+        $pendingId = is_object($session->metadata ?? null)
+            ? ($session->metadata->pending_enrollment_id ?? null)
+            : (is_array($session->metadata ?? null) ? ($session->metadata['pending_enrollment_id'] ?? null) : null);
+
         if (empty($pendingId)) {
-            // Not one of our payment-link sessions — could be a future
-            // self-serve flow that uses checkout for something else. No-op.
-            return;
+            return null;
         }
 
-        // Confirm payment actually landed. Checkout fires this event in
-        // payment_status='paid' for successful sessions; 'unpaid' or
-        // 'no_payment_required' shouldn't enroll.
         if (($session->payment_status ?? '') !== 'paid') {
-            Log::info('checkout.session.completed without paid status — skipping enrollment', [
+            Log::info('Checkout session not paid — skipping enrollment', [
                 'pending_enrollment_id' => $pendingId,
                 'payment_status' => $session->payment_status ?? null,
+                'source' => $source,
             ]);
-            return;
+            return null;
         }
 
         $pending = PendingEnrollment::where('tenant_id', $practice->id)
@@ -580,13 +597,16 @@ class StripeWebhookController extends Controller
             Log::warning('PendingEnrollment not found for checkout session', [
                 'pending_enrollment_id' => $pendingId,
                 'tenant_id' => $practice->id,
+                'source' => $source,
             ]);
-            return;
+            return null;
         }
 
-        // Idempotency: already claimed (duplicate webhook) — no-op.
         if ($pending->status !== PendingEnrollment::STATUS_PENDING) {
-            return;
+            // Already claimed — return the existing membership for the caller.
+            return $pending->claimed_membership_id
+                ? PatientMembership::find($pending->claimed_membership_id)
+                : null;
         }
 
         $patient = Patient::find($pending->patient_id);
@@ -595,7 +615,7 @@ class StripeWebhookController extends Controller
             Log::warning('PendingEnrollment refers to missing patient or plan', [
                 'pending_enrollment_id' => $pending->id,
             ]);
-            return;
+            return null;
         }
 
         try {
@@ -608,25 +628,24 @@ class StripeWebhookController extends Controller
                 compReason: null,
                 sourceUserId: $pending->created_by_user_id,
                 paymentMethodId: null,
-                source: 'checkout.session.completed',
+                source: $source,
                 existingStripeSubscriptionId: $session->subscription ?? null,
                 existingStripeCustomerId: $session->customer ?? $pending->stripe_customer_id,
             );
         } catch (\Throwable $e) {
-            // Critical path failure — Stripe got money but we couldn't
-            // create the local row. Log loud, leave the pending row in
-            // place so an admin can manually reconcile.
             Log::error('Failed to convert PendingEnrollment to membership after paid checkout', [
                 'pending_enrollment_id' => $pending->id,
                 'stripe_session_id' => $session->id,
+                'source' => $source,
                 'error' => $e->getMessage(),
             ]);
             $this->audit($practice, 'tier2_pending_enrollment_conversion_failed', [
                 'pending_enrollment_id' => $pending->id,
                 'stripe_session_id' => $session->id,
+                'source' => $source,
                 'error' => $e->getMessage(),
             ]);
-            return;
+            throw $e;
         }
 
         $pending->update([
@@ -635,10 +654,6 @@ class StripeWebhookController extends Controller
             'claimed_at' => now(),
         ]);
 
-        // Replay consent signatures captured at widget submit time. Only
-        // present when the pending row originated from the public widget
-        // (admin-sent payment links don't collect consents — admin already
-        // has them on file).
         $consentPayload = $pending->consent_payload ?? null;
         if (is_array($consentPayload) && !empty($consentPayload['types'])) {
             try {
@@ -660,11 +675,6 @@ class StripeWebhookController extends Controller
             }
         }
 
-        // Welcome email + practice-admin in-app/email notifications. Same
-        // path the manual external enrollment uses, just deferred until
-        // payment lands. Without this, a Checkout-paid widget enrollment
-        // would create the membership silently and the practice would
-        // never know.
         try {
             $patient->loadMissing('user');
             \App\Http\Controllers\Api\ExternalController::firePostEnrollmentNotifications(
@@ -689,7 +699,10 @@ class StripeWebhookController extends Controller
             'stripe_session_id' => $session->id,
             'stripe_subscription_id' => $session->subscription ?? null,
             'origin' => $consentPayload ? 'external_widget' : 'admin_payment_link',
+            'source' => $source,
         ]);
+
+        return $membership;
     }
 
     private function extractLineItems(object $stripeInvoice): array

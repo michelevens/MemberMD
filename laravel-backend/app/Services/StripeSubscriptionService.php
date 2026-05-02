@@ -667,6 +667,28 @@ class StripeSubscriptionService
     }
 
     /**
+     * Pull the latest state of a Stripe Checkout Session from the
+     * practice's Connect account. Used by the admin reconcile flow when
+     * the checkout.session.completed webhook never arrived (event not
+     * subscribed in Stripe Connect, transient outage) and we need to
+     * re-check whether the patient actually paid.
+     */
+    public function retrieveCheckoutSession(Practice $practice, string $sessionId): \Stripe\Checkout\Session
+    {
+        $this->assertPracticeReady($practice);
+
+        try {
+            return $this->stripe()->checkout->sessions->retrieve(
+                $sessionId,
+                [],
+                ['stripe_account' => $practice->stripe_account_id],
+            );
+        } catch (ApiErrorException $e) {
+            throw new RuntimeException("Failed to retrieve Checkout session: {$e->getMessage()}", 0, $e);
+        }
+    }
+
+    /**
      * Create Stripe Product + recurring Prices on the practice's Connect
      * account so this plan can be sold via subscriptions. Idempotent: if
      * the plan already has stripe_monthly_price_id / stripe_annual_price_id

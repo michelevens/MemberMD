@@ -931,6 +931,12 @@ export function PracticePortal() {
   const [_ptApiDocuments, setPtApiDocuments] = useState<any[]>([]);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [_ptApiMessages, setPtApiMessages] = useState<any[]>([]);
+  // Pending enrollments awaiting Stripe Checkout completion. Surfaced
+  // on the Billing tab so admins can see "payment in progress" rows
+  // and reconcile when the webhook never arrived.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [ptPendingEnrollments, setPtPendingEnrollments] = useState<any[]>([]);
+  const [ptReconcileLoading, setPtReconcileLoading] = useState<string | null>(null);
 
   // ─── Roster Cancel Membership Dialog ───────────────────────────────────
   const [rosterCancelDialog, setRosterCancelDialog] = useState<{ patientId: string; patientName: string; membershipId: string } | null>(null);
@@ -1228,6 +1234,7 @@ export function PracticePortal() {
       setPtApiScreenings([]);
       setPtApiDocuments([]);
       setPtApiMessages([]);
+      setPtPendingEnrollments([]);
       return;
     }
     const pid = selectedPatient.id;
@@ -1241,6 +1248,7 @@ export function PracticePortal() {
         screeningService.list({ patient_id: pid }),
         documentService.list({ patient_id: pid }),
         messageService.list({ patient_id: pid }),
+        apiFetch<unknown[]>(`/memberships/pending?patient_id=${pid}`).catch(() => ({ data: [] })),
       ]);
       if (cancelled) return;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1259,9 +1267,40 @@ export function PracticePortal() {
       setPtApiScreenings(unpack(results[4]));
       setPtApiDocuments(unpack(results[5]));
       setPtApiMessages(unpack(results[6]));
+      setPtPendingEnrollments(unpack(results[7]));
     })();
     return () => { cancelled = true; };
   }, [selectedPatient?.id]);
+
+  // Reconcile a pending enrollment against Stripe — used when the
+  // checkout.session.completed webhook never arrived but the patient
+  // actually paid. The backend re-fetches the session live and converts.
+  const handleReconcilePending = useCallback(async (pendingId: string) => {
+    setPtReconcileLoading(pendingId);
+    try {
+      const res = await apiFetch<{ data?: { reconciled?: boolean }; message?: string }>(
+        `/memberships/pending/${pendingId}/reconcile`,
+        { method: "POST" },
+      );
+      if (res.error) {
+        setToast({ message: res.error, type: "error" });
+      } else {
+        const reconciled = (res.data as { data?: { reconciled?: boolean } } | undefined)?.data?.reconciled;
+        const msg = (res.data as { message?: string } | undefined)?.message;
+        setToast({
+          message: msg || (reconciled ? "Membership reconciled." : "Nothing to reconcile yet."),
+          type: reconciled ? "success" : "error",
+        });
+        if (reconciled) {
+          loadPracticeData();
+          setPtPendingEnrollments((prev) => prev.filter((p) => p.id !== pendingId));
+        }
+      }
+    } catch {
+      setToast({ message: "Reconcile failed.", type: "error" });
+    }
+    setPtReconcileLoading(null);
+  }, [loadPracticeData, setToast]);
 
   // ─── Fetch Entitlement Types ─────────────────────────────────────────
   const fetchEntitlementTypes = useCallback(async () => {
@@ -4302,6 +4341,67 @@ export function PracticePortal() {
                   >
                     Enroll in plan
                   </button>
+                </div>
+              )}
+
+              {/* Pending enrollments — payment in progress / never claimed.
+                  Surfaces the case where a patient paid via Stripe Checkout but
+                  the checkout.session.completed webhook never reached us.
+                  "Reconcile from Stripe" pulls the live session and converts. */}
+              {ptPendingEnrollments.filter((p) => p.status === "pending").length > 0 && (
+                <div className="mt-4 space-y-3">
+                  {ptPendingEnrollments.filter((p) => p.status === "pending").map((pending) => {
+                    const planName = pending.plan?.name || pending.planName || "Unknown plan";
+                    const ageHours = pending.created_at
+                      ? Math.floor((Date.now() - new Date(pending.created_at).getTime()) / 3_600_000)
+                      : null;
+                    const expired = pending.expires_at && new Date(pending.expires_at) < new Date();
+                    return (
+                      <div
+                        key={pending.id}
+                        className="rounded-xl border p-4"
+                        style={{ borderColor: "#fde68a", backgroundColor: "#fffbeb" }}
+                      >
+                        <div className="flex items-start justify-between gap-4">
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-semibold text-amber-900">
+                              Payment in progress — {planName}
+                            </p>
+                            <p className="text-xs text-amber-800 mt-1 leading-relaxed">
+                              {expired
+                                ? "Stripe Checkout session expired. The patient may have paid before expiry — reconcile to check."
+                                : "Patient was sent to Stripe Checkout but we haven't received payment confirmation yet. If they paid, click Reconcile to pull the live session from Stripe and create the membership."}
+                            </p>
+                            <div className="mt-2 text-xs text-amber-700" style={{ fontSize: "11px" }}>
+                              {ageHours !== null && <>Created {ageHours}h ago · </>}
+                              Session: {pending.stripe_checkout_session_id?.slice(0, 18) || "—"}…
+                            </div>
+                          </div>
+                          <div className="flex flex-col gap-2 shrink-0">
+                            <button
+                              onClick={() => handleReconcilePending(pending.id)}
+                              disabled={ptReconcileLoading === pending.id}
+                              className="px-3 py-1.5 rounded-md text-xs font-medium text-white transition-colors disabled:opacity-50"
+                              style={{ backgroundColor: "#d97706" }}
+                            >
+                              {ptReconcileLoading === pending.id ? "Reconciling..." : "Reconcile from Stripe"}
+                            </button>
+                            {pending.checkout_url && !expired && (
+                              <a
+                                href={pending.checkout_url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="px-3 py-1.5 rounded-md text-xs font-medium border text-center transition-colors"
+                                style={{ borderColor: "#d97706", color: "#92400e" }}
+                              >
+                                Open link
+                              </a>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>

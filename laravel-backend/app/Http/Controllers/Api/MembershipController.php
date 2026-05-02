@@ -27,6 +27,7 @@ class MembershipController extends Controller
         private readonly StripeSubscriptionService $subscriptions,
         private readonly MembershipStateMachine $states,
         private readonly MembershipEnrollmentService $enrollment,
+        private readonly StripeWebhookController $webhooks,
     ) {
     }
 
@@ -265,6 +266,128 @@ class MembershipController extends Controller
                 'error' => $e->getMessage(),
             ]);
         }
+    }
+
+    /**
+     * Practice-admin diagnostic: list pending enrollments for the tenant.
+     * Used by the reconciliation UI to surface widget enrollments + admin
+     * payment links that haven't yet converted into a real membership.
+     *
+     * Optional ?patient_id={uuid} narrows to a single patient, which the
+     * patient-detail Billing tab uses to show "payment in progress".
+     */
+    public function pendingEnrollments(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        abort_if(!in_array($user->role, ['practice_admin', 'staff']), 403);
+
+        $query = PendingEnrollment::where('tenant_id', $user->tenant_id)
+            ->with(['patient:id,first_name,last_name,email', 'plan:id,name,monthly_price,annual_price']);
+
+        if ($request->filled('patient_id')) {
+            $query->where('patient_id', $request->input('patient_id'));
+        }
+        if ($request->filled('status')) {
+            $query->where('status', $request->input('status'));
+        }
+
+        $pendings = $query->orderByDesc('created_at')
+            ->paginate($request->input('per_page', 25));
+
+        return response()->json(['data' => $pendings]);
+    }
+
+    /**
+     * Practice-admin reconciliation: when a patient paid via Stripe but
+     * the checkout.session.completed webhook never reached us (event not
+     * subscribed in Stripe Connect, transient outage, etc.), the
+     * PendingEnrollment stays as 'pending' forever and the patient has
+     * been billed without a membership.
+     *
+     * This endpoint queries Stripe live for the session, and if it's
+     * paid, runs the same conversion the webhook would have run —
+     * creating the PatientMembership, replaying consents, sending the
+     * welcome email. Idempotent: if the pending row was already claimed
+     * by a webhook arrival in the meantime, returns the existing row.
+     */
+    public function reconcilePendingEnrollment(Request $request, string $id): JsonResponse
+    {
+        $user = $request->user();
+        abort_if(!in_array($user->role, ['practice_admin', 'staff']), 403);
+
+        $pending = PendingEnrollment::where('tenant_id', $user->tenant_id)
+            ->findOrFail($id);
+
+        if ($pending->status === PendingEnrollment::STATUS_CLAIMED && $pending->claimed_membership_id) {
+            return response()->json([
+                'data' => [
+                    'pending' => $pending,
+                    'membership' => PatientMembership::with(['patient', 'plan'])->find($pending->claimed_membership_id),
+                    'reconciled' => false,
+                ],
+                'message' => 'Already claimed.',
+            ]);
+        }
+
+        if (empty($pending->stripe_checkout_session_id)) {
+            return response()->json([
+                'message' => 'This pending enrollment has no Stripe session — nothing to reconcile.',
+            ], 422);
+        }
+
+        $practice = Practice::findOrFail($user->tenant_id);
+
+        try {
+            $session = $this->subscriptions->retrieveCheckoutSession(
+                $practice,
+                $pending->stripe_checkout_session_id,
+            );
+        } catch (\Throwable $e) {
+            return response()->json([
+                'message' => 'Could not fetch session from Stripe: ' . $e->getMessage(),
+            ], 422);
+        }
+
+        if (($session->payment_status ?? '') !== 'paid') {
+            return response()->json([
+                'data' => [
+                    'pending' => $pending->fresh(),
+                    'session_status' => $session->status ?? null,
+                    'payment_status' => $session->payment_status ?? null,
+                    'reconciled' => false,
+                ],
+                'message' => 'Patient has not completed payment yet (status: '
+                    . ($session->payment_status ?? 'unknown') . ').',
+            ]);
+        }
+
+        try {
+            $membership = $this->webhooks->convertCheckoutSession(
+                $session,
+                $practice,
+                'admin.reconcile',
+            );
+        } catch (\Throwable $e) {
+            return response()->json([
+                'message' => 'Conversion failed: ' . $e->getMessage(),
+            ], 500);
+        }
+
+        if (!$membership) {
+            return response()->json([
+                'data' => ['pending' => $pending->fresh(), 'reconciled' => false],
+                'message' => 'Could not convert pending enrollment — see server logs.',
+            ], 422);
+        }
+
+        return response()->json([
+            'data' => [
+                'pending' => $pending->fresh(),
+                'membership' => $membership->load(['patient', 'plan']),
+                'reconciled' => true,
+            ],
+            'message' => 'Membership reconciled successfully.',
+        ]);
     }
 
     public function update(Request $request, string $id): JsonResponse
