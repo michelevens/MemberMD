@@ -34,9 +34,7 @@
 <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin-bottom: 28px;">
     <tr>
         <td align="center">
-            <a href="{{ $enrollUrl }}" style="display: inline-block; padding: 14px 36px; background-color: #27ab83; color: #ffffff; font-size: 16px; font-weight: 600; text-decoration: none; border-radius: 8px;">
-                Start enrollment
-            </a>
+            @include('emails.partials.button', ['url' => $enrollUrl, 'text' => 'Start enrollment'])
         </td>
     </tr>
 </table>
