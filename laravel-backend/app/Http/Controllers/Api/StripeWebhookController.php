@@ -136,6 +136,10 @@ class StripeWebhookController extends Controller
             $metaTier = $obj->metadata->tier ?? null;
             $isOurEvent = $metaTier === 'platform_subscription'
                 || PracticeSubscription::where('stripe_subscription_id', $subscriptionId)->exists();
+        } elseif ($event->type === 'checkout.session.completed') {
+            // Checkout sessions carry our metadata.tier when we created them
+            $metaTier = $obj->metadata->tier ?? null;
+            $isOurEvent = $metaTier === 'platform_subscription';
         }
 
         if (!$isOurEvent) {
@@ -143,6 +147,7 @@ class StripeWebhookController extends Controller
         }
 
         match ($event->type) {
+            'checkout.session.completed' => $this->handleCheckoutSessionCompleted($obj),
             'invoice.paid' => $this->handleInvoicePaid($obj),
             'invoice.payment_failed' => $this->handleInvoicePaymentFailed($obj),
             'invoice.finalized' => $this->handleInvoiceFinalized($obj),
@@ -152,6 +157,67 @@ class StripeWebhookController extends Controller
             'customer.subscription.trial_will_end' => null, // Email reminder handled via cron, not webhook
             default => null,
         };
+    }
+
+    /**
+     * Stripe Checkout completed for a platform subscription. Stamp the new
+     * subscription id on the practice_subscriptions row + flip status to
+     * active. The subscription was created on Stripe's side as part of
+     * Checkout — we just need to mirror it locally.
+     */
+    private function handleCheckoutSessionCompleted($session): void
+    {
+        $practiceSubId = $session->metadata->practice_subscription_id ?? null;
+        $sub = $practiceSubId ? PracticeSubscription::find($practiceSubId) : null;
+        if (!$sub) return;
+
+        $stripeSubId = $session->subscription ?? null;
+        $customerId = $session->customer ?? null;
+
+        $sub->update([
+            'stripe_subscription_id' => $stripeSubId ?: $sub->stripe_subscription_id,
+            'stripe_customer_id' => $customerId ?: $sub->stripe_customer_id,
+            'status' => 'active',
+        ]);
+
+        // Sync period dates from the Stripe subscription so the UI shows
+        // the next-billing date immediately rather than waiting for the
+        // first invoice.paid webhook.
+        if ($stripeSubId && $this->billingService()) {
+            try {
+                $stripeSub = $this->billingService()->stripeRetrieveSubscription($stripeSubId);
+                if ($stripeSub) {
+                    $sub->update([
+                        'current_period_start' => $stripeSub->current_period_start
+                            ? now()->setTimestamp($stripeSub->current_period_start) : null,
+                        'current_period_end' => $stripeSub->current_period_end
+                            ? now()->setTimestamp($stripeSub->current_period_end) : null,
+                        'trial_ends_at' => $stripeSub->trial_end
+                            ? now()->setTimestamp($stripeSub->trial_end) : $sub->trial_ends_at,
+                    ]);
+                }
+            } catch (\Throwable $e) {
+                Log::warning('Failed to sync period dates after checkout', [
+                    'practice_subscription_id' => $sub->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+    }
+
+    /**
+     * Lazily resolve PlatformBillingService for the post-checkout subscription
+     * details fetch. We don't constructor-inject because StripeWebhookController
+     * is one of Laravel's earliest-bound controllers and adding deps there
+     * is risky; resolving on demand is fine.
+     */
+    private function billingService(): ?\App\Services\PlatformBillingService
+    {
+        try {
+            return app(\App\Services\PlatformBillingService::class);
+        } catch (\Throwable) {
+            return null;
+        }
     }
 
     private function handleInvoicePaid($invoice): void

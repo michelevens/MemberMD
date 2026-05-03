@@ -110,9 +110,56 @@ class PracticeSubscriptionController extends Controller
 
         $billingCycle = $validated['billing_cycle'] ?? $sub->billing_cycle;
 
-        // Local-side update first — covers dev environments without Stripe
-        // keys, and means the surface flips immediately even if Stripe is
-        // slow. Webhook reconciles any drift.
+        // Decision tree:
+        //   1. First-time subscriber (no stripe_subscription_id yet) AND
+        //      Stripe configured → return Checkout URL. Frontend redirects
+        //      the practice to Stripe to enter their card; webhook flips
+        //      practice_subscriptions to active on completion.
+        //   2. Existing subscriber → swap the price on their live Stripe sub
+        //      via applyPlanChange (proration, no card re-collection).
+        //   3. Stripe not configured (dev) → local-only update.
+        //
+        // Why not local-update first like before: the previous flow lied
+        // to the user — it said "Plan changed" even when no Stripe customer
+        // existed, leaving the practice "subscribed" but never charged.
+        // Now if Stripe is configured, the practice MUST go through Stripe.
+
+        $stripeConfigured = $this->billing->isConfigured();
+        $needsCheckout = $stripeConfigured && empty($sub->stripe_subscription_id);
+
+        if ($needsCheckout) {
+            try {
+                $checkoutUrl = $this->billing->createCheckoutSession($sub, $plan, $billingCycle);
+            } catch (\Throwable $e) {
+                Log::warning('Failed to create Checkout session for plan change', [
+                    'practice_subscription_id' => $sub->id,
+                    'plan_key' => $plan->key,
+                    'error' => $e->getMessage(),
+                ]);
+                return response()->json(['message' => $e->getMessage()], 422);
+            }
+
+            // Stash the intended plan + cycle on the row so the webhook can
+            // confirm the practice picked what they paid for. Don't flip
+            // status yet — that happens when checkout.session.completed lands.
+            $sub->update([
+                'platform_plan_id' => $plan->id,
+                'billing_cycle' => $billingCycle,
+                'purchased_seat_blocks' => 0,
+                'cancels_at' => null,
+                'cancelled_at' => null,
+            ]);
+
+            return response()->json([
+                'data' => [
+                    'checkout_url' => $checkoutUrl,
+                    'requires_checkout' => true,
+                ],
+                'message' => 'Redirecting to Stripe to complete checkout.',
+            ]);
+        }
+
+        // Existing-subscriber path OR Stripe-not-configured path
         $sub->update([
             'platform_plan_id' => $plan->id,
             'billing_cycle' => $billingCycle,
@@ -122,13 +169,8 @@ class PracticeSubscriptionController extends Controller
             'status' => $sub->status === 'cancelled' ? 'active' : $sub->status,
         ]);
 
-        // Stripe-side: create or swap the subscription on the platform account.
-        // Skipped when Stripe isn't configured (dev), when the practice is on
-        // Founder override (never bills), or when the plan has no Stripe price
-        // (SuperAdmin hasn't synced it yet — change still works locally so
-        // we don't lock practices out of the surface, but bill won't hit Stripe).
         try {
-            if ($this->billing->isConfigured() && !$sub->is_founder_override) {
+            if ($stripeConfigured && !$sub->is_founder_override) {
                 $this->billing->applyPlanChange($sub->fresh(), $plan, $billingCycle);
             }
         } catch (\Throwable $e) {
@@ -137,9 +179,6 @@ class PracticeSubscriptionController extends Controller
                 'plan_key' => $plan->key,
                 'error' => $e->getMessage(),
             ]);
-            // Don't fail the request — local state is the source of truth
-            // for what the practice picked; admin can reconcile via webhook
-            // or manual sync later.
         }
 
         return response()->json([

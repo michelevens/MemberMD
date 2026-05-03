@@ -270,6 +270,106 @@ class PlatformBillingService
     }
 
     /**
+     * Create a Stripe Checkout session in subscription mode so the practice
+     * enters their card and the subscription is created in one shot.
+     *
+     * Used for first-time subscribers where applyPlanChange() can't run
+     * directly because there's no payment method on file. After the
+     * practice completes Checkout, the platform webhook receives
+     * checkout.session.completed → flips practice_subscriptions to active +
+     * stamps stripe_subscription_id.
+     *
+     * Returns the Checkout session url. Founder accounts and Enterprise
+     * (quote-only) tiers reject — they don't go through self-serve
+     * checkout.
+     */
+    public function createCheckoutSession(
+        PracticeSubscription $sub,
+        PlatformPlan $plan,
+        string $billingCycle = 'monthly',
+        ?string $successUrl = null,
+        ?string $cancelUrl = null,
+    ): string {
+        if ($sub->is_founder_override) {
+            throw new RuntimeException('Founder accounts cannot use Checkout — they are never billed.');
+        }
+        if ($plan->is_quote_only) {
+            throw new RuntimeException('Enterprise tier requires a sales conversation — contact sales@membermd.io.');
+        }
+
+        // Auto-sync the plan to Stripe if it has no price id yet
+        $priceId = $billingCycle === 'annual' ? $plan->stripe_annual_price_id : $plan->stripe_monthly_price_id;
+        if (empty($priceId)) {
+            try {
+                $plan = $this->syncPlanPricesToStripe($plan);
+                $priceId = $billingCycle === 'annual' ? $plan->stripe_annual_price_id : $plan->stripe_monthly_price_id;
+            } catch (\Throwable $e) {
+                Log::warning('Auto-sync of platform plan to Stripe failed during Checkout', [
+                    'plan_key' => $plan->key,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+        if (empty($priceId)) {
+            throw new RuntimeException(
+                "Platform plan {$plan->key} has no Stripe price for {$billingCycle} billing. "
+                . 'SuperAdmin needs to sync this plan to Stripe.'
+            );
+        }
+
+        $customerId = $this->ensureCustomer($sub);
+        $frontend = rtrim((string) env('FRONTEND_URL', 'https://app.membermd.io'), '/');
+        $defaultReturn = $frontend . '/#/practice/settings?tab=subscription';
+
+        try {
+            $session = $this->stripe()->checkout->sessions->create(
+                [
+                    'mode' => 'subscription',
+                    'customer' => $customerId,
+                    'line_items' => [['price' => $priceId, 'quantity' => 1]],
+                    'success_url' => ($successUrl ?? $defaultReturn) . '&checkout=success&session={CHECKOUT_SESSION_ID}',
+                    'cancel_url' => ($cancelUrl ?? $defaultReturn) . '&checkout=cancelled',
+                    'allow_promotion_codes' => true,
+                    'subscription_data' => [
+                        'trial_end' => $sub->trial_ends_at && $sub->trial_ends_at->isFuture()
+                            ? $sub->trial_ends_at->timestamp
+                            : null,
+                        'metadata' => [
+                            'practice_id' => $sub->practice_id,
+                            'practice_subscription_id' => $sub->id,
+                            'platform_plan_id' => $plan->id,
+                            'platform_plan_key' => $plan->key,
+                            'billing_cycle' => $billingCycle,
+                            'tier' => 'platform_subscription',
+                            'platform' => 'membermd',
+                        ],
+                    ],
+                    'metadata' => [
+                        'practice_id' => $sub->practice_id,
+                        'practice_subscription_id' => $sub->id,
+                        'platform_plan_id' => $plan->id,
+                        'platform_plan_key' => $plan->key,
+                        'billing_cycle' => $billingCycle,
+                        'tier' => 'platform_subscription',
+                        'platform' => 'membermd',
+                    ],
+                ],
+                ['idempotency_key' => "membermd-platform-checkout-{$sub->id}-{$plan->id}-{$billingCycle}"],
+            );
+        } catch (ApiErrorException $e) {
+            throw new RuntimeException("Failed to create Checkout session: {$e->getMessage()}", 0, $e);
+        }
+
+        $this->audit($sub, 'platform_checkout_session_created', [
+            'plan_key' => $plan->key,
+            'billing_cycle' => $billingCycle,
+            'session_id' => $session->id,
+        ]);
+
+        return $session->url;
+    }
+
+    /**
      * Create a Stripe Billing Customer Portal session and return the URL.
      * Practice admin gets redirected here from the "Update payment method"
      * button — Stripe hosts the entire UI for managing card on file,
@@ -704,6 +804,21 @@ class PlatformBillingService
             'redeemed_at' => now(),
         ]);
         $coupon->increment('redemptions_count');
+    }
+
+    /**
+     * Public passthrough for retrieving a Stripe subscription from the
+     * webhook handler after Checkout completes. Returns null if Stripe
+     * isn't configured or the lookup fails.
+     */
+    public function stripeRetrieveSubscription(string $subscriptionId): ?\Stripe\Subscription
+    {
+        if (!$this->isConfigured()) return null;
+        try {
+            return $this->stripe()->subscriptions->retrieve($subscriptionId);
+        } catch (ApiErrorException) {
+            return null;
+        }
     }
 
     /**

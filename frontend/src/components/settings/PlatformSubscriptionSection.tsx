@@ -649,6 +649,14 @@ function ChangePlanDialog({
       setSubmitting(false);
       return;
     }
+    // First-time subscribers get bounced to Stripe Checkout to collect a
+    // card. The webhook flips the subscription to active when they complete;
+    // Stripe redirects them back to this tab afterward.
+    const data = res.data as { checkoutUrl?: string; requiresCheckout?: boolean } | null;
+    if (data?.requiresCheckout && data.checkoutUrl) {
+      window.location.href = data.checkoutUrl;
+      return;
+    }
     await onChanged();
   };
 

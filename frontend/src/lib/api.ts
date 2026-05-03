@@ -1894,9 +1894,14 @@ export const subscriptionService = {
     if (useMockData()) return { data: [] };
     return apiFetch<PlatformInvoiceRow[]>("/me/subscription/invoices");
   },
-  changePlan: async (data: { platformPlanId: string; billingCycle?: "monthly" | "annual" }): Promise<ApiResponse<PracticeSubscriptionSummary>> => {
+  // Plan change has two return shapes depending on whether the practice
+  // already has a Stripe subscription on file:
+  //   - First-time subscriber: `{ checkoutUrl, requiresCheckout: true }`
+  //     Frontend redirects browser to Stripe Checkout to collect a card.
+  //   - Existing subscriber: `PracticeSubscriptionSummary` (the swapped sub).
+  changePlan: async (data: { platformPlanId: string; billingCycle?: "monthly" | "annual" }): Promise<ApiResponse<PracticeSubscriptionSummary | { checkoutUrl: string; requiresCheckout: true }>> => {
     if (useMockData()) return { data: null as unknown as PracticeSubscriptionSummary };
-    return apiFetch<PracticeSubscriptionSummary>("/me/subscription/change", {
+    return apiFetch<PracticeSubscriptionSummary | { checkoutUrl: string; requiresCheckout: true }>("/me/subscription/change", {
       method: "POST",
       body: JSON.stringify(data),
     });
