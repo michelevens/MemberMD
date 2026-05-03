@@ -185,6 +185,58 @@ class ConsentTemplateSeeder extends Seeder
                     'This Agreement, together with the Plan Entitlements table and the Notice of Privacy Practices, constitutes the entire agreement between the Member and the Practice with respect to the Membership and supersedes any prior agreements or understandings.' . "\n\n" .
                     'By signing below, the Member acknowledges that they have read this Agreement in full, have had an opportunity to ask questions, understand that the Membership is not health insurance, and agree to be bound by all of its terms. The Plan Entitlements table is incorporated into this Agreement by reference.',
             ],
+
+            // ─── HIPAA Release of Information — Authorization to RELEASE records to a third party ───
+            [
+                'type' => 'roi_release',
+                'name' => 'Authorization to Release Health Information',
+                'specialty' => null,
+                'is_required' => false,
+                'version' => '1.0',
+                'content' => "## Authorization to Release Protected Health Information\n\n" .
+                    'I hereby authorize this Practice to release my protected health information (PHI) to the recipient(s) named below.' . "\n\n" .
+                    "## 1. Information to be Released\n" .
+                    'This authorization covers all information in my medical record relevant to the purpose stated below, unless I specify otherwise in writing to the Practice. This may include progress notes, lab results, imaging reports, medication history, immunization records, and other clinical data.' . "\n\n" .
+                    "## 2. Sensitive Information\n" .
+                    'I understand that my records may contain information related to mental health, substance use treatment, HIV/AIDS status, or genetic testing. By signing this authorization, I specifically consent to the release of such sensitive information unless I check the following box: ☐ I do NOT authorize the release of sensitive information.' . "\n\n" .
+                    "## 3. Purpose of Release\n" .
+                    'The purpose of this release is to support continuity of care, coordinate treatment with another provider, respond to a request from me, or as otherwise specified in writing.' . "\n\n" .
+                    "## 4. Right to Revoke\n" .
+                    'I understand that I may revoke this authorization at any time by writing to the Practice, except to the extent that the Practice has already acted in reliance on it. Revocation will not affect any disclosures already made.' . "\n\n" .
+                    "## 5. Expiration\n" .
+                    'This authorization expires one (1) year from the date signed unless an earlier date is specified.' . "\n\n" .
+                    "## 6. Conditions of Treatment\n" .
+                    'I understand that my treatment, payment, enrollment, or eligibility for benefits cannot be conditioned on whether I sign this authorization, except as permitted by law.' . "\n\n" .
+                    "## 7. Re-disclosure Notice\n" .
+                    'I understand that information disclosed pursuant to this authorization may be subject to re-disclosure by the recipient and may no longer be protected by federal privacy regulations.' . "\n\n" .
+                    'By signing below, I acknowledge that I have read and understand this authorization and consent to the release of my protected health information as described above.',
+            ],
+
+            // ─── HIPAA Release of Information — Authorization to OBTAIN records from another provider ───
+            [
+                'type' => 'roi_obtain',
+                'name' => 'Authorization to Obtain Health Information',
+                'specialty' => null,
+                'is_required' => false,
+                'version' => '1.0',
+                'content' => "## Authorization to Obtain Protected Health Information\n\n" .
+                    'I hereby authorize the Practice to request and receive my protected health information (PHI) from the source(s) named below for the purpose of supporting my care.' . "\n\n" .
+                    "## 1. Information Requested\n" .
+                    'This authorization covers all information in my medical record at the named source relevant to the purpose stated below, including progress notes, lab and imaging reports, medication and immunization history, and other clinical data.' . "\n\n" .
+                    "## 2. Sensitive Information\n" .
+                    'I understand that the records I am authorizing to be obtained may contain information related to mental health, substance use treatment, HIV/AIDS status, or genetic testing. By signing this authorization, I specifically consent to the disclosure of such sensitive information to the Practice unless I check the following box: ☐ I do NOT authorize disclosure of sensitive information.' . "\n\n" .
+                    "## 3. Purpose\n" .
+                    'The purpose of this authorization is to allow the Practice to obtain my prior medical history so my care team has a complete picture of my health.' . "\n\n" .
+                    "## 4. Right to Revoke\n" .
+                    'I may revoke this authorization at any time by writing to the Practice, except to the extent that the source has already acted in reliance on it.' . "\n\n" .
+                    "## 5. Expiration\n" .
+                    'This authorization expires one (1) year from the date signed unless an earlier date is specified.' . "\n\n" .
+                    "## 6. Conditions of Treatment\n" .
+                    'My treatment, payment, enrollment, or eligibility for benefits cannot be conditioned on whether I sign this authorization, except as permitted by law.' . "\n\n" .
+                    "## 7. Re-disclosure Notice\n" .
+                    'Information received by the Practice from the named source becomes part of my medical record and is protected under HIPAA and applicable state law.' . "\n\n" .
+                    'By signing below, I authorize the Practice to obtain my protected health information as described above.',
+            ],
         ];
 
         foreach ($templates as $template) {

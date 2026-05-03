@@ -111,6 +111,10 @@ Route::prefix('external')->middleware('throttle:60,1')->group(function () {
     // Public consent template preview for the enrollment widget — patients
     // need to read full agreement text BEFORE checking the consent boxes.
     Route::get('/consent-templates/{tenantCode}', [\App\Http\Controllers\Api\ConsentTemplateController::class, 'publicForEnrollment']);
+    // Token-signed e-signature requests — patient lands here from the
+    // email link without auth and signs.
+    Route::get('/signature-requests/{token}', [\App\Http\Controllers\Api\SignatureRequestController::class, 'publicShow']);
+    Route::post('/signature-requests/{token}/sign', [\App\Http\Controllers\Api\SignatureRequestController::class, 'publicSign'])->middleware('throttle:10,1');
 });
 
 // ===== Public Registration Data (no auth) =====
@@ -506,6 +510,14 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
 
     // ===== Compliance Command Center =====
     Route::get('/compliance/score', [\App\Http\Controllers\Api\ComplianceController::class, 'score']);
+
+    // ===== Signature requests (practice-side) =====
+    Route::get('/signature-requests', [\App\Http\Controllers\Api\SignatureRequestController::class, 'index']);
+    Route::post('/signature-requests', [\App\Http\Controllers\Api\SignatureRequestController::class, 'store']);
+    Route::post('/signature-requests/{id}/cancel', [\App\Http\Controllers\Api\SignatureRequestController::class, 'cancel']);
+    Route::post('/signature-requests/{id}/resend', [\App\Http\Controllers\Api\SignatureRequestController::class, 'resend']);
+    // Patient-side: list mine
+    Route::get('/me/signature-requests', [\App\Http\Controllers\Api\SignatureRequestController::class, 'mine']);
 
     // ===== Outbound Webhook Endpoints (practice → their systems) =====
     Route::prefix('webhooks/endpoints')->group(function () {
