@@ -100,6 +100,11 @@ class MembershipPlanController extends Controller
         if (!array_key_exists('visits_per_month', $validated)) {
             $validated['visits_per_month'] = -1;
         }
+        // Patient-membership trials are disabled platform-wide. The schema
+        // and Stripe wiring stay so we can re-enable later, but new plans
+        // never create with a trial.
+        $validated['trial_days'] = 0;
+        $validated['trial_requires_payment_method'] = true;
 
         $plan = MembershipPlan::create($validated);
 

@@ -13,7 +13,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   CreditCard, X, AlertCircle, Calendar, CheckCircle2,
-  Clock, Receipt, Plus, Star, Shield, Loader2, ChevronRight,
+  Receipt, Plus, Star, Shield, Loader2, ChevronRight,
 } from "lucide-react";
 import {
   membershipService,
@@ -65,13 +65,6 @@ function formatCurrency(n?: number | string | null): string {
   const v = typeof n === "string" ? parseFloat(n) : n;
   if (Number.isNaN(v)) return "—";
   return `$${v.toFixed(2)}`;
-}
-
-function daysFromNow(d?: string | null): number | null {
-  if (!d) return null;
-  const target = new Date(d).getTime();
-  if (Number.isNaN(target)) return null;
-  return Math.ceil((target - Date.now()) / (1000 * 60 * 60 * 24));
 }
 
 // ─── Component ──────────────────────────────────────────────────────────────
@@ -177,19 +170,6 @@ export function BillingTab() {
     setSyncingFromStripe(false);
   };
 
-  // ─── Derived: trial status ────────────────────────────────────────────────
-  // PatientMembership type doesn't (yet) declare trial_ends_at — the API
-  // returns it; cast via Record so we can read it without forcing a type
-  // change every consumer reckons with. Once /types catches up, drop the cast.
-  const trialEndsAt = membership ? (membership as unknown as Record<string, string | null>).trialEndsAt
-    || (membership as unknown as Record<string, string | null>).trial_ends_at
-    : null;
-  const trialDaysLeft = useMemo(() => {
-    if (!trialEndsAt) return null;
-    const d = daysFromNow(trialEndsAt);
-    return d === null || d < 0 ? null : d;
-  }, [trialEndsAt]);
-
   // ─── Derived: visits this period ──────────────────────────────────────────
   const visitsLine = useMemo(() => {
     const visit = entitlements.find((e) => e.entitlementType === "visit");
@@ -290,24 +270,6 @@ export function BillingTab() {
 
   return (
     <div className="space-y-6">
-      {/* ── Trial banner ──────────────────────────────────────────────────── */}
-      {trialDaysLeft !== null && (
-        <div
-          className="rounded-2xl p-4 flex items-center gap-3"
-          style={{ backgroundColor: C.amber50, border: `1px solid ${C.amber500}` }}
-        >
-          <Clock className="w-5 h-5 shrink-0" style={{ color: C.amber500 }} />
-          <div className="flex-1">
-            <p className="text-sm font-semibold" style={{ color: "#92400e" }}>
-              Trial ends in {trialDaysLeft} {trialDaysLeft === 1 ? "day" : "days"}
-            </p>
-            <p className="text-xs" style={{ color: "#92400e", opacity: 0.85 }}>
-              Your first charge is on {formatDate(trialEndsAt)}. Cancel anytime before then to avoid being billed.
-            </p>
-          </div>
-        </div>
-      )}
-
       {/* ── Plan card ─────────────────────────────────────────────────────── */}
       <div className="glass rounded-2xl p-5">
         <h3 className="text-sm font-semibold mb-4" style={{ color: C.navy800 }}>My Membership</h3>
@@ -366,12 +328,6 @@ export function BillingTab() {
             <span style={{ color: C.slate500 }}>Current period ends</span>
             <span className="font-medium" style={{ color: C.navy800 }}>{formatDate(periodEnd)}</span>
           </div>
-          {trialDaysLeft !== null && (
-            <div className="flex items-center justify-between">
-              <span style={{ color: C.slate500 }}>Trial ends</span>
-              <span className="font-medium" style={{ color: C.amber500 }}>{formatDate(trialEndsAt)}</span>
-            </div>
-          )}
         </div>
 
         {/* Action buttons */}

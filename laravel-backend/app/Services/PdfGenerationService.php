@@ -174,9 +174,6 @@ class PdfGenerationService
                 'value' => $plan->family_member_price ? '$' . number_format((float) $plan->family_member_price, 2) . ' / additional member' : 'Available',
             ];
         }
-        if ((int) $plan->trial_days > 0) {
-            $items[] = ['label' => 'Trial period', 'value' => $plan->trial_days . ' days'];
-        }
         // One-time fees charged at enrollment (in addition to recurring).
         // Surfaced in the agreement so the patient can't be surprised by
         // a charge they weren't told about.

@@ -599,9 +599,6 @@ export function PracticeSettings({ initialTab }: { initialTab?: string }) {
   const [showPricing, setShowPricing] = useState(true);
   const [allowSwitch, setAllowSwitch] = useState(true);
   const [proration, setProration] = useState(true);
-  const [freeTrial, setFreeTrial] = useState(false);
-  const [trialDays, setTrialDays] = useState(14);
-  const [trialCard, setTrialCard] = useState(true);
   const [retryAttempts, setRetryAttempts] = useState("3");
   const [retryDays, setRetryDays] = useState("3");
   const [suspendAfterFail, setSuspendAfterFail] = useState(true);
@@ -1003,16 +1000,6 @@ export function PracticeSettings({ initialTab }: { initialTab?: string }) {
           <ToggleSwitch label="Show Pricing on Enrollment Page" checked={showPricing} onChange={set(setShowPricing)} />
           <ToggleSwitch label="Allow Plan Switching" checked={allowSwitch} onChange={set(setAllowSwitch)} />
           <ToggleSwitch label="Proration on Plan Change" checked={proration} onChange={set(setProration)} />
-        </SectionCard>
-
-        <SectionCard title="Trial Settings">
-          <ToggleSwitch label="Offer Free Trial" checked={freeTrial} onChange={set(setFreeTrial)} />
-          <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-4">
-            <NumberInput label="Trial Duration" value={trialDays} suffix="days" onChange={set(setTrialDays)} />
-          </div>
-          <div className="mt-2">
-            <ToggleSwitch label="Credit Card Required for Trial" checked={trialCard} onChange={set(setTrialCard)} />
-          </div>
         </SectionCard>
 
         <SectionCard title="Dunning Settings">
