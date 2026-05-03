@@ -96,6 +96,21 @@ class Kernel extends ConsoleKernel
             ->onFailure(function () {
                 \Log::error('Scheduled change executor failed');
             });
+
+        // Sweep stuck enrollment Checkouts whose webhook never fired AND
+        // whose patient never landed on the success page (closed tab,
+        // mobile background-kill). Layer 2A of the webhook-resilience
+        // plan; Layer 1B (success-page reconcile) catches the common
+        // case, this catches the rest. 15 min is fast enough that a
+        // patient who closed the tab gets enrolled before the practice
+        // notices, slow enough to amortize Stripe API calls.
+        $schedule->command('enrollments:sweep-stuck')
+            ->everyFifteenMinutes()
+            ->name('enrollment_sweeper')
+            ->withoutOverlapping()
+            ->onFailure(function () {
+                \Log::error('Enrollment sweeper failed');
+            });
     }
 
     /**
