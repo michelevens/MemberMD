@@ -3709,33 +3709,62 @@ export function PracticePortal() {
           );
         })()}
 
-        {/* ── Detail Tab Bar — Stripe-feel: single scrollable row, indigo
-            active indicator, slate-200 underline. Icons retained (clinical
-            scanning convention from EHR systems); the previous two-row
-            split is gone. */}
-        <div className="flex items-center gap-6 border-b border-slate-200 px-1 overflow-x-auto">
-          {[...primaryDetailTabs, ...secondaryDetailTabs].map((tab) => {
-            const Icon = tab.icon;
-            const active = patientDetailTab === tab.id;
-            return (
-              <button
-                key={tab.id}
-                onClick={() => setPatientDetailTab(tab.id)}
-                className="flex items-center gap-2 px-1 py-3 text-sm transition-colors whitespace-nowrap"
-                style={{
-                  color: active ? "#635bff" : "#64748b",
-                  borderBottom: active ? "2px solid #635bff" : "2px solid transparent",
-                  fontWeight: active ? 600 : 500,
-                  marginBottom: "-1px",
-                }}
-                onMouseEnter={(e) => { if (!active) e.currentTarget.style.color = "#334e68"; }}
-                onMouseLeave={(e) => { if (!active) e.currentTarget.style.color = "#64748b"; }}
-              >
-                <Icon className="w-4 h-4" />
-                <span>{tab.label}</span>
-              </button>
-            );
-          })}
+        {/* ── Detail Tab Bar — two rows for discoverability (14 tabs would
+            be off-screen on one row). Stripe-feel chrome: indigo active
+            indicator, quiet slate-200 borders, icons retained for clinical
+            scanning. Primary row = clinical chart sections; secondary row
+            (shaded) = notes / measures / admin. */}
+        <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+          {/* Primary row */}
+          <div className="flex items-center gap-5 border-b border-slate-200 px-4 overflow-x-auto">
+            {primaryDetailTabs.map((tab) => {
+              const Icon = tab.icon;
+              const active = patientDetailTab === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  onClick={() => setPatientDetailTab(tab.id)}
+                  className="flex items-center gap-2 px-1 py-3 text-sm transition-colors whitespace-nowrap"
+                  style={{
+                    color: active ? "#635bff" : "#64748b",
+                    borderBottom: active ? "2px solid #635bff" : "2px solid transparent",
+                    fontWeight: active ? 600 : 500,
+                    marginBottom: "-1px",
+                  }}
+                  onMouseEnter={(e) => { if (!active) e.currentTarget.style.color = "#334e68"; }}
+                  onMouseLeave={(e) => { if (!active) e.currentTarget.style.color = "#64748b"; }}
+                >
+                  <Icon className="w-4 h-4" />
+                  <span>{tab.label}</span>
+                </button>
+              );
+            })}
+          </div>
+          {/* Secondary row */}
+          <div className="flex items-center gap-5 px-4 overflow-x-auto" style={{ backgroundColor: "#f8fafc" }}>
+            {secondaryDetailTabs.map((tab) => {
+              const Icon = tab.icon;
+              const active = patientDetailTab === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  onClick={() => setPatientDetailTab(tab.id)}
+                  className="flex items-center gap-2 px-1 py-3 text-sm transition-colors whitespace-nowrap"
+                  style={{
+                    color: active ? "#635bff" : "#64748b",
+                    borderBottom: active ? "2px solid #635bff" : "2px solid transparent",
+                    fontWeight: active ? 600 : 500,
+                    marginBottom: "-1px",
+                  }}
+                  onMouseEnter={(e) => { if (!active) e.currentTarget.style.color = "#334e68"; }}
+                  onMouseLeave={(e) => { if (!active) e.currentTarget.style.color = "#64748b"; }}
+                >
+                  <Icon className="w-4 h-4" />
+                  <span>{tab.label}</span>
+                </button>
+              );
+            })}
+          </div>
         </div>
 
         {/* ── Sub-tab Content ─────────────────────────────────────────── */}
