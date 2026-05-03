@@ -497,19 +497,19 @@ class StripeWebhookController extends Controller
             // ─── Tier 2 subscription / invoice events ─────────────────────
             case 'invoice.paid':
             case 'invoice.payment_succeeded':
-                $this->handleInvoicePaid($event, $practice);
+                $this->handleInvoicePaidForConnect($event, $practice);
                 break;
 
             case 'invoice.payment_failed':
-                $this->handleInvoicePaymentFailed($event, $practice);
+                $this->handleInvoicePaymentFailedForConnect($event, $practice);
                 break;
 
             case 'customer.subscription.deleted':
-                $this->handleSubscriptionDeleted($event, $practice);
+                $this->handleSubscriptionDeletedForConnect($event, $practice);
                 break;
 
             case 'customer.subscription.updated':
-                $this->handleSubscriptionUpdated($event, $practice);
+                $this->handleSubscriptionUpdatedForConnect($event, $practice);
                 break;
 
             case 'charge.refunded':
@@ -517,7 +517,7 @@ class StripeWebhookController extends Controller
                 break;
 
             case 'checkout.session.completed':
-                $this->handleCheckoutSessionCompleted($event, $practice);
+                $this->handleCheckoutSessionCompletedForConnect($event, $practice);
                 break;
 
             default:
@@ -532,7 +532,7 @@ class StripeWebhookController extends Controller
      * Successful periodic charge. Persist a paid Invoice + Payment locally,
      * extend the membership's current_period_end, and roll entitlements.
      */
-    private function handleInvoicePaid(Event $event, ?Practice $practice): void
+    private function handleInvoicePaidForConnect(Event $event, ?Practice $practice): void
     {
         if (!$practice) return;
 
@@ -640,7 +640,7 @@ class StripeWebhookController extends Controller
      * Charge failed. Mark membership past_due and let the dunning executor
      * (scheduled job) take it from there per the practice's policy.
      */
-    private function handleInvoicePaymentFailed(Event $event, ?Practice $practice): void
+    private function handleInvoicePaymentFailedForConnect(Event $event, ?Practice $practice): void
     {
         if (!$practice) return;
 
@@ -692,7 +692,7 @@ class StripeWebhookController extends Controller
      * Subscription deleted on Stripe (either expired after cancel_at_period_end
      * or hard-cancelled). Mirror locally; preserve any existing cancel_reason.
      */
-    private function handleSubscriptionDeleted(Event $event, ?Practice $practice): void
+    private function handleSubscriptionDeletedForConnect(Event $event, ?Practice $practice): void
     {
         if (!$practice) return;
 
@@ -725,7 +725,7 @@ class StripeWebhookController extends Controller
      * Most-useful: track impending cancellation set via the Stripe Dashboard
      * or a downstream support tool.
      */
-    private function handleSubscriptionUpdated(Event $event, ?Practice $practice): void
+    private function handleSubscriptionUpdatedForConnect(Event $event, ?Practice $practice): void
     {
         if (!$practice) return;
 
@@ -840,7 +840,7 @@ class StripeWebhookController extends Controller
      * delivered twice), we no-op. Stripe webhooks can fire duplicates,
      * and we don't want to create two memberships for one paid session.
      */
-    private function handleCheckoutSessionCompleted(Event $event, ?Practice $practice): void
+    private function handleCheckoutSessionCompletedForConnect(Event $event, ?Practice $practice): void
     {
         if (!$practice) return;
         $this->convertCheckoutSession($event->data->object, $practice, 'checkout.session.completed');
