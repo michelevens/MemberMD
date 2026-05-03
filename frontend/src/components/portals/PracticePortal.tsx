@@ -771,6 +771,16 @@ export function PracticePortal() {
   const [sendLinkLoading, setSendLinkLoading] = useState(false);
   const [sendLinkError, setSendLinkError] = useState<string | null>(null);
 
+  // "Add dependent" — staff adds a family member to an existing primary
+  // membership. Backend POST /memberships/{id}/dependents creates the
+  // child PatientMembership + bumps the Stripe quantity (+1 seat).
+  const [addDependentFor, setAddDependentFor] = useState<{ membershipId: string; primaryName: string } | null>(null);
+  const [addDependentForm, setAddDependentForm] = useState<{ firstName: string; lastName: string; dateOfBirth: string; relationship: "spouse" | "child" | "parent" | "other"; email: string; phone: string }>({
+    firstName: "", lastName: "", dateOfBirth: "", relationship: "spouse", email: "", phone: "",
+  });
+  const [addDependentLoading, setAddDependentLoading] = useState(false);
+  const [addDependentError, setAddDependentError] = useState<string | null>(null);
+
   // "Request signature" — practice picks a consent template and emails the
   // patient a tokened sign-link. Reuses the same backend that EnrollmentWidget
   // signs into; the resulting ConsentSignature is durable + auditable.
@@ -2871,6 +2881,7 @@ export function PracticePortal() {
       ...(patient.status === "active" && patient.membershipId
         ? [
             { label: "Change plan", onClick: () => { setRosterPlanDialog({ patientId: patient.id, patientName: patient.name, membershipId: patient.membershipId, mode: "change" as const }); fetchRosterPlans(); setRosterSelectedPlanId(null); } },
+            { label: "Add dependent", onClick: () => { if (patient.membershipId) { setAddDependentFor({ membershipId: patient.membershipId, primaryName: patient.name }); setAddDependentForm({ firstName: "", lastName: "", dateOfBirth: "", relationship: "spouse", email: "", phone: "" }); setAddDependentError(null); } } },
             { label: "Pause membership", onClick: () => { setConfirmDialog({ title: "Pause Membership", message: `Pause ${patient.name}'s membership? They will retain their plan but benefits will be suspended.`, confirmLabel: "Pause", onConfirm: async () => { if (patient.membershipId) { await handlePauseMembership(patient.membershipId, patient.name); } setConfirmDialog(null); } }); } },
             { label: "Cancel membership", danger: true, onClick: () => { if (patient.membershipId) { setRosterCancelDialog({ patientId: patient.id, patientName: patient.name, membershipId: patient.membershipId }); setRosterCancelReason(""); } } },
           ]
@@ -10023,6 +10034,115 @@ export function PracticePortal() {
                   setToast({ message: `Intake link sent to ${sendLinkForm.email}.`, type: "success" });
                 }}>
                 {sendLinkLoading ? "Sending…" : "Send link"}
+              </button>
+            </div>
+          </>
+        )}
+      </MobileSheet>
+
+      {/* ─── Add Dependent Modal ───────────────────────────────────────────
+          POSTs /memberships/{id}/dependents — creates a child
+          PatientMembership linked to the primary + bumps the Stripe
+          subscription quantity by 1. Backend already handles all the
+          validation (plan must be family_eligible, primary must be
+          active, no nesting families). */}
+      <MobileSheet
+        open={!!addDependentFor}
+        onClose={() => { setAddDependentFor(null); setAddDependentError(null); }}
+        maxWidth="max-w-md"
+        title={
+          <div>
+            <div>Add family dependent</div>
+            <div className="text-xs text-slate-500 font-normal mt-0.5">
+              {addDependentFor ? `Add to ${addDependentFor.primaryName}'s family plan. The next invoice picks up the extra seat.` : ""}
+            </div>
+          </div>
+        }
+      >
+        {addDependentFor && (
+          <>
+            <div className="p-6 space-y-4">
+              {addDependentError && (
+                <div className="rounded-lg p-3 text-sm" style={{ backgroundColor: "#fef2f2", color: "#dc2626" }}>{addDependentError}</div>
+              )}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">First name *</label>
+                  <input className="w-full border rounded-lg px-3 py-2 text-sm" value={addDependentForm.firstName}
+                    onChange={(e) => setAddDependentForm(f => ({ ...f, firstName: e.target.value }))} />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Last name *</label>
+                  <input className="w-full border rounded-lg px-3 py-2 text-sm" value={addDependentForm.lastName}
+                    onChange={(e) => setAddDependentForm(f => ({ ...f, lastName: e.target.value }))} />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Date of birth *</label>
+                  <input type="date" className="w-full border rounded-lg px-3 py-2 text-sm" value={addDependentForm.dateOfBirth}
+                    onChange={(e) => setAddDependentForm(f => ({ ...f, dateOfBirth: e.target.value }))} />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Relationship *</label>
+                  <select className="w-full border rounded-lg px-3 py-2 text-sm" value={addDependentForm.relationship}
+                    onChange={(e) => setAddDependentForm(f => ({ ...f, relationship: e.target.value as "spouse" | "child" | "parent" | "other" }))}>
+                    <option value="spouse">Spouse</option>
+                    <option value="child">Child</option>
+                    <option value="parent">Parent</option>
+                    <option value="other">Other</option>
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Email (optional)</label>
+                <input type="email" className="w-full border rounded-lg px-3 py-2 text-sm" value={addDependentForm.email}
+                  onChange={(e) => setAddDependentForm(f => ({ ...f, email: e.target.value }))} />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Phone (optional)</label>
+                <input className="w-full border rounded-lg px-3 py-2 text-sm" value={addDependentForm.phone}
+                  onChange={(e) => setAddDependentForm(f => ({ ...f, phone: e.target.value }))} />
+              </div>
+            </div>
+            <div className="px-6 pb-6 flex items-center justify-end gap-3">
+              <button
+                className="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100"
+                onClick={() => { setAddDependentFor(null); setAddDependentError(null); }}
+              >Cancel</button>
+              <button
+                className="px-6 py-2 rounded-lg text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50"
+                disabled={addDependentLoading}
+                onClick={async () => {
+                  if (!addDependentFor) return;
+                  if (!addDependentForm.firstName || !addDependentForm.lastName || !addDependentForm.dateOfBirth) {
+                    setAddDependentError("First name, last name, and date of birth are required.");
+                    return;
+                  }
+                  setAddDependentLoading(true);
+                  setAddDependentError(null);
+                  const res = await apiFetch(`/memberships/${addDependentFor.membershipId}/dependents`, {
+                    method: "POST",
+                    body: JSON.stringify({
+                      first_name: addDependentForm.firstName,
+                      last_name: addDependentForm.lastName,
+                      date_of_birth: addDependentForm.dateOfBirth,
+                      relationship: addDependentForm.relationship,
+                      email: addDependentForm.email || null,
+                      phone: addDependentForm.phone || null,
+                    }),
+                  });
+                  setAddDependentLoading(false);
+                  if (res.error) {
+                    setAddDependentError(res.error);
+                    return;
+                  }
+                  setToast({ message: `Dependent added to ${addDependentFor.primaryName}'s plan.`, type: "success" });
+                  setAddDependentFor(null);
+                  loadPracticeData();
+                }}
+              >
+                {addDependentLoading ? "Adding…" : "Add dependent"}
               </button>
             </div>
           </>
