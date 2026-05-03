@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { stripeConnectService, type StripeConnectStatusResponse, type StripeConnectStatus } from "../../lib/api";
 import { EmbeddedConnectOnboarding } from "./EmbeddedConnectOnboarding";
+import { useConfirm } from "../shared/ConfirmDialog";
 
 // ─── Colors ──────────────────────────────────────────────────────────────────
 
@@ -167,6 +168,7 @@ export function PaymentSetup() {
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [embeddedOpen, setEmbeddedOpen] = useState(false);
+  const confirm = useConfirm();
 
   const loadStatus = useCallback(async (refresh = false) => {
     setError(null);
@@ -218,9 +220,13 @@ export function PaymentSetup() {
   };
 
   const disconnect = async () => {
-    if (!window.confirm("Disconnect Stripe Connect? You will not be able to accept new payments until you reconnect.")) {
-      return;
-    }
+    const ok = await confirm({
+      title: "Disconnect Stripe Connect?",
+      message: "You will not be able to accept new payments until you reconnect.",
+      confirmLabel: "Disconnect",
+      variant: "danger",
+    });
+    if (!ok) return;
     setActionLoading("disconnect");
     const res = await stripeConnectService.disconnect();
     setActionLoading(null);

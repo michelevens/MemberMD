@@ -30,6 +30,7 @@ import {
   type WidgetAnalyticsSummary,
 } from "../../lib/api";
 import { useAuth } from "../../contexts/AuthContext";
+import { useConfirm } from "../shared/ConfirmDialog";
 
 const C = {
   navy900: "#102a43",
@@ -242,6 +243,7 @@ function DomainsPanel() {
 
 function DomainRow({ domain, onChanged }: { domain: TenantDomain; onChanged: () => void }) {
   const [verifying, setVerifying] = useState(false);
+  const confirm = useConfirm();
 
   const verify = async () => {
     setVerifying(true);
@@ -270,7 +272,13 @@ function DomainRow({ domain, onChanged }: { domain: TenantDomain; onChanged: () 
   };
 
   const release = async () => {
-    if (!window.confirm(`Release ${domain.domain}? Members already enrolling there will see an error.`)) return;
+    const ok = await confirm({
+      title: `Release ${domain.domain}?`,
+      message: "Members already enrolling on this domain will see an error.",
+      confirmLabel: "Release",
+      variant: "danger",
+    });
+    if (!ok) return;
     const res = await tenantDomainService.release(domain.id);
     if (res.error) {
       toast(res.error, "error");
@@ -415,6 +423,7 @@ function ThemePanel() {
   const [scope] = useState<WidgetThemeScope>("all");
   const [theme, setTheme] = useState<WidgetTheme | null>(null);
   const [vars, setVars] = useState<Record<string, string>>({});
+  const confirm = useConfirm();
   const [customCss, setCustomCss] = useState("");
   const [fontFamily, setFontFamily] = useState("");
   const [loading, setLoading] = useState(true);
@@ -451,7 +460,13 @@ function ThemePanel() {
   };
 
   const reset = async () => {
-    if (!window.confirm("Reset theme to platform defaults?")) return;
+    const ok = await confirm({
+      title: "Reset theme?",
+      message: "All custom colors and CSS will be replaced with platform defaults.",
+      confirmLabel: "Reset",
+      variant: "warning",
+    });
+    if (!ok) return;
     await widgetThemeService.reset(scope);
     toast("Theme reset.");
     void load();

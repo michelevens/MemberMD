@@ -27,6 +27,7 @@ import {
   type TemplateStatus,
   type OperatorMe,
 } from "../../../lib/api";
+import { useConfirm } from "../../shared/ConfirmDialog";
 
 // ─── Colors ──────────────────────────────────────────────────────────────────
 
@@ -206,6 +207,7 @@ function TemplateCard({
   onChanged: () => void;
 }) {
   const [acting, setActing] = useState<string | null>(null);
+  const confirm = useConfirm();
 
   const publish = async () => {
     setActing("publish");
@@ -220,7 +222,13 @@ function TemplateCard({
   };
 
   const syncAll = async () => {
-    if (!window.confirm(`Push current defaults to all ${template.plansCount ?? 0} linked plans? Tenant overrides are preserved.`)) return;
+    const ok = await confirm({
+      title: "Sync defaults to all linked plans?",
+      message: `Push current defaults to all ${template.plansCount ?? 0} linked plans. Tenant overrides are preserved.`,
+      confirmLabel: "Sync all",
+      variant: "warning",
+    });
+    if (!ok) return;
     setActing("sync");
     const res = await masterPlanTemplateService.syncAll(template.id);
     setActing(null);
@@ -233,7 +241,13 @@ function TemplateCard({
   };
 
   const archive = async () => {
-    if (!window.confirm("Archive this template? Linked plans keep their values but no longer receive updates.")) return;
+    const ok = await confirm({
+      title: "Archive this template?",
+      message: "Linked plans keep their values but no longer receive updates.",
+      confirmLabel: "Archive",
+      variant: "warning",
+    });
+    if (!ok) return;
     setActing("archive");
     const res = await masterPlanTemplateService.archive(template.id);
     setActing(null);

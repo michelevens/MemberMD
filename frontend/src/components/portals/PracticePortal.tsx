@@ -10,6 +10,7 @@ import { dashboardService, membershipPlanService, messageService, patientService
 import { PortalShell, type NavSection as ShellNavSection, type PortalColor } from "../shared/PortalShell";
 import { MobileSheet } from "../shared/MobileSheet";
 import { PhoneField, FaxField, EmailField, NPIField, ZipField, AddressField } from "../shared/fields";
+import { useConfirm } from "../shared/ConfirmDialog";
 import { CommandPalette, useCommandPaletteShortcut } from "../shared/CommandPalette";
 import { AddAllergyDialog, type AllergyEntry } from "../clinical/AddAllergyDialog";
 import { AddMeasureDialog } from "../clinical/AddMeasureDialog";
@@ -775,6 +776,7 @@ export function PracticePortal() {
 
   // ─── Confirm Dialog ─────────────────────────────────────────────────
   const [confirmDialog, setConfirmDialog] = useState<{ title: string; message: string; onConfirm: () => void; confirmLabel?: string; danger?: boolean } | null>(null);
+  const confirm = useConfirm();
 
   // ─── Book Appointment Modal ─────────────────────────────────────────
   // showBookAppointment renders AppointmentBookingWidget in staff mode.
@@ -2870,7 +2872,13 @@ export function PracticePortal() {
               <button
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium border border-red-200 text-red-700 bg-white hover:bg-red-50 transition-colors"
                 onClick={async () => {
-                  if (!window.confirm("Remove all sample patients for this practice? This cannot be undone.")) return;
+                  const ok = await confirm({
+                    title: "Remove all sample patients?",
+                    message: "This will delete every sample patient on this practice. This cannot be undone.",
+                    confirmLabel: "Remove all",
+                    variant: "danger",
+                  });
+                  if (!ok) return;
                   const r = await onboardingService.removeAllSamplePatients();
                   if (r.error) {
                     setToast({ message: r.error, type: "error" });

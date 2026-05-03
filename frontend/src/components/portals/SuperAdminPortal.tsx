@@ -10,6 +10,7 @@ import { HeaderToolbar } from "../shared/HeaderToolbar";
 import { PlatformSettings } from "../settings/PlatformSettings";
 import { UserSettingsDropdown } from "../shared/UserSettingsDropdown";
 import { RefreshButton } from "../shared/RefreshButton";
+import { useConfirm } from "../shared/ConfirmDialog";
 import {
   DataTable,
   EntityId,
@@ -982,6 +983,7 @@ function TierBadge({ tier }: { tier: "starter" | "professional" | "enterprise" }
 
 export function SuperAdminPortal() {
   const isDemoMode = import.meta.env.VITE_DEMO_MODE !== "false";
+  const confirm = useConfirm();
 
   const [activeTab, setActiveTab] = useState<TabId>("dashboard");
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -2765,7 +2767,13 @@ export function SuperAdminPortal() {
               ) : p.status !== "pending" && (
                 <button
                   onClick={async () => {
-                    if (!window.confirm(`Suspend ${p.name}? Members will be blocked from sign-in until reactivated.`)) return;
+                    const ok = await confirm({
+                      title: `Suspend ${p.name}?`,
+                      message: "Members will be blocked from sign-in until you reactivate the practice.",
+                      confirmLabel: "Suspend",
+                      variant: "danger",
+                    });
+                    if (!ok) return;
                     const reason = window.prompt("Optional reason (visible to other superadmins):", "") ?? null;
                     const r = await apiFetch(`/admin/practices/${p.id}/suspend`, {
                       method: "POST",

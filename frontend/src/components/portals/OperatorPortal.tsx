@@ -21,6 +21,7 @@ import {
 import { OperatorNetworkDashboard } from "./operator/OperatorNetworkDashboard";
 import { OperatorPlanTemplates } from "./operator/OperatorPlanTemplates";
 import { PhoneField, EmailField } from "../shared/fields";
+import { useConfirm } from "../shared/ConfirmDialog";
 import { RefreshButton } from "../shared/RefreshButton";
 import {
   LayoutDashboard,
@@ -522,6 +523,7 @@ function OperatorUsersTab({ me }: { me: OperatorMe }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState(false);
+  const confirm = useConfirm();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -584,7 +586,13 @@ function OperatorUsersTab({ me }: { me: OperatorMe }) {
                   {me.canManageUsers && (
                     <button
                       onClick={async () => {
-                        if (!window.confirm(`Remove ${u.email} from this operator?`)) return;
+                        const ok = await confirm({
+                          title: "Remove user from operator?",
+                          message: `${u.email} will lose access to this operator. They can be re-added later.`,
+                          confirmLabel: "Remove",
+                          variant: "danger",
+                        });
+                        if (!ok) return;
                         const res = await operatorService.removeUser(u.userId);
                         if (res.error) {
                           toast(res.error, "error");
