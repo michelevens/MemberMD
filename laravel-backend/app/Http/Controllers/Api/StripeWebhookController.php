@@ -944,6 +944,28 @@ class StripeWebhookController extends Controller
             'claimed_at' => now(),
         ]);
 
+        // Flip the mirrored widget_submission row (written at /external/enroll
+        // time) so the practice's Intake tab shows the enrollment as converted
+        // instead of indefinitely pending. Keyed on pending_enrollment_id
+        // rather than patient_id to avoid colliding with other in-flight
+        // submissions for the same patient.
+        try {
+            \App\Models\WidgetSubmission::withoutGlobalScope('tenant')
+                ->where('tenant_id', $practice->id)
+                ->where('pending_enrollment_id', $pending->id)
+                ->update([
+                    'status' => 'converted',
+                    'converted_patient_id' => $patient->id,
+                    'converted_at' => now(),
+                ]);
+        } catch (\Throwable $e) {
+            Log::warning('WidgetSubmission flip-to-converted failed after Checkout', [
+                'pending_enrollment_id' => $pending->id,
+                'membership_id' => $membership->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
         $consentPayload = $pending->consent_payload ?? null;
         if (is_array($consentPayload) && !empty($consentPayload['types'])) {
             try {

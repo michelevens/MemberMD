@@ -281,6 +281,33 @@ class ExternalController extends Controller
                 'expires_at' => $session['expires_at'],
             ]);
 
+            // Mirror into widget_submissions so the practice's Intake tab
+            // surfaces the enrollment in flight. The webhook flips this row
+            // to status=converted at the same moment it claims the
+            // PendingEnrollment. widget_config_id is null because this
+            // route is the built-in /external/enroll path, not a builder
+            // widget. Best-effort — never block the user-facing 201.
+            try {
+                \App\Models\WidgetSubmission::withoutGlobalScope('tenant')->create([
+                    'widget_config_id' => null,
+                    'tenant_id' => $practice->id,
+                    'type' => 'enrollment',
+                    'status' => 'pending',
+                    'data' => $validated,
+                    'ip_address' => $request->ip(),
+                    'user_agent' => substr((string) $request->userAgent(), 0, 255),
+                    'referrer_url' => $request->header('Referer'),
+                    'pending_enrollment_id' => $pending->id,
+                    'converted_patient_id' => $patient->id,
+                ]);
+            } catch (Throwable $e) {
+                Log::warning('WidgetSubmission mirror failed for external enroll', [
+                    'pending_enrollment_id' => $pending->id,
+                    'practice_id' => $practice->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+
             return response()->json([
                 'requires_payment' => true,
                 'checkout_url' => $session['url'],
@@ -336,6 +363,30 @@ class ExternalController extends Controller
             patientEmail: $validated['email'] ?? null,
             patientName: trim(($validated['first_name'] ?? '') . ' ' . ($validated['last_name'] ?? '')),
         );
+
+        // Mirror into widget_submissions for the practice's Intake tab.
+        // Manual path = membership is already active, so write the row
+        // pre-converted (no webhook will arrive). Best-effort.
+        try {
+            \App\Models\WidgetSubmission::withoutGlobalScope('tenant')->create([
+                'widget_config_id' => null,
+                'tenant_id' => $practice->id,
+                'type' => 'enrollment',
+                'status' => 'converted',
+                'data' => $validated,
+                'ip_address' => $request->ip(),
+                'user_agent' => substr((string) $request->userAgent(), 0, 255),
+                'referrer_url' => $request->header('Referer'),
+                'converted_patient_id' => $patient->id,
+                'converted_at' => now(),
+            ]);
+        } catch (Throwable $e) {
+            Log::warning('WidgetSubmission mirror failed for external enroll (manual)', [
+                'patient_id' => $patient->id,
+                'practice_id' => $practice->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
 
         return response()->json(array_filter([
             'message' => 'Enrollment successful!',

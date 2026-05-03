@@ -16,6 +16,7 @@ class WidgetSubmission extends Model
         'tenant_id', 'widget_config_id', 'type', 'status',
         'data', 'ip_address', 'user_agent', 'referrer_url',
         'converted_patient_id', 'converted_at', 'archived_reason',
+        'pending_enrollment_id',
     ];
 
     protected $casts = [
