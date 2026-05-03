@@ -24,6 +24,7 @@ import {
   Menu,
   X,
   Search,
+  MessageSquare,
 } from "lucide-react";
 import { NotificationBell } from "./NotificationBell";
 
@@ -92,6 +93,18 @@ interface PortalShellProps {
    * default portalIcon in the sidebar header.
    */
   brandLogoUrl?: string;
+  /**
+   * Top-bar icon row (right side). Each callback that's defined adds
+   * an icon button. Pattern mirrors InsureFlow's Phase 14 layout:
+   * Messages | Help | Settings | Notifications | Profile.
+   *
+   * On mobile (<sm), Help and Settings hide — Messages stays visible
+   * since it carries an unread count. Practices that don't ship
+   * messaging (e.g. SuperAdmin) just omit onOpenMessages.
+   */
+  onOpenMessages?: () => void;
+  messagesUnreadCount?: number;
+  onOpenSettings?: () => void;
 }
 
 // ─── Color palette ──────────────────────────────────────────────────────────
@@ -189,6 +202,9 @@ export function PortalShell({
   mobileBottomNav,
   accentColor,
   brandLogoUrl,
+  onOpenMessages,
+  messagesUnreadCount = 0,
+  onOpenSettings,
 }: PortalShellProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
@@ -480,6 +496,51 @@ export function PortalShell({
             </div>
 
             {headerActions}
+
+            {/* Messages — visible at all breakpoints because the unread
+                badge is the most actionable signal in the bar. */}
+            {onOpenMessages && (
+              <button
+                onClick={onOpenMessages}
+                aria-label={`Messages${messagesUnreadCount > 0 ? ` (${messagesUnreadCount} unread)` : ""}`}
+                className="relative p-2 rounded-xl hover:bg-gray-100 transition-colors"
+              >
+                <MessageSquare className="w-5 h-5 text-gray-600" />
+                {messagesUnreadCount > 0 && (
+                  <span
+                    className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] font-semibold flex items-center justify-center"
+                  >
+                    {messagesUnreadCount > 9 ? "9+" : messagesUnreadCount}
+                  </span>
+                )}
+              </button>
+            )}
+
+            {/* Help — desktop-only. On mobile it lives in the user menu. */}
+            <button
+              type="button"
+              onClick={() => {
+                // Lightweight help: surface the keyboard shortcut hint via
+                // a native title until a real help center ships. The
+                // CommandPalette is reachable via Cmd+K from anywhere.
+                alert("Tip: press Cmd+K (Mac) or Ctrl+K (Windows) to jump to any section.\n\nDocs and support coming soon.");
+              }}
+              aria-label="Help"
+              className="hidden sm:inline-flex p-2 rounded-xl hover:bg-gray-100 transition-colors"
+            >
+              <HelpCircle className="w-5 h-5 text-gray-600" />
+            </button>
+
+            {/* Settings — desktop-only, sidebar entry remains the canonical path. */}
+            {onOpenSettings && (
+              <button
+                onClick={onOpenSettings}
+                aria-label="Settings"
+                className="hidden sm:inline-flex p-2 rounded-xl hover:bg-gray-100 transition-colors"
+              >
+                <Settings className="w-5 h-5 text-gray-600" />
+              </button>
+            )}
 
             {/* Notifications — self-contained: polls unread count and
                 manages its own popover. The legacy notificationCount

@@ -3197,6 +3197,9 @@ export function PatientPortal() {
         onLogout={logout}
         notificationCount={unreadCount}
         headerTitle={headerTitleByTab[activeTab] ?? "Dashboard"}
+        onOpenMessages={() => setActiveTab("messages" as TabId)}
+        messagesUnreadCount={unreadCount}
+        onOpenSettings={() => setActiveTab("profile" as TabId)}
         // Mobile bottom tab bar — 5 most-used tabs, left→right.
         // Entitlements + Profile remain reachable via the in-app surfaces
         // (Account → Entitlements section, header avatar dropdown).

@@ -9333,6 +9333,8 @@ export function PracticePortal() {
         onTabChange={(id) => setActiveTab(id as TabId)}
         onLogout={auth.logout}
         headerTitle={activeLabel}
+        onOpenMessages={() => setActiveTab("messages" as TabId)}
+        onOpenSettings={() => setActiveTab("settings" as TabId)}
       >
         {dataLoading && (
           <div className="h-0.5 w-full overflow-hidden mb-4 -mt-2 bg-slate-100">
