@@ -2,7 +2,7 @@
 // Public multi-step enrollment form for patients to join a DPC practice.
 // URL: /#/enroll/:tenantCode?plan=complete — no auth required
 
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { Check, ChevronLeft, ChevronRight, ArrowRight, FileText, X } from "lucide-react";
 import { useWidgetTheme } from "../../hooks/useWidgetTheme";
@@ -207,6 +207,52 @@ export function EnrollmentWidget() {
 
   const [step, setStep] = useState(0);
   const [form, setForm] = useState<FormData>(INITIAL_FORM);
+
+  // Save & resume — keep an unsigned draft in localStorage for 24h.
+  // Without this, a patient who walks away mid-form (kid wakes up,
+  // tab crashes, browser update) loses everything and abandons. The
+  // signature_data is intentionally NOT persisted — re-signing is a
+  // legal requirement, not a UX nuisance.
+  const draftKey = tenantCode ? `membermd:enrollDraft:${tenantCode}` : null;
+  const draftLoadedRef = useRef(false);
+
+  useEffect(() => {
+    if (!draftKey || draftLoadedRef.current) return;
+    draftLoadedRef.current = true;
+    try {
+      const raw = localStorage.getItem(draftKey);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as { savedAt: number; form: FormData; step: number };
+      const ageMs = Date.now() - (parsed.savedAt ?? 0);
+      if (ageMs > 24 * 60 * 60 * 1000) {
+        localStorage.removeItem(draftKey);
+        return;
+      }
+      // Drop signature on resume — patient re-signs at step 5.
+      const restored = { ...parsed.form, signatureData: "" };
+      setForm((prev) => ({ ...prev, ...restored }));
+      setStep(parsed.step ?? 0);
+    } catch {
+      // Corrupt draft — discard silently.
+      try { localStorage.removeItem(draftKey); } catch { /* ignore */ }
+    }
+  }, [draftKey]);
+
+  useEffect(() => {
+    if (!draftKey) return;
+    // Skip writing the empty initial state on first render.
+    if (form === INITIAL_FORM) return;
+    const t = setTimeout(() => {
+      try {
+        localStorage.setItem(draftKey, JSON.stringify({
+          savedAt: Date.now(),
+          form: { ...form, signatureData: "" },
+          step,
+        }));
+      } catch { /* quota exceeded — drop silently */ }
+    }, 800);
+    return () => clearTimeout(t);
+  }, [draftKey, form, step]);
   const [plans, setPlans] = useState<Plan[]>([]);
   const [practiceName, setPracticeName] = useState("");
   const [loading, setLoading] = useState(true);
@@ -444,6 +490,12 @@ export function EnrollmentWidget() {
       // membership doesn't exist until the patient pays. Redirect them out
       // to Stripe — checkout.session.completed will create the membership
       // and they land on /#/enrollment/success when payment goes through.
+      // Clear the saved draft now that submission succeeded (Stripe path
+      // is also a "success" — the patient will redirect off the form).
+      if (draftKey) {
+        try { localStorage.removeItem(draftKey); } catch { /* ignore */ }
+      }
+
       if (data.requires_payment && data.checkout_url) {
         // Don't track 'complete' here — the membership doesn't exist yet.
         // The webhook fires once payment lands; we can add a separate

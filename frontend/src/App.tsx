@@ -12,6 +12,7 @@ import { ResetPasswordScreen } from "./components/auth/ResetPasswordScreen";
 import { InstallPrompt } from "./components/shared/InstallPrompt";
 import { ImpersonationBannerHost } from "./components/shared/ImpersonationBanner";
 import { PlanCapModalHost } from "./components/shared/PlanCapModalHost";
+import { ConfirmProvider } from "./components/shared/ConfirmDialog";
 
 // ─── Error Boundary ─────────────────────────────────────────────────────────────
 
@@ -251,10 +252,12 @@ export default function App() {
         <QueryClientProvider client={queryClient}>
           <HashRouter>
             <AuthProvider>
-              <ImpersonationBannerHost />
-              <PlanCapModalHost />
-              <AuthGate />
-              <InstallPrompt />
+              <ConfirmProvider>
+                <ImpersonationBannerHost />
+                <PlanCapModalHost />
+                <AuthGate />
+                <InstallPrompt />
+              </ConfirmProvider>
             </AuthProvider>
           </HashRouter>
         </QueryClientProvider>
