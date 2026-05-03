@@ -17,7 +17,7 @@ class ProgramController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
-        $query = Program::with(['plans', 'fundingSources'])
+        $query = Program::with(['plans', 'fundingSources', 'membershipPlans', 'providers'])
             ->where('is_template', false);
 
         if ($request->has('status')) {
@@ -30,7 +30,68 @@ class ProgramController extends Controller
 
         $programs = $query->orderBy('sort_order')->orderBy('name')->get();
 
-        return response()->json(['data' => $programs]);
+        // Stamp unified enrollment count + monthly revenue on each row so the
+        // practice's "My Programs" cards and the program Overview tab don't
+        // show 0 just because the legacy counters never tracked
+        // membership-driven enrollments. Same definition the show() endpoint
+        // uses for the Enrollments tab — never disagrees.
+        $payload = $programs->map(function ($p) {
+            $stats = self::unifiedEnrollmentStats($p);
+            $arr = $p->toArray();
+            $arr['current_enrollment'] = $stats['active_count'];
+            $arr['monthly_revenue'] = $stats['monthly_revenue'];
+            return $arr;
+        });
+
+        return response()->json(['data' => $payload]);
+    }
+
+    /**
+     * Unified enrollment + revenue count for a program. Counts BOTH:
+     *   1. ProgramEnrollment rows tied to this program with active/pending status
+     *   2. PatientMembership rows whose plan.program_id = this program
+     *      OR whose program_id is set to this program (active/trialing/past_due)
+     * Deduped by patient_id so a patient with both a PE row and a membership
+     * row (the common case) is counted once.
+     *
+     * Monthly revenue = sum of monthly_price across the matching memberships
+     * that have a plan with a price set. Membership-driven only — PE-only rows
+     * (admin enroll without payment) don't contribute revenue.
+     *
+     * @return array{active_count: int, monthly_revenue: float}
+     */
+    public static function unifiedEnrollmentStats(Program $program): array
+    {
+        // Patient ids from active program_enrollments
+        $peIds = ProgramEnrollment::where('program_id', $program->id)
+            ->whereIn('status', ['active', 'pending'])
+            ->pluck('patient_id')
+            ->all();
+
+        // Patient ids + monthly prices from active memberships in this program
+        $programPlanIds = $program->membershipPlans->pluck('id')->all();
+        $memberships = \App\Models\PatientMembership::with('plan:id,monthly_price')
+            ->where('tenant_id', $program->tenant_id)
+            ->whereIn('status', ['active', 'trialing', 'past_due'])
+            ->where(function ($q) use ($program, $programPlanIds) {
+                $q->where('program_id', $program->id);
+                if (!empty($programPlanIds)) {
+                    $q->orWhereIn('plan_id', $programPlanIds);
+                }
+            })
+            ->get();
+
+        $membershipPatientIds = $memberships->pluck('patient_id')->filter()->all();
+        $monthlyRevenue = (float) $memberships->sum(function ($m) {
+            return (float) ($m->plan?->monthly_price ?? 0);
+        });
+
+        $allActiveIds = array_unique(array_merge($peIds, $membershipPatientIds));
+
+        return [
+            'active_count' => count($allActiveIds),
+            'monthly_revenue' => $monthlyRevenue,
+        ];
     }
 
     /**
@@ -176,6 +237,28 @@ class ProgramController extends Controller
 
         $payload = $program->toArray();
         $payload['membership_enrollments'] = $membershipEnrollments;
+
+        // Same unified counts as index() — Overview tab cards (Active
+        // Enrollments / Monthly Revenue / Utilization) read these fields.
+        $stats = self::unifiedEnrollmentStats($program);
+        $payload['current_enrollment'] = $stats['active_count'];
+        $payload['monthly_revenue'] = $stats['monthly_revenue'];
+
+        // Stamp panel_current on each provider attached to this program so
+        // the Providers tab on the program detail can render "1 / 500"
+        // bars without a separate per-provider round-trip. Same definition
+        // as ProviderController::countPanelPatients.
+        if (isset($payload['providers']) && is_array($payload['providers'])) {
+            foreach ($payload['providers'] as &$prov) {
+                if (!empty($prov['id'])) {
+                    $prov['panel_current'] = \App\Http\Controllers\Api\ProviderController::countPanelPatients(
+                        $program->tenant_id,
+                        $prov['id']
+                    );
+                }
+            }
+            unset($prov);
+        }
 
         return response()->json(['data' => $payload]);
     }

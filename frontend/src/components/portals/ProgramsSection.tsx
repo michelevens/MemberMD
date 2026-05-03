@@ -539,10 +539,14 @@ export function ProgramsSection() {
     status: p.status || "draft",
     durationType: p.durationType || "ongoing",
     durationMonths: p.durationMonths ?? null,
-    currentEnrollment: p.currentEnrollment ?? 0,
+    // Backend stamps `current_enrollment` (camelCased to currentEnrollment)
+    // with the unified count: ProgramEnrollment rows + PatientMemberships
+    // whose plan belongs to this program, deduped by patient. The fallback
+    // to 0 only fires before the API returns.
+    currentEnrollment: (p.currentEnrollment as number) ?? 0,
     maxEnrollment: p.maxEnrollment ?? null,
     providerCount: p.providers?.length ?? p.programProviders?.length ?? 0,
-    monthlyRevenue: 0,
+    monthlyRevenue: (p.monthlyRevenue as number) ?? 0,
     plans: (() => {
       // Prefer real membershipPlans if available, fall back to embedded plans
       const realPlans = p.membershipPlans || p.membership_plans;
