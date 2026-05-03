@@ -4672,7 +4672,7 @@ export function PracticePortal() {
               {(() => {
                 const primaryEc = pt.emergencyContacts?.[0];
                 const members: Array<{ name: string; role: string; color: string; sub?: string }> = [
-                  { name: pt.provider || "Unassigned", role: "Primary Provider", color: "#147d64" },
+                  { name: pt.provider || "Unassigned", role: "Default Provider", color: "#147d64" },
                   { name: "—", role: "Care Coordinator", color: "#1d4ed8" },
                   {
                     name: primaryEc?.name || "—",

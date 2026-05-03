@@ -1547,10 +1547,24 @@ export function PatientPortal() {
           || (m?.member_number as string)
           || patient.memberId
           || "";
-        // primaryProvider.user.{first,last}_name eager-loaded by
-        // DashboardController::patient. Fall back through legacy keys
-        // and finally the demo seed string so existing users never
-        // see "Provider: " with nothing after it.
+        // Provider label resolution (truth-of-record changed 2026-05-03):
+        //   1. PREFERRED — assignedProvider on the patient's first active
+        //      enrollment. This is the per-program provider the practice
+        //      admin set via the gear icon on the Programs tab.
+        //   2. FALLBACK  — patient.primary_provider (the legacy "default
+        //      provider" field). Used when the patient has no active
+        //      enrollment yet (signed up but not on a program).
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const activeEnr = (apiEnrollments as any[] | null)?.find(
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (e: any) => (e.assignedProvider || e.assigned_provider) && (e.status === "active" || !e.status)
+        );
+        const enrProv = activeEnr?.assignedProvider ?? activeEnr?.assigned_provider ?? null;
+        // Enrollment provider may carry first_name/last_name flat OR nested under .user.
+        const enrFirst = enrProv?.firstName ?? enrProv?.first_name ?? enrProv?.user?.firstName ?? enrProv?.user?.first_name ?? "";
+        const enrLast = enrProv?.lastName ?? enrProv?.last_name ?? enrProv?.user?.lastName ?? enrProv?.user?.last_name ?? "";
+        const enrCreds = enrProv?.credentials ?? "";
+
         const ppUser = apiP.primaryProvider?.user
           ?? apiP.primary_provider?.user
           ?? null;
@@ -1559,9 +1573,15 @@ export function PatientPortal() {
         const ppCreds = apiP.primaryProvider?.credentials
           ?? apiP.primary_provider?.credentials
           ?? "";
+
+        // Pick enrollment provider when present; only fall back to the
+        // default-provider field when no enrollment provider exists.
+        const useFirst = enrFirst || ppFirst;
+        const useLast = enrLast || ppLast;
+        const useCreds = enrFirst ? enrCreds : ppCreds;
         const providerLabel: string =
-          [ppFirst, ppLast].filter(Boolean).join(" ").trim()
-            ? `${[ppFirst, ppLast].filter(Boolean).join(" ")}${ppCreds ? `, ${ppCreds}` : ""}`
+          [useFirst, useLast].filter(Boolean).join(" ").trim()
+            ? `${[useFirst, useLast].filter(Boolean).join(" ")}${useCreds ? `, ${useCreds}` : ""}`
             : (patient.provider || "Not yet assigned");
 
         return (

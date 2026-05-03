@@ -13,6 +13,22 @@ use App\Traits\BelongsToTenant;
 use App\Traits\Auditable;
 use App\Traits\TolerantEncryptedCasts;
 
+/**
+ * Patient.
+ *
+ * Provider relationships (truth-of-record clarified 2026-05-03):
+ *   - `primary_provider_id` is the patient's "default provider" — used as
+ *     a fallback when the patient has no active program enrollment yet.
+ *     UI labels this as "Default Provider", not "Primary Provider".
+ *   - The per-program provider lives on `program_enrollments.assigned_provider_id`
+ *     (managed via the gear icon on the Programs > Enrollments tab) and
+ *     is the truth-of-record for "who's seeing this patient on THIS program".
+ *   - The Welcome card on the patient portal prefers the per-enrollment
+ *     provider over `primary_provider_id`.
+ *   - A provider's panel = patients where the provider is on any active
+ *     enrollment, plus default-provider-only patients with no enrollments.
+ *     See ProviderController::countPanelPatients().
+ */
 class Patient extends Model
 {
     use HasFactory, HasUuids, BelongsToTenant, Auditable, SoftDeletes, TolerantEncryptedCasts;

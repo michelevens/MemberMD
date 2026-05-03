@@ -43,7 +43,18 @@ class ProviderController extends Controller
 
         $providers = $query->orderBy('created_at', 'desc')->get();
 
-        return response()->json(['data' => $providers]);
+        // Stamp `panel_count` (current members on this provider's panel)
+        // on each row so the provider list card can render "0 of 500
+        // members" without a separate per-row round-trip. Mirrors the
+        // panelPatients() definition exactly so the card and the Panel
+        // tab can never disagree.
+        $payload = $providers->map(function ($p) use ($user) {
+            $arr = $p->toArray();
+            $arr['panel_count'] = self::countPanelPatients($user->tenant_id, $p->id);
+            return $arr;
+        });
+
+        return response()->json(['data' => $payload]);
     }
 
     public function show(Request $request, string $id): JsonResponse
@@ -53,7 +64,38 @@ class ProviderController extends Controller
             ->with(['user', 'availability'])
             ->findOrFail($id);
 
-        return response()->json(['data' => $provider]);
+        $payload = $provider->toArray();
+        $payload['panel_count'] = self::countPanelPatients($user->tenant_id, $provider->id);
+
+        return response()->json(['data' => $payload]);
+    }
+
+    /**
+     * Count of patients on a provider's panel — matches the panelPatients()
+     * definition. A patient counts when this provider is the
+     * assigned_provider_id on any active enrollment, OR is the patient's
+     * primary_provider_id and the patient has no active enrollment.
+     */
+    public static function countPanelPatients(string $tenantId, string $providerId): int
+    {
+        $enrolledIds = \App\Models\ProgramEnrollment::where('tenant_id', $tenantId)
+            ->where('assigned_provider_id', $providerId)
+            ->whereIn('status', ['active', 'pending', 'paused'])
+            ->pluck('patient_id')
+            ->unique()
+            ->values()
+            ->all();
+
+        $defaultIds = Patient::where('tenant_id', $tenantId)
+            ->where('primary_provider_id', $providerId)
+            ->whereNotIn('id', $enrolledIds)
+            ->whereDoesntHave('memberships', function ($q) {
+                $q->whereIn('status', ['active', 'trialing', 'past_due']);
+            })
+            ->pluck('id')
+            ->all();
+
+        return count(array_unique(array_merge($enrolledIds, $defaultIds)));
     }
 
     public function store(StoreProviderRequest $request): JsonResponse
@@ -278,32 +320,63 @@ class ProviderController extends Controller
 
     /**
      * Patient panel for a provider — what shows on the Provider detail
-     * "Panel" tab. Two sources are merged so the tab is never empty
-     * for an active provider:
-     *   - assigned: patients with primary_provider_id = this provider
-     *     (the formal panel — what gets billed against panel capacity)
-     *   - recent:   patients who've had any appointment with this
-     *     provider in the last 12 months but aren't formally assigned
-     *     yet (so admins can see "Dieudone has been seen here, want to
-     *     add him to the panel?" and act on it)
+     * "Panel" tab.
      *
-     * The frontend renders both sets and offers an "Add to panel"
-     * button for unassigned recent patients.
+     * Source of truth as of 2026-05-03: a provider's panel = every active
+     * patient where this provider is the assigned provider on **any active
+     * enrollment**, PLUS patients with `primary_provider_id = this provider`
+     * who have no active enrollment elsewhere (the "default provider"
+     * fallback for newly-signed-up patients who haven't picked a program
+     * yet, or for practices that use primary_provider_id as a stable PCP
+     * field separate from per-program providers).
+     *
+     * Why: MemberMD is multi-program by design (DPC + Mental Health + RPM…),
+     * so a patient on three programs has three different specialists. Forcing
+     * a single primary_provider_id created a stale "panel" that conflicted
+     * with the gear-driven per-enrollment provider in the Programs tab.
+     *
+     * Recent (separate): patients who've had any appointment with this
+     * provider in the last 12 months but aren't formally on the panel yet.
      */
     public function panelPatients(Request $request, string $id): JsonResponse
     {
         $user = $request->user();
         $provider = Provider::where('tenant_id', $user->tenant_id)->findOrFail($id);
 
-        $assigned = Patient::where('tenant_id', $user->tenant_id)
+        // 1. Patients on any active enrollment where this provider is assigned.
+        //    program_enrollments.assigned_provider_id is the per-enrollment
+        //    truth-of-record updated by the gear icon on the Programs tab.
+        $enrolledPatientIds = \App\Models\ProgramEnrollment::where('tenant_id', $user->tenant_id)
+            ->where('assigned_provider_id', $provider->id)
+            ->whereIn('status', ['active', 'pending', 'paused'])
+            ->pluck('patient_id')
+            ->unique()
+            ->values()
+            ->all();
+
+        // 2. Patients where this provider is the default (primary_provider_id)
+        //    AND who have no active enrollment elsewhere — i.e. newly-signed-up
+        //    patients waiting on a program. Stays as a fallback so the
+        //    Welcome card always has someone to display.
+        $defaultPatientIds = Patient::where('tenant_id', $user->tenant_id)
             ->where('primary_provider_id', $provider->id)
+            ->whereNotIn('id', $enrolledPatientIds)
+            ->whereDoesntHave('memberships', function ($q) {
+                $q->whereIn('status', ['active', 'trialing', 'past_due']);
+            })
+            ->pluck('id')
+            ->all();
+
+        $allAssignedIds = array_unique(array_merge($enrolledPatientIds, $defaultPatientIds));
+
+        $assigned = Patient::where('tenant_id', $user->tenant_id)
+            ->whereIn('id', $allAssignedIds)
             ->orderBy('last_name')
             ->orderBy('first_name')
             ->get(['id', 'first_name', 'last_name', 'email', 'is_active', 'primary_provider_id']);
 
         // "Recent": appointment history with this provider in the past
-        // year, minus anyone already assigned. Excludes cancelled / no-show
-        // since those don't represent established care.
+        // year, minus anyone already on the panel.
         $assignedIds = $assigned->pluck('id')->all();
         $recentPatientIds = Appointment::where('tenant_id', $user->tenant_id)
             ->where('provider_id', $provider->id)
