@@ -563,6 +563,102 @@ class ExternalController extends Controller
     }
 
     /**
+     * POST /external/reconcile/{pendingEnrollmentId}
+     * Public endpoint — synchronous fallback for the success-page redirect.
+     *
+     * Stripe Checkout's success_url is the only signal we control that the
+     * patient finished payment. The async webhook can drop (config drift,
+     * Railway outage, signing-secret rotation, an unhandled exception in
+     * the controller — see the duplicate-method bug fixed in da2e17b),
+     * leaving the patient's membership uncreated even though Stripe
+     * already charged the card. Calling this endpoint when the success
+     * page mounts gives us a synchronous "did they pay" check that
+     * doesn't depend on the webhook firing at all.
+     *
+     * Idempotent: if the pending enrollment is already claimed, returns
+     * the existing membership state instead of creating a duplicate.
+     */
+    public function reconcile(string $pendingEnrollmentId): JsonResponse
+    {
+        $pending = PendingEnrollment::find($pendingEnrollmentId);
+        if (!$pending) {
+            return response()->json(['error' => 'Enrollment not found'], 404);
+        }
+
+        $practice = Practice::find($pending->tenant_id);
+        if (!$practice) {
+            return response()->json(['error' => 'Practice not found'], 404);
+        }
+
+        // Already claimed (webhook beat us, or a previous reconcile call):
+        // return the existing membership without re-running conversion.
+        if ($pending->status === PendingEnrollment::STATUS_CLAIMED) {
+            $membership = $pending->claimed_membership_id
+                ? PatientMembership::find($pending->claimed_membership_id)
+                : null;
+            return response()->json([
+                'data' => [
+                    'status' => 'claimed',
+                    'membership_id' => $membership?->id,
+                    'membership_status' => $membership?->status,
+                ],
+                'message' => 'Already enrolled.',
+            ]);
+        }
+
+        if (empty($pending->stripe_checkout_session_id)) {
+            return response()->json([
+                'data' => ['status' => $pending->status],
+                'message' => 'This enrollment has no Stripe session — nothing to reconcile.',
+            ], 422);
+        }
+
+        try {
+            $session = $this->subscriptions->retrieveCheckoutSession(
+                $practice,
+                $pending->stripe_checkout_session_id,
+            );
+        } catch (Throwable $e) {
+            Log::warning('Reconcile retrieveCheckoutSession failed', [
+                'pending_enrollment_id' => $pending->id,
+                'error' => $e->getMessage(),
+            ]);
+            return response()->json(['error' => 'Could not verify payment with Stripe.'], 502);
+        }
+
+        if (($session->payment_status ?? '') !== 'paid') {
+            return response()->json([
+                'data' => [
+                    'status' => 'pending',
+                    'payment_status' => $session->payment_status ?? null,
+                    'session_status' => $session->status ?? null,
+                ],
+                'message' => 'Payment not yet completed.',
+            ], 402);
+        }
+
+        try {
+            $webhook = app(StripeWebhookController::class);
+            $membership = $webhook->convertCheckoutSession($session, $practice, 'success_page.reconcile');
+        } catch (Throwable $e) {
+            Log::error('Reconcile convertCheckoutSession failed', [
+                'pending_enrollment_id' => $pending->id,
+                'error' => $e->getMessage(),
+            ]);
+            return response()->json(['error' => 'Payment received but enrollment failed: ' . $e->getMessage()], 500);
+        }
+
+        return response()->json([
+            'data' => [
+                'status' => 'claimed',
+                'membership_id' => $membership?->id,
+                'membership_status' => $membership?->status,
+            ],
+            'message' => 'Enrollment confirmed.',
+        ]);
+    }
+
+    /**
      * GET /external/availability/{tenantCode}
      * Public endpoint — returns practice availability info.
      */

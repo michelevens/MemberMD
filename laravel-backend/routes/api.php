@@ -104,6 +104,9 @@ Route::prefix('auth')->group(function () {
 Route::prefix('external')->middleware('throttle:60,1')->group(function () {
     Route::get('/plans/{tenantCode}', [ExternalController::class, 'plans']);
     Route::post('/enroll/{tenantCode}', [ExternalController::class, 'enroll'])->middleware('throttle:5,1');
+    // Synchronous fallback: success page calls this on mount to convert the
+    // pending enrollment if the async webhook hasn't fired yet.
+    Route::post('/reconcile/{pendingEnrollmentId}', [ExternalController::class, 'reconcile'])->middleware('throttle:30,1');
     Route::get('/availability/{tenantCode}', [ExternalController::class, 'availability']);
     // Public consent template preview for the enrollment widget — patients
     // need to read full agreement text BEFORE checking the consent boxes.
