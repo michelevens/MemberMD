@@ -5,6 +5,7 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { practiceService, adminService, auditService, apiFetch } from "../../lib/api";
 import { beginImpersonation } from "../shared/ImpersonationBanner";
 import { ProgramTemplatesTab } from "./ProgramTemplatesTab";
+import { PlatformPlansSection } from "./superadmin/PlatformPlansSection";
 import { HeaderToolbar } from "../shared/HeaderToolbar";
 import { PlatformSettings } from "../settings/PlatformSettings";
 import { UserSettingsDropdown } from "../shared/UserSettingsDropdown";
@@ -85,6 +86,7 @@ type TabId =
   | "pending-approvals"
   | "specialties"
   | "plan-templates"
+  | "platform-plans"
   | "screening-library"
   | "consent-templates"
   | "note-templates"
@@ -266,6 +268,7 @@ const NAV_SECTIONS: NavSection[] = [
     title: "Platform",
     items: [
       { id: "analytics", label: "Analytics", icon: BarChart3 },
+      { id: "platform-plans", label: "Platform Plans", icon: Layers },
       { id: "billing", label: "Billing", icon: CreditCard },
       { id: "support", label: "Support", icon: HeadphonesIcon },
     ],
@@ -5180,6 +5183,8 @@ export function SuperAdminPortal() {
         return <ProgramTemplatesTab />;
       case "analytics":
         return renderAnalytics();
+      case "platform-plans":
+        return <PlatformPlansSection />;
       case "billing":
         return renderBilling();
       case "support":

@@ -11,7 +11,9 @@ use App\Models\MembershipPlan;
 use App\Models\Patient;
 use App\Models\PatientMembership;
 use App\Models\PendingEnrollment;
+use App\Models\PlatformInvoice;
 use App\Models\Practice;
+use App\Models\PracticeSubscription;
 use App\Models\StripeConnectEvent;
 use App\Services\MembershipCreditService;
 use App\Services\MembershipEnrollmentService;
@@ -78,7 +80,207 @@ class StripeWebhookController extends Controller
             ],
         );
 
+        // Dispatch to platform-billing handlers (practice→MemberMD direction).
+        // Wrapped: a handler error must not 500 the webhook (Stripe would retry
+        // forever); we log + mark the row as failed and continue.
+        try {
+            $this->dispatchPlatformEvent($event);
+            DB::table('stripe_platform_events')
+                ->where('stripe_event_id', $event->id)
+                ->update(['processing_status' => 'processed', 'updated_at' => now()]);
+        } catch (Throwable $e) {
+            Log::warning('Platform webhook handler failed', [
+                'event_id' => $event->id,
+                'event_type' => $event->type,
+                'error' => $e->getMessage(),
+            ]);
+            DB::table('stripe_platform_events')
+                ->where('stripe_event_id', $event->id)
+                ->update([
+                    'processing_status' => 'failed',
+                    'updated_at' => now(),
+                ]);
+        }
+
         return response()->json(['received' => true]);
+    }
+
+    /**
+     * Dispatch the verified platform event to the right handler. Only events
+     * whose metadata.tier === 'platform_subscription' (set by PlatformBillingService
+     * when creating subscriptions) are routed — other platform events are recorded
+     * but ignored.
+     */
+    private function dispatchPlatformEvent(Event $event): void
+    {
+        $obj = $event->data->object ?? null;
+        if (!$obj) {
+            return;
+        }
+
+        // Pull metadata. For invoices, the subscription metadata isn't on the
+        // invoice itself — we look the subscription up by id below.
+        $isOurEvent = false;
+        $subscriptionId = null;
+
+        if (in_array($event->type, ['invoice.paid', 'invoice.payment_failed', 'invoice.finalized', 'invoice.voided'], true)) {
+            $subscriptionId = $obj->subscription ?? null;
+            if ($subscriptionId) {
+                $sub = PracticeSubscription::where('stripe_subscription_id', $subscriptionId)->first();
+                $isOurEvent = $sub !== null;
+            }
+        } elseif (str_starts_with($event->type, 'customer.subscription.')) {
+            $subscriptionId = $obj->id ?? null;
+            $metaTier = $obj->metadata->tier ?? null;
+            $isOurEvent = $metaTier === 'platform_subscription'
+                || PracticeSubscription::where('stripe_subscription_id', $subscriptionId)->exists();
+        }
+
+        if (!$isOurEvent) {
+            return;
+        }
+
+        match ($event->type) {
+            'invoice.paid' => $this->handleInvoicePaid($obj),
+            'invoice.payment_failed' => $this->handleInvoicePaymentFailed($obj),
+            'invoice.finalized' => $this->handleInvoiceFinalized($obj),
+            'invoice.voided' => $this->handleInvoiceVoided($obj),
+            'customer.subscription.updated' => $this->handleSubscriptionUpdated($obj),
+            'customer.subscription.deleted' => $this->handleSubscriptionDeleted($obj),
+            'customer.subscription.trial_will_end' => null, // Email reminder handled via cron, not webhook
+            default => null,
+        };
+    }
+
+    private function handleInvoicePaid($invoice): void
+    {
+        $sub = PracticeSubscription::where('stripe_subscription_id', $invoice->subscription)->first();
+        if (!$sub) return;
+
+        $this->upsertPlatformInvoice($sub, $invoice, status: 'paid', paidAt: now());
+
+        // If we were past_due and just got paid, flip back to active.
+        if ($sub->status === 'past_due') {
+            $sub->update(['status' => 'active']);
+        }
+    }
+
+    private function handleInvoicePaymentFailed($invoice): void
+    {
+        $sub = PracticeSubscription::where('stripe_subscription_id', $invoice->subscription)->first();
+        if (!$sub) return;
+
+        $this->upsertPlatformInvoice($sub, $invoice, status: 'open');
+
+        if ($sub->status === 'active' || $sub->status === 'trial') {
+            $sub->update(['status' => 'past_due']);
+        }
+    }
+
+    private function handleInvoiceFinalized($invoice): void
+    {
+        $sub = PracticeSubscription::where('stripe_subscription_id', $invoice->subscription)->first();
+        if (!$sub) return;
+
+        $this->upsertPlatformInvoice($sub, $invoice, status: $invoice->status ?? 'open');
+    }
+
+    private function handleInvoiceVoided($invoice): void
+    {
+        $sub = PracticeSubscription::where('stripe_subscription_id', $invoice->subscription)->first();
+        if (!$sub) return;
+
+        $this->upsertPlatformInvoice($sub, $invoice, status: 'void');
+    }
+
+    private function handleSubscriptionUpdated($stripeSub): void
+    {
+        $sub = PracticeSubscription::where('stripe_subscription_id', $stripeSub->id)->first();
+        if (!$sub) return;
+
+        $newStatus = match ($stripeSub->status ?? 'active') {
+            'trialing' => 'trial',
+            'active' => 'active',
+            'past_due', 'unpaid' => 'past_due',
+            'canceled', 'incomplete_expired' => 'cancelled',
+            'paused' => 'paused',
+            default => $sub->status,
+        };
+
+        $updates = [
+            'status' => $newStatus,
+            'current_period_start' => $stripeSub->current_period_start
+                ? now()->setTimestamp($stripeSub->current_period_start) : $sub->current_period_start,
+            'current_period_end' => $stripeSub->current_period_end
+                ? now()->setTimestamp($stripeSub->current_period_end) : $sub->current_period_end,
+            'trial_ends_at' => $stripeSub->trial_end
+                ? now()->setTimestamp($stripeSub->trial_end) : $sub->trial_ends_at,
+        ];
+
+        // cancel_at_period_end → mirror to local cancels_at
+        if (!empty($stripeSub->cancel_at_period_end) && empty($sub->cancels_at)) {
+            $updates['cancels_at'] = $stripeSub->cancel_at
+                ? now()->setTimestamp($stripeSub->cancel_at)
+                : ($stripeSub->current_period_end ? now()->setTimestamp($stripeSub->current_period_end) : now());
+        } elseif (empty($stripeSub->cancel_at_period_end) && !empty($sub->cancels_at) && empty($sub->cancelled_at)) {
+            // Reactivated on Stripe side — clear local pending cancel
+            $updates['cancels_at'] = null;
+        }
+
+        $sub->update($updates);
+    }
+
+    private function handleSubscriptionDeleted($stripeSub): void
+    {
+        $sub = PracticeSubscription::where('stripe_subscription_id', $stripeSub->id)->first();
+        if (!$sub) return;
+
+        $sub->update([
+            'status' => 'cancelled',
+            'cancelled_at' => $sub->cancelled_at ?? now(),
+        ]);
+    }
+
+    /**
+     * Mirror a Stripe invoice into platform_invoices. Idempotent on stripe_invoice_id.
+     */
+    private function upsertPlatformInvoice(
+        PracticeSubscription $sub,
+        $invoice,
+        string $status,
+        ?\Illuminate\Support\Carbon $paidAt = null,
+    ): void {
+        $lineItems = [];
+        foreach (($invoice->lines->data ?? []) as $line) {
+            $lineItems[] = [
+                'description' => $line->description ?? '',
+                'amount' => ($line->amount ?? 0) / 100,
+                'quantity' => $line->quantity ?? 1,
+                'price_id' => $line->price->id ?? null,
+                'period_start' => isset($line->period->start) ? now()->setTimestamp($line->period->start)->toIso8601String() : null,
+                'period_end' => isset($line->period->end) ? now()->setTimestamp($line->period->end)->toIso8601String() : null,
+            ];
+        }
+
+        PlatformInvoice::updateOrCreate(
+            ['stripe_invoice_id' => $invoice->id],
+            [
+                'practice_id' => $sub->practice_id,
+                'practice_subscription_id' => $sub->id,
+                'stripe_invoice_number' => $invoice->number ?? null,
+                'amount_subtotal_cents' => $invoice->subtotal ?? 0,
+                'amount_tax_cents' => $invoice->tax ?? 0,
+                'amount_total_cents' => $invoice->total ?? 0,
+                'amount_paid_cents' => $invoice->amount_paid ?? 0,
+                'status' => $status,
+                'line_items' => $lineItems,
+                'issued_at' => $invoice->created ? now()->setTimestamp($invoice->created) : null,
+                'due_at' => $invoice->due_date ? now()->setTimestamp($invoice->due_date) : null,
+                'paid_at' => $paidAt,
+                'hosted_invoice_url' => $invoice->hosted_invoice_url ?? null,
+                'invoice_pdf_url' => $invoice->invoice_pdf ?? null,
+            ],
+        );
     }
 
     public function connect(Request $request): JsonResponse

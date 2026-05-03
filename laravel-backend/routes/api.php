@@ -587,6 +587,7 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
         Route::get('/{id}', [\App\Http\Controllers\Api\Admin\PlatformPlanController::class, 'show']);
         Route::put('/{id}', [\App\Http\Controllers\Api\Admin\PlatformPlanController::class, 'update']);
         Route::delete('/{id}', [\App\Http\Controllers\Api\Admin\PlatformPlanController::class, 'destroy']);
+        Route::post('/{id}/sync-to-stripe', [\App\Http\Controllers\Api\Admin\PlatformPlanController::class, 'syncToStripe']);
     });
 
     // ===== Audit & Compliance =====

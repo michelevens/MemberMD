@@ -31,6 +31,16 @@ return Application::configure(basePath: dirname(__DIR__))
             ->onFailure(function () {
                 \Log::error('Appointment reminders processing failed');
             });
+
+        // Practice → MemberMD subscription lifecycle: refresh usage counts,
+        // auto-downgrade unused slot blocks (60-day rule), expire trials.
+        // Daily at 02:30 — well after engagement scoring at 01:00.
+        $schedule->command('platform-billing:lifecycle')
+            ->dailyAt('02:30')
+            ->name('platform_billing_lifecycle')
+            ->onFailure(function () {
+                \Log::error('Platform billing lifecycle processing failed');
+            });
     })
     ->withRouting(
         web: __DIR__.'/../routes/web.php',

@@ -1797,6 +1797,59 @@ export interface CancellationReason {
   isActive: boolean;
 }
 
+// SuperAdmin CRUD over platform_plans (the MemberMD tier definitions).
+// Distinct from subscriptionService.plans() which is the practice-facing
+// "what tiers can I subscribe to" lookup.
+export interface PlatformPlanRow extends PlatformPlanSummary {
+  cardFeeBps: number;
+  cardFeeFlatCents: number;
+  achFeeBps: number;
+  achFeeFlatCents: number;
+  achFeeCapCents: number;
+  trialDays: number;
+  isActive: boolean;
+  stripeMonthlyPriceId: string | null;
+  stripeAnnualPriceId: string | null;
+  stripeSeatPriceId: string | null;
+  subscriptionsCount?: number;
+}
+
+export const platformPlanService = {
+  list: async (): Promise<ApiResponse<PlatformPlanRow[]>> => {
+    if (useMockData()) return { data: [] };
+    return apiFetch<PlatformPlanRow[]>("/admin/platform-plans");
+  },
+  show: async (id: string): Promise<ApiResponse<PlatformPlanRow>> => {
+    if (useMockData()) return { data: null as unknown as PlatformPlanRow };
+    return apiFetch<PlatformPlanRow>(`/admin/platform-plans/${id}`);
+  },
+  create: async (data: Partial<PlatformPlanRow>): Promise<ApiResponse<PlatformPlanRow>> => {
+    if (useMockData()) return { data: null as unknown as PlatformPlanRow };
+    return apiFetch<PlatformPlanRow>("/admin/platform-plans", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  },
+  update: async (id: string, data: Partial<PlatformPlanRow>): Promise<ApiResponse<PlatformPlanRow>> => {
+    if (useMockData()) return { data: null as unknown as PlatformPlanRow };
+    return apiFetch<PlatformPlanRow>(`/admin/platform-plans/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+  },
+  destroy: async (id: string): Promise<ApiResponse<void>> => {
+    if (useMockData()) return { data: undefined };
+    return apiFetch<void>(`/admin/platform-plans/${id}`, { method: "DELETE" });
+  },
+  syncToStripe: async (id: string): Promise<ApiResponse<PlatformPlanRow>> => {
+    if (useMockData()) return { data: null as unknown as PlatformPlanRow };
+    return apiFetch<PlatformPlanRow>(`/admin/platform-plans/${id}/sync-to-stripe`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+  },
+};
+
 export const subscriptionService = {
   show: async (): Promise<ApiResponse<PracticeSubscriptionSummary>> => {
     if (useMockData()) return { data: null as unknown as PracticeSubscriptionSummary };

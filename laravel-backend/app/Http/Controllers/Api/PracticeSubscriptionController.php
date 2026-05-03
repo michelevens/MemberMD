@@ -7,8 +7,11 @@ use App\Models\PlatformInvoice;
 use App\Models\PlatformPlan;
 use App\Models\PracticeSubscription;
 use App\Models\SuperAdminCancellationReason;
+use App\Services\PlatformBillingService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 /**
  * Practice's view of their own MemberMD subscription — the bill they pay US.
@@ -24,6 +27,10 @@ use Illuminate\Http\Request;
  */
 class PracticeSubscriptionController extends Controller
 {
+    public function __construct(private readonly PlatformBillingService $billing)
+    {
+    }
+
     public function show(Request $request): JsonResponse
     {
         $user = $request->user();
@@ -101,16 +108,39 @@ class PracticeSubscriptionController extends Controller
             ], 422);
         }
 
+        $billingCycle = $validated['billing_cycle'] ?? $sub->billing_cycle;
+
+        // Local-side update first — covers dev environments without Stripe
+        // keys, and means the surface flips immediately even if Stripe is
+        // slow. Webhook reconciles any drift.
         $sub->update([
             'platform_plan_id' => $plan->id,
-            'billing_cycle' => $validated['billing_cycle'] ?? $sub->billing_cycle,
-            // Reset slot blocks on plan change — practice picks fresh capacity
+            'billing_cycle' => $billingCycle,
             'purchased_seat_blocks' => 0,
-            // Clear pending cancel if any
             'cancels_at' => null,
             'cancelled_at' => null,
             'status' => $sub->status === 'cancelled' ? 'active' : $sub->status,
         ]);
+
+        // Stripe-side: create or swap the subscription on the platform account.
+        // Skipped when Stripe isn't configured (dev), when the practice is on
+        // Founder override (never bills), or when the plan has no Stripe price
+        // (SuperAdmin hasn't synced it yet — change still works locally so
+        // we don't lock practices out of the surface, but bill won't hit Stripe).
+        try {
+            if ($this->billing->isConfigured() && !$sub->is_founder_override) {
+                $this->billing->applyPlanChange($sub->fresh(), $plan, $billingCycle);
+            }
+        } catch (\Throwable $e) {
+            Log::warning('Platform Stripe applyPlanChange failed (local change kept)', [
+                'practice_subscription_id' => $sub->id,
+                'plan_key' => $plan->key,
+                'error' => $e->getMessage(),
+            ]);
+            // Don't fail the request — local state is the source of truth
+            // for what the practice picked; admin can reconcile via webhook
+            // or manual sync later.
+        }
 
         return response()->json([
             'data' => $sub->fresh()->load('plan'),
@@ -155,6 +185,17 @@ class PracticeSubscriptionController extends Controller
             'status' => $immediate ? 'cancelled' : $sub->status,
         ]);
 
+        try {
+            if ($this->billing->isConfigured()) {
+                $this->billing->cancel($sub->fresh(), $immediate);
+            }
+        } catch (\Throwable $e) {
+            Log::warning('Platform Stripe cancel failed (local cancel kept)', [
+                'practice_subscription_id' => $sub->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
         return response()->json([
             'data' => $sub->fresh(),
             'message' => $immediate
@@ -195,6 +236,17 @@ class PracticeSubscriptionController extends Controller
             'cancel_immediately' => false,
         ]);
 
+        try {
+            if ($this->billing->isConfigured()) {
+                $this->billing->reactivate($sub->fresh());
+            }
+        } catch (\Throwable $e) {
+            Log::warning('Platform Stripe reactivate failed (local reactivate kept)', [
+                'practice_subscription_id' => $sub->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
         return response()->json([
             'data' => $sub->fresh(),
             'message' => 'Cancellation reversed.',
@@ -221,24 +273,24 @@ class PracticeSubscriptionController extends Controller
     public static function computeUsage(string $tenantId): array
     {
         return [
-            'members' => \DB::table('patient_memberships')
+            'members' => DB::table('patient_memberships')
                 ->where('tenant_id', $tenantId)
                 ->whereIn('status', ['active', 'trialing', 'past_due'])
                 ->count(),
-            'providers' => \DB::table('providers')
+            'providers' => DB::table('providers')
                 ->where('tenant_id', $tenantId)
                 ->where('is_active', true)
                 ->count(),
-            'staff' => \DB::table('users')
+            'staff' => DB::table('users')
                 ->where('tenant_id', $tenantId)
                 ->whereIn('role', ['staff', 'practice_admin'])
                 ->count(),
-            'programs' => \DB::table('programs')
+            'programs' => DB::table('programs')
                 ->where('tenant_id', $tenantId)
                 ->where('is_active', true)
                 ->count(),
             'locations' => 1, // placeholder until multi-location ships
-            'employers' => \DB::table('employers')
+            'employers' => DB::table('employers')
                 ->where('tenant_id', $tenantId)
                 ->count(),
         ];

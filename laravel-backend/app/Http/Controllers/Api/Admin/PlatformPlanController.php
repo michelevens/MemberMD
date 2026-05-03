@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\PlatformPlan;
+use App\Services\PlatformBillingService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -15,6 +16,10 @@ use Illuminate\Http\Request;
  */
 class PlatformPlanController extends Controller
 {
+    public function __construct(private readonly PlatformBillingService $billing)
+    {
+    }
+
     public function index(Request $request): JsonResponse
     {
         abort_if(!$this->isSuperAdmin($request), 403);
@@ -70,6 +75,30 @@ class PlatformPlanController extends Controller
 
         $plan->delete();
         return response()->json(['message' => 'Plan deleted.']);
+    }
+
+    /**
+     * Create Stripe Product + Prices on the platform account for this plan.
+     * Idempotent — already-synced plans no-op.
+     */
+    public function syncToStripe(Request $request, string $id): JsonResponse
+    {
+        abort_if(!$this->isSuperAdmin($request), 403);
+
+        $plan = PlatformPlan::findOrFail($id);
+
+        try {
+            $plan = $this->billing->syncPlanPricesToStripe($plan);
+        } catch (\Throwable $e) {
+            return response()->json([
+                'message' => 'Could not sync plan to Stripe: ' . $e->getMessage(),
+            ], 422);
+        }
+
+        return response()->json([
+            'data' => $plan,
+            'message' => 'Plan synced to Stripe.',
+        ]);
     }
 
     private function validateRow(Request $request, bool $forUpdate = false): array
