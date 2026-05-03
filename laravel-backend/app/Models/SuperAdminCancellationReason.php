@@ -19,6 +19,12 @@ class SuperAdminCancellationReason extends Model
 {
     use HasFactory, HasUuids, Auditable, SoftDeletes;
 
+    // Eloquent's snake-cased convention from the class name would resolve
+    // to `super_admin_cancellation_reasons` (with an extra underscore)
+    // but the migration created `superadmin_cancellation_reasons`. Pin
+    // the table name explicitly so queries match.
+    protected $table = 'superadmin_cancellation_reasons';
+
     protected $fillable = ['label', 'description', 'sort_order', 'is_active'];
 
     protected $casts = [

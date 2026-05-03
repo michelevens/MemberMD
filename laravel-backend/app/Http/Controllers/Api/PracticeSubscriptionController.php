@@ -69,22 +69,11 @@ class PracticeSubscriptionController extends Controller
 
     public function cancellationReasons(): JsonResponse
     {
-        try {
-            $rows = SuperAdminCancellationReason::where('is_active', true)
+        return response()->json([
+            'data' => SuperAdminCancellationReason::where('is_active', true)
                 ->orderBy('sort_order')
-                ->get();
-            return response()->json(['data' => $rows]);
-        } catch (\Throwable $e) {
-            // TEMPORARY DIAG — strip after diagnosis
-            return response()->json([
-                'message' => 'Server Error',
-                'diag' => [
-                    'error' => $e->getMessage(),
-                    'class' => get_class($e),
-                    'file' => basename($e->getFile()) . ':' . $e->getLine(),
-                ],
-            ], 500);
-        }
+                ->get(),
+        ]);
     }
 
     /**
