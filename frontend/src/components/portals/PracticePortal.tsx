@@ -9,6 +9,7 @@ import { useAuth } from "../../contexts/AuthContext";
 import { dashboardService, membershipPlanService, messageService, patientService, appointmentService, encounterService, prescriptionService, invoiceService, programService, telehealthService, screeningService, couponService, providerService, paymentService, notificationService, apiFetch, billingEnhancedService, documentService, onboardingService, staffService } from "../../lib/api";
 import { PortalShell, type NavSection as ShellNavSection, type PortalColor } from "../shared/PortalShell";
 import { MobileSheet } from "../shared/MobileSheet";
+import { PhoneField, EmailField, NPIField } from "../shared/fields";
 import { CommandPalette, useCommandPaletteShortcut } from "../shared/CommandPalette";
 import { AddAllergyDialog, type AllergyEntry } from "../clinical/AddAllergyDialog";
 import { AddMeasureDialog } from "../clinical/AddMeasureDialog";
@@ -9675,16 +9676,17 @@ export function PracticePortal() {
                   </select>
                 </div>
               </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Email *</label>
-                <input type="email" className="w-full border rounded-lg px-3 py-2 text-sm" value={addPatientForm.email}
-                  onChange={(e) => setAddPatientForm(f => ({ ...f, email: e.target.value }))} placeholder="john@example.com" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Phone</label>
-                <input type="tel" className="w-full border rounded-lg px-3 py-2 text-sm" value={addPatientForm.phone}
-                  onChange={(e) => setAddPatientForm(f => ({ ...f, phone: e.target.value }))} placeholder="(407) 555-1234" />
-              </div>
+              <EmailField
+                label="Email"
+                required
+                value={addPatientForm.email}
+                onChange={(v) => setAddPatientForm(f => ({ ...f, email: v }))}
+              />
+              <PhoneField
+                label="Phone"
+                value={addPatientForm.phone}
+                onChange={(v) => setAddPatientForm(f => ({ ...f, phone: v }))}
+              />
             </div>
             <div className="px-6 pb-6 flex items-center justify-end gap-3">
               <button className="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100 transition-colors"
@@ -10183,35 +10185,36 @@ export function PracticePortal() {
                   <input className="w-full border rounded-lg px-3 py-2 text-sm" value={providerForm.specialty} onChange={e => setProviderForm(f => ({ ...f, specialty: e.target.value }))} placeholder="e.g. Family Medicine" />
                 </div>
               </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">NPI Number</label>
-                <div className="flex gap-2">
-                  <input
-                    className="flex-1 border rounded-lg px-3 py-2 text-sm"
+              <div className="flex gap-2 items-end">
+                <div className="flex-1">
+                  <NPIField
+                    label="NPI Number"
                     value={providerForm.npiNumber}
-                    onChange={e => setProviderForm(f => ({ ...f, npiNumber: e.target.value.replace(/\D/g, "").slice(0, 10) }))}
-                    placeholder="10-digit NPI"
-                    maxLength={10}
+                    onChange={(v) => setProviderForm(f => ({ ...f, npiNumber: v }))}
                   />
-                  <button
-                    type="button"
-                    onClick={() => lookupNpiAndFill(providerForm.npiNumber, "add")}
-                    disabled={providerForm.npiNumber.length !== 10 || npiLookupLoading}
-                    className="px-3 py-2 rounded-lg border border-slate-200 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed"
-                  >
-                    {npiLookupLoading ? "..." : "Lookup"}
-                  </button>
                 </div>
+                <button
+                  type="button"
+                  onClick={() => lookupNpiAndFill(providerForm.npiNumber, "add")}
+                  disabled={providerForm.npiNumber.length !== 10 || npiLookupLoading}
+                  className="px-3 py-2 rounded-lg border border-slate-200 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed mb-5"
+                >
+                  {npiLookupLoading ? "..." : "Lookup"}
+                </button>
               </div>
               <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Email *</label>
-                  <input type="email" className="w-full border rounded-lg px-3 py-2 text-sm" value={providerForm.email} onChange={e => setProviderForm(f => ({ ...f, email: e.target.value }))} placeholder="provider@example.com" />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Phone</label>
-                  <input type="tel" className="w-full border rounded-lg px-3 py-2 text-sm" value={providerForm.phone} onChange={e => setProviderForm(f => ({ ...f, phone: e.target.value }))} placeholder="(407) 555-1234" />
-                </div>
+                <EmailField
+                  label="Email"
+                  required
+                  value={providerForm.email}
+                  onChange={(v) => setProviderForm(f => ({ ...f, email: v }))}
+                  placeholder="provider@example.com"
+                />
+                <PhoneField
+                  label="Phone"
+                  value={providerForm.phone}
+                  onChange={(v) => setProviderForm(f => ({ ...f, phone: v }))}
+                />
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Consultation Fee (USD)</label>

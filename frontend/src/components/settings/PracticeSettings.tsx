@@ -37,6 +37,7 @@ import { PaymentSetup } from "./PaymentSetup";
 import { BrandedWidgets } from "./BrandedWidgets";
 import { AgreementEditor } from "./AgreementEditor";
 import { PlatformSubscriptionSection } from "./PlatformSubscriptionSection";
+import { PhoneField, EmailField, NPIField, ZipField, AddressField } from "../shared/fields";
 
 // ─── Colors ──────────────────────────────────────────────────────────────────
 
@@ -780,8 +781,8 @@ export function PracticeSettings({ initialTab }: { initialTab?: string }) {
               <div className="pt-1.5"><Badge text="Pure DPC" color={C.teal600} bg="#e6f7f1" /></div>
             </div>
             <CopyableInput label="Tenant Code" value="70FEC8" helper="Unique identifier for your practice" />
-            <TextInput label="Phone" value={phone} onChange={set(setPhone)} />
-            <TextInput label="Email" value={email} type="email" onChange={set(setEmail)} />
+            <PhoneField label="Phone" value={phone} onChange={(v) => setPhone(v)} />
+            <EmailField label="Email" value={email} onChange={(v) => setEmail(v)} />
             <TextInput label="Website" value={website} onChange={set(setWebsite)} />
           </div>
         </SectionCard>
@@ -789,7 +790,20 @@ export function PracticeSettings({ initialTab }: { initialTab?: string }) {
         <SectionCard title="Address">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="md:col-span-2">
-              <TextInput label="Street Address" value={street} onChange={set(setStreet)} />
+              <AddressField
+                label="Street Address"
+                value={street}
+                onChange={(v) => setStreet(v)}
+                onParsed={(p) => {
+                  // When the user picks from the OpenStreetMap dropdown,
+                  // also fill the city/state/zip fields. Lets one
+                  // autocomplete pick populate four fields.
+                  if (p.street) setStreet(p.street);
+                  if (p.city) setCity(p.city);
+                  if (p.state) setState(p.state);
+                  if (p.zip) setZip(p.zip);
+                }}
+              />
             </div>
             <TextInput label="City" value={city} onChange={set(setCity)} />
             <SelectInput
@@ -798,13 +812,13 @@ export function PracticeSettings({ initialTab }: { initialTab?: string }) {
               options={US_STATES.map((s) => ({ value: s, label: s }))}
               onChange={set(setState)}
             />
-            <TextInput label="ZIP" value={zip} onChange={set(setZip)} />
+            <ZipField label="ZIP" value={zip} onChange={(v) => setZip(v)} />
           </div>
         </SectionCard>
 
         <SectionCard title="Legal / Tax">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <TextInput label="NPI" value={npi} helper="10-digit National Provider Identifier" onChange={set(setNpi)} />
+            <NPIField label="NPI" value={npi} onChange={(v) => setNpi(v)} />
             <MaskedInput label="Tax ID" value={taxId} helper="EIN or SSN (masked for security)" onChange={set(setTaxId)} />
             <TextInput label="License Number" value={licenseNumber} onChange={set(setLicenseNumber)} />
             <SelectInput
