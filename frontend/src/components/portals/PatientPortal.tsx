@@ -1974,26 +1974,33 @@ export function PatientPortal() {
         </div>
       </div>
 
-      {/* Care Team preview — shows the patient's assigned primary
-          provider from the dashboard endpoint (eager-loaded
-          primaryProvider.user). Tier 2 will broaden to "all program
-          providers"; v1 is one row to confirm the data's there and to
-          give the dashboard the "Your Care Team" widget the Figma
-          design calls for. Quietly hidden when no provider is assigned
-          yet — the membership card already says "Not yet assigned"
-          for that case so we don't repeat the message here. */}
+      {/* Care Team preview — uses the same per-enrollment-first resolution
+          as the Welcome card (truth-of-record changed 2026-05-03). Prefers
+          the assignedProvider on the patient's first active enrollment,
+          falling back to primary_provider only when no enrollment provider
+          exists. Hidden quietly when no provider is set anywhere. */}
       {(() => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const apiP = (apiPatient ?? {}) as any;
+        // 1. Prefer per-enrollment assigned provider
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const activeEnr = (apiEnrollments as any[] | null)?.find(
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (e: any) => (e.assignedProvider || e.assigned_provider) && (e.status === "active" || !e.status)
+        );
+        const enrProv = activeEnr?.assignedProvider ?? activeEnr?.assigned_provider ?? null;
+        // 2. Fall back to primary_provider when enrollment has no assigned provider
         const pp = apiP.primaryProvider ?? apiP.primary_provider;
-        if (!pp) return null;
-        const ppUser = pp.user ?? null;
-        const first = ppUser?.firstName ?? ppUser?.first_name ?? pp.firstName ?? pp.first_name ?? "";
-        const last = ppUser?.lastName ?? ppUser?.last_name ?? pp.lastName ?? pp.last_name ?? "";
+        const source = enrProv ?? pp;
+        if (!source) return null;
+        // Both shapes carry firstName/lastName flat (enrollment payload) OR nested under .user (Patient.primaryProvider eager-loaded)
+        const ppUser = source.user ?? null;
+        const first = source.firstName ?? source.first_name ?? ppUser?.firstName ?? ppUser?.first_name ?? "";
+        const last = source.lastName ?? source.last_name ?? ppUser?.lastName ?? ppUser?.last_name ?? "";
         const fullName = [first, last].filter(Boolean).join(" ").trim();
         if (!fullName) return null;
-        const creds = pp.credentials ?? "";
-        const specialty = Array.isArray(pp.specialties) ? pp.specialties[0] : (pp.specialty ?? "");
+        const creds = source.credentials ?? "";
+        const specialty = Array.isArray(source.specialties) ? source.specialties[0] : (source.specialty ?? "");
         const initials = ((first[0] || "") + (last[0] || "")).toUpperCase() || "??";
         return (
           <div className="glass rounded-2xl p-5">
@@ -2014,7 +2021,7 @@ export function PatientPortal() {
                   {fullName}{creds ? `, ${creds}` : ""}
                 </p>
                 <p className="text-xs truncate" style={{ color: COLORS.slate500 }}>
-                  {specialty || "Primary Provider"}
+                  {specialty || "Your provider"}
                 </p>
               </div>
               <button
