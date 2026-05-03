@@ -13,6 +13,7 @@ import { ProfilePage } from "../profile/ProfilePage";
 import { PortalShell, type NavSection } from "../shared/PortalShell";
 import { CommandPalette, useCommandPaletteShortcut } from "../shared/CommandPalette";
 import { RefreshButton } from "../shared/RefreshButton";
+import { MobileSheet } from "../shared/MobileSheet";
 import { BillingTab } from "./patient/BillingTab";
 import { EntitlementsTab } from "./patient/EntitlementsTab";
 import { LabResultsTab } from "./patient/LabResultsTab";
@@ -1729,7 +1730,7 @@ export function PatientPortal() {
         <h3 className="text-sm font-semibold mb-4" style={{ color: COLORS.navy800 }}>
           Your Benefits
         </h3>
-        <div className="grid grid-cols-4 gap-2">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-2">
           <CircularProgress used={1} total={2} label="Visits" />
           <div className="flex flex-col items-center gap-1">
             <div
@@ -3196,26 +3197,13 @@ export function PatientPortal() {
       {/* Reschedule appointment dialog. Patient picks a new date+time;
           PATCH /appointments/{id} with scheduled_at clears confirmed_at
           on the backend so staff has to re-confirm the new slot. */}
-      {rescheduleDialog && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4"
-          style={{ backgroundColor: "rgba(15, 23, 42, 0.55)" }}
-          onClick={() => !rescheduleSubmitting && setRescheduleDialog(null)}
-        >
-          <div
-            className="bg-white rounded-2xl shadow-2xl w-full max-w-md"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
-              <h3 className="text-lg font-bold text-slate-900">Reschedule appointment</h3>
-              <button
-                onClick={() => !rescheduleSubmitting && setRescheduleDialog(null)}
-                className="p-1 rounded hover:bg-slate-100 text-slate-400"
-                aria-label="Close"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
+      <MobileSheet
+        open={!!rescheduleDialog}
+        onClose={() => !rescheduleSubmitting && setRescheduleDialog(null)}
+        title="Reschedule appointment"
+      >
+        {rescheduleDialog && (
+          <>
             <div className="p-6 space-y-4">
               <div className="rounded-lg bg-slate-50 p-3">
                 <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1">Currently</p>
@@ -3254,7 +3242,7 @@ export function PatientPortal() {
                 Your practice will need to re-confirm the new time.
               </p>
             </div>
-            <div className="px-6 pb-6 flex justify-end gap-2">
+            <div className="px-6 pb-6 pt-2 flex justify-end gap-2 border-t border-slate-100 sm:border-t-0">
               <button
                 onClick={() => setRescheduleDialog(null)}
                 disabled={rescheduleSubmitting}
@@ -3271,70 +3259,65 @@ export function PatientPortal() {
                 {rescheduleSubmitting ? "Saving…" : "Reschedule"}
               </button>
             </div>
-          </div>
-        </div>
-      )}
+          </>
+        )}
+      </MobileSheet>
 
       {/* Cancel appointment dialog — single Are-you-sure so the patient
           doesn't accidentally cancel by mis-tapping the small Cancel
           button on a dense card. DELETE /appointments/{id} flips the
           status to 'cancelled' on the backend. */}
-      {cancelDialog && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4"
-          style={{ backgroundColor: "rgba(15, 23, 42, 0.55)" }}
-          onClick={() => !cancelSubmitting && setCancelDialog(null)}
-        >
-          <div
-            className="bg-white rounded-2xl shadow-2xl w-full max-w-md"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="p-6">
-              <div className="flex items-start gap-3 mb-4">
-                <div
-                  className="w-10 h-10 rounded-full flex items-center justify-center shrink-0"
-                  style={{ backgroundColor: "#fee2e2" }}
-                >
-                  <X className="w-5 h-5" style={{ color: COLORS.red500 }} />
-                </div>
-                <div>
-                  <h3 className="text-base font-bold text-slate-900">Cancel this appointment?</h3>
-                  <p className="text-sm mt-0.5 text-slate-500">
-                    {cancelDialog.type} on {formatDate(cancelDialog.date)}
-                    {cancelDialog.time ? ` at ${cancelDialog.time}` : ""}
-                    {cancelDialog.provider ? ` with ${cancelDialog.provider.split(",")[0]}` : ""}.
-                  </p>
-                </div>
+      <MobileSheet
+        open={!!cancelDialog}
+        onClose={() => !cancelSubmitting && setCancelDialog(null)}
+        title="Cancel appointment"
+      >
+        {cancelDialog && (
+          <div className="p-6">
+            <div className="flex items-start gap-3 mb-4">
+              <div
+                className="w-10 h-10 rounded-full flex items-center justify-center shrink-0"
+                style={{ backgroundColor: "#fee2e2" }}
+              >
+                <X className="w-5 h-5" style={{ color: COLORS.red500 }} />
               </div>
-              <p className="text-xs text-slate-500 mb-4">
-                Your care team will be notified. You can rebook any time from the Appointments tab.
-              </p>
-              {cancelError && (
-                <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 mb-4">
-                  {cancelError}
-                </div>
-              )}
-              <div className="flex justify-end gap-2">
-                <button
-                  onClick={() => setCancelDialog(null)}
-                  disabled={cancelSubmitting}
-                  className="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100 transition-colors disabled:opacity-50"
-                >
-                  Keep it
-                </button>
-                <button
-                  onClick={handleCancelSubmit}
-                  disabled={cancelSubmitting}
-                  className="px-4 py-2 rounded-lg text-sm font-semibold text-white transition-colors disabled:opacity-50"
-                  style={{ backgroundColor: COLORS.red500 }}
-                >
-                  {cancelSubmitting ? "Cancelling…" : "Yes, cancel"}
-                </button>
+              <div>
+                <h3 className="text-base font-bold text-slate-900">Cancel this appointment?</h3>
+                <p className="text-sm mt-0.5 text-slate-500">
+                  {cancelDialog.type} on {formatDate(cancelDialog.date)}
+                  {cancelDialog.time ? ` at ${cancelDialog.time}` : ""}
+                  {cancelDialog.provider ? ` with ${cancelDialog.provider.split(",")[0]}` : ""}.
+                </p>
               </div>
             </div>
+            <p className="text-xs text-slate-500 mb-4">
+              Your care team will be notified. You can rebook any time from the Appointments tab.
+            </p>
+            {cancelError && (
+              <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 mb-4">
+                {cancelError}
+              </div>
+            )}
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setCancelDialog(null)}
+                disabled={cancelSubmitting}
+                className="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100 transition-colors disabled:opacity-50"
+              >
+                Keep it
+              </button>
+              <button
+                onClick={handleCancelSubmit}
+                disabled={cancelSubmitting}
+                className="px-4 py-2 rounded-lg text-sm font-semibold text-white transition-colors disabled:opacity-50"
+                style={{ backgroundColor: COLORS.red500 }}
+              >
+                {cancelSubmitting ? "Cancelling…" : "Yes, cancel"}
+              </button>
+            </div>
           </div>
-        </div>
-      )}
+        )}
+      </MobileSheet>
 
       {selectedPlanForDetail && (() => {
         const plan = selectedPlanForDetail;
@@ -3360,26 +3343,11 @@ export function PatientPortal() {
         const isLoading = enrollingPlanId === plan.id;
 
         return (
-          <div
-            className="fixed inset-0 z-50 flex items-center justify-center p-4"
-            style={{ backgroundColor: "rgba(15, 23, 42, 0.55)" }}
-            onClick={() => { setSelectedPlanForDetail(null); setEnrollError(null); }}
+          <MobileSheet
+            open={!!plan}
+            onClose={() => { setSelectedPlanForDetail(null); setEnrollError(null); }}
+            title={planName}
           >
-            <div
-              className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
-                <h3 className="text-lg font-bold text-slate-900">{planName}</h3>
-                <button
-                  onClick={() => { setSelectedPlanForDetail(null); setEnrollError(null); }}
-                  className="p-1 rounded hover:bg-slate-100 text-slate-400"
-                  aria-label="Close"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-
               <div className="p-6 space-y-4">
                 <div className="flex items-baseline gap-1">
                   {monthly !== null && (
@@ -3449,8 +3417,7 @@ export function PatientPortal() {
                   Cancel
                 </button>
               </div>
-            </div>
-          </div>
+          </MobileSheet>
         );
       })()}
       <CommandPalette
@@ -3471,26 +3438,11 @@ export function PatientPortal() {
           team list (providers attached to enrolled programs). When the
           patient has no enrollments yet, the dialog explains that
           rather than rendering an empty dropdown. */}
-      {composeOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4"
-          style={{ backgroundColor: "rgba(15, 23, 42, 0.55)" }}
-          onClick={() => !composeSubmitting && setComposeOpen(false)}
-        >
-          <div
-            className="bg-white rounded-2xl shadow-2xl w-full max-w-md"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
-              <h3 className="text-lg font-bold text-slate-900">New message</h3>
-              <button
-                onClick={() => setComposeOpen(false)}
-                className="p-1 rounded hover:bg-slate-100 text-slate-400"
-                aria-label="Close"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
+      <MobileSheet
+        open={composeOpen}
+        onClose={() => !composeSubmitting && setComposeOpen(false)}
+        title="New message"
+      >
             <div className="p-6 space-y-4">
               {careTeamProviders.length === 0 ? (
                 <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-800">
@@ -3557,9 +3509,7 @@ export function PatientPortal() {
                 {composeSubmitting ? "Sending…" : "Send"}
               </button>
             </div>
-          </div>
-        </div>
-      )}
+      </MobileSheet>
 
       {/* Flash banner (top-right). 3s auto-dismiss; setFlash(null) on click. */}
       {flash && (
@@ -3681,18 +3631,12 @@ function PatientFieldEditDialog({ mode, patient, onClose, onSaved, onError }: Pa
       ];
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4"
-      style={{ backgroundColor: "rgba(16, 42, 67, 0.5)" }}
-      onClick={onClose}
+    <MobileSheet
+      open
+      onClose={onClose}
+      title={mode === "emergency" ? "Edit Emergency Contact" : mode === "pharmacy" ? "Change Preferred Pharmacy" : "Edit Personal Info"}
     >
-      <div
-        className="w-full max-w-md bg-white rounded-2xl shadow-2xl p-6"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h3 className="text-lg font-bold mb-4" style={{ color: "#102a43" }}>
-          {mode === "emergency" ? "Edit Emergency Contact" : "Change Preferred Pharmacy"}
-        </h3>
+      <div className="p-6">
         <div className="space-y-3">
           {fields.map((f) => {
             // Select fields render a dropdown with prepopulated options
@@ -3767,6 +3711,6 @@ function PatientFieldEditDialog({ mode, patient, onClose, onSaved, onError }: Pa
           </button>
         </div>
       </div>
-    </div>
+    </MobileSheet>
   );
 }
