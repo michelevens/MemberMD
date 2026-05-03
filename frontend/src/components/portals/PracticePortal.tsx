@@ -1213,18 +1213,35 @@ export function PracticePortal() {
         read: n.readAt != null || n.read === true,
       })));
     }
-    // Intakes (API returns paginated)
+    // Intakes (API: array of WidgetSubmission rows serialized by
+    // IntakeController::serialize → { id, type, status, submittedAt,
+    // applicant: { firstName, lastName, email, phone, planName }, data }).
+    // Earlier mapper read i.patient.* / i.patientName / i.submissionCode —
+    // none of those exist on the payload, so practices saw an empty
+    // Intake Submissions tab even when widget submissions had landed.
     if (intakesRes.status === "fulfilled" && intakesRes.value.data) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const intList = Array.isArray(intakesRes.value.data) ? intakesRes.value.data : (intakesRes.value.data as any).data || [];
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      setApiIntakes(intList.map((i: any) => ({
-        id: i.id,
-        code: i.submissionCode || i.code || `INT-${i.id}`,
-        name: i.patient ? [i.patient.firstName, i.patient.lastName].filter(Boolean).join(" ") : i.patientName || i.name || "",
-        dateSubmitted: i.submittedAt ? new Date(i.submittedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : i.dateSubmitted || "",
-        status: i.status || "pending",
-      })));
+      setApiIntakes(intList.map((i: any) => {
+        const a = i.applicant || {};
+        const fullName = [a.firstName ?? a.first_name, a.lastName ?? a.last_name]
+          .filter(Boolean).join(" ").trim()
+          || a.email
+          || "Anonymous submission";
+        return {
+          id: i.id,
+          code: `INT-${String(i.id).slice(0, 8)}`,
+          name: fullName,
+          email: a.email || null,
+          phone: a.phone || null,
+          plan: a.planName ?? a.plan_name ?? null,
+          type: i.type || "enrollment",
+          dateSubmitted: i.submittedAt ? new Date(i.submittedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "",
+          status: i.status || "pending",
+          rawData: i.data || {},
+        };
+      }));
     }
     // Waitlist (API returns paginated)
     if (waitlistRes.status === "fulfilled" && waitlistRes.value.data) {
