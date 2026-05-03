@@ -4,6 +4,8 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { apiFetch } from "../../lib/api";
+import { formatUSPhone, normalizeUSPhone } from "../../lib/phone";
+import { AddressAutocomplete } from "../shared/AddressAutocomplete";
 import {
   Search,
   Plus,
@@ -229,9 +231,17 @@ export function EmployerManagementTab() {
   // ─── Actions ──────────────────────────────────────────────────────────────
 
   const handleAddEmployer = async () => {
+    // Send normalized digits-only phone to the backend; the display
+    // formatter is for the user-facing input only. Empty string is
+    // sent for "no phone" so the backend doesn't see a partial like
+    // "(956)" if the user typed and then cleared it.
+    const payload = {
+      ...newEmployer,
+      contactPhone: normalizeUSPhone(newEmployer.contactPhone),
+    };
     const res = await apiFetch<Employer>("/employers", {
       method: "POST",
-      body: JSON.stringify(newEmployer),
+      body: JSON.stringify(payload),
     });
     if (res.error) {
       setError(res.error);
@@ -418,7 +428,7 @@ export function EmployerManagementTab() {
                               </div>
                               <div>
                                 <span className="text-slate-500">Phone:</span>{" "}
-                                <span className="text-slate-800">{expandedDetail.employer.contactPhone}</span>
+                                <span className="text-slate-800">{formatUSPhone(expandedDetail.employer.contactPhone) || expandedDetail.employer.contactPhone || "—"}</span>
                               </div>
                               <div className="col-span-2">
                                 <span className="text-slate-500">Address:</span>{" "}
@@ -517,21 +527,25 @@ export function EmployerManagementTab() {
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Contact Phone</label>
                 <input
-                  type="text"
+                  type="tel"
+                  inputMode="tel"
+                  autoComplete="tel"
                   value={newEmployer.contactPhone}
-                  onChange={(e) => setNewEmployer({ ...newEmployer, contactPhone: e.target.value })}
+                  // As-you-type US format: digits in → "(555) 123-4567" out.
+                  // formatUSPhone strips non-digits + caps at 10, so paste,
+                  // backspace, and country-code prefixes all behave.
+                  onChange={(e) => setNewEmployer({ ...newEmployer, contactPhone: formatUSPhone(e.target.value) })}
                   className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
                   placeholder="(555) 123-4567"
                 />
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Address</label>
-                <input
-                  type="text"
+                <AddressAutocomplete
                   value={newEmployer.address}
-                  onChange={(e) => setNewEmployer({ ...newEmployer, address: e.target.value })}
-                  className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                  placeholder="123 Business Ave, Orlando, FL"
+                  onChange={(text) => setNewEmployer({ ...newEmployer, address: text })}
+                  placeholder="Start typing an address…"
+                  countryCode="us"
                 />
               </div>
               <div className="flex justify-end gap-3 pt-2">
