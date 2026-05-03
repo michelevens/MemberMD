@@ -669,6 +669,10 @@ export function PracticeSettings({ initialTab }: { initialTab?: string }) {
   const [clinicalConditions, setClinicalConditions] = useState<ClinicalListItem[]>([]);
   const [clinicalModalities, setClinicalModalities] = useState<ClinicalListItem[]>([]);
   const [patientPopulations, setPatientPopulations] = useState<ClinicalListItem[]>([]);
+  // Sixth list — surfaces in the membership-cancel dialog (admin and
+  // patient self-cancel) so cancels are categorical instead of free
+  // text. Fed by the same /clinical-settings/{type} endpoint.
+  const [cancellationReasons, setCancellationReasons] = useState<ClinicalListItem[]>([]);
 
   // Map list-type → setter so add/remove helpers can stay generic. Each
   // helper does the API call first, then updates state with the
@@ -682,16 +686,17 @@ export function PracticeSettings({ initialTab }: { initialTab?: string }) {
     conditions: setClinicalConditions,
     treatment_modalities: setClinicalModalities,
     patient_populations: setPatientPopulations,
+    cancellation_reasons: setCancellationReasons,
   };
 
-  // Fetch all five clinical lists on mount. Runs once; the helpers
+  // Fetch all six clinical lists on mount. Runs once; the helpers
   // below mutate state in place after each individual API call.
   useEffect(() => {
     let cancelled = false;
     (async () => {
       const types: ClinicalListType[] = [
         "visit_statuses", "visit_reasons", "conditions",
-        "treatment_modalities", "patient_populations",
+        "treatment_modalities", "patient_populations", "cancellation_reasons",
       ];
       await Promise.all(types.map(async (t) => {
         const res = await clinicalSettingsService.list(t);
@@ -1851,6 +1856,21 @@ export function PracticeSettings({ initialTab }: { initialTab?: string }) {
           placeholder: "e.g. First Responders",
           onAdd: (v) => addClinicalItem("patient_populations", v),
           onRemove: (i) => removeClinicalItem("patient_populations", i),
+        })}
+
+        {/* Membership lifecycle */}
+        <div className="mt-8 mb-2">
+          <h2 className="text-sm font-semibold uppercase tracking-wider mb-3" style={{ color: C.slate500 }}>
+            Membership Lifecycle
+          </h2>
+        </div>
+        {renderChipList({
+          title: "Cancellation Reasons",
+          helper: "Reasons shown to patients (and staff) when a membership is cancelled. Picking a reason becomes categorical reporting instead of free-text. Saved to /clinical-settings/cancellation_reasons.",
+          items: cancellationReasons.map((i) => i.label),
+          placeholder: "e.g. Moved out of area",
+          onAdd: (v) => addClinicalItem("cancellation_reasons", v),
+          onRemove: (i) => removeClinicalItem("cancellation_reasons", i),
         })}
 
         {/* Templates */}

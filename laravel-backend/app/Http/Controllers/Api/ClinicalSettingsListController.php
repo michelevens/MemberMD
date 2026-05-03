@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\PracticeCancellationReason;
 use App\Models\PracticeCondition;
 use App\Models\PracticePatientPopulation;
 use App\Models\PracticeTreatmentModality;
@@ -44,6 +45,12 @@ class ClinicalSettingsListController extends Controller
         'conditions' => PracticeCondition::class,
         'treatment_modalities' => PracticeTreatmentModality::class,
         'patient_populations' => PracticePatientPopulation::class,
+        // Cancellation reasons aren't strictly "clinical" but they fit
+        // the same shape (label + description + sort_order + is_active)
+        // and live alongside the other lists in Practice Settings.
+        // Used by the membership-cancel dialog (admin and patient
+        // self-cancel) so cancels are categorical instead of free-text.
+        'cancellation_reasons' => PracticeCancellationReason::class,
     ];
 
     /** Resolve the model class for a route's {type} param or 404. */

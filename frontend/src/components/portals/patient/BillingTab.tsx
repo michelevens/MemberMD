@@ -20,6 +20,7 @@ import {
   invoiceService,
   paymentMethodService,
   entitlementService,
+  clinicalSettingsService,
   apiFetch,
 } from "../../../lib/api";
 import { MyAgreementsSection } from "./MyAgreementsSection";
@@ -873,10 +874,35 @@ function CancelMembershipDialog({
   onClose: () => void;
   onCancelled: (message: string) => void;
 }) {
-  const [reason, setReason] = useState<"moved" | "cost" | "dissatisfied" | "switching_provider" | "other" | "">("");
+  // Reason is now a free-form string (the label of whatever the
+  // practice has configured under Practice Settings → Clinical →
+  // Cancellation Reasons). selfCancel takes `reason: string` so any
+  // label flows through fine. If the practice hasn't configured the
+  // list yet we fall back to a sensible default below.
+  const [reason, setReason] = useState<string>("");
   const [notes, setNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Practice-curated reasons. null = still loading. Empty array =
+  // practice hasn't configured any → render fallback list.
+  const [practiceReasons, setPracticeReasons] = useState<Array<{ id: string; label: string }> | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const res = await clinicalSettingsService.list("cancellation_reasons");
+      if (cancelled) return;
+      if (res.error || !res.data) {
+        setPracticeReasons([]);
+        return;
+      }
+      const list = res.data
+        .filter((r) => r.isActive !== false)
+        .map((r) => ({ id: r.label, label: r.label }));
+      setPracticeReasons(list);
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   const submit = async () => {
     if (!reason) {
@@ -900,13 +926,18 @@ function CancelMembershipDialog({
     }
   };
 
-  const reasons: Array<{ id: typeof reason; label: string }> = [
-    { id: "cost", label: "Too expensive" },
-    { id: "moved", label: "I'm moving" },
-    { id: "dissatisfied", label: "Not satisfied with care" },
-    { id: "switching_provider", label: "Switching to another provider" },
-    { id: "other", label: "Other" },
+  // Fallback list shown when the practice hasn't configured their own
+  // reasons yet. Same five we shipped pre-config so existing patients
+  // see no behavior change until the practice opts into customization.
+  const FALLBACK_REASONS = [
+    { id: "Too expensive", label: "Too expensive" },
+    { id: "I'm moving", label: "I'm moving" },
+    { id: "Not satisfied with care", label: "Not satisfied with care" },
+    { id: "Switching to another provider", label: "Switching to another provider" },
+    { id: "Other", label: "Other" },
   ];
+  const reasons: Array<{ id: string; label: string }> =
+    practiceReasons && practiceReasons.length > 0 ? practiceReasons : FALLBACK_REASONS;
 
   return (
     <div

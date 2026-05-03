@@ -683,7 +683,8 @@ export type ClinicalListType =
   | "visit_reasons"
   | "conditions"
   | "treatment_modalities"
-  | "patient_populations";
+  | "patient_populations"
+  | "cancellation_reasons";
 
 export interface ClinicalListItem {
   id: string;
@@ -913,7 +914,11 @@ export const membershipService = {
   selfCancel: async (
     id: string,
     body: {
-      reason: "moved" | "cost" | "dissatisfied" | "switching_provider" | "other";
+      // Free-form string sourced from the practice's curated
+      // cancellation_reasons list. Was a fixed enum prior to that
+      // list shipping; backend validation now accepts any short
+      // string (capped at 100 chars).
+      reason: string;
       reason_notes?: string;
       retention_declined?: "pause" | "downgrade" | "contact";
     },

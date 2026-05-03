@@ -972,7 +972,14 @@ class MembershipController extends Controller
         }
 
         $validated = $request->validate([
-            'reason' => 'required|string|in:moved,cost,dissatisfied,switching_provider,other',
+            // Reason was a fixed enum (moved/cost/dissatisfied/...) until
+            // the practice-curated cancellation_reasons list shipped
+            // (clinical-settings type=cancellation_reasons). Patients
+            // now pick from labels their own practice configured, so
+            // the value can be any short string. Length-capped at 100
+            // since it ends up in the human-readable cancel_reason
+            // column on PatientMembership.
+            'reason' => 'required|string|max:100',
             'reason_notes' => 'nullable|string|max:500',
             'retention_declined' => 'nullable|string|in:pause,downgrade,contact',
         ]);
