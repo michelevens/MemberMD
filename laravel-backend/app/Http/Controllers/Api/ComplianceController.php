@@ -198,8 +198,12 @@ class ComplianceController extends Controller
 
     private function scoreCustomDomain(Practice $practice): array
     {
+        // tenant_domains uses verified_at (timestamp, nullable) — not a
+        // string status column. A non-null verified_at on an active row
+        // is the equivalent of "verified".
         $verified = TenantDomain::where('tenant_id', $practice->id)
-            ->where('status', 'verified')
+            ->where('is_active', true)
+            ->whereNotNull('verified_at')
             ->exists();
         return [
             'name' => 'Custom domain',
