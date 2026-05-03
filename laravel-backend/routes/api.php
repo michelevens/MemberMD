@@ -245,6 +245,7 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
     // dismissing the dashboard banner / checklist).
     Route::post('/practice/onboarding/complete', [PracticeController::class, 'completeOnboarding']);
     Route::put('/practice/branding', [PracticeController::class, 'updateBranding']);
+    Route::post('/practice/logo', [PracticeController::class, 'uploadLogo']);
 
     // Master Data (SuperAdmin)
     Route::get('/admin/master-data/specialties', [MasterDataController::class, 'specialties']);

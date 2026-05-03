@@ -48,8 +48,14 @@ class IntakeController extends Controller
         if ($request->filled('status')) {
             $query->where('status', $request->status);
         } else {
-            // Default to pending so the queue stays clean
-            $query->where('status', 'pending');
+            // Default to all "open" statuses — pending + approved +
+            // under_review — so the practice's Intake tab shows manual
+            // (status=approved at creation time, since staff vetted on
+            // the call) submissions alongside the pending widget queue.
+            // Converted/archived are excluded by default so the queue
+            // doesn't grow without bound; pass status=converted explicitly
+            // to see those.
+            $query->whereIn('status', ['pending', 'approved', 'under_review']);
         }
 
         if ($request->filled('type')) {

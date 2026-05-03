@@ -2,8 +2,8 @@
 // Practice-level settings: Practice Info, Branding, Scheduling, Membership,
 // Notifications, Team, Compliance, Integrations
 
-import { useEffect, useState } from "react";
-import { apiFetch, clinicalSettingsService, type ClinicalListType, type ClinicalListItem } from "../../lib/api";
+import { useEffect, useRef, useState } from "react";
+import { apiFetch, apiUpload, clinicalSettingsService, type ClinicalListType, type ClinicalListItem } from "../../lib/api";
 import {
   Building2,
   Palette,
@@ -572,6 +572,9 @@ export function PracticeSettings({ initialTab }: { initialTab?: string }) {
   const [accentColor, setAccentColor] = useState("#D4A855");
   const [logoUrl, setLogoUrl] = useState("");
   const [faviconUrl, setFaviconUrl] = useState("");
+  const logoFileInputRef = useRef<HTMLInputElement | null>(null);
+  const [logoUploading, setLogoUploading] = useState(false);
+  const [logoUploadError, setLogoUploadError] = useState<string | null>(null);
   const [welcomeMsg, setWelcomeMsg] = useState("Welcome to our practice!");
   const [tagline, setTagline] = useState("");
   const [footerText, setFooterText] = useState("");
@@ -854,6 +857,45 @@ export function PracticeSettings({ initialTab }: { initialTab?: string }) {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <TextInput label="Logo URL" value={logoUrl} onChange={set(setLogoUrl)} />
+              <div className="mt-2 flex items-center gap-3">
+                <input
+                  ref={logoFileInputRef}
+                  type="file"
+                  accept="image/png,image/jpeg,image/svg+xml,image/webp"
+                  className="hidden"
+                  onChange={async (e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    setLogoUploading(true);
+                    setLogoUploadError(null);
+                    const res = await apiUpload<{ logoUrl?: string; logo_url?: string }>("/practice/logo", "logo", file);
+                    setLogoUploading(false);
+                    if (e.target) e.target.value = "";
+                    if (res.error) {
+                      setLogoUploadError(res.error);
+                      return;
+                    }
+                    const url = res.data?.logoUrl ?? res.data?.logo_url;
+                    if (url) {
+                      setLogoUrl(url);
+                      showToast("Logo uploaded");
+                    }
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => logoFileInputRef.current?.click()}
+                  disabled={logoUploading}
+                  className="inline-flex items-center gap-1.5 rounded-lg border bg-white px-3 py-2 text-sm font-medium hover:bg-slate-50 disabled:opacity-50"
+                  style={{ borderColor: C.slate200 }}
+                >
+                  {logoUploading ? "Uploading…" : "Upload from computer"}
+                </button>
+                <span className="text-xs text-slate-400">PNG/JPG/SVG/WebP up to 2MB</span>
+              </div>
+              {logoUploadError && (
+                <p className="mt-2 text-xs" style={{ color: "#dc2626" }}>{logoUploadError}</p>
+              )}
               {logoUrl && (
                 <div className="mt-3 p-4 rounded-lg border flex items-center justify-center" style={{ borderColor: C.slate200, backgroundColor: C.slate50, minHeight: 80 }}>
                   <img src={logoUrl} alt="Logo preview" className="max-h-16 max-w-full object-contain" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />

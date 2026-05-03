@@ -167,6 +167,64 @@ class PracticeController extends Controller
     }
 
     /**
+     * Accept a logo image upload from the practice settings page and
+     * store it under storage/app/public/logos so it can be served via
+     * the public storage symlink. Returns the public URL which the
+     * caller stamps onto branding.logo_url via updateBranding.
+     *
+     * Why a separate endpoint vs. multipart on updateBranding: the
+     * frontend already has a clean single-purpose helper (apiUpload)
+     * for FormData; mixing JSON branding fields with a file would
+     * complicate both ends.
+     */
+    public function uploadLogo(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        abort_if(!$user->isPracticeAdmin() && !$user->isSuperAdmin(), 403);
+
+        $request->validate([
+            // 2MB ceiling is generous for a logo. PNG/JPG/SVG/WebP cover
+            // every realistic practice asset; .ico/.gif are excluded.
+            'logo' => ['required', 'file', 'mimes:png,jpg,jpeg,svg,webp', 'max:2048'],
+        ]);
+
+        $practice = Practice::findOrFail($user->tenant_id);
+        $file = $request->file('logo');
+        $ext = strtolower($file->getClientOriginalExtension());
+
+        // Filename: tenant id + timestamp avoids collisions across
+        // re-uploads while keeping the bucket scoped per practice.
+        $filename = "logos/{$practice->id}-" . now()->timestamp . ".{$ext}";
+
+        try {
+            $path = $file->storeAs('public', $filename);
+        } catch (\Throwable $e) {
+            return response()->json(['message' => 'Could not save uploaded file: ' . $e->getMessage()], 500);
+        }
+
+        // public disk URL pattern: APP_URL/storage/<filename>
+        // (requires `php artisan storage:link` once on the host)
+        $publicUrl = rtrim((string) config('app.url'), '/') . '/storage/' . ltrim($filename, '/');
+
+        // Stamp the URL on the branding bag immediately so a successful
+        // upload is reflected even if the caller skips updateBranding.
+        $current = (array) ($practice->branding ?? []);
+        $current['logo_url'] = $publicUrl;
+        $practice->update([
+            'branding' => $current,
+            'logo_url' => $publicUrl,
+        ]);
+
+        return response()->json([
+            'data' => [
+                'logo_url' => $publicUrl,
+                'path' => $path,
+            ],
+            'message' => 'Logo uploaded.',
+        ], 201);
+    }
+
+    /**
      * Superadmin: list every practice in pending_approval state.
      * Drives the SuperAdmin "Pending Approvals" tab.
      */
