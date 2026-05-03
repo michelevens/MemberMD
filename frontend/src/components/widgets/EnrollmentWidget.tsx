@@ -10,6 +10,7 @@ import { widgetAnalyticsService, consentService, type PublicConsentTemplate } fr
 import { AgreementBody } from "../shared/AgreementBody";
 import { AddressAutocomplete } from "../shared/AddressAutocomplete";
 import { MedicationAutocomplete, type RxNormConcept } from "../shared/MedicationAutocomplete";
+import { formatUSPhone } from "../../lib/phone";
 
 // ─── Config ─────────────────────────────────────────────────────────────────
 
@@ -1237,8 +1238,16 @@ function FormField({
       </label>
       <input
         type={type}
+        // type="tel" inputs auto-format to "(555) 123-4567" as the user
+        // types — keeps the public widget consistent with the in-app
+        // forms that use the shared PhoneField component.
+        inputMode={type === "tel" ? "tel" : type === "email" ? "email" : undefined}
+        autoComplete={type === "tel" ? "tel" : type === "email" ? "email" : undefined}
         value={value}
-        onChange={(e) => onChange(e.target.value)}
+        onChange={(e) => {
+          const v = type === "tel" ? formatUSPhone(e.target.value) : e.target.value;
+          onChange(v);
+        }}
         placeholder={placeholder}
         className="w-full px-3 py-2.5 rounded-lg border text-sm outline-none transition-colors"
         style={{

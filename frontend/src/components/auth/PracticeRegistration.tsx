@@ -11,6 +11,7 @@ import {
   Search, Plus, Trash2, Copy, AlertTriangle,
 } from "lucide-react";
 import { AddressAutocomplete } from "../shared/AddressAutocomplete";
+import { formatUSPhone } from "../../lib/phone";
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || "/api";
 
@@ -807,8 +808,13 @@ export function PracticeRegistration() {
                       </label>
                       <input
                         type="tel"
+                        inputMode="tel"
+                        autoComplete="tel"
                         value={practiceInfo.phone}
-                        onChange={e => updatePractice("phone", e.target.value)}
+                        // Phone auto-formats to "(555) 000-0001" as the
+                        // user types — same vocabulary as the shared
+                        // PhoneField component used elsewhere.
+                        onChange={e => updatePractice("phone", formatUSPhone(e.target.value))}
                         className={inputClass}
                         placeholder="(555) 000-0001"
                       />

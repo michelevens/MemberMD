@@ -20,6 +20,7 @@ import {
 } from "../../lib/api";
 import { OperatorNetworkDashboard } from "./operator/OperatorNetworkDashboard";
 import { OperatorPlanTemplates } from "./operator/OperatorPlanTemplates";
+import { PhoneField, EmailField } from "../shared/fields";
 import { RefreshButton } from "../shared/RefreshButton";
 import {
   LayoutDashboard,
@@ -749,26 +750,18 @@ function OperatorSettingsTab({ me, onSaved }: { me: OperatorMe; onSaved: () => v
             style={{ borderColor: C.slate200 }}
           />
         </Field>
-        <Field label="Contact email">
-          <input
-            type="email"
-            value={contactEmail}
-            onChange={(e) => setContactEmail(e.target.value)}
-            disabled={!me.canWrite}
-            className="w-full px-3 py-2 rounded-lg border text-sm focus:outline-none focus:ring-2 focus:ring-teal-400 disabled:bg-slate-50"
-            style={{ borderColor: C.slate200 }}
-          />
-        </Field>
-        <Field label="Contact phone">
-          <input
-            type="tel"
-            value={contactPhone}
-            onChange={(e) => setContactPhone(e.target.value)}
-            disabled={!me.canWrite}
-            className="w-full px-3 py-2 rounded-lg border text-sm focus:outline-none focus:ring-2 focus:ring-teal-400 disabled:bg-slate-50"
-            style={{ borderColor: C.slate200 }}
-          />
-        </Field>
+        <EmailField
+          label="Contact email"
+          value={contactEmail}
+          onChange={(v) => setContactEmail(v)}
+          disabled={!me.canWrite}
+        />
+        <PhoneField
+          label="Contact phone"
+          value={contactPhone}
+          onChange={(v) => setContactPhone(v)}
+          disabled={!me.canWrite}
+        />
         <Field label="Website">
           <input
             type="url"

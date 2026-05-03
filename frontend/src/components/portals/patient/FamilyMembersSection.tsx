@@ -18,6 +18,7 @@
 import { useEffect, useState } from "react";
 import { Heart, UserPlus, Trash2, Loader2, X } from "lucide-react";
 import { familyService } from "../../../lib/api";
+import { PhoneField, EmailField } from "../../shared/fields";
 
 interface FamilyMember {
   id: string; // dependent's PatientMembership id
@@ -345,24 +346,16 @@ export function FamilyMembersSection({ variant = "card" }: FamilyMembersSectionP
                   </select>
                 </div>
               </div>
-              <div>
-                <label className="block text-xs font-medium text-slate-700 mb-1">Email (optional)</label>
-                <input
-                  type="email"
-                  value={form.email}
-                  onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
-                  className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-slate-700 mb-1">Phone (optional)</label>
-                <input
-                  type="tel"
-                  value={form.phone}
-                  onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))}
-                  className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400"
-                />
-              </div>
+              <EmailField
+                label="Email (optional)"
+                value={form.email}
+                onChange={(v) => setForm((f) => ({ ...f, email: v }))}
+              />
+              <PhoneField
+                label="Phone (optional)"
+                value={form.phone}
+                onChange={(v) => setForm((f) => ({ ...f, phone: v }))}
+              />
               <p className="text-xs italic" style={{ color: SLATE400 }}>
                 Adding a member adjusts your billing on the next invoice.
               </p>

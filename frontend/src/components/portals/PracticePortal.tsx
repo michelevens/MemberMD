@@ -9,7 +9,7 @@ import { useAuth } from "../../contexts/AuthContext";
 import { dashboardService, membershipPlanService, messageService, patientService, appointmentService, encounterService, prescriptionService, invoiceService, programService, telehealthService, screeningService, couponService, providerService, paymentService, notificationService, apiFetch, billingEnhancedService, documentService, onboardingService, staffService } from "../../lib/api";
 import { PortalShell, type NavSection as ShellNavSection, type PortalColor } from "../shared/PortalShell";
 import { MobileSheet } from "../shared/MobileSheet";
-import { PhoneField, EmailField, NPIField } from "../shared/fields";
+import { PhoneField, FaxField, EmailField, NPIField, ZipField, AddressField } from "../shared/fields";
 import { CommandPalette, useCommandPaletteShortcut } from "../shared/CommandPalette";
 import { AddAllergyDialog, type AllergyEntry } from "../clinical/AddAllergyDialog";
 import { AddMeasureDialog } from "../clinical/AddMeasureDialog";
@@ -9880,10 +9880,11 @@ export function PracticePortal() {
                   <label className="block text-sm font-medium text-slate-700 mb-1">Pharmacy Name</label>
                   <input className="w-full border rounded-lg px-3 py-2 text-sm" value={rxForm.pharmacyName} onChange={e => setRxForm(f => ({ ...f, pharmacyName: e.target.value }))} placeholder="CVS Pharmacy" />
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Pharmacy Phone</label>
-                  <input className="w-full border rounded-lg px-3 py-2 text-sm" value={rxForm.pharmacyPhone} onChange={e => setRxForm(f => ({ ...f, pharmacyPhone: e.target.value }))} placeholder="(555) 123-4567" />
-                </div>
+                <PhoneField
+                  label="Pharmacy Phone"
+                  value={rxForm.pharmacyPhone}
+                  onChange={(v) => setRxForm(f => ({ ...f, pharmacyPhone: v }))}
+                />
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Notes</label>
@@ -9920,16 +9921,13 @@ export function PracticePortal() {
                 <div className="text-sm text-slate-500 mt-2">Patient</div>
                 <div className="font-medium text-slate-700">{efaxTarget.patient}</div>
               </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Pharmacy Fax Number *</label>
-                <input
-                  className="w-full border rounded-lg px-3 py-2 text-sm"
-                  value={efaxFaxNumber}
-                  onChange={e => setEfaxFaxNumber(e.target.value)}
-                  placeholder="(407) 555-9877"
-                />
-                <p className="text-xs text-slate-400 mt-1">Enter the pharmacy fax number including area code.</p>
-              </div>
+              <FaxField
+                label="Pharmacy Fax Number"
+                required
+                value={efaxFaxNumber}
+                onChange={(v) => setEfaxFaxNumber(v)}
+                helper="Enter the pharmacy fax number including area code."
+              />
             </div>
             <div className="px-6 pb-6 flex items-center justify-end gap-3">
               <button className="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100 transition-colors" onClick={() => setShowEfaxModal(false)}>Cancel</button>
@@ -9980,18 +9978,30 @@ export function PracticePortal() {
                   </select>
                 </div>
               </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Email</label>
-                <input type="email" className="w-full border rounded-lg px-3 py-2 text-sm" value={editPatientForm.email} onChange={e => setEditPatientForm(f => ({ ...f, email: e.target.value }))} />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Phone</label>
-                <input type="tel" className="w-full border rounded-lg px-3 py-2 text-sm" value={editPatientForm.phone} onChange={e => setEditPatientForm(f => ({ ...f, phone: e.target.value }))} />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Address</label>
-                <input className="w-full border rounded-lg px-3 py-2 text-sm" value={editPatientForm.addressLine1} onChange={e => setEditPatientForm(f => ({ ...f, addressLine1: e.target.value }))} placeholder="Street address" />
-              </div>
+              <EmailField
+                label="Email"
+                value={editPatientForm.email}
+                onChange={(v) => setEditPatientForm(f => ({ ...f, email: v }))}
+              />
+              <PhoneField
+                label="Phone"
+                value={editPatientForm.phone}
+                onChange={(v) => setEditPatientForm(f => ({ ...f, phone: v }))}
+              />
+              <AddressField
+                label="Address"
+                value={editPatientForm.addressLine1}
+                onChange={(v) => setEditPatientForm(f => ({ ...f, addressLine1: v }))}
+                onParsed={(p) => {
+                  setEditPatientForm(f => ({
+                    ...f,
+                    addressLine1: p.street || f.addressLine1,
+                    city: p.city || f.city,
+                    state: p.state || f.state,
+                    zip: p.zip || f.zip,
+                  }));
+                }}
+              />
               <div className="grid grid-cols-3 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">City</label>
@@ -10001,10 +10011,11 @@ export function PracticePortal() {
                   <label className="block text-sm font-medium text-slate-700 mb-1">State</label>
                   <input className="w-full border rounded-lg px-3 py-2 text-sm" value={editPatientForm.state} onChange={e => setEditPatientForm(f => ({ ...f, state: e.target.value }))} />
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">ZIP</label>
-                  <input className="w-full border rounded-lg px-3 py-2 text-sm" value={editPatientForm.zip} onChange={e => setEditPatientForm(f => ({ ...f, zip: e.target.value }))} />
-                </div>
+                <ZipField
+                  label="ZIP"
+                  value={editPatientForm.zip}
+                  onChange={(v) => setEditPatientForm(f => ({ ...f, zip: v }))}
+                />
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Preferred Language</label>
@@ -10280,35 +10291,35 @@ export function PracticePortal() {
                   <input className="w-full border rounded-lg px-3 py-2 text-sm" value={editProviderForm.specialty} onChange={e => setEditProviderForm(f => ({ ...f, specialty: e.target.value }))} placeholder="e.g. Family Medicine" />
                 </div>
               </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">NPI Number</label>
-                <div className="flex gap-2">
-                  <input
-                    className="flex-1 border rounded-lg px-3 py-2 text-sm"
+              <div className="flex gap-2 items-end">
+                <div className="flex-1">
+                  <NPIField
+                    label="NPI Number"
                     value={editProviderForm.npiNumber}
-                    onChange={e => setEditProviderForm(f => ({ ...f, npiNumber: e.target.value.replace(/\D/g, "").slice(0, 10) }))}
-                    placeholder="10-digit NPI"
-                    maxLength={10}
+                    onChange={(v) => setEditProviderForm(f => ({ ...f, npiNumber: v }))}
                   />
-                  <button
-                    type="button"
-                    onClick={() => lookupNpiAndFill(editProviderForm.npiNumber, "edit")}
-                    disabled={editProviderForm.npiNumber.length !== 10 || npiLookupLoading}
-                    className="px-3 py-2 rounded-lg border border-slate-200 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed"
-                  >
-                    {npiLookupLoading ? "..." : "Lookup"}
-                  </button>
                 </div>
+                <button
+                  type="button"
+                  onClick={() => lookupNpiAndFill(editProviderForm.npiNumber, "edit")}
+                  disabled={editProviderForm.npiNumber.length !== 10 || npiLookupLoading}
+                  className="px-3 py-2 rounded-lg border border-slate-200 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed mb-5"
+                >
+                  {npiLookupLoading ? "..." : "Lookup"}
+                </button>
               </div>
               <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Email</label>
-                  <input type="email" className="w-full border rounded-lg px-3 py-2 text-sm" value={editProviderForm.email} onChange={e => setEditProviderForm(f => ({ ...f, email: e.target.value }))} placeholder="provider@example.com" />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Phone</label>
-                  <input type="tel" className="w-full border rounded-lg px-3 py-2 text-sm" value={editProviderForm.phone} onChange={e => setEditProviderForm(f => ({ ...f, phone: e.target.value }))} placeholder="(407) 555-1234" />
-                </div>
+                <EmailField
+                  label="Email"
+                  value={editProviderForm.email}
+                  onChange={(v) => setEditProviderForm(f => ({ ...f, email: v }))}
+                  placeholder="provider@example.com"
+                />
+                <PhoneField
+                  label="Phone"
+                  value={editProviderForm.phone}
+                  onChange={(v) => setEditProviderForm(f => ({ ...f, phone: v }))}
+                />
               </div>
               <div className="flex items-center gap-3">
                 <label className="flex items-center gap-2 cursor-pointer">

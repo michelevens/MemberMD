@@ -6,6 +6,7 @@ import { User, Lock, Shield, Key, Eye, EyeOff, Copy, Check, ArrowLeft } from "lu
 import { useAuth } from "../../contexts/AuthContext";
 import { authService } from "../../lib/api";
 import { colors, Button, SubTabNav, Badge, Modal } from "../ui/design-system";
+import { PhoneField } from "../shared/fields";
 
 type ProfileTab = "profile" | "password" | "mfa";
 
@@ -223,10 +224,11 @@ export function ProfilePage({ onBack, initialTab = "profile" }: ProfilePageProps
             </div>
           </div>
 
-          <div>
-            <label className="block text-xs font-medium mb-1" style={{ color: colors.slate600 }}>Phone</label>
-            <input value={profileForm.phone} onChange={(e) => setProfileForm(f => ({ ...f, phone: e.target.value }))} className="w-full px-3 py-2 rounded-lg border text-sm" style={{ borderColor: colors.slate300 }} placeholder="(555) 123-4567" />
-          </div>
+          <PhoneField
+            label="Phone"
+            value={profileForm.phone}
+            onChange={(v) => setProfileForm(f => ({ ...f, phone: v }))}
+          />
 
           <div>
             <label className="block text-xs font-medium mb-1" style={{ color: colors.slate600 }}>Email</label>

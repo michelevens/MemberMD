@@ -3,6 +3,7 @@
 
 import { useState, useEffect, useCallback, useRef, Fragment } from "react";
 import { apiFetch } from "../../lib/api";
+import { PhoneField, FaxField, EmailField, AddressField } from "../shared/fields";
 import {
   ArrowRight,
   Plus,
@@ -775,48 +776,29 @@ export function ReferralManagementTab() {
                 />
               </div>
               <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-1.5">Phone</label>
-                  <input
-                    type="tel"
-                    value={specialistForm.phone}
-                    onChange={(e) => setSpecialistForm((f) => ({ ...f, phone: e.target.value }))}
-                    placeholder="(555) 123-4567"
-                    className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-200"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-1.5">Email</label>
-                  <input
-                    type="email"
-                    value={specialistForm.email}
-                    onChange={(e) => setSpecialistForm((f) => ({ ...f, email: e.target.value }))}
-                    placeholder="doctor@practice.com"
-                    className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-200"
-                  />
-                </div>
+                <PhoneField
+                  label="Phone"
+                  value={specialistForm.phone}
+                  onChange={(v) => setSpecialistForm((f) => ({ ...f, phone: v }))}
+                />
+                <EmailField
+                  label="Email"
+                  value={specialistForm.email}
+                  onChange={(v) => setSpecialistForm((f) => ({ ...f, email: v }))}
+                  placeholder="doctor@practice.com"
+                />
               </div>
               <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-1.5">Fax</label>
-                  <input
-                    type="tel"
-                    value={specialistForm.fax}
-                    onChange={(e) => setSpecialistForm((f) => ({ ...f, fax: e.target.value }))}
-                    placeholder="(555) 123-4568"
-                    className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-200"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-1.5">Address</label>
-                  <input
-                    type="text"
-                    value={specialistForm.address}
-                    onChange={(e) => setSpecialistForm((f) => ({ ...f, address: e.target.value }))}
-                    placeholder="123 Medical Dr, City, ST 12345"
-                    className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-200"
-                  />
-                </div>
+                <FaxField
+                  label="Fax"
+                  value={specialistForm.fax}
+                  onChange={(v) => setSpecialistForm((f) => ({ ...f, fax: v }))}
+                />
+                <AddressField
+                  label="Address"
+                  value={specialistForm.address}
+                  onChange={(v) => setSpecialistForm((f) => ({ ...f, address: v }))}
+                />
               </div>
               <div>
                 <label className="block text-xs font-medium text-slate-600 mb-1.5">Notes</label>
