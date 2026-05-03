@@ -223,7 +223,65 @@ class StripeConnectService
             ]);
         }
 
+        // On transition INTO 'active', sync any plans that have prices but
+        // no Stripe price IDs yet. Practices typically create plans (or get
+        // starter plans forked) before completing Connect onboarding, so
+        // without this hook the public enrollment flow falls back to free
+        // 'manual' mode — patients enroll without paying. Best-effort: a
+        // sync failure logs but doesn't unwind the status transition.
+        if ($previousStatus !== 'active' && $newStatus === 'active') {
+            $this->syncUnsyncedPlans($practice->fresh());
+        }
+
         return $practice->fresh();
+    }
+
+    /**
+     * Sync every MembershipPlan for this practice that has prices set but
+     * no Stripe price IDs yet. Idempotent: syncPlanPricesToStripe early-
+     * returns when both price IDs are already populated.
+     *
+     * Called from refreshStatus on Connect activation, and exposed
+     * publicly so artisan backfills + the manual "Sync to Stripe" button
+     * can reuse it.
+     */
+    public function syncUnsyncedPlans(Practice $practice): array
+    {
+        if (!$practice->canAcceptPayments()) {
+            return ['synced' => 0, 'failed' => 0, 'skipped_reason' => 'practice_not_billing_ready'];
+        }
+
+        $subscriptions = app(StripeSubscriptionService::class);
+        $synced = 0;
+        $failed = 0;
+
+        $plans = \App\Models\MembershipPlan::where('tenant_id', $practice->id)
+            ->where('is_active', true)
+            ->where(function ($q) {
+                $q->where('monthly_price', '>', 0)
+                  ->orWhere('annual_price', '>', 0);
+            })
+            ->where(function ($q) {
+                $q->whereNull('stripe_monthly_price_id')
+                  ->orWhereNull('stripe_annual_price_id');
+            })
+            ->get();
+
+        foreach ($plans as $plan) {
+            try {
+                $subscriptions->syncPlanPricesToStripe($practice, $plan);
+                $synced++;
+            } catch (\Throwable $e) {
+                $failed++;
+                Log::warning('Plan auto-sync to Stripe failed', [
+                    'practice_id' => $practice->id,
+                    'plan_id' => $plan->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
+        return ['synced' => $synced, 'failed' => $failed];
     }
 
     /**

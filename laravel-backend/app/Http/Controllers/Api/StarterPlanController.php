@@ -108,11 +108,28 @@ class StarterPlanController extends Controller
             }
         });
 
+        // Sync newly-created plans to Stripe so the public enrollment flow
+        // can bill against them. No-op when Connect isn't ready; the
+        // post-Connect activation hook re-runs sync in that case.
+        $stripeSyncResult = ['synced' => 0, 'failed' => 0];
+        if (count($created) > 0 && $practice->canAcceptPayments()) {
+            try {
+                $stripeSyncResult = app(\App\Services\StripeConnectService::class)
+                    ->syncUnsyncedPlans($practice);
+            } catch (\Throwable $e) {
+                \Illuminate\Support\Facades\Log::warning('Starter plan Stripe sync failed', [
+                    'practice_id' => $practice->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
         return response()->json([
             'data' => [
                 'created' => count($created),
                 'skipped' => $skipped,
                 'plans' => $created,
+                'stripe_synced' => $stripeSyncResult['synced'],
                 'specialty' => [
                     'code' => $specialty->code,
                     'name' => $specialty->name,

@@ -277,6 +277,24 @@ class AuthController extends Controller
                     $starterPlanCount++;
                 }
                 $provisioningSummary['starter_plans'] = $starterPlanCount;
+
+                // Try to sync the freshly-forked plans to Stripe immediately.
+                // No-op when Connect isn't ready yet (the common case at
+                // signup — Connect onboarding happens in a separate step).
+                // The StripeConnectService::refreshStatus hook re-runs sync
+                // when the practice eventually completes Connect, so plans
+                // forked here always end up billable.
+                if ($starterPlanCount > 0 && $practice->fresh()->canAcceptPayments()) {
+                    try {
+                        app(\App\Services\StripeConnectService::class)
+                            ->syncUnsyncedPlans($practice->fresh());
+                    } catch (\Throwable $e) {
+                        \Illuminate\Support\Facades\Log::warning('Starter plan Stripe sync failed at registration', [
+                            'practice_id' => $practice->id,
+                            'error' => $e->getMessage(),
+                        ]);
+                    }
+                }
             } catch (\Throwable $e) {
                 \Illuminate\Support\Facades\Log::warning('Starter plan fork failed at registration', [
                     'practice_id' => $practice->id,
