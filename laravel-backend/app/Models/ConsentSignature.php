@@ -23,7 +23,6 @@ class ConsentSignature extends Model
 
     protected $casts = [
         'signed_at' => 'datetime',
-        'template_version' => 'integer',
     ];
 
     public function patient(): BelongsTo { return $this->belongsTo(Patient::class); }
