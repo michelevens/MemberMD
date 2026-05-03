@@ -1257,22 +1257,37 @@ export function ProgramsSection() {
           </div>
         </div>
 
-        {/* Tabs */}
-        <div className="flex gap-1 border-b border-slate-200 overflow-x-auto">
-          {(["overview", "plans", "enrollments", "providers", "settings"] as const).map((tab) => (
-            <button
-              key={tab}
-              onClick={() => setDetailTab(tab)}
-              className={`px-4 py-2.5 text-sm font-medium capitalize whitespace-nowrap transition-colors border-b-2 ${
-                detailTab === tab
-                  ? "border-current"
-                  : "border-transparent text-slate-500 hover:text-slate-700"
-              }`}
-              style={detailTab === tab ? { color: "#0D9488" } : undefined}
-            >
-              {tab}
-            </button>
-          ))}
+        {/* Tabs — Stripe-feel: single row, title-cased labels, indigo active
+            indicator, quiet slate-200 underline. No icons (Stripe convention
+            for entity-detail tabs; patient detail keeps icons because dense
+            clinical scanning warrants them). */}
+        <div className="flex gap-6 border-b border-slate-200 overflow-x-auto">
+          {([
+            { id: "overview", label: "Overview" },
+            { id: "plans", label: "Plans" },
+            { id: "enrollments", label: "Enrollments" },
+            { id: "providers", label: "Providers" },
+            { id: "settings", label: "Settings" },
+          ] as const).map((tab) => {
+            const active = detailTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => setDetailTab(tab.id)}
+                className="px-1 py-3 text-sm whitespace-nowrap transition-colors"
+                style={{
+                  color: active ? "#635bff" : "#64748b",
+                  borderBottom: active ? "2px solid #635bff" : "2px solid transparent",
+                  fontWeight: active ? 600 : 500,
+                  marginBottom: "-1px",
+                }}
+                onMouseEnter={(e) => { if (!active) e.currentTarget.style.color = "#334e68"; }}
+                onMouseLeave={(e) => { if (!active) e.currentTarget.style.color = "#64748b"; }}
+              >
+                {tab.label}
+              </button>
+            );
+          })}
         </div>
 
         {/* Tab Content */}
