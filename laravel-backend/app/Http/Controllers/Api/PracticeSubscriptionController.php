@@ -376,7 +376,6 @@ class PracticeSubscriptionController extends Controller
                 ->count(),
             'providers' => DB::table('providers')
                 ->where('tenant_id', $tenantId)
-                ->where('is_active', true)
                 ->count(),
             'staff' => DB::table('users')
                 ->where('tenant_id', $tenantId)

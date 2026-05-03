@@ -75,9 +75,10 @@ return new class extends Migration
                     ->where('tenant_id', $practice->id)
                     ->whereIn('status', ['active', 'trialing', 'past_due'])
                     ->count();
+                // providers has no is_active column — every row is a real
+                // provider. Count by tenant alone for cap-classification.
                 $providerCount = DB::table('providers')
                     ->where('tenant_id', $practice->id)
-                    ->where('is_active', true)
                     ->count();
 
                 if ($memberCount > 250 || $providerCount > 5) {

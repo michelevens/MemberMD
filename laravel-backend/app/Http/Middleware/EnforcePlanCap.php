@@ -107,9 +107,9 @@ class EnforcePlanCap
             ],
             'providers' => [
                 'max_providers',
+                // No is_active column on providers — every row counts.
                 fn () => DB::table('providers')
                     ->where('tenant_id', $tenantId)
-                    ->where('is_active', true)
                     ->count(),
             ],
             'staff' => [
