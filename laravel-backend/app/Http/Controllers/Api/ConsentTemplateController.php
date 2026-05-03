@@ -169,6 +169,7 @@ class ConsentTemplateController extends Controller
             'slug' => 'nullable|string|max:100',
             'content' => 'required|string',
             'is_required' => 'boolean',
+            'auto_request' => 'sometimes|boolean',
             'display_order' => 'nullable|integer',
         ]);
 
@@ -215,6 +216,7 @@ class ConsentTemplateController extends Controller
             'description' => 'nullable|string|max:500',
             'content' => 'sometimes|string',
             'is_required' => 'sometimes|boolean',
+            'auto_request' => 'sometimes|boolean',
             'display_order' => 'sometimes|integer',
             'is_active' => 'sometimes|boolean',
         ]);

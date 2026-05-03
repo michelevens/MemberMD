@@ -174,6 +174,22 @@ class AppointmentController extends Controller
             $this->generateRecurringAppointments($appointment, $validated['recurrence_rule']);
         }
 
+        // Auto-request consent/intake documents on FIRST appointment per
+        // patient. Practices flag templates as auto_request=true (e.g.
+        // HIPAA, ROI, treatment consent); we create a SignatureRequest
+        // for each unsigned template so the patient can sign before the
+        // visit. Wrapped in try/catch so a documents hiccup never blocks
+        // appointment creation.
+        try {
+            $this->autoRequestDocuments($appointment, $user->tenant_id);
+        } catch (\Throwable $e) {
+            \Log::warning('Auto-request documents failed at appointment.store', [
+                'appointment_id' => $appointment->id,
+                'patient_id' => $appointment->patient_id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
         // Auto-create telehealth session if telehealth appointment
         if ($appointment->is_telehealth) {
             try {
@@ -507,6 +523,92 @@ class AppointmentController extends Controller
         $entry->delete();
 
         return response()->json(['data' => ['message' => 'Waitlist entry removed.']]);
+    }
+
+    /**
+     * Auto-create SignatureRequest rows for any tenant consent_templates
+     * marked auto_request=true, scoped to the patient's FIRST appointment.
+     *
+     * Why first-only:
+     *   Without this gate the patient gets re-asked to sign HIPAA every
+     *   visit. The point of "auto-request" is onboarding, not friction.
+     *
+     * Skips templates the patient has already signed (latest version) and
+     * any with an existing pending SignatureRequest. Idempotent — safe to
+     * call multiple times if logic changes upstream.
+     */
+    private function autoRequestDocuments(Appointment $appointment, string $tenantId): void
+    {
+        // First-appointment check — count pre-existing appointments for
+        // this patient (excluding the one we just created).
+        $priorCount = Appointment::where('tenant_id', $tenantId)
+            ->where('patient_id', $appointment->patient_id)
+            ->where('id', '!=', $appointment->id)
+            ->count();
+        if ($priorCount > 0) return;
+
+        $templates = \App\Models\ConsentTemplate::where(function ($q) use ($tenantId) {
+                $q->where('tenant_id', $tenantId)->orWhereNull('tenant_id');
+            })
+            ->where('is_active', true)
+            ->where('auto_request', true)
+            ->whereNull('superseded_at')
+            ->get();
+
+        if ($templates->isEmpty()) return;
+
+        $patient = \App\Models\Patient::find($appointment->patient_id);
+        if (!$patient || empty($patient->email)) return; // need an email to send the link
+
+        foreach ($templates as $template) {
+            // Skip if patient already signed this template (any version).
+            $alreadySigned = \App\Models\ConsentSignature::where('tenant_id', $tenantId)
+                ->where('patient_id', $patient->id)
+                ->where('template_id', $template->id)
+                ->exists();
+            if ($alreadySigned) continue;
+
+            // Skip if a pending request already exists.
+            $alreadyPending = \App\Models\SignatureRequest::where('tenant_id', $tenantId)
+                ->where('patient_id', $patient->id)
+                ->where('template_id', $template->id)
+                ->where('status', \App\Models\SignatureRequest::STATUS_PENDING)
+                ->exists();
+            if ($alreadyPending) continue;
+
+            $req = \App\Models\SignatureRequest::create([
+                'tenant_id' => $tenantId,
+                'template_id' => $template->id,
+                'patient_id' => $patient->id,
+                'requested_by_user_id' => null, // system-created
+                'status' => \App\Models\SignatureRequest::STATUS_PENDING,
+                'message' => 'Please complete this before your visit.',
+                'expires_at' => now()->addDays(30),
+            ]);
+
+            // Email the link. Reuse the existing dispatcher.
+            try {
+                $practice = \App\Models\Practice::find($tenantId);
+                if (!$practice) continue;
+                $appUrl = (string) config('app.frontend_url', config('app.url', 'https://app.membermd.io'));
+                $signUrl = rtrim($appUrl, '/') . '/#/sign/' . $req->public_token;
+                \Illuminate\Support\Facades\Mail::to($patient->email)->send(
+                    new \App\Mail\SignatureRequestEmail(
+                        practice: $practice,
+                        patient: $patient,
+                        template: $template,
+                        signUrl: $signUrl,
+                        personalNote: 'Please complete this before your visit on '
+                            . \Carbon\Carbon::parse($appointment->scheduled_at)->format('F j, Y') . '.',
+                    ),
+                );
+            } catch (\Throwable $e) {
+                \Log::warning('Auto-request email send failed', [
+                    'request_id' => $req->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
     }
 
     /**

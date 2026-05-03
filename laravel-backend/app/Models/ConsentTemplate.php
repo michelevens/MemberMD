@@ -16,13 +16,14 @@ class ConsentTemplate extends Model
         'tenant_id', 'parent_template_id',
         'name', 'description', 'type', 'slug', 'content',
         'specialty', 'is_required', 'display_order',
-        'version', 'is_active',
+        'version', 'is_active', 'auto_request',
         'effective_at', 'superseded_at',
     ];
 
     protected $casts = [
         'is_required' => 'boolean',
         'is_active' => 'boolean',
+        'auto_request' => 'boolean',
         'display_order' => 'integer',
         'effective_at' => 'datetime',
         'superseded_at' => 'datetime',
