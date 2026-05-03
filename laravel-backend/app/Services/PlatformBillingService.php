@@ -249,6 +249,98 @@ class PlatformBillingService
     }
 
     /**
+     * Set the practice's purchased seat-block count on Stripe.
+     *
+     * Adds/updates a second subscription item using the plan's seat price id.
+     * Quantity is the number of blocks (each block grants
+     * extra_seat_block_size additional members at extra_seat_block_price each).
+     *
+     * Quantity = 0 removes the seat item entirely.
+     *
+     * Returns the updated PracticeSubscription. Updates purchased_seat_blocks
+     * locally before the Stripe round-trip; the webhook reconciles drift.
+     */
+    public function setSeatBlocks(PracticeSubscription $sub, int $blocks): PracticeSubscription
+    {
+        if ($blocks < 0) {
+            throw new RuntimeException('Seat block count cannot be negative.');
+        }
+
+        $sub->loadMissing('plan');
+        $plan = $sub->plan;
+        if (!$plan) {
+            throw new RuntimeException('Subscription has no plan.');
+        }
+        if ($plan->extra_seat_block_size === null || $plan->extra_seat_block_size <= 0) {
+            throw new RuntimeException('This plan does not support extra seat blocks.');
+        }
+
+        // Local update happens first — even without Stripe, the cap math
+        // immediately respects the new ceiling.
+        $sub->update([
+            'purchased_seat_blocks' => $blocks,
+            'seats_eligible_for_downgrade_since' => null,
+        ]);
+
+        // Founder accounts and unconfigured Stripe just stop here
+        if ($sub->is_founder_override || empty($sub->stripe_subscription_id)) {
+            $this->audit($sub, 'platform_seat_blocks_changed_local_only', ['blocks' => $blocks]);
+            return $sub->fresh();
+        }
+        if (empty($plan->stripe_seat_price_id)) {
+            throw new RuntimeException(
+                'Plan has no Stripe seat-block price. SuperAdmin needs to sync the plan first.'
+            );
+        }
+
+        try {
+            $stripeSub = $this->stripe()->subscriptions->retrieve($sub->stripe_subscription_id);
+
+            // Find the existing seat item (by price id), if any
+            $seatItem = null;
+            foreach (($stripeSub->items->data ?? []) as $item) {
+                if (($item->price->id ?? null) === $plan->stripe_seat_price_id) {
+                    $seatItem = $item;
+                    break;
+                }
+            }
+
+            $items = [];
+            if ($seatItem) {
+                if ($blocks === 0) {
+                    // Remove the seat item
+                    $items[] = ['id' => $seatItem->id, 'deleted' => true];
+                } else {
+                    $items[] = ['id' => $seatItem->id, 'quantity' => $blocks];
+                }
+            } elseif ($blocks > 0) {
+                $items[] = ['price' => $plan->stripe_seat_price_id, 'quantity' => $blocks];
+            }
+
+            if (!empty($items)) {
+                $this->stripe()->subscriptions->update(
+                    $sub->stripe_subscription_id,
+                    [
+                        'items' => $items,
+                        'proration_behavior' => 'create_prorations',
+                    ],
+                );
+            }
+        } catch (ApiErrorException $e) {
+            // Local change stays — the practice has the capacity locally and
+            // ops can reconcile via webhook + Stripe dashboard.
+            Log::warning('Failed to sync seat blocks to Stripe (local change kept)', [
+                'practice_subscription_id' => $sub->id,
+                'blocks' => $blocks,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        $this->audit($sub, 'platform_seat_blocks_changed', ['blocks' => $blocks]);
+        return $sub->fresh();
+    }
+
+    /**
      * Cancel the Stripe subscription. Defaults to cancel_at_period_end.
      * Pass immediately=true to cut off mid-cycle (no refund).
      */

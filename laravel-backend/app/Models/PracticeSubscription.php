@@ -32,6 +32,7 @@ class PracticeSubscription extends Model
         'cancelled_at', 'cancels_at', 'cancel_immediately',
         'cancellation_reason_id', 'cancellation_reason_other', 'cancellation_notes',
         'is_founder_override',
+        'notifications_sent',
     ];
 
     protected $casts = [
@@ -45,7 +46,25 @@ class PracticeSubscription extends Model
         'cancels_at' => 'datetime',
         'cancel_immediately' => 'boolean',
         'is_founder_override' => 'boolean',
+        'notifications_sent' => 'array',
     ];
+
+    /**
+     * Whether the named milestone notification has been sent.
+     * Used by the lifecycle cron to skip already-sent reminders.
+     */
+    public function hasSentNotification(string $key): bool
+    {
+        return is_array($this->notifications_sent)
+            && isset($this->notifications_sent[$key]);
+    }
+
+    public function markNotificationSent(string $key): void
+    {
+        $sent = is_array($this->notifications_sent) ? $this->notifications_sent : [];
+        $sent[$key] = now()->toIso8601String();
+        $this->update(['notifications_sent' => $sent]);
+    }
 
     public function practice(): BelongsTo
     {

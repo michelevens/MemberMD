@@ -6,7 +6,7 @@
 // cancel-with-reason flow.
 
 import { useEffect, useMemo, useState } from "react";
-import { Check, AlertCircle, Loader2, Crown, ChevronRight, Star, X } from "lucide-react";
+import { Check, AlertCircle, Loader2, Crown, ChevronRight, Star, X, Plus, Minus, TrendingUp } from "lucide-react";
 import {
   subscriptionService,
   type PlatformPlanSummary,
@@ -74,6 +74,7 @@ export function PlatformSubscriptionSection() {
 
   const [showChangeDialog, setShowChangeDialog] = useState(false);
   const [showCancelDialog, setShowCancelDialog] = useState(false);
+  const [showSeatsDialog, setShowSeatsDialog] = useState(false);
 
   const reload = async () => {
     setLoading(true);
@@ -186,6 +187,11 @@ export function PlatformSubscriptionSection() {
         </div>
       </div>
 
+      {/* Seat capacity (only when plan supports overage purchases) */}
+      {!isFounder && sub.plan.maxMembers !== null && (
+        <SeatCapacityCard sub={sub} onBuy={() => setShowSeatsDialog(true)} />
+      )}
+
       {/* Action buttons */}
       {!isFounder && (
         <div className="flex flex-wrap items-center gap-2">
@@ -276,6 +282,215 @@ export function PlatformSubscriptionSection() {
           }}
         />
       )}
+
+      {showSeatsDialog && sub && (
+        <BuySeatsDialog
+          sub={sub}
+          onClose={() => setShowSeatsDialog(false)}
+          onSaved={async () => {
+            setShowSeatsDialog(false);
+            await reload();
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function SeatCapacityCard({ sub, onBuy }: { sub: PracticeSubscriptionSummary; onBuy: () => void }) {
+  const includedSeats = sub.plan.maxMembers ?? 0;
+  const usedMembers = sub.usage.members;
+  // Backend's effectiveMemberCap = max_members + purchased * block_size.
+  // Falls back to plan-included when not surfaced.
+  const effectiveCap = sub.effectiveMemberCap ?? includedSeats;
+  const hasPurchased = effectiveCap > includedSeats;
+  const headroom = effectiveCap - usedMembers;
+  const nearCap = headroom <= 5 || (effectiveCap > 0 && usedMembers / effectiveCap >= 0.85);
+
+  return (
+    <div className="rounded-2xl p-5 flex items-center gap-4 flex-wrap" style={{ border: `1px solid ${nearCap ? C.amber500 : C.slate200}`, backgroundColor: nearCap ? C.amber50 : C.white }}>
+      <div className="flex-1 min-w-[200px]">
+        <h3 className="text-sm font-semibold mb-1" style={{ color: C.navy800 }}>Member capacity</h3>
+        <p className="text-xs" style={{ color: C.slate500 }}>
+          Using {usedMembers} of {effectiveCap} seats
+          {hasPurchased && ` (${includedSeats} included + ${effectiveCap - includedSeats} purchased)`}.
+          {headroom > 0 ? ` ${headroom} seat${headroom === 1 ? "" : "s"} available.` : " Capacity is full — buy more to enroll new members."}
+        </p>
+      </div>
+      <button
+        onClick={onBuy}
+        className="px-4 py-2 rounded-lg text-sm font-semibold inline-flex items-center gap-1.5"
+        style={{
+          backgroundColor: nearCap ? C.amber500 : C.teal600,
+          color: C.white,
+        }}
+      >
+        <TrendingUp className="w-4 h-4" />
+        {hasPurchased ? "Manage seats" : "Buy more seats"}
+      </button>
+    </div>
+  );
+}
+
+function BuySeatsDialog({
+  sub,
+  onClose,
+  onSaved,
+}: {
+  sub: PracticeSubscriptionSummary;
+  onClose: () => void;
+  onSaved: () => Promise<void>;
+}) {
+  const includedSeats = sub.plan.maxMembers ?? 0;
+  const effectiveCap = sub.effectiveMemberCap ?? includedSeats;
+
+  // Block size + price + currentBlocks all derive from /me/subscription/plans
+  // (the AuthSubscriptionSummary on /me doesn't carry block fields).
+  const [blockSize, setBlockSize] = useState<number | null>(null);
+  const [blockPrice, setBlockPrice] = useState<number | null>(null);
+  const [targetBlocks, setTargetBlocks] = useState(0);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    subscriptionService.plans().then((r) => {
+      const p = (r.data ?? []).find((pl) => pl.key === sub.plan.key);
+      if (p && p.extraSeatBlockSize) {
+        setBlockSize(p.extraSeatBlockSize);
+        setBlockPrice(p.extraSeatBlockPrice);
+        const blocks = effectiveCap > includedSeats
+          ? Math.round((effectiveCap - includedSeats) / p.extraSeatBlockSize)
+          : 0;
+        setTargetBlocks(blocks);
+      }
+    });
+  }, [sub.plan.key, effectiveCap, includedSeats]);
+
+  const currentBlocks = effectiveCap > includedSeats && blockSize
+    ? Math.round((effectiveCap - includedSeats) / blockSize)
+    : 0;
+
+  const projectedCap = includedSeats + (blockSize ?? 0) * targetBlocks;
+  const projectedExtraCost = (blockPrice ?? 0) * targetBlocks;
+  const usedMembers = sub.usage.members;
+  const tooSmall = projectedCap < usedMembers;
+
+  const submit = async () => {
+    setSubmitting(true);
+    setError(null);
+    const res = await subscriptionService.setSeatBlocks(targetBlocks);
+    if (res.error) {
+      setError(res.error);
+      setSubmitting(false);
+      return;
+    }
+    await onSaved();
+  };
+
+  if (blockSize === null || blockPrice === null) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: "rgba(0,0,0,0.5)" }}>
+        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 text-center">
+          <Loader2 className="w-6 h-6 animate-spin mx-auto" style={{ color: C.teal600 }} />
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: "rgba(0,0,0,0.5)" }}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
+        <div className="px-6 py-4 border-b flex items-center justify-between" style={{ borderColor: C.slate100 }}>
+          <h3 className="text-lg font-bold" style={{ color: C.slate800 }}>Member capacity</h3>
+          <button onClick={onClose} className="p-1 rounded hover:bg-slate-100">
+            <X className="w-5 h-5" style={{ color: C.slate500 }} />
+          </button>
+        </div>
+        <div className="p-6 space-y-4">
+          <div className="rounded-lg p-3" style={{ backgroundColor: C.slate100 }}>
+            <p className="text-xs" style={{ color: C.slate500 }}>{sub.plan.name} includes</p>
+            <p className="text-lg font-semibold" style={{ color: C.navy800 }}>
+              {includedSeats} members
+            </p>
+            <p className="text-xs mt-1" style={{ color: C.slate500 }}>
+              Each extra block = {blockSize} more members for ${blockPrice}/mo
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium mb-2" style={{ color: C.slate600 }}>
+              Number of extra seat blocks
+            </label>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => setTargetBlocks(Math.max(0, targetBlocks - 1))}
+                disabled={targetBlocks === 0}
+                className="w-10 h-10 rounded-lg border flex items-center justify-center disabled:opacity-40"
+                style={{ borderColor: C.slate200 }}
+              >
+                <Minus className="w-4 h-4" style={{ color: C.slate600 }} />
+              </button>
+              <div className="flex-1 text-center">
+                <div className="text-3xl font-bold" style={{ color: C.navy800 }}>{targetBlocks}</div>
+                <div className="text-xs" style={{ color: C.slate500 }}>
+                  block{targetBlocks === 1 ? "" : "s"}
+                </div>
+              </div>
+              <button
+                onClick={() => setTargetBlocks(Math.min(100, targetBlocks + 1))}
+                className="w-10 h-10 rounded-lg border flex items-center justify-center"
+                style={{ borderColor: C.slate200 }}
+              >
+                <Plus className="w-4 h-4" style={{ color: C.slate600 }} />
+              </button>
+            </div>
+          </div>
+
+          <div className="rounded-lg p-3 space-y-1" style={{ backgroundColor: C.teal50 }}>
+            <div className="flex items-center justify-between text-sm">
+              <span style={{ color: C.slate600 }}>New capacity</span>
+              <span className="font-semibold" style={{ color: C.navy800 }}>{projectedCap} members</span>
+            </div>
+            <div className="flex items-center justify-between text-sm">
+              <span style={{ color: C.slate600 }}>Extra monthly cost</span>
+              <span className="font-semibold" style={{ color: projectedExtraCost > 0 ? C.teal600 : C.slate500 }}>
+                {projectedExtraCost === 0 ? "—" : `+$${projectedExtraCost}/mo`}
+              </span>
+            </div>
+            <div className="flex items-center justify-between text-xs pt-1" style={{ color: C.slate500 }}>
+              <span>Currently using</span>
+              <span>{usedMembers} members</span>
+            </div>
+          </div>
+
+          {tooSmall && (
+            <div className="rounded-lg p-3 text-sm flex items-start gap-2" style={{ backgroundColor: C.red50, color: C.red500 }}>
+              <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
+              <span>You currently have {usedMembers} active members. Lowering capacity below that will block new enrollments. Existing members keep access.</span>
+            </div>
+          )}
+
+          {error && (
+            <div className="rounded-lg p-3 text-sm" style={{ backgroundColor: C.red50, color: C.red500 }}>
+              {error}
+            </div>
+          )}
+        </div>
+        <div className="px-6 py-4 border-t flex justify-end gap-2" style={{ borderColor: C.slate100 }}>
+          <button onClick={onClose} disabled={submitting} className="px-4 py-2 rounded-lg text-sm font-medium hover:bg-slate-100" style={{ color: C.slate600 }}>
+            Cancel
+          </button>
+          <button
+            onClick={submit}
+            disabled={submitting || targetBlocks === currentBlocks}
+            className="px-4 py-2 rounded-lg text-sm font-semibold text-white inline-flex items-center gap-1.5 disabled:opacity-50"
+            style={{ backgroundColor: C.teal600 }}
+          >
+            {submitting && <Loader2 className="w-4 h-4 animate-spin" />}
+            {submitting ? "Saving…" : targetBlocks > currentBlocks ? `Buy ${targetBlocks - currentBlocks} block${targetBlocks - currentBlocks === 1 ? "" : "s"}` : targetBlocks < currentBlocks ? "Reduce capacity" : "Save"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

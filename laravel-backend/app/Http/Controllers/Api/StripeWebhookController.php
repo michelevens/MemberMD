@@ -10,11 +10,13 @@ use App\Models\PaymentRefund;
 use App\Models\MembershipPlan;
 use App\Models\Patient;
 use App\Models\PatientMembership;
+use App\Mail\PlatformPaymentFailedMail;
 use App\Models\PendingEnrollment;
 use App\Models\PlatformInvoice;
 use App\Models\Practice;
 use App\Models\PracticeSubscription;
 use App\Models\StripeConnectEvent;
+use App\Services\MailDispatcher;
 use App\Services\MembershipCreditService;
 use App\Services\MembershipEnrollmentService;
 use App\Services\MembershipStateMachine;
@@ -174,6 +176,26 @@ class StripeWebhookController extends Controller
 
         if ($sub->status === 'active' || $sub->status === 'trial') {
             $sub->update(['status' => 'past_due']);
+        }
+
+        // Notify the practice. Idempotent on stripe_invoice_id so a retry of
+        // the same invoice doesn't double-mail; Stripe sends a new event id
+        // per attempt but the underlying invoice id stays the same.
+        $key = "payment_failed_invoice_{$invoice->id}";
+        if (!$sub->hasSentNotification($key)) {
+            $platformInvoice = PlatformInvoice::where('stripe_invoice_id', $invoice->id)->first();
+            $practice = $sub->practice ?? Practice::find($sub->practice_id);
+            $recipient = $practice?->owner_email ?? $practice?->email;
+            if ($platformInvoice && $recipient) {
+                $sent = MailDispatcher::send(
+                    $recipient,
+                    new PlatformPaymentFailedMail($sub, $platformInvoice),
+                    "platform_billing.{$key}",
+                );
+                if ($sent) {
+                    $sub->markNotificationSent($key);
+                }
+            }
         }
     }
 

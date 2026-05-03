@@ -1893,6 +1893,13 @@ export const subscriptionService = {
       body: JSON.stringify({}),
     });
   },
+  setSeatBlocks: async (blocks: number): Promise<ApiResponse<PracticeSubscriptionSummary>> => {
+    if (useMockData()) return { data: null as unknown as PracticeSubscriptionSummary };
+    return apiFetch<PracticeSubscriptionSummary>("/me/subscription/seat-blocks", {
+      method: "POST",
+      body: JSON.stringify({ blocks }),
+    });
+  },
 };
 
 // ─── Programs (Universal Program Management) ────────────────────────────────

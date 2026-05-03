@@ -253,6 +253,39 @@ class PracticeSubscriptionController extends Controller
         ]);
     }
 
+    /**
+     * Buy or release member-capacity seat blocks. The practice picks a target
+     * block count; backend computes proration via Stripe.
+     */
+    public function setSeatBlocks(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        abort_if(!$user || !$user->tenant_id, 401);
+        abort_if(!$user->isPracticeAdmin(), 403);
+
+        $validated = $request->validate([
+            'blocks' => 'required|integer|min:0|max:100',
+        ]);
+
+        $sub = PracticeSubscription::with('plan')
+            ->where('practice_id', $user->tenant_id)
+            ->latest()
+            ->firstOrFail();
+
+        try {
+            $sub = $this->billing->setSeatBlocks($sub, (int) $validated['blocks']);
+        } catch (\Throwable $e) {
+            return response()->json([
+                'message' => $e->getMessage(),
+            ], 422);
+        }
+
+        return response()->json([
+            'data' => $sub->load('plan'),
+            'message' => 'Seat capacity updated.',
+        ]);
+    }
+
     public function invoices(Request $request): JsonResponse
     {
         $user = $request->user();

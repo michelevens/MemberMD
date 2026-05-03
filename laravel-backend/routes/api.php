@@ -343,6 +343,7 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
     Route::post('/me/subscription/change', [\App\Http\Controllers\Api\PracticeSubscriptionController::class, 'changePlan']);
     Route::post('/me/subscription/cancel', [\App\Http\Controllers\Api\PracticeSubscriptionController::class, 'cancel']);
     Route::post('/me/subscription/reactivate', [\App\Http\Controllers\Api\PracticeSubscriptionController::class, 'reactivate']);
+    Route::post('/me/subscription/seat-blocks', [\App\Http\Controllers\Api\PracticeSubscriptionController::class, 'setSeatBlocks']);
 
     // Patient self-service: family members (dependents) on the
     // caller's active membership. Backed by the same Stripe-quantity
