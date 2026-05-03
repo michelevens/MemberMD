@@ -326,10 +326,16 @@ class IntakeController extends Controller
                 'converted_at' => now(),
             ]);
         } else {
-            // Stamp the patient on the submission so the post-payment
-            // webhook can correlate without re-deriving from email.
+            // Stamp patient + pending_enrollment_id on the submission so
+            // the Stripe webhook (StripeWebhookController::convertCheckoutSession)
+            // can find this row and flip it to status='converted' once
+            // payment lands. Without pending_enrollment_id the webhook has
+            // no way to correlate and the submission stays pending forever.
             $submission->update([
                 'converted_patient_id' => $patient->id,
+                'pending_enrollment_id' => $paymentLinkInfo['pending_enrollment_id']
+                    ?? $paymentLinkInfo['pendingEnrollmentId']
+                    ?? null,
             ]);
         }
 
