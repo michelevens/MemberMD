@@ -96,6 +96,7 @@ import {
 } from "lucide-react";
 import { RefreshButton } from "../shared/RefreshButton";
 import { OnboardingChecklist, ConnectSetupBanner } from "../shared/OnboardingChecklist";
+import { ComplianceWidget } from "../shared/ComplianceWidget";
 import {
   DataTable,
   DetailDrawer,
@@ -2546,6 +2547,10 @@ export function PracticePortal() {
         ) : (
           <ConnectSetupBanner onSetup={() => setActiveTab("practice-settings" as TabId)} />
         )}
+
+        {/* Compliance score — port from Credentik. Widget self-fetches
+            /compliance/score and renders the breakdown + top actions. */}
+        <ComplianceWidget />
 
         {/* Revenue by Source */}
         <div>

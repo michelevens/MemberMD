@@ -53,7 +53,7 @@ Most platform-level infrastructure built out. Source path:
 | # | Feature | Effort | Why MemberMD wants it |
 |---|---|---|---|
 | I1 | **Branded email layout system** — master `layout.blade.php` + reusable partials (button, stat-card, status-badge), 20+ templates refactored to extend layout | 1–3d | MemberMD's emails are inconsistent right now; biggest visual upgrade for lowest risk |
-| I2 | **Outbound webhook system** — register URL + events, retry with exponential backoff, delivery log viewer, test endpoint | 1–3d | Pairs with C1 workflow engine; lets tenants integrate without code |
+| I2 | **Outbound webhook system** — register URL + events, retry with exponential backoff, delivery log viewer, test endpoint | 1–3d | Pairs with C1 workflow engine; lets tenants integrate without code. **STATUS: backend already built (WebhookEndpoint + WebhookDelivery + WebhookDispatcher + 8 routes at /webhooks/endpoints). No frontend UI yet — that's the actual remaining work.** |
 | I3 | **Save & resume abandoned forms** — localStorage with 24h expiry + server-side draft sync for logged-in users | <1d | EnrollmentWidget is a one-shot 6-step form today; abandonment rate must be high |
 | I4 | **Styled confirm dialog system** — `ConfirmDialog` + `ConfirmProvider` + `useConfirm()` hook, replaces all native `confirm()` | <1d | Cheap polish; 13 native confirms in InsureFlow → 0 |
 | I5 | **Custom report builder + BI export** — query config, schedule, recipients, CSV + JSON | 1w+ | Practices want their own reports; no current way |

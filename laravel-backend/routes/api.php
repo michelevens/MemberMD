@@ -504,6 +504,9 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
     Route::post('/push/subscriptions', [PushSubscriptionController::class, 'store']);
     Route::delete('/push/subscriptions', [PushSubscriptionController::class, 'destroy']);
 
+    // ===== Compliance Command Center =====
+    Route::get('/compliance/score', [\App\Http\Controllers\Api\ComplianceController::class, 'score']);
+
     // ===== Outbound Webhook Endpoints (practice → their systems) =====
     Route::prefix('webhooks/endpoints')->group(function () {
         Route::get('/', [WebhookEndpointController::class, 'index']);
