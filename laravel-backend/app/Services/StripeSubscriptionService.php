@@ -616,6 +616,11 @@ class StripeSubscriptionService
         $params = [
             'mode' => 'subscription',
             'customer' => $customerId,
+            // Offer card + ACH + Cash App + Link. Stripe auto-renders the
+            // wallet/save-info options based on what the connected account
+            // has enabled — practices that haven't toggled on US bank
+            // accounts in their Connect dashboard will see card-only.
+            'payment_method_types' => ['card', 'us_bank_account', 'cashapp', 'link'],
             'line_items' => [[
                 'price' => $priceId,
                 'quantity' => 1,

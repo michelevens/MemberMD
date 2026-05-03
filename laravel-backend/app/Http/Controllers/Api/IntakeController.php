@@ -14,6 +14,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
 /**
@@ -97,6 +98,12 @@ class IntakeController extends Controller
             // beta tester). Required reason for audit.
             'comp' => 'sometimes|boolean',
             'comp_reason' => 'required_if:comp,true|nullable|string|max:500',
+            // When true, skip enroll() entirely and email the patient a
+            // Stripe Checkout payment link instead. The webhook converts
+            // the pending row to a real PatientMembership when payment
+            // lands. Default true — most practices prefer this over
+            // collecting card details themselves.
+            'send_payment_link' => 'sometimes|boolean',
         ]);
 
         $submission = WidgetSubmission::where('tenant_id', $user->tenant_id)
@@ -159,17 +166,45 @@ class IntakeController extends Controller
             ]);
         });
 
-        // Phase 2: Membership enrollment via the shared service. Honors
-        // billing_mode (stripe / comped / manual / rejected) so a practice
-        // with billing_enforced=true can't accidentally create a free
-        // membership through the intake back door. If no plan_id was
-        // passed, this is a lead-only conversion (Patient created, no
-        // membership) — the practice can enroll later from the patient
-        // detail page.
+        // Phase 2: Membership setup. Three branches:
+        //
+        //   (a) Comp path — practice marks the membership as comped, no
+        //       Stripe involved. Same as before.
+        //
+        //   (b) Send-payment-link path (default for billed plans) — we
+        //       create a PendingEnrollment + Stripe Checkout session and
+        //       email the patient. The webhook converts to a real
+        //       PatientMembership when they pay. Submission stays
+        //       'pending' until the webhook flips it to 'converted'.
+        //
+        //   (c) Direct enroll — only viable when paymentMethodId is on
+        //       hand (rare from intake; supported for completeness).
+        //
+        // Plan resolution order: explicit data['plan_id'] from the
+        // request → fallback to plan_id stored in the original widget
+        // submission data (the patient picked a plan in the widget).
+        $planId = $data['plan_id']
+            ?? $sd['plan_id']
+            ?? $sd['planId']
+            ?? null;
+
+        $billingFrequency = $data['billing_frequency']
+            ?? $sd['billing_frequency']
+            ?? $sd['billingFrequency']
+            ?? 'monthly';
+
+        $sendPaymentLink = (bool) ($data['send_payment_link'] ?? true);
+        $isComp = (bool) ($data['comp'] ?? false);
+
         $membership = null;
-        if (!empty($data['plan_id'])) {
+        $paymentLinkInfo = null;
+
+        if (!$planId) {
+            // Lead-only conversion: Patient created, no membership.
+            // Practice can enroll later from the patient detail page.
+        } else {
             $plan = MembershipPlan::where('tenant_id', $submission->tenant_id)
-                ->where('id', $data['plan_id'])
+                ->where('id', $planId)
                 ->where('is_active', true)
                 ->first();
 
@@ -181,50 +216,137 @@ class IntakeController extends Controller
 
             $practice = Practice::findOrFail($submission->tenant_id);
 
-            try {
-                $membership = $this->enrollment->enroll(
-                    practice: $practice,
-                    patient: $patient,
-                    plan: $plan,
-                    billingFrequency: $data['billing_frequency'] ?? 'monthly',
-                    isComp: (bool) ($data['comp'] ?? false),
-                    compReason: $data['comp_reason'] ?? null,
-                    sourceUserId: $user->id,
-                    paymentMethodId: null,
-                    source: 'intake.convert',
-                );
-            } catch (\RuntimeException $e) {
-                // Patient is real and saved — the practice can retry the
-                // membership creation from the patient detail page once
-                // they've fixed the underlying issue (sent a payment link,
-                // finished Connect onboarding, etc.). Submission stays
-                // 'pending' so it remains in the review queue.
-                return response()->json([
-                    'data' => [
-                        'patient' => $patient,
-                        'membership' => null,
-                        'submission_id' => $submission->id,
-                    ],
-                    'message' => 'Patient created but membership could not be set up: ' . $e->getMessage(),
-                ], 422);
+            // Comp path — short-circuits Stripe, creates the membership
+            // directly. Practice took on the obligation manually.
+            if ($isComp) {
+                try {
+                    $membership = $this->enrollment->enroll(
+                        practice: $practice,
+                        patient: $patient,
+                        plan: $plan,
+                        billingFrequency: $billingFrequency,
+                        isComp: true,
+                        compReason: $data['comp_reason'] ?? null,
+                        sourceUserId: $user->id,
+                        paymentMethodId: null,
+                        source: 'intake.convert',
+                    );
+                } catch (\RuntimeException $e) {
+                    return response()->json([
+                        'data' => [
+                            'patient' => $patient,
+                            'membership' => null,
+                            'submission_id' => $submission->id,
+                        ],
+                        'message' => 'Patient created but comp membership failed: ' . $e->getMessage(),
+                    ], 422);
+                }
+            } elseif ($sendPaymentLink) {
+                // Default path — email Stripe Checkout link to the patient.
+                // The webhook (handlePatientCheckoutCompleted) flips the
+                // submission to 'converted' + creates the PatientMembership
+                // when they pay.
+                try {
+                    /** @var \Illuminate\Http\JsonResponse $linkResponse */
+                    $linkResponse = app(\App\Http\Controllers\Api\MembershipController::class)
+                        ->buildOrReusePaymentLink(
+                            user: $user,
+                            patient: $patient,
+                            planId: $plan->id,
+                            billingFrequency: $billingFrequency,
+                            sendEmail: true,
+                        );
+                    $payload = $linkResponse->getData(true);
+                    if (($linkResponse->getStatusCode() ?? 200) >= 400) {
+                        // Patient is real, payment link couldn't be created.
+                        // Practice can retry from the patient detail page.
+                        return response()->json([
+                            'data' => [
+                                'patient' => $patient,
+                                'membership' => null,
+                                'submission_id' => $submission->id,
+                            ],
+                            'message' => 'Patient created but payment link could not be sent: '
+                                . ($payload['message'] ?? 'Unknown error.'),
+                        ], $linkResponse->getStatusCode());
+                    }
+                    $paymentLinkInfo = $payload['data'] ?? null;
+                } catch (\Throwable $e) {
+                    Log::warning('Payment link dispatch failed during intake convert', [
+                        'patient_id' => $patient->id,
+                        'plan_id' => $plan->id,
+                        'error' => $e->getMessage(),
+                    ]);
+                    return response()->json([
+                        'data' => [
+                            'patient' => $patient,
+                            'membership' => null,
+                            'submission_id' => $submission->id,
+                        ],
+                        'message' => 'Patient created but payment link could not be sent: ' . $e->getMessage(),
+                    ], 422);
+                }
+            } else {
+                // Direct-enroll path (no payment link). Will throw if no
+                // payment method is available; same semantics as before.
+                try {
+                    $membership = $this->enrollment->enroll(
+                        practice: $practice,
+                        patient: $patient,
+                        plan: $plan,
+                        billingFrequency: $billingFrequency,
+                        isComp: false,
+                        compReason: null,
+                        sourceUserId: $user->id,
+                        paymentMethodId: null,
+                        source: 'intake.convert',
+                    );
+                } catch (\RuntimeException $e) {
+                    return response()->json([
+                        'data' => [
+                            'patient' => $patient,
+                            'membership' => null,
+                            'submission_id' => $submission->id,
+                        ],
+                        'message' => 'Patient created but membership could not be set up: ' . $e->getMessage(),
+                    ], 422);
+                }
             }
         }
 
-        // Phase 3: Mark the submission converted. Done last so a failed
-        // membership attempt leaves the submission in the queue.
-        $submission->update([
-            'status' => 'converted',
-            'converted_patient_id' => $patient->id,
-            'converted_at' => now(),
-        ]);
+        // Phase 3: Mark the submission converted EXCEPT when we sent a
+        // payment link — in that case the webhook flips it to converted
+        // when payment lands. Leaving it 'pending' keeps the submission
+        // visible in the review queue until then so the practice can
+        // resend the link if needed.
+        if (!$paymentLinkInfo) {
+            $submission->update([
+                'status' => 'converted',
+                'converted_patient_id' => $patient->id,
+                'converted_at' => now(),
+            ]);
+        } else {
+            // Stamp the patient on the submission so the post-payment
+            // webhook can correlate without re-deriving from email.
+            $submission->update([
+                'converted_patient_id' => $patient->id,
+            ]);
+        }
+
+        $message = $paymentLinkInfo
+            ? "Patient created. Payment link sent to {$patient->email}."
+            : ($membership
+                ? 'Submission converted to patient.'
+                : 'Patient created (no plan — convert later).');
 
         return response()->json([
             'data' => [
                 'patient' => $patient,
                 'membership' => $membership,
+                'payment_link' => $paymentLinkInfo,
                 'submission_id' => $submission->id,
             ],
-            'message' => 'Submission converted to patient.',
+            'message' => $message,
         ], 201);
     }
 

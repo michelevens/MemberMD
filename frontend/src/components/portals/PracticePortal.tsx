@@ -7120,11 +7120,30 @@ export function PracticePortal() {
       ...(intake.status === "approved" ? [{
         label: "Convert to patient",
         onClick: async () => {
-          try {
-            await apiFetch(`/intakes/${intake.id}/convert`, { method: "POST" });
-            setToast({ message: "Intake converted to patient.", type: "success" });
-            loadPracticeData();
-          } catch { setToast({ message: "Failed to convert intake.", type: "error" }); }
+          // apiFetch returns { data, error } — never throws. data unwraps the
+          // server's `data:` envelope, so the server `message:` is dropped.
+          // Re-derive the message client-side based on what came back.
+          const res = await apiFetch<{
+            patient?: { email?: string };
+            membership?: unknown;
+            paymentLink?: { checkoutUrl?: string; pendingEnrollmentId?: string } | null;
+          }>(`/intakes/${intake.id}/convert`, { method: "POST" });
+
+          if (res.error) {
+            setToast({ message: res.error, type: "error" });
+            return;
+          }
+
+          const d = res.data;
+          let message = "Intake converted to patient.";
+          if (d?.paymentLink?.checkoutUrl) {
+            const email = d.patient?.email ?? "the patient";
+            message = `Patient created. Payment link sent to ${email}.`;
+          } else if (!d?.membership) {
+            message = "Patient created (no plan — convert later).";
+          }
+          setToast({ message, type: "success" });
+          loadPracticeData();
         },
       }] : []),
       ...(intake.status === "pending" ? [{

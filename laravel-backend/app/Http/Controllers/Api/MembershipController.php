@@ -182,13 +182,15 @@ class MembershipController extends Controller
     }
 
     /**
-     * Shared body of sendPaymentLink + selfEnroll. Both paths need the
-     * same active-membership preflight, idempotency check, Stripe
-     * Checkout session creation, and pending-enrollment side row. The
-     * only differences are: who calls it (admin vs patient), and
-     * whether to fire the payment-link email.
+     * Shared body of sendPaymentLink + selfEnroll. Also called from
+     * IntakeController::convert when the practice converts a widget
+     * submission and we want to email the patient a Checkout link
+     * instead of trying to charge a card we don't have.
+     *
+     * Public so other controllers can reuse without coupling to this
+     * controller's request shape.
      */
-    private function buildOrReusePaymentLink(
+    public function buildOrReusePaymentLink(
         \App\Models\User $user,
         Patient $patient,
         string $planId,
