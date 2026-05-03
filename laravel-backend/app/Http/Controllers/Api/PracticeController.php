@@ -229,6 +229,26 @@ class PracticeController extends Controller
             'approved_by' => $request->user()->id,
         ]);
 
+        // Restart the 14-day platform-subscription trial from approval
+        // time. The practice couldn't use the app during the pending-
+        // approval window, so they shouldn't lose those days. Idempotent:
+        // if a subscription row was somehow already created at signup,
+        // we just push trial_ends_at forward.
+        try {
+            $sub = \App\Models\PracticeSubscription::where('practice_id', $practice->id)
+                ->where('status', 'trial')
+                ->latest()
+                ->first();
+            if ($sub) {
+                $sub->update(['trial_ends_at' => now()->addDays(14)]);
+            }
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('Failed to refresh trial window on approval', [
+                'practice_id' => $practice->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
         // Notify the practice admin so they know they can sign in now.
         try {
             $admin = User::where('tenant_id', $practice->id)

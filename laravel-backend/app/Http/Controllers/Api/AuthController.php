@@ -189,6 +189,31 @@ class AuthController extends Controller
             'subscription_status' => 'pending_approval',
         ]);
 
+        // Bootstrap a Solo trial PracticeSubscription so the practice has a
+        // billing row from day one. 14-day trial mirrors the standard SaaS
+        // playbook in project_practice_subscription_cancellation.md. Without
+        // this, the Subscription tab would render "No subscription on file"
+        // because the backfill migration only runs against existing
+        // practices on deploy boot, not new sign-ups.
+        try {
+            $soloPlan = \App\Models\PlatformPlan::where('key', 'solo')->first();
+            if ($soloPlan) {
+                \App\Models\PracticeSubscription::create([
+                    'practice_id' => $practice->id,
+                    'platform_plan_id' => $soloPlan->id,
+                    'status' => 'trial',
+                    'billing_cycle' => 'monthly',
+                    'trial_ends_at' => now()->addDays(14),
+                    'is_founder_override' => false,
+                ]);
+            }
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('Failed to auto-create platform subscription on signup', [
+                'practice_id' => $practice->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
         // Bootstrap practice with specialty defaults (plans, appointment types, screenings, consents, settings)
         $bootstrapStatus = 'success';
         $bootstrapErrors = [];
