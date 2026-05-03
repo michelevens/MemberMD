@@ -150,6 +150,11 @@ const TelehealthRoom = namedLazy(
   "TelehealthRoom"
 );
 
+const SignatureWidget = namedLazy(
+  () => import("./components/widgets/SignatureWidget"),
+  "SignatureWidget"
+);
+
 
 // ─── Loading Fallback ─────────────────────────────────────────────────────────
 
@@ -187,6 +192,7 @@ function AuthGate() {
           <Route path="/enrollment/success" element={<EnrollmentSuccessWidget />} />
           <Route path="/enrollment/cancelled" element={<EnrollmentCancelledWidget />} />
           <Route path="/intake/:tenantCode" element={<div className="min-h-screen flex items-center justify-center"><p className="text-slate-500">Patient Intake — Coming Soon</p></div>} />
+          <Route path="/sign/:token" element={<SignatureWidget />} />
           <Route path="*" element={<Navigate to="/login" replace />} />
         </Routes>
       </Suspense>
@@ -210,6 +216,7 @@ function AuthGate() {
         <Route path="/telehealth/:sessionId" element={<TelehealthRoom />} />
         <Route path="/enrollment/success" element={<EnrollmentSuccessWidget />} />
         <Route path="/enrollment/cancelled" element={<EnrollmentCancelledWidget />} />
+        <Route path="/sign/:token" element={<SignatureWidget />} />
         <Route path="*" element={<Navigate to={portalPath} replace />} />
       </Routes>
     </Suspense>

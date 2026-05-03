@@ -751,6 +751,13 @@ export function PatientPortal() {
   const [availablePlans, setAvailablePlans] = useState<any[]>([]);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [pendingPaymentLinks, setPendingPaymentLinks] = useState<any[]>([]);
+  // Pending e-signature requests (membership renewals, ROIs, etc).
+  // Backend dedupes/filters expired; here we only render.
+  const [pendingSignatures, setPendingSignatures] = useState<Array<{
+    id: string;
+    publicToken: string;
+    template?: { id: string; name: string; type: string };
+  }>>([]);
 
   const loadPatientData = useCallback(async () => {
     // In production we MUST avoid leaving the api* state slots null
@@ -1067,6 +1074,31 @@ export function PatientPortal() {
           setPendingPaymentLinks(live);
         }
       } catch { /* silent — empty list is the safe default */ }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  // ─── Pending e-signature requests ────────────────────────────────────
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const res = await apiFetch<any>("/me/signature-requests");
+        if (cancelled) return;
+        if (res.error || !res.data) return;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const items = (Array.isArray(res.data) ? res.data : (res.data as any).data ?? []) as any[];
+        setPendingSignatures(items.map((r) => ({
+          id: r.id,
+          publicToken: r.publicToken ?? r.public_token,
+          template: r.template ? {
+            id: r.template.id,
+            name: r.template.name,
+            type: r.template.type,
+          } : undefined,
+        })));
+      } catch { /* empty list is the safe default */ }
     })();
     return () => { cancelled = true; };
   }, []);
@@ -1502,6 +1534,42 @@ export function PatientPortal() {
               >
                 Complete enrollment
               </a>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Pending signatures banner — practice has requested patient
+          sign one or more agreements (membership renewal, ROI, etc).
+          The signing surface is the public token-link URL, which works
+          whether the patient is logged in here or not. */}
+      {pendingSignatures.length > 0 && (
+        <div className="rounded-2xl p-5 border" style={{ backgroundColor: "#eef2ff", borderColor: "#c7d2fe" }}>
+          <div className="flex items-start gap-3">
+            <div className="w-10 h-10 rounded-full flex items-center justify-center shrink-0" style={{ backgroundColor: "#4f46e5" }}>
+              <FileText className="w-5 h-5 text-white" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold" style={{ color: "#1e1b4b" }}>
+                {pendingSignatures.length === 1 ? "Document awaiting your signature" : `${pendingSignatures.length} documents awaiting your signature`}
+              </p>
+              <ul className="mt-2 space-y-1">
+                {pendingSignatures.slice(0, 3).map((s) => (
+                  <li key={s.id} className="text-sm" style={{ color: "#312e81" }}>
+                    <a
+                      href={`#/sign/${s.publicToken}`}
+                      className="font-medium underline underline-offset-2 hover:no-underline"
+                    >
+                      {s.template?.name ?? "Untitled document"}
+                    </a>
+                  </li>
+                ))}
+                {pendingSignatures.length > 3 && (
+                  <li className="text-xs italic" style={{ color: "#6366f1" }}>
+                    +{pendingSignatures.length - 3} more
+                  </li>
+                )}
+              </ul>
             </div>
           </div>
         </div>

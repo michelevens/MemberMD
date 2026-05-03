@@ -771,6 +771,29 @@ export function PracticePortal() {
   const [sendLinkLoading, setSendLinkLoading] = useState(false);
   const [sendLinkError, setSendLinkError] = useState<string | null>(null);
 
+  // "Request signature" — practice picks a consent template and emails the
+  // patient a tokened sign-link. Reuses the same backend that EnrollmentWidget
+  // signs into; the resulting ConsentSignature is durable + auditable.
+  const [signatureRequestPatient, setSignatureRequestPatient] = useState<{ id: string; name: string; email: string | null } | null>(null);
+  const [signatureTemplates, setSignatureTemplates] = useState<Array<{ id: string; name: string; type: string; description?: string | null }>>([]);
+  const [signatureForm, setSignatureForm] = useState<{ templateId: string; message: string }>({ templateId: "", message: "" });
+  const [signatureSending, setSignatureSending] = useState(false);
+  const [signatureError, setSignatureError] = useState<string | null>(null);
+  const fetchSignatureTemplates = useCallback(async () => {
+    setSignatureForm({ templateId: "", message: "" });
+    setSignatureError(null);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const res = await apiFetch<any>("/consent-templates");
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const items: any[] = Array.isArray(res.data) ? res.data : (res.data as any)?.data ?? [];
+    setSignatureTemplates(items.filter((t) => t.isActive !== false && t.is_active !== false).map((t) => ({
+      id: t.id,
+      name: t.name,
+      type: t.type,
+      description: t.description ?? null,
+    })));
+  }, []);
+
   // ─── Toast ──────────────────────────────────────────────────────────
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   useEffect(() => { if (toast) { const t = setTimeout(() => setToast(null), 4000); return () => clearTimeout(t); } }, [toast]);
@@ -2842,6 +2865,7 @@ export function PracticePortal() {
       { label: "Edit", onClick: () => openEditPatient(patient) },
       { label: "Book appointment", onClick: () => { setBookApptStaffPatientId(patient.id); setBookApptStaffPatientName(patient.name || ""); setShowBookAppointment(true); } },
       { label: "Send message", onClick: () => { setSelectedPatient(patient); setPatientDetailTab("messages"); } },
+      { label: "Request signature", onClick: () => { setSignatureRequestPatient({ id: patient.id, name: patient.name, email: patient.email ?? null }); fetchSignatureTemplates(); } },
       { label: "Log activity", onClick: () => { setActiveTab("activity-log"); } },
       { label: "Create encounter", onClick: () => { setEncounterForm(f => ({ ...f, patientId: patient.id })); setShowNewEncounter(true); } },
       ...(patient.status === "active" && patient.membershipId
@@ -9999,6 +10023,98 @@ export function PracticePortal() {
                   setToast({ message: `Intake link sent to ${sendLinkForm.email}.`, type: "success" });
                 }}>
                 {sendLinkLoading ? "Sending…" : "Send link"}
+              </button>
+            </div>
+          </>
+        )}
+      </MobileSheet>
+
+      {/* ─── Request Signature Modal ──────────────────────────────────────
+          Practice picks a consent template + writes optional note;
+          backend creates a SignatureRequest row and emails the patient
+          a tokened sign-link. The patient can also complete it in-app
+          via the pending-signatures banner on their dashboard. */}
+      <MobileSheet
+        open={!!signatureRequestPatient}
+        onClose={() => { setSignatureRequestPatient(null); setSignatureError(null); }}
+        maxWidth="max-w-md"
+        title={
+          <div>
+            <div>Request signature</div>
+            <div className="text-xs text-slate-500 font-normal mt-0.5">
+              {signatureRequestPatient ? `${signatureRequestPatient.name} will receive an email with a sign-link.` : ""}
+            </div>
+          </div>
+        }
+      >
+        {signatureRequestPatient && (
+          <>
+            <div className="p-6 space-y-4">
+              {!signatureRequestPatient.email && (
+                <div className="rounded-lg p-3 text-sm" style={{ backgroundColor: "#fef3c7", color: "#92400e" }}>
+                  This patient has no email on file. Add an email before requesting a signature.
+                </div>
+              )}
+              {signatureError && (
+                <div className="rounded-lg p-3 text-sm" style={{ backgroundColor: "#fef2f2", color: "#dc2626" }}>{signatureError}</div>
+              )}
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Document *</label>
+                <select
+                  className="w-full border rounded-lg px-3 py-2 text-sm"
+                  value={signatureForm.templateId}
+                  onChange={(e) => setSignatureForm((f) => ({ ...f, templateId: e.target.value }))}
+                >
+                  <option value="">Select a document…</option>
+                  {signatureTemplates.map((t) => (
+                    <option key={t.id} value={t.id}>{t.name}</option>
+                  ))}
+                </select>
+                <p className="text-xs text-slate-400 mt-1">Templates come from your active consent + agreement library.</p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Personal note (optional)</label>
+                <textarea
+                  className="w-full border rounded-lg px-3 py-2 text-sm"
+                  rows={3}
+                  value={signatureForm.message}
+                  onChange={(e) => setSignatureForm((f) => ({ ...f, message: e.target.value }))}
+                  placeholder="Hi Jane — please sign this so we can request your records from Dr. Smith."
+                />
+              </div>
+            </div>
+            <div className="px-6 pb-6 flex items-center justify-end gap-3">
+              <button
+                className="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100"
+                onClick={() => { setSignatureRequestPatient(null); setSignatureError(null); }}
+              >
+                Cancel
+              </button>
+              <button
+                className="px-6 py-2 rounded-lg text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50"
+                disabled={signatureSending || !signatureForm.templateId || !signatureRequestPatient.email}
+                onClick={async () => {
+                  if (!signatureRequestPatient || !signatureForm.templateId) return;
+                  setSignatureSending(true);
+                  setSignatureError(null);
+                  const res = await apiFetch("/signature-requests", {
+                    method: "POST",
+                    body: JSON.stringify({
+                      template_id: signatureForm.templateId,
+                      patient_id: signatureRequestPatient.id,
+                      message: signatureForm.message || null,
+                    }),
+                  });
+                  setSignatureSending(false);
+                  if (res.error) {
+                    setSignatureError(res.error);
+                    return;
+                  }
+                  setToast({ message: `Signature link sent to ${signatureRequestPatient.email}.`, type: "success" });
+                  setSignatureRequestPatient(null);
+                }}
+              >
+                {signatureSending ? "Sending…" : "Send signature link"}
               </button>
             </div>
           </>
