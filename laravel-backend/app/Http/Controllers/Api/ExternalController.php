@@ -171,26 +171,51 @@ class ExternalController extends Controller
             }
         }
 
-        // Create user account for patient
-        $user = User::create([
-            'tenant_id' => $practice->id,
-            'name' => $validated['first_name'] . ' ' . $validated['last_name'],
-            'first_name' => $validated['first_name'],
-            'last_name' => $validated['last_name'],
-            'email' => $validated['email'],
-            'password' => Hash::make(Str::random(16)),
-            'phone' => $validated['phone'],
-            'date_of_birth' => $validated['date_of_birth'],
-            'role' => 'patient',
-            'status' => 'active',
-        ]);
+        // Reuse the user row if this email already has an account.
+        // users.email is globally UNIQUE, so a blind User::create on a
+        // re-submission throws a QueryException and the patient gets
+        // "Server Error" with no recovery (real bug seen 2026-05-04).
+        // Three cases:
+        //   - existing user in THIS tenant → reuse them
+        //   - existing user in a DIFFERENT tenant → reject with a clean
+        //     message (cross-tenant account merging is out of scope here)
+        //   - no existing user → create as before
+        $existingUser = User::where('email', $validated['email'])->first();
+        if ($existingUser && $existingUser->tenant_id !== $practice->id) {
+            return response()->json([
+                'message' => 'This email already belongs to an account at another practice. '
+                    . 'Sign in to that account or use a different email to enroll here.',
+                'code' => 'email_belongs_to_other_tenant',
+            ], 409);
+        }
 
-        // Create patient record. Use ?? null for nullable validated fields so
-        // requests that omit them don't crash with "Undefined array key".
+        if ($existingUser) {
+            $user = $existingUser;
+        } else {
+            $user = User::create([
+                'tenant_id' => $practice->id,
+                'name' => $validated['first_name'] . ' ' . $validated['last_name'],
+                'first_name' => $validated['first_name'],
+                'last_name' => $validated['last_name'],
+                'email' => $validated['email'],
+                'password' => Hash::make(Str::random(16)),
+                'phone' => $validated['phone'],
+                'date_of_birth' => $validated['date_of_birth'],
+                'role' => 'patient',
+                'status' => 'active',
+            ]);
+        }
+
+        // Create patient record (or reuse existing). updateOrCreate keyed on
+        // (tenant_id, user_id) so a re-submission updates the same row instead
+        // of leaving an orphan.
         $memberId = 'MBR-' . strtoupper(substr($user->id, 0, 6));
-        $patient = Patient::create([
-            'tenant_id' => $practice->id,
-            'user_id' => $user->id,
+        $patient = Patient::updateOrCreate(
+            [
+                'tenant_id' => $practice->id,
+                'user_id' => $user->id,
+            ],
+            [
             'first_name' => $validated['first_name'],
             'last_name' => $validated['last_name'],
             'date_of_birth' => $validated['date_of_birth'],
@@ -209,7 +234,8 @@ class ExternalController extends Controller
                 'phone' => $validated['emergency_contact_phone'],
             ]],
             'is_active' => true,
-        ]);
+            ],
+        );
         // ─── Branch on billing mode ────────────────────────────────────────
         // Resolve once, here, so the widget either redirects the patient to
         // Stripe Checkout (stripe path) or completes a free enrollment

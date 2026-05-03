@@ -45,12 +45,26 @@ class ConsentTemplateController extends Controller
         // Tenant-specific templates take precedence over platform-wide ones
         // when they have the same slug. Platform-wide templates are fallback
         // for HIPAA/treatment/etc. that the practice didn't customize.
+        //
+        // Within-tenant dedup: PracticeBootstrapService and
+        // PracticeProvisioningService each seed consent templates from
+        // different sources (consent_templates with tenant_id=null vs.
+        // master_consent_templates) — so a freshly provisioned tenant
+        // can have the same `type` (e.g. "hipaa") inserted twice with
+        // different names. The widget then renders both rows. Keep the
+        // newest per (type, name) so the patient sees one row per
+        // logical consent. Prefer slug as the dedup key when set,
+        // otherwise type+name.
         $tenantTemplates = ConsentTemplate::where('tenant_id', $practice->id)
             ->where('is_active', true)
             ->whereNull('superseded_at')
-            ->get();
+            ->orderByDesc('updated_at')
+            ->get()
+            ->unique(fn ($t) => $t->slug ?: ($t->type . '|' . $t->name))
+            ->values();
 
         $tenantSlugs = $tenantTemplates->pluck('slug')->filter()->all();
+        $tenantTypes = $tenantTemplates->pluck('type')->filter()->all();
 
         // Platform-wide fallbacks: only include templates whose slug isn't
         // already shadowed by a tenant fork. Postgres `NOT IN` excludes NULL
@@ -63,6 +77,13 @@ class ConsentTemplateController extends Controller
                     $qq->whereNull('slug')
                        ->orWhereNotIn('slug', $tenantSlugs);
                 });
+            })
+            ->when($tenantTypes, function ($q) use ($tenantTypes) {
+                // A tenant fork without a slug still shadows the platform
+                // template by `type`. Without this, "HIPAA" appears twice
+                // (tenant version with null slug + platform version with
+                // slug=hipaa) and the patient sees a duplicate row.
+                $q->whereNotIn('type', $tenantTypes);
             })
             ->get();
 
