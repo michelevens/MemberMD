@@ -38,7 +38,12 @@ interface EmployerContract {
   employerId: string;
   employerName: string;
   planName: string;
-  pepmRate: number;
+  // Postgres decimal columns serialize as strings through Laravel's
+  // decimal:N cast, so what arrives here is "12.50" not 12.50. Anywhere
+  // we render or compute, wrap with Number() — the literal `number` type
+  // here was a lie that crashed PracticePortal at runtime when contracts
+  // existed (.toFixed is undefined on strings).
+  pepmRate: number | string;
   effectiveDate: string;
   endDate: string;
   status: "active" | "expired" | "pending" | "cancelled";
@@ -589,7 +594,7 @@ export function EmployerManagementTab() {
                   <tr key={c.id} className="border-t border-slate-100 hover:bg-slate-50 transition-colors">
                     <td className="px-4 py-3 font-medium text-slate-800">{c.employerName}</td>
                     <td className="px-4 py-3 text-slate-600">{c.planName}</td>
-                    <td className="px-4 py-3 text-right text-slate-700">${c.pepmRate.toFixed(2)}</td>
+                    <td className="px-4 py-3 text-right text-slate-700">${Number(c.pepmRate || 0).toFixed(2)}</td>
                     <td className="px-4 py-3 text-slate-600">{c.effectiveDate}</td>
                     <td className="px-4 py-3 text-center text-slate-700">{c.enrolledCount}</td>
                     <td className="px-4 py-3 text-center">
