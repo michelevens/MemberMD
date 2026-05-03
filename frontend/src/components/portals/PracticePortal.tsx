@@ -964,6 +964,11 @@ export function PracticePortal() {
   const [patientActivitiesLoading, setPatientActivitiesLoading] = useState(false);
   const [patientActivitiesPage, setPatientActivitiesPage] = useState(1);
   const [patientActivitiesTotalPages, setPatientActivitiesTotalPages] = useState(1);
+  // Patient id we last attempted to fetch activities for. Without this,
+  // a successful empty fetch (or a 500) leaves activities=[] and the
+  // render-time auto-fetch IIFE re-fires every render — DDoSing the
+  // endpoint and stuck at "Loading activities…" forever.
+  const [patientActivitiesPatientId, setPatientActivitiesPatientId] = useState<string | null>(null);
 
   // ─── Patient Detail per-tab data slots ───────────────────────────────
   // Each sub-tab in the patient drawer loads its own scoped fetch when
@@ -3242,7 +3247,7 @@ export function PracticePortal() {
       <div className="space-y-5">
         {/* Back link — Stripe slim pattern */}
         <button
-          onClick={() => { setSelectedPatient(null); setPatientUtilization(null); setPatientActivities([]); setShowQuickActivityLog(false); }}
+          onClick={() => { setSelectedPatient(null); setPatientUtilization(null); setPatientActivities([]); setPatientActivitiesPatientId(null); setShowQuickActivityLog(false); }}
           className="inline-flex items-center gap-1.5 text-sm text-slate-600 hover:text-slate-900 transition-colors"
         >
           <ArrowLeft className="w-4 h-4" />
@@ -3282,7 +3287,7 @@ export function PracticePortal() {
                   {pt.memberSince && (
                     <div className="flex items-center gap-1.5">
                       <Calendar className="w-4 h-4" />
-                      <span>Member since {pt.memberSince}</span>
+                      <span>Member since {formatDob(pt.memberSince) || pt.memberSince}</span>
                     </div>
                   )}
                   {pt.lastVisit && (
@@ -3594,8 +3599,15 @@ export function PracticePortal() {
 
         {/* ── Activity Log Section ──────────────────────────────────── */}
         {(() => {
-          // Auto-fetch activities when patient detail is viewed
-          if (pt && patientActivities.length === 0 && !patientActivitiesLoading) {
+          // Auto-fetch activities when patient detail is viewed.
+          // Track the patient id we last attempted so a successful EMPTY
+          // result doesn't trigger an infinite re-render loop (length===0
+          // would stay true after the fetch and re-fire forever, hammering
+          // the endpoint at ~10 req/sec). The setTimeout-in-render pattern
+          // is itself bad — should be useEffect — but flipping that out is
+          // risky here; the gate below makes it safe.
+          if (pt && patientActivitiesPatientId !== pt.id && !patientActivitiesLoading) {
+            setPatientActivitiesPatientId(pt.id);
             setTimeout(() => fetchPatientActivities(pt.id), 0);
           }
 
