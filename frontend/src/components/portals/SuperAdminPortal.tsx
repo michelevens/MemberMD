@@ -11,6 +11,7 @@ import { PlatformSettings } from "../settings/PlatformSettings";
 import { UserSettingsDropdown } from "../shared/UserSettingsDropdown";
 import { RefreshButton } from "../shared/RefreshButton";
 import { useConfirm } from "../shared/ConfirmDialog";
+import { CommandPalette, useCommandPaletteShortcut } from "../shared/CommandPalette";
 import {
   DataTable,
   EntityId,
@@ -984,6 +985,8 @@ function TierBadge({ tier }: { tier: "starter" | "professional" | "enterprise" }
 export function SuperAdminPortal() {
   const isDemoMode = import.meta.env.VITE_DEMO_MODE !== "false";
   const confirm = useConfirm();
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  useCommandPaletteShortcut(() => setPaletteOpen(true));
 
   const [activeTab, setActiveTab] = useState<TabId>("dashboard");
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -5278,6 +5281,21 @@ export function SuperAdminPortal() {
           </div>
         </footer>
       </div>
+
+      {/* Command Palette — Cmd+K / Ctrl+K to jump to any section. */}
+      <CommandPalette
+        open={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+        items={NAV_SECTIONS.flatMap((section) =>
+          section.items.map((it) => ({
+            id: it.id,
+            label: it.label,
+            hint: section.title,
+            icon: it.icon as React.ComponentType<{ className?: string }>,
+          })),
+        )}
+        onSelect={(id) => setActiveTab(id as TabId)}
+      />
     </div>
   );
 }
