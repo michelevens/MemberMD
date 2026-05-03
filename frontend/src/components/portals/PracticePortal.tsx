@@ -1730,24 +1730,29 @@ export function PracticePortal() {
   const handleQuickActivityLog = useCallback(async (patientId: string) => {
     if (!quickActivityForm.activityType) return;
     setQuickActivityLoading(true);
-    try {
-      await apiFetch("/activity-log", {
-        method: "POST",
-        body: JSON.stringify({
-          patientId,
-          activityType: quickActivityForm.activityType,
-          durationMinutes: parseInt(quickActivityForm.durationMinutes) || 15,
-          notes: quickActivityForm.notes || undefined,
-        }),
-      });
-      setToast({ message: "Activity logged.", type: "success" });
-      setShowQuickActivityLog(false);
-      setQuickActivityForm({ activityType: "", durationMinutes: "15", notes: "" });
-      fetchPatientActivities(patientId);
-    } catch {
-      setToast({ message: "Failed to log activity.", type: "error" });
-    }
+    // apiFetch returns {data, error} — never throws. The previous
+    // try/catch wrapper was a no-op: on a 500 backend error the user
+    // saw "Activity logged" success toast even though zero rows hit
+    // the DB. Surface the real error message instead.
+    const res = await apiFetch("/activity-log", {
+      method: "POST",
+      body: JSON.stringify({
+        patientId,
+        activityType: quickActivityForm.activityType,
+        durationMinutes: parseInt(quickActivityForm.durationMinutes) || 15,
+        notes: quickActivityForm.notes || undefined,
+      }),
+    });
     setQuickActivityLoading(false);
+    if (res.error) {
+      setToast({ message: res.error, type: "error" });
+      return;
+    }
+    setToast({ message: "Activity logged.", type: "success" });
+    setShowQuickActivityLog(false);
+    setQuickActivityForm({ activityType: "", durationMinutes: "15", notes: "" });
+    setPatientActivitiesPatientId(null);
+    fetchPatientActivities(patientId);
   }, [quickActivityForm, fetchPatientActivities, setToast]);
 
   const handleAddPatient = async () => {

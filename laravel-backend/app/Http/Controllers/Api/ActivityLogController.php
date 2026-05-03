@@ -56,34 +56,54 @@ class ActivityLogController extends Controller
 
         $response = ['data' => []];
 
-        // Create CommunicationLog for communication types
-        $communicationTypes = ['phone_call', 'text_message', 'after_hours_call', 'referral_call'];
-        $commLog = null;
+        // Persist EVERY activity type to communication_logs — it's the
+        // canonical store the index/recent endpoints read from. Earlier
+        // versions only wrote for {phone_call, text_message,
+        // after_hours_call, referral_call}, so logging "home visit" or
+        // "care coordination" returned 201 but wrote nothing — the
+        // Activity Log section then said "No activities logged yet."
+        // even after the staff member confirmed the toast.
+        //
+        // Channel mapping: communications go to phone/sms; clinical
+        // activities use a synthetic channel matching the activity_type
+        // so the recent() reader and the index() activity_type-deriver
+        // can round-trip cleanly.
+        $channelMap = [
+            'phone_call' => 'phone',
+            'text_message' => 'sms',
+            'after_hours_call' => 'phone',
+            'referral_call' => 'phone',
+            // Non-communication activities: store the activity_type
+            // directly as the channel so it shows up grouped correctly.
+            'home_visit' => 'home_visit',
+            'care_coordination' => 'care_coordination',
+            'education' => 'education',
+            'medication_dispensed' => 'medication_dispensed',
+            'other' => 'other',
+        ];
 
-        if (in_array($validated['activity_type'], $communicationTypes)) {
-            $channelMap = [
-                'phone_call' => 'phone',
-                'text_message' => 'sms',
-                'after_hours_call' => 'phone',
-                'referral_call' => 'phone',
-            ];
+        // provider_id on communication_logs is FK to providers.id, not
+        // users.id. Look up the provider row attached to this user (if
+        // any) — staff users won't have one, leave null in that case.
+        $providerId = \App\Models\Provider::where('tenant_id', $user->tenant_id)
+            ->where('user_id', $user->id)
+            ->value('id');
 
-            $commLog = CommunicationLog::create([
-                'tenant_id' => $user->tenant_id,
-                'patient_id' => $validated['patient_id'],
-                'channel' => $channelMap[$validated['activity_type']] ?? 'other',
-                'direction' => 'outbound',
-                'subject' => ucfirst(str_replace('_', ' ', $validated['activity_type'])),
-                'summary' => $validated['notes'] ?? null,
-                'provider_id' => $user->id,
-                'logged_at' => now(),
-                'duration_seconds' => isset($validated['duration_minutes'])
-                    ? $validated['duration_minutes'] * 60
-                    : null,
-            ]);
+        $commLog = CommunicationLog::create([
+            'tenant_id' => $user->tenant_id,
+            'patient_id' => $validated['patient_id'],
+            'channel' => $channelMap[$validated['activity_type']] ?? 'other',
+            'direction' => 'outbound',
+            'subject' => ucfirst(str_replace('_', ' ', $validated['activity_type'])),
+            'summary' => $validated['notes'] ?? null,
+            'provider_id' => $providerId,
+            'logged_at' => now(),
+            'duration_seconds' => isset($validated['duration_minutes'])
+                ? $validated['duration_minutes'] * 60
+                : null,
+        ]);
 
-            $response['data']['communication_log'] = $commLog;
-        }
+        $response['data']['communication_log'] = $commLog;
 
         // Record EntitlementUsage if entitlement_code provided
         if (!empty($validated['entitlement_code'])) {
@@ -178,18 +198,24 @@ class ActivityLogController extends Controller
         $items = $logs->map(function (CommunicationLog $log) {
             $patientName = trim(($log->patient->first_name ?? '') . ' ' . ($log->patient->last_name ?? ''));
             // Derive a UI activity_type from the channel + subject so the
-            // frontend ActivityBadge resolves correctly.
-            $activityType = 'other';
+            // frontend ActivityBadge resolves correctly. Channels stored
+            // as the activity_type itself (home_visit, care_coordination,
+            // education, medication_dispensed, other) round-trip 1:1.
             $channel = (string) $log->channel;
-            if ($channel === 'sms') {
+            $directMatch = ['home_visit', 'care_coordination', 'education', 'medication_dispensed', 'other'];
+            if (in_array($channel, $directMatch, true)) {
+                $activityType = $channel;
+            } elseif ($channel === 'sms') {
                 $activityType = 'text_message';
             } elseif ($channel === 'phone') {
-                // Best-effort mapping from subject text — back-fill historical
-                // rows that didn't carry a discrete activity_type column.
+                // Subject-based disambiguation for older rows that don't
+                // carry a discrete activity_type column.
                 $subj = strtolower((string) $log->subject);
                 if (str_contains($subj, 'after')) $activityType = 'after_hours_call';
                 elseif (str_contains($subj, 'referral')) $activityType = 'referral_call';
                 else $activityType = 'phone_call';
+            } else {
+                $activityType = 'other';
             }
 
             return [
