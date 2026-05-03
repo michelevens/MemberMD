@@ -803,6 +803,29 @@ export function PracticePortal() {
   // ─── Create Coupon Modal ──────────────────────────────────────────────
   const [showNewCoupon, setShowNewCoupon] = useState(false);
   const [couponForm, setCouponForm] = useState({ code: "", description: "", discountType: "percent" as "percent" | "amount" | "free_months", discountValue: "", maxUses: "", validUntil: "" });
+
+  // Auto-generate a memorable, human-typeable coupon code: a short brand
+  // word + 3 digits. Patients have to type these — uuid/hex would be
+  // unfriendly and a random run of letters can accidentally spell something
+  // bad. Curated word list keeps it on-brand and reads cleanly.
+  const generateCouponCode = useCallback((): string => {
+    const words = [
+      "WELCOME", "SAVE", "GIFT", "BONUS", "HELLO", "JOIN", "BOOST",
+      "VALUE", "CARE", "WELL", "HEALTH", "MEMBER", "DPC", "FRESH",
+      "START", "RISE", "SPARK", "PLUS", "VITAL", "PRIME",
+    ];
+    const word = words[Math.floor(Math.random() * words.length)];
+    const num = Math.floor(100 + Math.random() * 900); // 3-digit so 100-999
+    return `${word}${num}`;
+  }, []);
+
+  // Pre-fill the code whenever the modal opens with an empty form. Users
+  // can still type their own code over it, or click the regenerate button.
+  useEffect(() => {
+    if (showNewCoupon && !couponForm.code) {
+      setCouponForm(f => ({ ...f, code: generateCouponCode() }));
+    }
+  }, [showNewCoupon, couponForm.code, generateCouponCode]);
   const [couponLoading, setCouponLoading] = useState(false);
 
   // ─── Add Provider Modal ───────────────────────────────────────────────
@@ -10060,7 +10083,23 @@ export function PracticePortal() {
             <div className="p-6 space-y-4">
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Coupon Code *</label>
-                <input className="w-full border rounded-lg px-3 py-2 text-sm font-mono uppercase" value={couponForm.code} onChange={e => setCouponForm(f => ({ ...f, code: e.target.value }))} placeholder="e.g. WELCOME20" />
+                <div className="flex items-stretch gap-2">
+                  <input
+                    className="flex-1 border rounded-lg px-3 py-2 text-sm font-mono uppercase"
+                    value={couponForm.code}
+                    onChange={e => setCouponForm(f => ({ ...f, code: e.target.value.toUpperCase() }))}
+                    placeholder="e.g. WELCOME20"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setCouponForm(f => ({ ...f, code: generateCouponCode() }))}
+                    className="px-3 py-2 rounded-lg text-xs font-medium border border-slate-200 text-slate-600 hover:bg-slate-50 whitespace-nowrap"
+                    title="Generate a new code"
+                  >
+                    Regenerate
+                  </button>
+                </div>
+                <p className="text-xs text-slate-400 mt-1">Auto-generated. Edit or regenerate as needed before saving.</p>
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Description</label>
@@ -10092,7 +10131,16 @@ export function PracticePortal() {
               </div>
             </div>
             <div className="px-6 pb-6 flex items-center justify-end gap-3">
-              <button className="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100 transition-colors" onClick={() => setShowNewCoupon(false)}>Cancel</button>
+              <button
+                className="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100 transition-colors"
+                onClick={() => {
+                  setShowNewCoupon(false);
+                  // Reset so the next open gets a fresh auto-generated code
+                  setCouponForm({ code: "", description: "", discountType: "percent", discountValue: "", maxUses: "", validUntil: "" });
+                }}
+              >
+                Cancel
+              </button>
               <button
                 className="px-6 py-2 rounded-lg text-sm font-medium text-white transition-colors"
                 style={{ backgroundColor: "#635bff" }}
