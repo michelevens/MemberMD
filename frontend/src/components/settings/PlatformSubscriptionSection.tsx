@@ -6,7 +6,7 @@
 // cancel-with-reason flow.
 
 import { useEffect, useMemo, useState } from "react";
-import { Check, AlertCircle, Loader2, Crown, ChevronRight, Star, X, Plus, Minus, TrendingUp } from "lucide-react";
+import { Check, AlertCircle, Loader2, Crown, ChevronRight, Star, X, Plus, Minus, TrendingUp, Tag, CreditCard } from "lucide-react";
 import {
   subscriptionService,
   type PlatformPlanSummary,
@@ -202,6 +202,7 @@ export function PlatformSubscriptionSection() {
           >
             Change Plan
           </button>
+          <UpdatePaymentMethodButton />
           {!isCancelling && !isCancelled && (
             <button
               onClick={() => setShowCancelDialog(true)}
@@ -213,6 +214,9 @@ export function PlatformSubscriptionSection() {
           )}
         </div>
       )}
+
+      {/* Coupon redemption */}
+      {!isFounder && !isCancelled && <CouponRedeemRow onApplied={reload} />}
 
       {/* Invoice history */}
       <div className="rounded-2xl p-5" style={{ border: `1px solid ${C.slate200}` }}>
@@ -292,6 +296,102 @@ export function PlatformSubscriptionSection() {
             await reload();
           }}
         />
+      )}
+    </div>
+  );
+}
+
+function UpdatePaymentMethodButton() {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const open = async () => {
+    setLoading(true);
+    setError(null);
+    const res = await subscriptionService.openBillingPortal();
+    if (res.error || !res.data?.url) {
+      setError(res.error || "Could not open billing portal.");
+      setLoading(false);
+      setTimeout(() => setError(null), 4000);
+      return;
+    }
+    // Hand off to Stripe-hosted portal. Stripe redirects back to
+    // FRONTEND_URL/#/practice/settings?tab=subscription on save/close.
+    window.location.href = res.data.url;
+  };
+
+  return (
+    <>
+      <button
+        onClick={open}
+        disabled={loading}
+        className="px-4 py-2 rounded-lg text-sm font-semibold border inline-flex items-center gap-1.5 hover:bg-slate-50 disabled:opacity-50"
+        style={{ borderColor: C.slate300, color: C.slate600 }}
+      >
+        {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <CreditCard className="w-4 h-4" />}
+        Update payment method
+      </button>
+      {error && (
+        <span className="text-xs" style={{ color: C.red500 }}>
+          {error}
+        </span>
+      )}
+    </>
+  );
+}
+
+function CouponRedeemRow({ onApplied }: { onApplied: () => Promise<void> }) {
+  const [code, setCode] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [feedback, setFeedback] = useState<{ message: string; type: "success" | "error" } | null>(null);
+
+  const submit = async () => {
+    if (!code.trim()) return;
+    setSubmitting(true);
+    setFeedback(null);
+    const res = await subscriptionService.redeemCoupon(code.trim());
+    setSubmitting(false);
+    if (res.error) {
+      setFeedback({ message: res.error, type: "error" });
+      return;
+    }
+    setFeedback({ message: "Coupon applied — discount appears on your next invoice.", type: "success" });
+    setCode("");
+    await onApplied();
+  };
+
+  return (
+    <div className="rounded-2xl p-4" style={{ border: `1px solid ${C.slate200}` }}>
+      <div className="flex items-center gap-2 mb-2">
+        <Tag className="w-4 h-4" style={{ color: C.slate500 }} />
+        <span className="text-sm font-semibold" style={{ color: C.slate800 }}>Have a coupon?</span>
+      </div>
+      <div className="flex items-center gap-2">
+        <input
+          value={code}
+          onChange={(e) => setCode(e.target.value.toUpperCase())}
+          placeholder="Enter code"
+          className="flex-1 px-3 py-2 border rounded-lg text-sm uppercase tracking-wide"
+          style={{ borderColor: C.slate200 }}
+          onKeyDown={(e) => { if (e.key === "Enter") submit(); }}
+        />
+        <button
+          onClick={submit}
+          disabled={!code.trim() || submitting}
+          className="px-4 py-2 rounded-lg text-sm font-semibold text-white inline-flex items-center gap-1.5 disabled:opacity-50"
+          style={{ backgroundColor: C.teal600 }}
+        >
+          {submitting && <Loader2 className="w-4 h-4 animate-spin" />}
+          Apply
+        </button>
+      </div>
+      {feedback && (
+        <div className="mt-2 rounded-lg px-3 py-2 text-xs" style={{
+          backgroundColor: feedback.type === "success" ? C.teal50 : C.red50,
+          color: feedback.type === "success" ? C.teal600 : C.red500,
+        }}>
+          {feedback.message}
+        </div>
       )}
     </div>
   );

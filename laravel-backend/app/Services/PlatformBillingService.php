@@ -3,10 +3,13 @@
 namespace App\Services;
 
 use App\Models\AuditLog;
+use App\Models\PlatformCoupon;
 use App\Models\PlatformPlan;
 use App\Models\Practice;
 use App\Models\PracticeSubscription;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 use RuntimeException;
 use Stripe\Exception\ApiErrorException;
 use Stripe\StripeClient;
@@ -112,10 +115,28 @@ class PlatformBillingService
             ? $newPlan->stripe_annual_price_id
             : $newPlan->stripe_monthly_price_id;
 
+        // Auto-sync the plan to Stripe if it has no price id yet — beats
+        // making a SuperAdmin click "Sync to Stripe" the first time anyone
+        // tries to subscribe to a fresh tier. Idempotent on price id metadata
+        // so this won't create dupes if the row was partially synced earlier.
+        if (empty($priceId)) {
+            try {
+                $newPlan = $this->syncPlanPricesToStripe($newPlan);
+                $priceId = $billingCycle === 'annual'
+                    ? $newPlan->stripe_annual_price_id
+                    : $newPlan->stripe_monthly_price_id;
+            } catch (\Throwable $e) {
+                Log::warning('Auto-sync of platform plan to Stripe failed', [
+                    'plan_key' => $newPlan->key,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
         if (empty($priceId)) {
             throw new RuntimeException(
-                "Platform plan {$newPlan->key} has no Stripe price for {$billingCycle} billing. "
-                . "SuperAdmin needs to run 'sync to Stripe' on this plan first."
+                "Platform plan {$newPlan->key} has no Stripe price for {$billingCycle} billing "
+                . 'and could not be auto-created. SuperAdmin needs to manually sync this plan to Stripe.'
             );
         }
 
@@ -246,6 +267,38 @@ class PlatformBillingService
         ]);
 
         return $sub->fresh();
+    }
+
+    /**
+     * Create a Stripe Billing Customer Portal session and return the URL.
+     * Practice admin gets redirected here from the "Update payment method"
+     * button — Stripe hosts the entire UI for managing card on file,
+     * downloading invoices, viewing billing history. Cleaner than embedding
+     * Elements + matches the existing app's pattern of redirecting for
+     * Connect onboarding.
+     */
+    public function createCustomerPortalSession(PracticeSubscription $sub, string $returnUrl): string
+    {
+        if ($sub->is_founder_override) {
+            throw new RuntimeException('Founder accounts do not have a billing portal.');
+        }
+
+        $customerId = $this->ensureCustomer($sub);
+
+        try {
+            $session = $this->stripe()->billingPortal->sessions->create([
+                'customer' => $customerId,
+                'return_url' => $returnUrl,
+            ]);
+        } catch (ApiErrorException $e) {
+            throw new RuntimeException("Failed to open billing portal: {$e->getMessage()}", 0, $e);
+        }
+
+        $this->audit($sub, 'platform_billing_portal_opened', [
+            'customer_id' => $customerId,
+        ]);
+
+        return $session->url;
     }
 
     /**
@@ -527,6 +580,130 @@ class PlatformBillingService
         }
 
         return $plan->fresh();
+    }
+
+    /**
+     * Apply a platform coupon to a practice's existing Stripe subscription.
+     *
+     * Validates the coupon (active, not expired, plan-restriction satisfied,
+     * max-redemptions remaining), syncs it to Stripe if not already, then
+     * sets `discounts: [{ coupon }]` on the subscription. Stripe applies
+     * the discount on the next invoice automatically.
+     *
+     * Records redemption in platform_coupon_redemptions.
+     *
+     * Returns the coupon row on success.
+     */
+    public function applyCoupon(PracticeSubscription $sub, string $code): PlatformCoupon
+    {
+        $sub->loadMissing('plan');
+        $coupon = PlatformCoupon::where('code', $code)->first();
+        if (!$coupon) {
+            throw new RuntimeException("Coupon code '{$code}' not found.");
+        }
+        if (!$coupon->canRedeemFor($sub->plan?->key ?? '')) {
+            throw new RuntimeException("Coupon '{$code}' isn't available for this plan or has expired.");
+        }
+
+        // Reject re-redemption by the same practice on the same coupon
+        // (when coupon is duration=once or has max_redemptions=1)
+        $alreadyRedeemed = DB::table('platform_coupon_redemptions')
+            ->where('platform_coupon_id', $coupon->id)
+            ->where('practice_id', $sub->practice_id)
+            ->exists();
+        if ($alreadyRedeemed && ($coupon->duration === 'once' || $coupon->max_redemptions === 1)) {
+            throw new RuntimeException('This coupon has already been used on this practice.');
+        }
+
+        // Founder accounts and unconfigured Stripe just record locally
+        if ($sub->is_founder_override || empty($sub->stripe_subscription_id) || !$this->isConfigured()) {
+            $this->recordRedemption($coupon, $sub);
+            return $coupon;
+        }
+
+        // Sync to Stripe if needed
+        $this->ensureCouponOnStripe($coupon);
+
+        try {
+            $this->stripe()->subscriptions->update(
+                $sub->stripe_subscription_id,
+                ['discounts' => [['coupon' => $coupon->stripe_coupon_id]]],
+            );
+        } catch (ApiErrorException $e) {
+            throw new RuntimeException("Failed to apply coupon to subscription: {$e->getMessage()}", 0, $e);
+        }
+
+        $this->recordRedemption($coupon, $sub);
+        $this->audit($sub, 'platform_coupon_redeemed', [
+            'coupon_code' => $code,
+            'stripe_coupon_id' => $coupon->stripe_coupon_id,
+        ]);
+
+        return $coupon;
+    }
+
+    /**
+     * Idempotent: ensure the platform coupon exists on Stripe. Stamps
+     * stripe_coupon_id locally when created.
+     */
+    public function ensureCouponOnStripe(PlatformCoupon $coupon): PlatformCoupon
+    {
+        if (!empty($coupon->stripe_coupon_id)) {
+            return $coupon;
+        }
+
+        $params = [
+            'name' => $coupon->name,
+            'duration' => $coupon->duration,
+            'metadata' => [
+                'platform' => 'membermd',
+                'platform_coupon_id' => $coupon->id,
+                'tier' => 'platform_subscription',
+            ],
+        ];
+
+        if ($coupon->percent_off !== null) {
+            $params['percent_off'] = $coupon->percent_off;
+        } elseif ($coupon->amount_off_cents !== null) {
+            $params['amount_off'] = $coupon->amount_off_cents;
+            $params['currency'] = 'usd';
+        } else {
+            throw new RuntimeException('Coupon must specify either percent_off or amount_off.');
+        }
+
+        if ($coupon->duration === 'repeating' && $coupon->duration_in_months) {
+            $params['duration_in_months'] = $coupon->duration_in_months;
+        }
+        if ($coupon->max_redemptions !== null) {
+            $params['max_redemptions'] = $coupon->max_redemptions;
+        }
+        if ($coupon->expires_at) {
+            $params['redeem_by'] = $coupon->expires_at->timestamp;
+        }
+
+        try {
+            $stripeCoupon = $this->stripe()->coupons->create(
+                $params,
+                ['idempotency_key' => "membermd-platform-coupon-{$coupon->id}"],
+            );
+        } catch (ApiErrorException $e) {
+            throw new RuntimeException("Failed to create platform coupon on Stripe: {$e->getMessage()}", 0, $e);
+        }
+
+        $coupon->update(['stripe_coupon_id' => $stripeCoupon->id]);
+        return $coupon->fresh();
+    }
+
+    private function recordRedemption(PlatformCoupon $coupon, PracticeSubscription $sub): void
+    {
+        DB::table('platform_coupon_redemptions')->insert([
+            'id' => (string) Str::uuid(),
+            'platform_coupon_id' => $coupon->id,
+            'practice_subscription_id' => $sub->id,
+            'practice_id' => $sub->practice_id,
+            'redeemed_at' => now(),
+        ]);
+        $coupon->increment('redemptions_count');
     }
 
     /**

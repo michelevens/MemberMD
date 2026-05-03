@@ -221,6 +221,11 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
 
     // Practice: own practice
     Route::get('/practice/me', [PracticeController::class, 'myPractice']);
+    // Practice staff team management — distinct from /providers (the staff
+    // invite UI used to mistakenly POST there). plan.cap:staff enforces tier
+    // limits independently from the providers cap.
+    Route::get('/practice/staff', [PracticeController::class, 'listStaff']);
+    Route::post('/practice/staff', [PracticeController::class, 'inviteStaff'])->middleware('plan.cap:staff');
     Route::post('/practice/rebootstrap', [PracticeController::class, 'rebootstrap']);
 
     // ===== First-mile onboarding helpers =====
@@ -344,6 +349,8 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
     Route::post('/me/subscription/cancel', [\App\Http\Controllers\Api\PracticeSubscriptionController::class, 'cancel']);
     Route::post('/me/subscription/reactivate', [\App\Http\Controllers\Api\PracticeSubscriptionController::class, 'reactivate']);
     Route::post('/me/subscription/seat-blocks', [\App\Http\Controllers\Api\PracticeSubscriptionController::class, 'setSeatBlocks']);
+    Route::post('/me/subscription/redeem-coupon', [\App\Http\Controllers\Api\PracticeSubscriptionController::class, 'redeemCoupon']);
+    Route::post('/me/subscription/billing-portal', [\App\Http\Controllers\Api\PracticeSubscriptionController::class, 'billingPortal']);
 
     // Patient self-service: family members (dependents) on the
     // caller's active membership. Backed by the same Stripe-quantity

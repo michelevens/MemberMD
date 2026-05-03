@@ -10,7 +10,9 @@ use App\Services\PracticeBootstrapService;
 use App\Services\PracticeProvisioningService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 
 class PracticeController extends Controller
 {
@@ -1109,5 +1111,87 @@ class PracticeController extends Controller
                 'errors' => $errors,
             ],
         ], empty($errors) ? 200 : 207);
+    }
+
+    /**
+     * List the practice's staff users (excludes provider + patient roles).
+     */
+    public function listStaff(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        abort_if(!$user || !$user->tenant_id, 401);
+
+        $staff = User::where('tenant_id', $user->tenant_id)
+            ->whereIn('role', ['staff', 'practice_admin'])
+            ->orderBy('created_at')
+            ->get(['id', 'first_name', 'last_name', 'email', 'role', 'status', 'last_login_at', 'created_at']);
+
+        return response()->json(['data' => $staff]);
+    }
+
+    /**
+     * Invite a staff user to the practice. Real staff endpoint distinct from
+     * /providers — gated by plan.cap:staff. The frontend's "Invite Staff"
+     * button used to mistakenly POST to /providers and silently created a
+     * Provider row; this is the correct path.
+     *
+     * Generates a temporary password + sends a password-reset link the user
+     * follows to set their own. Email lands via Mail::send through
+     * MailDispatcher pattern existing already on the app.
+     */
+    public function inviteStaff(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        abort_if(!$user || !$user->tenant_id, 401);
+        abort_if(!$user->isPracticeAdmin(), 403);
+
+        $validated = $request->validate([
+            'first_name' => 'required|string|max:100',
+            'last_name' => 'required|string|max:100',
+            'email' => 'required|email|max:255|unique:users,email',
+            'role' => 'sometimes|string|in:staff,practice_admin',
+            'phone' => 'nullable|string|max:30',
+        ]);
+
+        $tempPassword = Str::random(16) . 'A1!';
+
+        $newUser = User::create([
+            'tenant_id' => $user->tenant_id,
+            'email' => $validated['email'],
+            'password' => Hash::make($tempPassword),
+            'first_name' => $validated['first_name'],
+            'last_name' => $validated['last_name'],
+            'name' => trim($validated['first_name'] . ' ' . $validated['last_name']),
+            'phone' => $validated['phone'] ?? null,
+            'role' => $validated['role'] ?? 'staff',
+            'status' => 'active',
+            'onboarding_completed' => false,
+        ]);
+
+        // Generate a password-reset token so the invitee sets their own pwd.
+        // We piggyback on Laravel's password broker; AuthController::reset
+        // accepts the token + new password.
+        try {
+            $token = \Illuminate\Support\Facades\Password::createToken($newUser);
+            $practice = Practice::find($user->tenant_id);
+            if ($practice) {
+                $invitedByName = trim(($user->first_name ?? '') . ' ' . ($user->last_name ?? '')) ?: null;
+                \App\Services\MailDispatcher::send(
+                    $newUser->email,
+                    new \App\Mail\StaffInvitationEmail($newUser, $practice, $token, $invitedByName),
+                    'staff_invitation',
+                );
+            }
+        } catch (\Throwable $e) {
+            Log::warning('Staff invite email failed (user row created)', [
+                'user_id' => $newUser->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        return response()->json([
+            'data' => $newUser->only(['id', 'first_name', 'last_name', 'email', 'role', 'status']),
+            'message' => 'Staff invitation sent.',
+        ], 201);
     }
 }

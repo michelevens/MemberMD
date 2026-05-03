@@ -6,7 +6,7 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { ProviderDetailPage } from "./ProviderDetailPage";
 import { useAuth } from "../../contexts/AuthContext";
-import { dashboardService, membershipPlanService, messageService, patientService, appointmentService, encounterService, prescriptionService, invoiceService, programService, telehealthService, screeningService, couponService, providerService, paymentService, notificationService, apiFetch, billingEnhancedService, documentService, onboardingService } from "../../lib/api";
+import { dashboardService, membershipPlanService, messageService, patientService, appointmentService, encounterService, prescriptionService, invoiceService, programService, telehealthService, screeningService, couponService, providerService, paymentService, notificationService, apiFetch, billingEnhancedService, documentService, onboardingService, staffService } from "../../lib/api";
 import { PortalShell, type NavSection as ShellNavSection, type PortalColor } from "../shared/PortalShell";
 import { CommandPalette, useCommandPaletteShortcut } from "../shared/CommandPalette";
 import { AddAllergyDialog, type AllergyEntry } from "../clinical/AddAllergyDialog";
@@ -2284,12 +2284,16 @@ export function PracticePortal() {
     }
     setInviteStaffLoading(true);
     try {
-      const res = await providerService.create({
+      // Map UI role labels to backend role enum. Front Desk / Billing /
+      // anything else → staff. Practice Admin label maps to the admin role
+      // for users who actually need the elevated permissions.
+      const backendRole = staffForm.role === "Practice Admin" ? "practice_admin" : "staff";
+      const res = await staffService.invite({
         firstName: staffForm.name.split(" ")[0] || staffForm.name,
         lastName: staffForm.name.split(" ").slice(1).join(" ") || "",
         email: staffForm.email,
-        role: staffForm.role,
-      } as Record<string, unknown>);
+        role: backendRole,
+      });
       if (res.data || !res.error) {
         setToast({ message: "Staff invitation sent successfully.", type: "success" });
         setShowInviteStaff(false);

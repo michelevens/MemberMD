@@ -286,6 +286,70 @@ class PracticeSubscriptionController extends Controller
         ]);
     }
 
+    /**
+     * Open a Stripe Billing Customer Portal session — practice admin
+     * lands on Stripe-hosted UI to manage their card, view invoices, etc.
+     * Returns the URL for the frontend to redirect to.
+     */
+    public function billingPortal(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        abort_if(!$user || !$user->tenant_id, 401);
+        abort_if(!$user->isPracticeAdmin(), 403);
+
+        $sub = PracticeSubscription::where('practice_id', $user->tenant_id)->latest()->firstOrFail();
+
+        $returnUrl = rtrim((string) env('FRONTEND_URL', 'https://app.membermd.io'), '/')
+            . '/#/practice/settings?tab=subscription';
+
+        try {
+            $url = $this->billing->createCustomerPortalSession($sub, $returnUrl);
+        } catch (\Throwable $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        return response()->json(['data' => ['url' => $url]]);
+    }
+
+    /**
+     * Redeem a platform coupon code against the practice's current
+     * subscription. Coupon is validated + synced to Stripe + applied to
+     * the live Stripe sub if one exists.
+     */
+    public function redeemCoupon(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        abort_if(!$user || !$user->tenant_id, 401);
+        abort_if(!$user->isPracticeAdmin(), 403);
+
+        $validated = $request->validate([
+            'code' => 'required|string|max:50',
+        ]);
+
+        $sub = PracticeSubscription::with('plan')
+            ->where('practice_id', $user->tenant_id)
+            ->latest()
+            ->firstOrFail();
+
+        try {
+            $coupon = $this->billing->applyCoupon($sub, $validated['code']);
+        } catch (\Throwable $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        return response()->json([
+            'data' => [
+                'code' => $coupon->code,
+                'name' => $coupon->name,
+                'percent_off' => $coupon->percent_off,
+                'amount_off_cents' => $coupon->amount_off_cents,
+                'duration' => $coupon->duration,
+                'duration_in_months' => $coupon->duration_in_months,
+            ],
+            'message' => 'Coupon applied — discount will appear on your next invoice.',
+        ]);
+    }
+
     public function invoices(Request $request): JsonResponse
     {
         $user = $request->user();

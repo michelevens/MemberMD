@@ -550,6 +550,33 @@ function toProviderApiPayload(input: Record<string, unknown>): Record<string, un
   return out;
 }
 
+// ─── Staff (separate from Providers — gated by plan.cap:staff) ─────────────
+
+export interface StaffRow {
+  id: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  role: "staff" | "practice_admin";
+  status: string;
+  lastLoginAt: string | null;
+  createdAt: string;
+}
+
+export const staffService = {
+  list: async (): Promise<ApiResponse<StaffRow[]>> => {
+    if (useMockData()) return { data: [] };
+    return apiFetch<StaffRow[]>("/practice/staff");
+  },
+  invite: async (data: { firstName: string; lastName: string; email: string; role?: "staff" | "practice_admin"; phone?: string }): Promise<ApiResponse<StaffRow>> => {
+    if (useMockData()) return { data: null as unknown as StaffRow };
+    return apiFetch<StaffRow>("/practice/staff", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  },
+};
+
 export const providerService = {
   list: async (): Promise<ApiResponse<Provider[]>> => {
     if (useMockData()) return { data: [] };
@@ -1898,6 +1925,20 @@ export const subscriptionService = {
     return apiFetch<PracticeSubscriptionSummary>("/me/subscription/seat-blocks", {
       method: "POST",
       body: JSON.stringify({ blocks }),
+    });
+  },
+  redeemCoupon: async (code: string): Promise<ApiResponse<{ code: string; name: string; percentOff: number | null; amountOffCents: number | null; duration: string; durationInMonths: number | null }>> => {
+    if (useMockData()) return { data: null as unknown as never };
+    return apiFetch("/me/subscription/redeem-coupon", {
+      method: "POST",
+      body: JSON.stringify({ code }),
+    });
+  },
+  openBillingPortal: async (): Promise<ApiResponse<{ url: string }>> => {
+    if (useMockData()) return { data: null as unknown as never };
+    return apiFetch<{ url: string }>("/me/subscription/billing-portal", {
+      method: "POST",
+      body: JSON.stringify({}),
     });
   },
 };

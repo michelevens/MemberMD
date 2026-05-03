@@ -29,7 +29,7 @@ class Practice extends Model
         'billing_enforced',
         'settings', 'utilization_settings', 'branding',
         'panel_capacity', 'is_active',
-        'timezone', 'ip_whitelist', 'password_policy',
+        'timezone', 'locale', 'ip_whitelist', 'password_policy',
         'session_timeout_minutes', 'enforce_mfa',
     ];
 
