@@ -77,6 +77,142 @@ class IntakeController extends Controller
     }
 
     /**
+     * Manual intake creation — staff captures a phone-call lead into the
+     * same review queue the public widget feeds. Staff already vetted the
+     * caller, so we mark the row 'approved' immediately, skipping the
+     * pending review step. The patient still has to pay; staff converts
+     * the row from the Intake tab and the existing convert flow emails a
+     * Stripe Checkout link to the patient's email.
+     *
+     * Lean field set on purpose: the full medical/consent payload is
+     * collected when the patient self-serves the payment link.
+     */
+    public function storeManual(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        abort_if(!in_array($user->role, ['practice_admin', 'staff'], true), 403);
+
+        $data = $request->validate([
+            'first_name' => 'required|string|max:100',
+            'last_name' => 'required|string|max:100',
+            'email' => 'required|email|max:255',
+            'phone' => 'nullable|string|max:30',
+            'date_of_birth' => 'nullable|date|before:today',
+            'plan_id' => 'required|uuid|exists:membership_plans,id',
+            'billing_frequency' => 'required|string|in:monthly,annual',
+            'notes' => 'nullable|string|max:2000',
+        ]);
+
+        // Validate plan belongs to this tenant — `exists:membership_plans,id`
+        // alone permits cross-tenant ids.
+        $plan = \App\Models\MembershipPlan::where('tenant_id', $user->tenant_id)
+            ->where('id', $data['plan_id'])
+            ->where('is_active', true)
+            ->first();
+        if (!$plan) {
+            return response()->json([
+                'message' => 'Plan not found for this practice.',
+            ], 422);
+        }
+
+        $submission = WidgetSubmission::withoutGlobalScope('tenant')->create([
+            'widget_config_id' => null,
+            'tenant_id' => $user->tenant_id,
+            'type' => 'enrollment',
+            // Skip pending — staff already vetted on the call.
+            'status' => 'approved',
+            'data' => [
+                'first_name' => $data['first_name'],
+                'last_name' => $data['last_name'],
+                'email' => $data['email'],
+                'phone' => $data['phone'] ?? null,
+                'date_of_birth' => $data['date_of_birth'] ?? null,
+                'plan_id' => $data['plan_id'],
+                'plan_name' => $plan->name,
+                'billing_frequency' => $data['billing_frequency'],
+                'notes' => $data['notes'] ?? null,
+                'source' => 'manual_phone',
+                'captured_by_user_id' => $user->id,
+            ],
+            'ip_address' => $request->ip(),
+            'user_agent' => substr((string) $request->userAgent(), 0, 255),
+            'referrer_url' => null,
+        ]);
+
+        return response()->json([
+            'data' => $this->serialize($submission),
+            'message' => 'Intake captured. Click "Convert to patient" to email a payment link.',
+        ], 201);
+    }
+
+    /**
+     * Email a prospective member the public enrollment URL so they can
+     * fill in the full intake (medical, consents, signature) themselves.
+     * Useful when staff is on a call but the patient prefers to do the
+     * form on their own time.
+     */
+    public function sendIntakeLink(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        abort_if(!in_array($user->role, ['practice_admin', 'staff'], true), 403);
+
+        $data = $request->validate([
+            'email' => 'required|email|max:255',
+            'first_name' => 'nullable|string|max:100',
+            'note' => 'nullable|string|max:1000',
+        ]);
+
+        $practice = \App\Models\Practice::findOrFail($user->tenant_id);
+        if (empty($practice->tenant_code)) {
+            return response()->json([
+                'message' => 'Practice has no tenant_code yet — cannot build enrollment URL.',
+            ], 422);
+        }
+
+        $appUrl = (string) config('app.frontend_url', config('app.url', 'https://app.membermd.io'));
+        $enrollUrl = rtrim($appUrl, '/') . '/#/enroll/' . $practice->tenant_code;
+
+        try {
+            \Illuminate\Support\Facades\Mail::to($data['email'])->send(
+                new \App\Mail\IntakeLinkInvitation(
+                    practice: $practice,
+                    enrollUrl: $enrollUrl,
+                    personalNote: $data['note'] ?? null,
+                ),
+            );
+        } catch (\Throwable $e) {
+            Log::warning('Intake link email failed', [
+                'practice_id' => $practice->id,
+                'email' => $data['email'],
+                'error' => $e->getMessage(),
+            ]);
+            return response()->json([
+                'message' => 'Could not send the email: ' . $e->getMessage(),
+            ], 502);
+        }
+
+        try {
+            \App\Models\AuditLog::create([
+                'tenant_id' => $practice->id,
+                'action' => 'intake_link_sent',
+                'resource' => 'Practice',
+                'resource_id' => $practice->id,
+                'metadata' => [
+                    'sent_to' => $data['email'],
+                    'sent_by_user_id' => $user->id,
+                ],
+            ]);
+        } catch (\Throwable) {
+            // non-fatal
+        }
+
+        return response()->json([
+            'data' => ['email' => $data['email'], 'enroll_url' => $enrollUrl],
+            'message' => "Intake link sent to {$data['email']}.",
+        ]);
+    }
+
+    /**
      * Convert a widget submission into a real Patient + (optionally)
      * PatientMembership. Practice admin clicks "Approve" on the
      * intake row, this fires.

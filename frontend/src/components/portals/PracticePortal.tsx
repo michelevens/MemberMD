@@ -753,6 +753,22 @@ export function PracticePortal() {
   const [addPatientLoading, setAddPatientLoading] = useState(false);
   const [addPatientError, setAddPatientError] = useState<string | null>(null);
 
+  // Manual phone-call intake — staff captures lead while on the call.
+  // Skips the public widget's medical/consent steps; the patient self-
+  // serves those when they click the Stripe payment link emailed at
+  // convert-time.
+  const [showAddIntake, setShowAddIntake] = useState(false);
+  const [addIntakeForm, setAddIntakeForm] = useState<{ firstName: string; lastName: string; email: string; phone: string; dateOfBirth: string; planId: string; billingFrequency: "monthly" | "annual"; notes: string }>({ firstName: "", lastName: "", email: "", phone: "", dateOfBirth: "", planId: "", billingFrequency: "monthly", notes: "" });
+  const [addIntakeLoading, setAddIntakeLoading] = useState(false);
+  const [addIntakeError, setAddIntakeError] = useState<string | null>(null);
+
+  // "Send intake link" — emails a prospective member the public widget
+  // URL so they self-serve the full enrollment form.
+  const [showSendLink, setShowSendLink] = useState(false);
+  const [sendLinkForm, setSendLinkForm] = useState<{ email: string; note: string }>({ email: "", note: "" });
+  const [sendLinkLoading, setSendLinkLoading] = useState(false);
+  const [sendLinkError, setSendLinkError] = useState<string | null>(null);
+
   // ─── Toast ──────────────────────────────────────────────────────────
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   useEffect(() => { if (toast) { const t = setTimeout(() => setToast(null), 4000); return () => clearTimeout(t); } }, [toast]);
@@ -7170,7 +7186,32 @@ export function PracticePortal() {
                 : `${filtered.length} of ${mockIntakes.length}`}
             </p>
           </div>
-          <RefreshButton onRefresh={loadPracticeData} title="Refresh intakes" />
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setSendLinkError(null);
+                setSendLinkForm({ email: "", note: "" });
+                setShowSendLink(true);
+              }}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 px-3 py-2 text-sm font-medium"
+            >
+              Send intake link
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setAddIntakeError(null);
+                setAddIntakeForm({ firstName: "", lastName: "", email: "", phone: "", dateOfBirth: "", planId: "", billingFrequency: "monthly", notes: "" });
+                setShowAddIntake(true);
+              }}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-2 text-sm font-medium"
+            >
+              <Plus className="w-4 h-4" />
+              Add intake
+            </button>
+            <RefreshButton onRefresh={loadPracticeData} title="Refresh intakes" />
+          </div>
         </div>
 
         {/* KPI tiles */}
@@ -9734,6 +9775,198 @@ export function PracticePortal() {
                 onClick={handleAddPatient}
                 disabled={addPatientLoading}>
                 {addPatientLoading ? "Creating..." : "Create Patient"}
+              </button>
+            </div>
+          </>
+        )}
+      </MobileSheet>
+
+      {/* ─── Add Intake Modal (manual phone-call capture) ─────────────────
+          Staff fills this while on a call with a prospective member.
+          Skips the public widget's medical/consent steps — the patient
+          self-serves those when they click the Stripe payment link
+          emailed at convert-time. Row lands as status='approved' since
+          staff already vetted on the call. */}
+      <MobileSheet
+        open={showAddIntake}
+        onClose={() => { setShowAddIntake(false); setAddIntakeError(null); }}
+        maxWidth="max-w-lg"
+        title={
+          <div>
+            <div>Add intake (phone)</div>
+            <div className="text-xs text-slate-500 font-normal mt-0.5">Capture the lead now. Email a Stripe payment link from the row when ready.</div>
+          </div>
+        }
+      >
+        {showAddIntake && (
+          <>
+            <div className="p-6 space-y-4">
+              {addIntakeError && (
+                <div className="rounded-lg p-3 text-sm" style={{ backgroundColor: "#fef2f2", color: "#dc2626" }}>{addIntakeError}</div>
+              )}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">First name *</label>
+                  <input className="w-full border rounded-lg px-3 py-2 text-sm" value={addIntakeForm.firstName}
+                    onChange={(e) => setAddIntakeForm(f => ({ ...f, firstName: e.target.value }))} placeholder="Jane" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Last name *</label>
+                  <input className="w-full border rounded-lg px-3 py-2 text-sm" value={addIntakeForm.lastName}
+                    onChange={(e) => setAddIntakeForm(f => ({ ...f, lastName: e.target.value }))} placeholder="Doe" />
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Email *</label>
+                <input type="email" className="w-full border rounded-lg px-3 py-2 text-sm" value={addIntakeForm.email}
+                  onChange={(e) => setAddIntakeForm(f => ({ ...f, email: e.target.value }))} placeholder="patient@example.com" />
+                <p className="text-xs text-slate-400 mt-1">Required — the payment link is emailed here.</p>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Phone</label>
+                  <input className="w-full border rounded-lg px-3 py-2 text-sm" value={addIntakeForm.phone}
+                    onChange={(e) => setAddIntakeForm(f => ({ ...f, phone: e.target.value }))} placeholder="(555) 555-5555" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Date of birth</label>
+                  <input type="date" className="w-full border rounded-lg px-3 py-2 text-sm" value={addIntakeForm.dateOfBirth}
+                    onChange={(e) => setAddIntakeForm(f => ({ ...f, dateOfBirth: e.target.value }))} />
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Plan *</label>
+                <select className="w-full border rounded-lg px-3 py-2 text-sm" value={addIntakeForm.planId}
+                  onChange={(e) => setAddIntakeForm(f => ({ ...f, planId: e.target.value }))}>
+                  <option value="">Select a plan…</option>
+                  {(apiPlans ?? []).filter((p: { isActive?: boolean; is_active?: boolean }) => p.isActive !== false && p.is_active !== false).map((p: { id: string; name: string; monthlyPrice?: number | string; monthly_price?: number | string }) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name} — ${Number(p.monthlyPrice ?? p.monthly_price ?? 0).toFixed(0)}/mo
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Billing frequency *</label>
+                <div className="flex gap-3">
+                  {(["monthly", "annual"] as const).map((freq) => (
+                    <label key={freq} className={`flex-1 border rounded-lg px-3 py-2 text-sm cursor-pointer ${addIntakeForm.billingFrequency === freq ? "border-indigo-600 bg-indigo-50" : "border-slate-200"}`}>
+                      <input type="radio" name="intake-billing" className="sr-only" checked={addIntakeForm.billingFrequency === freq}
+                        onChange={() => setAddIntakeForm(f => ({ ...f, billingFrequency: freq }))} />
+                      <span className="capitalize">{freq}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Notes</label>
+                <textarea className="w-full border rounded-lg px-3 py-2 text-sm" rows={3} value={addIntakeForm.notes}
+                  onChange={(e) => setAddIntakeForm(f => ({ ...f, notes: e.target.value }))} placeholder="Heard from referral. Mentioned anxiety. Best callback after 5pm." />
+              </div>
+            </div>
+            <div className="px-6 pb-6 flex items-center justify-end gap-3">
+              <button className="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100 transition-colors"
+                onClick={() => { setShowAddIntake(false); setAddIntakeError(null); }}>Cancel</button>
+              <button className="px-6 py-2 rounded-lg text-sm font-medium text-white transition-colors bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50"
+                disabled={addIntakeLoading}
+                onClick={async () => {
+                  setAddIntakeError(null);
+                  if (!addIntakeForm.firstName || !addIntakeForm.lastName || !addIntakeForm.email || !addIntakeForm.planId) {
+                    setAddIntakeError("First name, last name, email, and plan are required.");
+                    return;
+                  }
+                  setAddIntakeLoading(true);
+                  const res = await apiFetch("/intakes", {
+                    method: "POST",
+                    body: JSON.stringify({
+                      first_name: addIntakeForm.firstName,
+                      last_name: addIntakeForm.lastName,
+                      email: addIntakeForm.email,
+                      phone: addIntakeForm.phone || null,
+                      date_of_birth: addIntakeForm.dateOfBirth || null,
+                      plan_id: addIntakeForm.planId,
+                      billing_frequency: addIntakeForm.billingFrequency,
+                      notes: addIntakeForm.notes || null,
+                    }),
+                  });
+                  setAddIntakeLoading(false);
+                  if (res.error) {
+                    setAddIntakeError(res.error);
+                    return;
+                  }
+                  setShowAddIntake(false);
+                  setToast({ message: "Intake captured. Click \"Convert to patient\" to email a payment link.", type: "success" });
+                  loadPracticeData();
+                }}>
+                {addIntakeLoading ? "Saving…" : "Save intake"}
+              </button>
+            </div>
+          </>
+        )}
+      </MobileSheet>
+
+      {/* ─── Send Intake Link Modal ────────────────────────────────────────
+          Emails the prospective member the public /#/enroll/{tenantCode}
+          URL so they self-serve the full intake. Useful when staff is
+          on a call but the patient prefers to fill the form on their
+          own time. */}
+      <MobileSheet
+        open={showSendLink}
+        onClose={() => { setShowSendLink(false); setSendLinkError(null); }}
+        maxWidth="max-w-md"
+        title={
+          <div>
+            <div>Send intake link</div>
+            <div className="text-xs text-slate-500 font-normal mt-0.5">Email a prospective member the enrollment URL — they fill it out themselves.</div>
+          </div>
+        }
+      >
+        {showSendLink && (
+          <>
+            <div className="p-6 space-y-4">
+              {sendLinkError && (
+                <div className="rounded-lg p-3 text-sm" style={{ backgroundColor: "#fef2f2", color: "#dc2626" }}>{sendLinkError}</div>
+              )}
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Patient email *</label>
+                <input type="email" className="w-full border rounded-lg px-3 py-2 text-sm" value={sendLinkForm.email}
+                  onChange={(e) => setSendLinkForm(f => ({ ...f, email: e.target.value }))} placeholder="patient@example.com" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Personal note (optional)</label>
+                <textarea className="w-full border rounded-lg px-3 py-2 text-sm" rows={3} value={sendLinkForm.note}
+                  onChange={(e) => setSendLinkForm(f => ({ ...f, note: e.target.value }))} placeholder="Hi Jane — great chatting earlier. Here's the link to enroll. Reach out with any questions." />
+                <p className="text-xs text-slate-400 mt-1">Shown above the call-to-action in the email.</p>
+              </div>
+            </div>
+            <div className="px-6 pb-6 flex items-center justify-end gap-3">
+              <button className="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100 transition-colors"
+                onClick={() => { setShowSendLink(false); setSendLinkError(null); }}>Cancel</button>
+              <button className="px-6 py-2 rounded-lg text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50"
+                disabled={sendLinkLoading}
+                onClick={async () => {
+                  setSendLinkError(null);
+                  if (!sendLinkForm.email) {
+                    setSendLinkError("Email is required.");
+                    return;
+                  }
+                  setSendLinkLoading(true);
+                  const res = await apiFetch("/intakes/send-link", {
+                    method: "POST",
+                    body: JSON.stringify({
+                      email: sendLinkForm.email,
+                      note: sendLinkForm.note || null,
+                    }),
+                  });
+                  setSendLinkLoading(false);
+                  if (res.error) {
+                    setSendLinkError(res.error);
+                    return;
+                  }
+                  setShowSendLink(false);
+                  setToast({ message: `Intake link sent to ${sendLinkForm.email}.`, type: "success" });
+                }}>
+                {sendLinkLoading ? "Sending…" : "Send link"}
               </button>
             </div>
           </>

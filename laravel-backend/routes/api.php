@@ -272,6 +272,8 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
 
     // ===== Intakes — public widget submissions awaiting practice review =====
     Route::get('/intakes', [IntakeController::class, 'index']);
+    Route::post('/intakes', [IntakeController::class, 'storeManual']);
+    Route::post('/intakes/send-link', [IntakeController::class, 'sendIntakeLink']);
     Route::get('/intakes/{id}', [IntakeController::class, 'show']);
     Route::post('/intakes/{id}/convert', [IntakeController::class, 'convert']);
     Route::post('/intakes/{id}/archive', [IntakeController::class, 'archive']);
