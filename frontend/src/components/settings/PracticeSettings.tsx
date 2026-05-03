@@ -37,6 +37,7 @@ import { PaymentSetup } from "./PaymentSetup";
 import { BrandedWidgets } from "./BrandedWidgets";
 import { AgreementEditor } from "./AgreementEditor";
 import { PlatformSubscriptionSection } from "./PlatformSubscriptionSection";
+import { WebhooksPanel } from "./WebhooksPanel";
 import { PhoneField, EmailField, NPIField, ZipField, AddressField } from "../shared/fields";
 
 // ─── Colors ──────────────────────────────────────────────────────────────────
@@ -1514,6 +1515,9 @@ export function PracticeSettings({ initialTab }: { initialTab?: string }) {
 
     return (
       <div className="space-y-6">
+        {/* ── Outbound Webhooks (real backend, fully functional) ───────────── */}
+        <WebhooksPanel />
+
         {/* ── Embeddable Widgets ─────────────────────────────────────────────── */}
         <div className="rounded-xl border p-6" style={{ borderColor: C.slate200, backgroundColor: C.white }}>
           <div className="flex items-center gap-2 mb-4">
