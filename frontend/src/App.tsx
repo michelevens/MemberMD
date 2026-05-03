@@ -11,6 +11,7 @@ import { ForgotPasswordScreen } from "./components/auth/ForgotPasswordScreen";
 import { ResetPasswordScreen } from "./components/auth/ResetPasswordScreen";
 import { InstallPrompt } from "./components/shared/InstallPrompt";
 import { ImpersonationBannerHost } from "./components/shared/ImpersonationBanner";
+import { PlanCapModalHost } from "./components/shared/PlanCapModalHost";
 
 // ─── Error Boundary ─────────────────────────────────────────────────────────────
 
@@ -251,6 +252,7 @@ export default function App() {
           <HashRouter>
             <AuthProvider>
               <ImpersonationBannerHost />
+              <PlanCapModalHost />
               <AuthGate />
               <InstallPrompt />
             </AuthProvider>

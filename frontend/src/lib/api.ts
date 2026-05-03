@@ -207,6 +207,14 @@ export async function apiFetch<T>(
     const json = await response.json();
 
     if (!response.ok) {
+      // 402 from EnforcePlanCap middleware — broadcast a structured event so
+      // the SPA can show a global "Upgrade plan" modal regardless of which
+      // create-screen triggered the cap. Also returns the standard error so
+      // the calling component can fall back to its own error toast if needed.
+      if (response.status === 402 && (json.error_code === "plan_cap_reached" || json.errorCode === "plan_cap_reached")) {
+        const cap = transformKeys(json.cap ?? {}, snakeToCamel);
+        window.dispatchEvent(new CustomEvent("plan:cap-reached", { detail: { cap, message: json.message } }));
+      }
       return { error: json.message || `Request failed (${response.status})` };
     }
 
@@ -1717,6 +1725,120 @@ export const dunningService = {
     if (useMockData()) return { data: [] };
     const query = params ? "?" + new URLSearchParams(params).toString() : "";
     return apiFetch<DunningEvent[]>(`/dunning-events${query}`);
+  },
+};
+
+// ─── Practice → MemberMD Subscription (the practice's own bill) ─────────────
+//
+// Distinct from membershipService (patient-pays-practice). This surfaces the
+// practice's MemberMD subscription tier, usage, billing history, and the
+// upgrade/downgrade/cancel flow.
+
+export interface PlatformPlanSummary {
+  id: string;
+  key: string;
+  name: string;
+  badgeText?: string | null;
+  description?: string | null;
+  isQuoteOnly: boolean;
+  isPubliclyListed: boolean;
+  monthlyPrice: number;
+  annualPrice: number | null;
+  maxMembers: number | null;
+  maxProviders: number | null;
+  maxStaff: number | null;
+  maxActivePrograms: number | null;
+  maxLocations: number | null;
+  maxEmployers: number | null;
+  apiAccessLevel: "none" | "read" | "full";
+  extraSeatBlockSize: number | null;
+  extraSeatBlockPrice: number | null;
+  features: string[];
+  sortOrder: number;
+}
+
+export interface PracticeSubscriptionSummary {
+  id: string;
+  status: "trial" | "active" | "past_due" | "cancelled" | "paused";
+  isFounderOverride: boolean;
+  trialEndsAt: string | null;
+  cancelsAt: string | null;
+  plan: PlatformPlanSummary;
+  usage: {
+    members: number;
+    providers: number;
+    staff: number;
+    programs: number;
+    locations: number;
+    employers: number;
+  };
+  effectiveMemberCap?: number | null;
+}
+
+export interface PlatformInvoiceRow {
+  id: string;
+  stripeInvoiceId: string | null;
+  stripeInvoiceNumber: string | null;
+  amountTotalCents: number;
+  amountPaidCents: number;
+  status: string;
+  issuedAt: string | null;
+  paidAt: string | null;
+  hostedInvoiceUrl: string | null;
+  invoicePdfUrl: string | null;
+  lineItems: Array<{ type: string; qty?: number; unitPrice?: number; amount?: number }>;
+}
+
+export interface CancellationReason {
+  id: string;
+  label: string;
+  description?: string | null;
+  sortOrder: number;
+  isActive: boolean;
+}
+
+export const subscriptionService = {
+  show: async (): Promise<ApiResponse<PracticeSubscriptionSummary>> => {
+    if (useMockData()) return { data: null as unknown as PracticeSubscriptionSummary };
+    return apiFetch<PracticeSubscriptionSummary>("/me/subscription");
+  },
+  plans: async (): Promise<ApiResponse<PlatformPlanSummary[]>> => {
+    if (useMockData()) return { data: [] };
+    return apiFetch<PlatformPlanSummary[]>("/me/subscription/plans");
+  },
+  cancellationReasons: async (): Promise<ApiResponse<CancellationReason[]>> => {
+    if (useMockData()) return { data: [] };
+    return apiFetch<CancellationReason[]>("/me/subscription/cancellation-reasons");
+  },
+  invoices: async (): Promise<ApiResponse<PlatformInvoiceRow[]>> => {
+    if (useMockData()) return { data: [] };
+    return apiFetch<PlatformInvoiceRow[]>("/me/subscription/invoices");
+  },
+  changePlan: async (data: { platformPlanId: string; billingCycle?: "monthly" | "annual" }): Promise<ApiResponse<PracticeSubscriptionSummary>> => {
+    if (useMockData()) return { data: null as unknown as PracticeSubscriptionSummary };
+    return apiFetch<PracticeSubscriptionSummary>("/me/subscription/change", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  },
+  cancel: async (data: {
+    cancellationReasonId?: string | null;
+    cancellationReasonOther?: string | null;
+    cancellationNotes?: string | null;
+    cancelImmediately?: boolean;
+  }): Promise<ApiResponse<PracticeSubscriptionSummary>> => {
+    if (useMockData()) return { data: null as unknown as PracticeSubscriptionSummary };
+    return apiFetch<PracticeSubscriptionSummary>("/me/subscription/cancel", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  },
+  reactivate: async (): Promise<ApiResponse<PracticeSubscriptionSummary>> => {
+    if (useMockData()) return { data: null as unknown as PracticeSubscriptionSummary };
+    return apiFetch<PracticeSubscriptionSummary>("/me/subscription/reactivate", {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
   },
 };
 

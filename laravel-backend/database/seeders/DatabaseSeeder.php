@@ -53,6 +53,8 @@ class DatabaseSeeder extends Seeder
             HipaaComplianceSeeder::class,
             ChartTemplateSeeder::class,
             EntitlementTypeSeeder::class,
+            PlatformPlanSeeder::class,
+            SuperAdminCancellationReasonSeeder::class,
         ]);
 
         // Demo data — only when explicitly requested via SEED_DEMO=1 so a

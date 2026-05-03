@@ -73,6 +73,40 @@ export interface User {
    *  so the provider's "My Profile" tab can mount ProviderDetailPage
    *  against their own row without a separate /providers/me lookup. */
   providerId?: string | null;
+  /** Practice's MemberMD subscription summary. Null for users without
+   *  a tenant (superadmin / unbound). Inlined on /auth/me so the SPA can
+   *  render usage badges and gate features without a second round-trip. */
+  subscription?: AuthSubscriptionSummary | null;
+}
+
+export interface AuthSubscriptionSummary {
+  id: string;
+  status: "trial" | "active" | "past_due" | "cancelled" | "paused";
+  isFounderOverride: boolean;
+  trialEndsAt: string | null;
+  cancelsAt: string | null;
+  plan: {
+    id: string;
+    key: string;
+    name: string;
+    monthlyPrice: number;
+    maxMembers: number | null;
+    maxProviders: number | null;
+    maxStaff: number | null;
+    maxActivePrograms: number | null;
+    maxLocations: number | null;
+    maxEmployers: number | null;
+    apiAccessLevel: "none" | "read" | "full";
+    features: string[];
+  };
+  usage: {
+    members: number;
+    providers: number;
+    staff: number;
+    programs: number;
+    locations: number;
+    employers: number;
+  };
 }
 
 // ─── Practice ─────────────────────────────────────────────────────────────────

@@ -48,6 +48,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'phi.log' => \App\Http\Middleware\PHIAccessLogger::class,
             'security.headers' => \App\Http\Middleware\SecurityHeaders::class,
             'operator.scope' => \App\Http\Middleware\ResolveOperatorScope::class,
+            'plan.cap' => \App\Http\Middleware\EnforcePlanCap::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

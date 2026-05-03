@@ -332,6 +332,18 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
     // they're enrolled in.
     Route::get('/me/enrollments', [\App\Http\Controllers\Api\ProgramController::class, 'myEnrollments']);
 
+    // ===== Practice's view of their own MemberMD subscription =====
+    // Shows the practice their bill, lets them switch tier, cancel, etc.
+    // The "other" billing direction from membership/invoice endpoints
+    // (which are patient-pays-practice).
+    Route::get('/me/subscription', [\App\Http\Controllers\Api\PracticeSubscriptionController::class, 'show']);
+    Route::get('/me/subscription/plans', [\App\Http\Controllers\Api\PracticeSubscriptionController::class, 'plans']);
+    Route::get('/me/subscription/cancellation-reasons', [\App\Http\Controllers\Api\PracticeSubscriptionController::class, 'cancellationReasons']);
+    Route::get('/me/subscription/invoices', [\App\Http\Controllers\Api\PracticeSubscriptionController::class, 'invoices']);
+    Route::post('/me/subscription/change', [\App\Http\Controllers\Api\PracticeSubscriptionController::class, 'changePlan']);
+    Route::post('/me/subscription/cancel', [\App\Http\Controllers\Api\PracticeSubscriptionController::class, 'cancel']);
+    Route::post('/me/subscription/reactivate', [\App\Http\Controllers\Api\PracticeSubscriptionController::class, 'reactivate']);
+
     // Patient self-service: family members (dependents) on the
     // caller's active membership. Backed by the same Stripe-quantity
     // logic admin uses (POST/DELETE /memberships/{id}/dependents),
@@ -459,7 +471,8 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
     Route::get('/providers/{id}/panel', [ProviderController::class, 'panelPatients']);
     Route::post('/providers/{id}/panel/assign', [ProviderController::class, 'assignPatient']);
     Route::delete('/providers/{id}/panel/{patientId}', [ProviderController::class, 'unassignPatient']);
-    Route::apiResource('providers', ProviderController::class)->except(['destroy']);
+    Route::post('/providers', [ProviderController::class, 'store'])->middleware('plan.cap:providers');
+    Route::apiResource('providers', ProviderController::class)->except(['destroy', 'store']);
 
     // ===== Coupons =====
     Route::apiResource('coupons', CouponController::class)->except(['show']);
@@ -536,7 +549,7 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
     // ===== Programs =====
     Route::prefix('programs')->group(function () {
         Route::get('/', [ProgramController::class, 'index']);
-        Route::post('/', [ProgramController::class, 'store']);
+        Route::post('/', [ProgramController::class, 'store'])->middleware('plan.cap:programs');
         Route::get('/{program}', [ProgramController::class, 'show']);
         Route::get('/{program}/plans', [ProgramController::class, 'plans']);
         Route::put('/{program}', [ProgramController::class, 'update']);
@@ -565,6 +578,15 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
         Route::put('/{program}', [MasterProgramController::class, 'update']);
         Route::post('/{program}/provision', [MasterProgramController::class, 'provision']);
         Route::post('/reprovision', [MasterProgramController::class, 'reprovision']);
+    });
+
+    // ===== SuperAdmin Platform Plans (the MemberMD tiers practices subscribe to) =====
+    Route::prefix('admin/platform-plans')->group(function () {
+        Route::get('/', [\App\Http\Controllers\Api\Admin\PlatformPlanController::class, 'index']);
+        Route::post('/', [\App\Http\Controllers\Api\Admin\PlatformPlanController::class, 'store']);
+        Route::get('/{id}', [\App\Http\Controllers\Api\Admin\PlatformPlanController::class, 'show']);
+        Route::put('/{id}', [\App\Http\Controllers\Api\Admin\PlatformPlanController::class, 'update']);
+        Route::delete('/{id}', [\App\Http\Controllers\Api\Admin\PlatformPlanController::class, 'destroy']);
     });
 
     // ===== Audit & Compliance =====
@@ -708,7 +730,7 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
     // ===== Employer Management (Practice-side) =====
     Route::prefix('employers')->group(function () {
         Route::get('/', [EmployerController::class, 'index']);
-        Route::post('/', [EmployerController::class, 'store']);
+        Route::post('/', [EmployerController::class, 'store'])->middleware('plan.cap:employers');
         Route::get('/{id}', [EmployerController::class, 'show']);
         Route::put('/{id}', [EmployerController::class, 'update']);
         Route::delete('/{id}', [EmployerController::class, 'destroy']);

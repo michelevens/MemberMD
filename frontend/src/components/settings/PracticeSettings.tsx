@@ -36,6 +36,7 @@ import {
 import { PaymentSetup } from "./PaymentSetup";
 import { BrandedWidgets } from "./BrandedWidgets";
 import { AgreementEditor } from "./AgreementEditor";
+import { PlatformSubscriptionSection } from "./PlatformSubscriptionSection";
 
 // ─── Colors ──────────────────────────────────────────────────────────────────
 
@@ -66,6 +67,7 @@ const C = {
 
 type PracticeTab =
   | "info"
+  | "subscription"
   | "branding"
   | "widgets"
   | "scheduling"
@@ -102,6 +104,7 @@ interface TeamMember {
 
 const TAB_CONFIG: { id: PracticeTab; label: string; icon: React.ElementType }[] = [
   { id: "info", label: "Practice Info", icon: Building2 },
+  { id: "subscription", label: "Platform Subscription", icon: CreditCard },
   { id: "branding", label: "Branding", icon: Palette },
   { id: "widgets", label: "Branded Widgets", icon: Sparkles },
   { id: "scheduling", label: "Scheduling", icon: Calendar },
@@ -1936,6 +1939,7 @@ export function PracticeSettings({ initialTab }: { initialTab?: string }) {
   function renderTabContent() {
     switch (activeTab) {
       case "info": return renderInfo();
+      case "subscription": return <PlatformSubscriptionSection />;
       case "branding": return renderBranding();
       case "widgets": return <BrandedWidgets />;
       case "scheduling": return renderScheduling();

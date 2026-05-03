@@ -818,6 +818,43 @@ class AuthController extends Controller
     {
         $practice = $user->tenant_id ? Practice::find($user->tenant_id) : null;
 
+        // Practice's own MemberMD subscription summary — surfaced inline so
+        // every API consumer can render usage badges + cap warnings without
+        // a separate /me/subscription round-trip on every page mount.
+        // Only computed when there's a tenant; superadmin/no-tenant users
+        // get null.
+        $subscriptionSummary = null;
+        if ($user->tenant_id) {
+            $sub = \App\Models\PracticeSubscription::with('plan')
+                ->where('practice_id', $user->tenant_id)
+                ->latest()
+                ->first();
+            if ($sub && $sub->plan) {
+                $subscriptionSummary = [
+                    'id' => $sub->id,
+                    'status' => $sub->status,
+                    'is_founder_override' => (bool) $sub->is_founder_override,
+                    'trial_ends_at' => $sub->trial_ends_at?->toIso8601String(),
+                    'cancels_at' => $sub->cancels_at?->toIso8601String(),
+                    'plan' => [
+                        'id' => $sub->plan->id,
+                        'key' => $sub->plan->key,
+                        'name' => $sub->plan->name,
+                        'monthly_price' => $sub->plan->monthly_price,
+                        'max_members' => $sub->plan->max_members,
+                        'max_providers' => $sub->plan->max_providers,
+                        'max_staff' => $sub->plan->max_staff,
+                        'max_active_programs' => $sub->plan->max_active_programs,
+                        'max_locations' => $sub->plan->max_locations,
+                        'max_employers' => $sub->plan->max_employers,
+                        'api_access_level' => $sub->plan->api_access_level,
+                        'features' => $sub->plan->features ?? [],
+                    ],
+                    'usage' => \App\Http\Controllers\Api\PracticeSubscriptionController::computeUsage($user->tenant_id),
+                ];
+            }
+        }
+
         // Surface operator memberships so the SPA can route to OperatorPortal
         // when the user is an operator member. See ROADMAP H1 / Operator OS.
         $operatorMemberships = $user->operatorMemberships()->with('operator:id,name,slug')->get();
@@ -881,6 +918,7 @@ class AuthController extends Controller
                 'timezone' => $practice->timezone,
             ] : null,
             'operators' => $operators,
+            'subscription' => $subscriptionSummary,
         ];
     }
 
