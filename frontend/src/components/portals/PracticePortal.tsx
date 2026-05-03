@@ -8,6 +8,7 @@ import { ProviderDetailPage } from "./ProviderDetailPage";
 import { useAuth } from "../../contexts/AuthContext";
 import { dashboardService, membershipPlanService, messageService, patientService, appointmentService, encounterService, prescriptionService, invoiceService, programService, telehealthService, screeningService, couponService, providerService, paymentService, notificationService, apiFetch, billingEnhancedService, documentService, onboardingService, staffService } from "../../lib/api";
 import { PortalShell, type NavSection as ShellNavSection, type PortalColor } from "../shared/PortalShell";
+import { MobileSheet } from "../shared/MobileSheet";
 import { CommandPalette, useCommandPaletteShortcut } from "../shared/CommandPalette";
 import { AddAllergyDialog, type AllergyEntry } from "../clinical/AddAllergyDialog";
 import { AddMeasureDialog } from "../clinical/AddMeasureDialog";
@@ -9242,19 +9243,29 @@ export function PracticePortal() {
       )}
 
       {/* ─── Roster Cancel Membership Modal (with Retention Offers) ─────── */}
-      {rosterCancelDialog && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: "rgba(0,0,0,0.5)" }}>
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden">
-            {/* Header */}
-            <div className="px-6 py-4 border-b border-slate-100">
-              <h3 className="text-base font-semibold text-slate-900">
+      <MobileSheet
+        open={!!rosterCancelDialog}
+        onClose={() => { setRosterCancelDialog(null); setRosterCancelReason(""); setRosterCancelStep("reason"); }}
+        maxWidth="max-w-lg"
+        title={
+          rosterCancelDialog ? (
+            <div>
+              <div>
                 {rosterCancelStep === "reason" ? "Cancel membership" : rosterCancelStep === "offers" ? "Before you go…" : "Confirm cancellation"}
-              </h3>
-              <p className="text-sm text-slate-500 mt-0.5">
-                {rosterCancelStep === "reason" ? `Cancel ${rosterCancelDialog.patientName}'s membership` : rosterCancelStep === "offers" ? "We'd love to keep this member. Consider these options:" : `This will cancel ${rosterCancelDialog.patientName}'s membership`}
-              </p>
+              </div>
+              <div className="text-xs text-slate-500 font-normal mt-0.5">
+                {rosterCancelStep === "reason"
+                  ? `Cancel ${rosterCancelDialog.patientName}'s membership`
+                  : rosterCancelStep === "offers"
+                  ? "We'd love to keep this member. Consider these options:"
+                  : `This will cancel ${rosterCancelDialog.patientName}'s membership`}
+              </div>
             </div>
-
+          ) : null
+        }
+      >
+        {rosterCancelDialog && (
+          <>
             {/* Step 1: Reason Selection */}
             {rosterCancelStep === "reason" && (
               <div className="p-6">
@@ -9401,20 +9412,34 @@ export function PracticePortal() {
                 )}
               </div>
             </div>
-          </div>
-        </div>
-      )}
+          </>
+        )}
+      </MobileSheet>
 
       {/* ─── Roster Enroll / Change Plan Modal ───────────────────────────── */}
-      {rosterPlanDialog && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: "rgba(0,0,0,0.5)" }}>
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
-            <div className="px-6 py-4 border-b border-slate-100">
-              <h3 className="text-lg font-bold text-white">{rosterPlanDialog.mode === "change" ? "Change Plan" : "Enroll in Plan"}</h3>
-              <p className="text-sm text-slate-500 mt-0.5">
-                {rosterPlanDialog.mode === "change" ? `Select a new plan for ${rosterPlanDialog.patientName}` : `Choose a plan for ${rosterPlanDialog.patientName}`}
-              </p>
+      <MobileSheet
+        open={!!rosterPlanDialog}
+        onClose={() => {
+          setRosterPlanDialog(null);
+          setRosterSelectedPlanId(null);
+          setRosterCompEnabled(false);
+          setRosterCompReason("");
+        }}
+        title={
+          rosterPlanDialog ? (
+            <div>
+              <div>{rosterPlanDialog.mode === "change" ? "Change Plan" : "Enroll in Plan"}</div>
+              <div className="text-xs text-slate-500 font-normal mt-0.5">
+                {rosterPlanDialog.mode === "change"
+                  ? `Select a new plan for ${rosterPlanDialog.patientName}`
+                  : `Choose a plan for ${rosterPlanDialog.patientName}`}
+              </div>
             </div>
+          ) : null
+        }
+      >
+        {rosterPlanDialog && (
+          <>
             <div className="p-6">
               {rosterAvailablePlansLoading && (
                 <div className="flex items-center justify-center py-6">
@@ -9523,63 +9548,77 @@ export function PracticePortal() {
                   : (rosterPlanDialog.mode === "change" ? "Change Plan" : (rosterCompEnabled ? "Enroll (Comped)" : "Enroll"))}
               </button>
             </div>
-          </div>
-        </div>
-      )}
+          </>
+        )}
+      </MobileSheet>
 
       {/* ─── Password Reset Link Modal ───────────────────────────────────── */}
-      {resetLinkModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: "rgba(0,0,0,0.5)" }}>
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden">
-            <div className="px-6 py-4 border-b border-slate-100">
-              <h3 className="text-base font-semibold text-slate-900">Portal sign-in link</h3>
-              <p className="text-sm text-slate-500 mt-0.5">Share this link with {resetLinkModal.patientName} to set their password.</p>
+      <MobileSheet
+        open={!!resetLinkModal}
+        onClose={() => setResetLinkModal(null)}
+        maxWidth="max-w-lg"
+        title={
+          resetLinkModal ? (
+            <div>
+              <div>Portal sign-in link</div>
+              <div className="text-xs text-slate-500 font-normal mt-0.5">
+                Share this link with {resetLinkModal.patientName} to set their password.
+              </div>
             </div>
-            <div className="p-6 space-y-4">
-              <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
-                <strong>One-time use, expires in 60 minutes.</strong> Do not share over insecure channels — treat like a password.
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-slate-600 mb-1.5">Reset URL</label>
-                <textarea
-                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs font-mono break-all"
-                  rows={4}
-                  readOnly
-                  value={resetLinkModal.url}
-                  onClick={(e) => (e.target as HTMLTextAreaElement).select()}
-                />
-              </div>
-              <div className="flex items-center justify-end gap-2">
-                <button
-                  onClick={() => {
-                    navigator.clipboard.writeText(resetLinkModal.url);
-                    setToast({ message: "Link copied to clipboard.", type: "success" });
-                  }}
-                  className="px-4 py-2 rounded-lg text-sm font-medium text-white"
-                  style={{ backgroundColor: "#635bff" }}
-                >
-                  Copy Link
-                </button>
-                <button
-                  onClick={() => setResetLinkModal(null)}
-                  className="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100"
-                >
-                  Close
-                </button>
-              </div>
+          ) : null
+        }
+      >
+        {resetLinkModal && (
+          <div className="p-6 space-y-4">
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+              <strong>One-time use, expires in 60 minutes.</strong> Do not share over insecure channels — treat like a password.
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1.5">Reset URL</label>
+              <textarea
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs font-mono break-all"
+                rows={4}
+                readOnly
+                value={resetLinkModal.url}
+                onClick={(e) => (e.target as HTMLTextAreaElement).select()}
+              />
+            </div>
+            <div className="flex items-center justify-end gap-2">
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(resetLinkModal.url);
+                  setToast({ message: "Link copied to clipboard.", type: "success" });
+                }}
+                className="px-4 py-2 rounded-lg text-sm font-medium text-white"
+                style={{ backgroundColor: "#635bff" }}
+              >
+                Copy Link
+              </button>
+              <button
+                onClick={() => setResetLinkModal(null)}
+                className="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100"
+              >
+                Close
+              </button>
             </div>
           </div>
-        </div>
-      )}
+        )}
+      </MobileSheet>
 
       {/* ─── Add Patient Modal ──────────────────────────────────────────── */}
-      {showAddPatient && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: "rgba(0,0,0,0.5)" }}>
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden">
-            <div className="px-6 py-4 border-b border-slate-100">
-              <h3 className="text-base font-semibold text-slate-900">Add new patient</h3>
-              <p className="text-sm text-slate-500 mt-0.5">Enter patient demographics to create a new record.</p>
-            </div>
+      <MobileSheet
+        open={showAddPatient}
+        onClose={() => { setShowAddPatient(false); setAddPatientError(null); }}
+        maxWidth="max-w-lg"
+        title={
+          <div>
+            <div>Add new patient</div>
+            <div className="text-xs text-slate-500 font-normal mt-0.5">Enter patient demographics to create a new record.</div>
+          </div>
+        }
+      >
+        {showAddPatient && (
+          <>
             <div className="p-6 space-y-4">
               {addPatientError && (
                 <div className="rounded-lg p-3 text-sm" style={{ backgroundColor: "#fef2f2", color: "#dc2626" }}>{addPatientError}</div>
@@ -9636,9 +9675,9 @@ export function PracticePortal() {
                 {addPatientLoading ? "Creating..." : "Create Patient"}
               </button>
             </div>
-          </div>
-        </div>
-      )}
+          </>
+        )}
+      </MobileSheet>
 
       {/* ─── Book Appointment Modal ────────────────────────────────────────
           Replaced the previous hand-rolled modal with the shared
@@ -10243,13 +10282,19 @@ export function PracticePortal() {
       )}
 
       {/* ─── Invite Staff Modal ──────────────────────────────────────────── */}
-      {showInviteStaff && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: "rgba(0,0,0,0.5)" }}>
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden">
-            <div className="px-6 py-4 border-b border-slate-100">
-              <h3 className="text-base font-semibold text-slate-900">Invite staff</h3>
-              <p className="text-sm text-slate-500 mt-0.5">Send an invitation to a new team member.</p>
-            </div>
+      <MobileSheet
+        open={showInviteStaff}
+        onClose={() => setShowInviteStaff(false)}
+        maxWidth="max-w-lg"
+        title={
+          <div>
+            <div>Invite staff</div>
+            <div className="text-xs text-slate-500 font-normal mt-0.5">Send an invitation to a new team member.</div>
+          </div>
+        }
+      >
+        {showInviteStaff && (
+          <>
             <div className="p-6 space-y-4">
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Full Name *</label>
@@ -10281,9 +10326,9 @@ export function PracticePortal() {
                 {inviteStaffLoading ? "Sending..." : "Send Invitation"}
               </button>
             </div>
-          </div>
-        </div>
-      )}
+          </>
+        )}
+      </MobileSheet>
 
       {/* Command Palette — Cmd+K / Ctrl+K to jump to any section. */}
       <CommandPalette
