@@ -125,13 +125,38 @@ class ProgramController extends Controller
             ->orderByDesc('created_at')
             ->get();
 
-        // Project into the same shape the frontend uses for "enrollments"
-        // (id / patient / plan / status / fundingSource / enrolledAt / expiresAt)
-        // so the UI doesn't need a separate render path. Source flag lets the
-        // UI distinguish a membership-driven row from a program_enrollments row.
-        $membershipEnrollments = $memberships->map(function ($m) {
+        // For each membership, find the matching ProgramEnrollment row so the
+        // surfaced id is the one PATCH /enrollments/{id} accepts. The saved
+        // hook on PatientMembership creates a ProgramEnrollment per active
+        // membership-with-program; lookup is keyed on (program_id, patient_id).
+        // Without this the "Assign / change primary provider" gear posts the
+        // membership UUID to an endpoint that only knows ProgramEnrollment UUIDs
+        // and 404s every time — the bug Dieudone hit on 2026-05-04.
+        $membershipPatientIds = $memberships->pluck('patient_id')->filter()->unique();
+        $relatedEnrollments = ProgramEnrollment::with(['provider:id,first_name,last_name,credentials'])
+            ->where('program_id', $program->id)
+            ->whereIn('patient_id', $membershipPatientIds)
+            ->get()
+            ->keyBy('patient_id');
+
+        $membershipEnrollments = $memberships->map(function ($m) use ($relatedEnrollments) {
+            $pe = $relatedEnrollments->get($m->patient_id);
+            $providerPayload = null;
+            if ($pe && $pe->provider) {
+                $providerPayload = [
+                    'id' => $pe->provider->id,
+                    'firstName' => $pe->provider->first_name,
+                    'lastName' => $pe->provider->last_name,
+                    'credentials' => $pe->provider->credentials,
+                ];
+            }
             return [
-                'id' => $m->id,
+                // Use the ProgramEnrollment id when one exists so the row's
+                // PATCH /enrollments/{id} works. Fall back to membership id
+                // only if no enrollment row was created (shouldn't happen
+                // post-backfill but is defensive).
+                'id' => $pe?->id ?? $m->id,
+                'membership_id' => $m->id,
                 'source' => 'membership',
                 'patient' => $m->patient ? [
                     'id' => $m->patient->id,
@@ -144,6 +169,8 @@ class ProgramController extends Controller
                 'sponsorName' => null,
                 'enrolledAt' => $m->started_at?->toIso8601String(),
                 'expiresAt' => $m->cancelled_at?->toIso8601String() ?? $m->current_period_end?->toIso8601String(),
+                'provider' => $providerPayload,
+                'assignedProviderId' => $pe?->assigned_provider_id,
             ];
         });
 
