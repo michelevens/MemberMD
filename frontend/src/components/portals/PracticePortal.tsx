@@ -94,6 +94,8 @@ import {
   Radio,
   Trash2,
   Megaphone,
+  ShieldAlert,
+  ChevronRight,
 } from "lucide-react";
 import { RefreshButton } from "../shared/RefreshButton";
 import { OnboardingChecklist, ConnectSetupBanner } from "../shared/OnboardingChecklist";
@@ -876,7 +878,49 @@ export function PracticePortal() {
   const [encounterLoading, setEncounterLoading] = useState(false);
   // Encounter editor (inline SOAP)
   const [editingEncounterId, setEditingEncounterId] = useState<string | null>(null);
-  const [soapForm, setSoapForm] = useState({ subjective: "", objective: "", assessment: "", plan: "", chiefComplaint: "" });
+  // True when the editor was opened via the "Amend" action (encounter
+  // already signed). Forces an amendment_reason on save so the audit
+  // trail records *why* a signed/billed chart was changed.
+  const [amendingEncounter, setAmendingEncounter] = useState(false);
+  const [amendmentReason, setAmendmentReason] = useState("");
+  // Extended SOAP form — billing-grade. SOAP narrative + structured
+  // diagnoses + vitals + CPT + time tracking. Each piece is optional;
+  // pure-DPC practices can ignore the billing-flavored fields.
+  const [soapForm, setSoapForm] = useState<{
+    chiefComplaint: string;
+    subjective: string;
+    objective: string;
+    assessment: string;
+    plan: string;
+    // Diagnoses: array of { code, description, type ('primary' | 'secondary') }
+    diagnoses: Array<{ code: string; description: string; type: "primary" | "secondary" }>;
+    // Vitals: free-form keys, but we render the common ones with named inputs.
+    vitals: {
+      bp_systolic?: string;
+      bp_diastolic?: string;
+      hr?: string;
+      rr?: string;
+      temp_f?: string;
+      weight_lbs?: string;
+      height_in?: string;
+      o2_sat?: string;
+      pain_scale?: string;
+    };
+    cptCodes: string[];
+    durationMinutesActual: string;
+    timeSpentDocumenting: string;
+    followUpInstructions: string;
+    followUpWeeks: string;
+  }>({
+    chiefComplaint: "", subjective: "", objective: "", assessment: "", plan: "",
+    diagnoses: [],
+    vitals: {},
+    cptCodes: [],
+    durationMinutesActual: "",
+    timeSpentDocumenting: "",
+    followUpInstructions: "",
+    followUpWeeks: "",
+  });
   const [soapLoading, setSoapLoading] = useState(false);
 
   // ─── New Prescription Modal ─────────────────────────────────────────
@@ -1906,7 +1950,12 @@ export function PracticePortal() {
         setToast({ message: "Encounter created. Fill in the SOAP note below.", type: "success" });
         setShowNewEncounter(false);
         setEditingEncounterId((res.data as { id: string }).id);
-        setSoapForm({ subjective: "", objective: "", assessment: "", plan: "", chiefComplaint: "" });
+        setSoapForm({
+          chiefComplaint: "", subjective: "", objective: "", assessment: "", plan: "",
+          diagnoses: [], vitals: {}, cptCodes: [],
+          durationMinutesActual: "", timeSpentDocumenting: "",
+          followUpInstructions: "", followUpWeeks: "",
+        });
         setEncounterForm({ patientId: "", encounterType: "follow_up", programId: "", encounterDate: new Date().toISOString().split("T")[0] });
         await loadPracticeData();
       } else {
@@ -1919,20 +1968,45 @@ export function PracticePortal() {
   };
 
   // ─── Save SOAP Note Handler ────────────────────────────────────────
+  // Persists narrative SOAP plus structured diagnoses/vitals/CPT/time.
+  // Empty/zero fields are sent as null so the row reflects "not set"
+  // vs accidentally clearing a previously-set value.
   const handleSaveSoap = async (sign?: boolean) => {
     if (!editingEncounterId) return;
+    // Amending a signed chart: refuse to save without a reason. Compliance
+    // requires the audit log to capture *why* a locked chart was changed.
+    if (amendingEncounter && !amendmentReason.trim()) {
+      setToast({ message: "Amendment reason is required when editing a signed chart.", type: "error" });
+      return;
+    }
     setSoapLoading(true);
     try {
-      // Save SOAP fields first. UpdateEncounterRequest does NOT accept
-      // a `status` field, so to actually sign we hit the dedicated
-      // POST /encounters/{id}/sign endpoint after a successful save.
+      const numOrNull = (s: string) => {
+        const t = s.trim();
+        if (t === "") return null;
+        const n = parseInt(t, 10);
+        return Number.isFinite(n) ? n : null;
+      };
+      // Vitals: send the object only if at least one field has a
+      // value, so empty form doesn't poison the column with {}.
+      const vitalsHasAny = Object.values(soapForm.vitals).some((v) => (v ?? "").toString().trim() !== "");
+
       const updateRes = await encounterService.update(editingEncounterId, {
         subjective: soapForm.subjective,
         objective: soapForm.objective,
         assessment: soapForm.assessment,
         plan: soapForm.plan,
         chiefComplaint: soapForm.chiefComplaint,
-      });
+        diagnoses: soapForm.diagnoses.length > 0 ? soapForm.diagnoses : null,
+        vitals: vitalsHasAny ? soapForm.vitals : null,
+        cptCodes: soapForm.cptCodes.length > 0 ? soapForm.cptCodes : null,
+        durationMinutesActual: numOrNull(soapForm.durationMinutesActual),
+        timeSpentDocumenting: numOrNull(soapForm.timeSpentDocumenting),
+        followUpInstructions: soapForm.followUpInstructions.trim() || null,
+        followUpWeeks: numOrNull(soapForm.followUpWeeks),
+        ...(amendingEncounter ? { amendmentReason: amendmentReason.trim() } : {}),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      } as any);
       if (updateRes.error) {
         setToast({ message: updateRes.error, type: "error" });
         return;
@@ -1944,8 +2018,22 @@ export function PracticePortal() {
           return;
         }
         setEditingEncounterId(null);
+        setAmendingEncounter(false);
+        setAmendmentReason("");
+      } else if (amendingEncounter) {
+        // Amendment saved — close out so the signed chart locks back.
+        setEditingEncounterId(null);
+        setAmendingEncounter(false);
+        setAmendmentReason("");
       }
-      setToast({ message: sign ? "Encounter signed successfully." : "SOAP note saved.", type: "success" });
+      setToast({
+        message: sign
+          ? "Encounter signed successfully."
+          : amendingEncounter
+            ? "Amendment saved."
+            : "SOAP note saved.",
+        type: "success",
+      });
       loadPracticeData();
     } catch (err: unknown) {
       setToast({ message: err instanceof Error ? err.message : "Failed to save note.", type: "error" });
@@ -2537,6 +2625,22 @@ export function PracticePortal() {
     [appointments]
   );
 
+  // Documentation pending = completed appointments whose encounter is
+  // missing or unsigned. Backend eager-loads `encounter` on /appointments
+  // so we can derive this without a second round-trip.
+  const documentationPendingAppointments = useMemo(() => {
+    return (appointments || []).filter((a: any) => {
+      if (a?.status !== "completed") return false;
+      const enc = a?.encounter;
+      // No encounter row at all → pending. Encounter exists but not yet
+      // signed (status !== 'signed' and signed_at is null) → also pending.
+      if (!enc) return true;
+      const signed = enc?.signed_at || enc?.signedAt || enc?.status === "signed";
+      return !signed;
+    });
+  }, [appointments]);
+  const documentationPendingCount = documentationPendingAppointments.length;
+
   // ─── Telehealth waiting queue ──────────────────────────────────────────
   // Patients who've joined a session and are waiting for the provider
   // to admit them. Polled every 8s while the portal is open. Empty when
@@ -2752,6 +2856,29 @@ export function PracticePortal() {
             trendColor="#d97706"
           />
         </div>
+
+        {/* Documentation pending — appointments that are 'completed' but the
+            chart is unsigned. Tappable to jump straight to encounters. */}
+        {documentationPendingCount > 0 && (
+          <button
+            type="button"
+            onClick={() => setActiveTab("encounters")}
+            className="w-full text-left rounded-xl border border-amber-300 bg-amber-50 p-4 flex items-center gap-3 hover:bg-amber-100 transition-colors"
+          >
+            <div className="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0" style={{ backgroundColor: "#fef3c7" }}>
+              <FileText className="w-5 h-5" style={{ color: "#d97706" }} />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="font-semibold text-amber-900 text-sm">
+                {documentationPendingCount} encounter{documentationPendingCount === 1 ? "" : "s"} need{documentationPendingCount === 1 ? "s" : ""} documentation
+              </div>
+              <div className="text-xs text-amber-800 mt-0.5">
+                Visit{documentationPendingCount === 1 ? " is" : "s are"} marked complete but the chart is unsigned. Tap to finish.
+              </div>
+            </div>
+            <ChevronRight className="w-4 h-4 text-amber-600 flex-shrink-0" />
+          </button>
+        )}
 
         {/* Program Performance Cards */}
         <div>
@@ -7832,9 +7959,19 @@ export function PracticePortal() {
 
     const rowActions = (enc: Enc): import("../shared/stripe-ui").KebabAction[] => [
       { label: "View encounter", onClick: () => { setExpandedEncounters((prev) => prev.includes(enc.id) ? prev : [...prev, enc.id]); } },
-      { label: "Edit", onClick: () => { setEditingEncounterId(enc.id); setSoapForm({ subjective: "", objective: "", assessment: "", plan: "", chiefComplaint: "" }); setActiveTab("encounters"); } },
+      { label: "Edit", onClick: () => { setAmendingEncounter(false); setAmendmentReason(""); setEditingEncounterId(enc.id); setSoapForm({
+          chiefComplaint: "", subjective: "", objective: "", assessment: "", plan: "",
+          diagnoses: [], vitals: {}, cptCodes: [],
+          durationMinutesActual: "", timeSpentDocumenting: "",
+          followUpInstructions: "", followUpWeeks: "",
+        }); setActiveTab("encounters"); } },
       ...(enc.status === "draft" ? [{ label: "Sign", onClick: () => handleSignEncounter(enc.id) }] : []),
-      ...(enc.status === "signed" ? [{ label: "Amend", onClick: () => { setEditingEncounterId(enc.id); setSoapForm({ subjective: "", objective: "", assessment: "", plan: "", chiefComplaint: "" }); } }] : []),
+      ...(enc.status === "signed" ? [{ label: "Amend", onClick: () => { setAmendingEncounter(true); setAmendmentReason(""); setEditingEncounterId(enc.id); setSoapForm({
+          chiefComplaint: "", subjective: "", objective: "", assessment: "", plan: "",
+          diagnoses: [], vitals: {}, cptCodes: [],
+          durationMinutesActual: "", timeSpentDocumenting: "",
+          followUpInstructions: "", followUpWeeks: "",
+        }); setActiveTab("encounters"); } }] : []),
       ...(enc.status === "draft" ? [{ label: "Delete", danger: true, onClick: () => setConfirmDialog({ title: "Delete Encounter", message: "Delete this draft encounter?", confirmLabel: "Delete", danger: true, onConfirm: async () => { try { await encounterService.update(enc.id, { status: "in_progress" }); setToast({ message: "Encounter deleted.", type: "success" }); loadPracticeData(); } catch { setToast({ message: "Failed.", type: "error" }); } setConfirmDialog(null); } }) }] : []),
     ];
 
@@ -7901,7 +8038,7 @@ export function PracticePortal() {
         {editingEncounterId && (
           <div className="glass rounded-xl p-6 space-y-4">
             <div className="flex items-center justify-between">
-              <h3 className="font-semibold text-slate-800">SOAP Note Editor</h3>
+              <h3 className="font-semibold text-slate-800">{amendingEncounter ? "Amend Signed Encounter" : "SOAP Note Editor"}</h3>
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => setDocAssistantOpen(true)}
@@ -7912,11 +8049,30 @@ export function PracticePortal() {
                   <Sparkles className="w-3.5 h-3.5" />
                   Documentation Assistant
                 </button>
-                <button onClick={() => setEditingEncounterId(null)} className="p-1.5 rounded-md hover:bg-slate-100 text-slate-400">
+                <button onClick={() => { setEditingEncounterId(null); setAmendingEncounter(false); setAmendmentReason(""); }} className="p-1.5 rounded-md hover:bg-slate-100 text-slate-400">
                   <X className="w-4 h-4" />
                 </button>
               </div>
             </div>
+            {amendingEncounter && (
+              <div className="rounded-lg border border-amber-300 bg-amber-50 p-3">
+                <div className="flex items-start gap-2 mb-2">
+                  <ShieldAlert className="w-4 h-4 text-amber-600 mt-0.5 flex-shrink-0" />
+                  <div className="text-xs text-amber-900">
+                    <div className="font-semibold mb-0.5">You are amending a signed chart.</div>
+                    <div>The original is preserved in the audit log. Please describe why this amendment is being made.</div>
+                  </div>
+                </div>
+                <label className="block text-[11px] font-semibold text-amber-900 uppercase mb-1">Amendment Reason <span className="text-red-600">*</span></label>
+                <textarea
+                  rows={2}
+                  className="w-full border border-amber-300 rounded-lg px-3 py-2 text-sm bg-white"
+                  value={amendmentReason}
+                  onChange={e => setAmendmentReason(e.target.value)}
+                  placeholder="e.g., Lab result corrected the diagnosis; updated medication dose..."
+                />
+              </div>
+            )}
             <div>
               <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Chief Complaint</label>
               <input className="w-full border rounded-lg px-3 py-2 text-sm" value={soapForm.chiefComplaint} onChange={e => setSoapForm(f => ({ ...f, chiefComplaint: e.target.value }))} placeholder="Reason for visit..." />
@@ -7937,6 +8093,211 @@ export function PracticePortal() {
               <label className="block text-xs font-semibold uppercase mb-1" style={{ color: "#147d64" }}>P — Plan</label>
               <textarea className="w-full border rounded-lg px-3 py-2 text-sm" rows={3} value={soapForm.plan} onChange={e => setSoapForm(f => ({ ...f, plan: e.target.value }))} placeholder="Treatment plan, follow-up..." />
             </div>
+
+            {/* Vitals widget */}
+            <div className="border-t pt-4">
+              <label className="block text-xs font-semibold text-slate-500 uppercase mb-2">Vitals</label>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                <div>
+                  <div className="text-[11px] text-slate-500 mb-0.5">BP Systolic</div>
+                  <input type="number" className="w-full border rounded px-2 py-1.5 text-sm" placeholder="120" value={soapForm.vitals.bp_systolic ?? ""} onChange={e => setSoapForm(f => ({ ...f, vitals: { ...f.vitals, bp_systolic: e.target.value } }))} />
+                </div>
+                <div>
+                  <div className="text-[11px] text-slate-500 mb-0.5">BP Diastolic</div>
+                  <input type="number" className="w-full border rounded px-2 py-1.5 text-sm" placeholder="80" value={soapForm.vitals.bp_diastolic ?? ""} onChange={e => setSoapForm(f => ({ ...f, vitals: { ...f.vitals, bp_diastolic: e.target.value } }))} />
+                </div>
+                <div>
+                  <div className="text-[11px] text-slate-500 mb-0.5">Heart Rate (bpm)</div>
+                  <input type="number" className="w-full border rounded px-2 py-1.5 text-sm" placeholder="72" value={soapForm.vitals.hr ?? ""} onChange={e => setSoapForm(f => ({ ...f, vitals: { ...f.vitals, hr: e.target.value } }))} />
+                </div>
+                <div>
+                  <div className="text-[11px] text-slate-500 mb-0.5">Resp Rate</div>
+                  <input type="number" className="w-full border rounded px-2 py-1.5 text-sm" placeholder="16" value={soapForm.vitals.rr ?? ""} onChange={e => setSoapForm(f => ({ ...f, vitals: { ...f.vitals, rr: e.target.value } }))} />
+                </div>
+                <div>
+                  <div className="text-[11px] text-slate-500 mb-0.5">Temp (°F)</div>
+                  <input type="number" step="0.1" className="w-full border rounded px-2 py-1.5 text-sm" placeholder="98.6" value={soapForm.vitals.temp_f ?? ""} onChange={e => setSoapForm(f => ({ ...f, vitals: { ...f.vitals, temp_f: e.target.value } }))} />
+                </div>
+                <div>
+                  <div className="text-[11px] text-slate-500 mb-0.5">Weight (lbs)</div>
+                  <input type="number" step="0.1" className="w-full border rounded px-2 py-1.5 text-sm" placeholder="170" value={soapForm.vitals.weight_lbs ?? ""} onChange={e => setSoapForm(f => ({ ...f, vitals: { ...f.vitals, weight_lbs: e.target.value } }))} />
+                </div>
+                <div>
+                  <div className="text-[11px] text-slate-500 mb-0.5">Height (in)</div>
+                  <input type="number" step="0.1" className="w-full border rounded px-2 py-1.5 text-sm" placeholder="68" value={soapForm.vitals.height_in ?? ""} onChange={e => setSoapForm(f => ({ ...f, vitals: { ...f.vitals, height_in: e.target.value } }))} />
+                </div>
+                <div>
+                  <div className="text-[11px] text-slate-500 mb-0.5">O₂ Sat (%)</div>
+                  <input type="number" className="w-full border rounded px-2 py-1.5 text-sm" placeholder="98" value={soapForm.vitals.o2_sat ?? ""} onChange={e => setSoapForm(f => ({ ...f, vitals: { ...f.vitals, o2_sat: e.target.value } }))} />
+                </div>
+                <div>
+                  <div className="text-[11px] text-slate-500 mb-0.5">Pain (0–10)</div>
+                  <input type="number" min={0} max={10} className="w-full border rounded px-2 py-1.5 text-sm" placeholder="0" value={soapForm.vitals.pain_scale ?? ""} onChange={e => setSoapForm(f => ({ ...f, vitals: { ...f.vitals, pain_scale: e.target.value } }))} />
+                </div>
+              </div>
+            </div>
+
+            {/* Diagnoses (ICD-10) */}
+            <div className="border-t pt-4">
+              <label className="block text-xs font-semibold text-slate-500 uppercase mb-2">Diagnoses (ICD-10)</label>
+              {soapForm.diagnoses.length > 0 && (
+                <div className="space-y-1.5 mb-2">
+                  {soapForm.diagnoses.map((dx, idx) => (
+                    <div key={idx} className="flex items-center gap-2 bg-slate-50 border rounded-lg px-2 py-1.5">
+                      <span className="font-mono text-xs font-semibold text-slate-700 w-16">{dx.code}</span>
+                      <span className="text-sm text-slate-700 flex-1">{dx.description}</span>
+                      <select
+                        className="border rounded px-1.5 py-0.5 text-xs"
+                        value={dx.type}
+                        onChange={e => setSoapForm(f => ({ ...f, diagnoses: f.diagnoses.map((d, i) => i === idx ? { ...d, type: e.target.value as "primary" | "secondary" } : d) }))}
+                      >
+                        <option value="primary">Primary</option>
+                        <option value="secondary">Secondary</option>
+                      </select>
+                      <button
+                        type="button"
+                        onClick={() => setSoapForm(f => ({ ...f, diagnoses: f.diagnoses.filter((_, i) => i !== idx) }))}
+                        className="p-1 rounded hover:bg-slate-200 text-slate-500"
+                        title="Remove"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  placeholder="ICD-10 code (e.g., F41.1)"
+                  className="border rounded px-2 py-1.5 text-sm w-36 font-mono"
+                  id="dx-code-input"
+                />
+                <input
+                  type="text"
+                  placeholder="Description"
+                  className="border rounded px-2 py-1.5 text-sm flex-1"
+                  id="dx-desc-input"
+                />
+                <button
+                  type="button"
+                  className="px-3 py-1.5 rounded text-xs font-medium border transition-colors"
+                  style={{ borderColor: "#635bff", color: "#635bff" }}
+                  onClick={() => {
+                    const codeEl = document.getElementById("dx-code-input") as HTMLInputElement | null;
+                    const descEl = document.getElementById("dx-desc-input") as HTMLInputElement | null;
+                    const code = (codeEl?.value ?? "").trim().toUpperCase();
+                    const description = (descEl?.value ?? "").trim();
+                    if (!code || !description) return;
+                    setSoapForm(f => ({
+                      ...f,
+                      diagnoses: [...f.diagnoses, { code, description, type: f.diagnoses.length === 0 ? "primary" : "secondary" }],
+                    }));
+                    if (codeEl) codeEl.value = "";
+                    if (descEl) descEl.value = "";
+                  }}
+                >
+                  + Add
+                </button>
+              </div>
+            </div>
+
+            {/* CPT codes */}
+            <div className="border-t pt-4">
+              <label className="block text-xs font-semibold text-slate-500 uppercase mb-2">
+                CPT Codes <span className="text-[10px] font-normal text-slate-400 normal-case">(for insurance billing — optional)</span>
+              </label>
+              {soapForm.cptCodes.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 mb-2">
+                  {soapForm.cptCodes.map((cpt, idx) => (
+                    <span key={idx} className="inline-flex items-center gap-1.5 bg-indigo-50 border border-indigo-200 rounded-full px-2.5 py-1 text-xs font-mono text-indigo-700">
+                      {cpt}
+                      <button
+                        type="button"
+                        onClick={() => setSoapForm(f => ({ ...f, cptCodes: f.cptCodes.filter((_, i) => i !== idx) }))}
+                        className="hover:text-indigo-900"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+              <div className="flex items-center gap-2 flex-wrap">
+                {["99213", "99214", "99215", "99490", "99454", "90834", "90837"].map(code => (
+                  <button
+                    key={code}
+                    type="button"
+                    disabled={soapForm.cptCodes.includes(code)}
+                    onClick={() => setSoapForm(f => ({ ...f, cptCodes: [...f.cptCodes, code] }))}
+                    className="px-2 py-1 rounded text-xs font-mono border transition-colors disabled:opacity-30 disabled:cursor-not-allowed hover:bg-slate-50"
+                  >
+                    + {code}
+                  </button>
+                ))}
+                <input
+                  type="text"
+                  placeholder="Custom CPT"
+                  className="border rounded px-2 py-1 text-xs font-mono w-28"
+                  id="cpt-input"
+                  onKeyDown={e => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      const el = e.currentTarget;
+                      const val = el.value.trim();
+                      if (val && !soapForm.cptCodes.includes(val)) {
+                        setSoapForm(f => ({ ...f, cptCodes: [...f.cptCodes, val] }));
+                        el.value = "";
+                      }
+                    }
+                  }}
+                />
+              </div>
+            </div>
+
+            {/* Time tracking */}
+            <div className="border-t pt-4">
+              <label className="block text-xs font-semibold text-slate-500 uppercase mb-2">
+                Time <span className="text-[10px] font-normal text-slate-400 normal-case">(supports time-based billing codes)</span>
+              </label>
+              <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <div className="text-[11px] text-slate-500 mb-0.5">Face-to-face (min)</div>
+                  <input type="number" min={0} className="w-full border rounded px-2 py-1.5 text-sm" value={soapForm.durationMinutesActual} onChange={e => setSoapForm(f => ({ ...f, durationMinutesActual: e.target.value }))} placeholder="0" />
+                </div>
+                <div>
+                  <div className="text-[11px] text-slate-500 mb-0.5">Documentation (min)</div>
+                  <input type="number" min={0} className="w-full border rounded px-2 py-1.5 text-sm" value={soapForm.timeSpentDocumenting} onChange={e => setSoapForm(f => ({ ...f, timeSpentDocumenting: e.target.value }))} placeholder="0" />
+                </div>
+                <div>
+                  <div className="text-[11px] text-slate-500 mb-0.5">Total</div>
+                  <div className="w-full border rounded px-2 py-1.5 text-sm bg-slate-50 text-slate-600">
+                    {(() => {
+                      const a = parseInt(soapForm.durationMinutesActual, 10);
+                      const d = parseInt(soapForm.timeSpentDocumenting, 10);
+                      const total = (Number.isFinite(a) ? a : 0) + (Number.isFinite(d) ? d : 0);
+                      return total > 0 ? `${total} min` : "—";
+                    })()}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Follow-up */}
+            <div className="border-t pt-4">
+              <label className="block text-xs font-semibold text-slate-500 uppercase mb-2">Follow-up</label>
+              <div className="grid grid-cols-3 gap-3">
+                <div className="col-span-2">
+                  <div className="text-[11px] text-slate-500 mb-0.5">Instructions</div>
+                  <textarea rows={2} className="w-full border rounded px-2 py-1.5 text-sm" value={soapForm.followUpInstructions} onChange={e => setSoapForm(f => ({ ...f, followUpInstructions: e.target.value }))} placeholder="Return in 4 weeks for medication review..." />
+                </div>
+                <div>
+                  <div className="text-[11px] text-slate-500 mb-0.5">Weeks</div>
+                  <input type="number" min={1} max={52} className="w-full border rounded px-2 py-1.5 text-sm" value={soapForm.followUpWeeks} onChange={e => setSoapForm(f => ({ ...f, followUpWeeks: e.target.value }))} placeholder="4" />
+                </div>
+              </div>
+            </div>
+
             <div className="flex items-center gap-3 pt-2">
               <button
                 className="px-4 py-2 rounded-lg text-sm font-medium border transition-colors"
