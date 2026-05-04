@@ -188,14 +188,34 @@ export function MyAgreementsSection() {
         </div>
       )}
 
-      {/* Individual signed consents */}
-      {signatures.length === 0 ? (
-        <p className="text-sm text-center py-8" style={{ color: C.slate400 }}>
-          No agreements signed yet.
-        </p>
-      ) : (
+      {/* Individual signed consents.
+          We filter out the per-template signature for the membership
+          agreement when an active membership is already surfaced
+          above — that row showed up as a duplicate "Direct Primary
+          Care Membership Agreement" right under the green PDF
+          block. The contract is the canonical artifact; the
+          per-template signature for it is redundant noise here. */}
+      {(() => {
+        const filteredSignatures = signatures.filter((sig) => {
+          if (!activeMembership) return true;
+          if (sig.membership_id && sig.membership_id === activeMembership.id) return false;
+          // Belt-and-suspenders for legacy rows that have a null
+          // membership_id but obviously refer to the same contract:
+          // the template type is "membership_agreement" or the
+          // template name matches the contract title.
+          const t = sig.template;
+          if (t?.type === "membership_agreement") return false;
+          return true;
+        });
+        return filteredSignatures.length === 0 ? (
+          activeMembership ? null : (
+            <p className="text-sm text-center py-8" style={{ color: C.slate400 }}>
+              No agreements signed yet.
+            </p>
+          )
+        ) : (
         <div className="divide-y" style={{ borderColor: C.slate100 }}>
-          {signatures.map((sig) => {
+          {filteredSignatures.map((sig) => {
             const tName = sig.template?.name ?? "Agreement";
             const tVersion = sig.template_version ?? sig.template?.version ?? "—";
             return (
@@ -237,7 +257,8 @@ export function MyAgreementsSection() {
             );
           })}
         </div>
-      )}
+        );
+      })()}
 
       {/* Preview modal */}
       {previewSig && (
@@ -314,9 +335,11 @@ export function MyAgreementsSection() {
 function formatDate(d?: string | null): string {
   if (!d) return "—";
   try {
-    return new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+    const dt = new Date(d);
+    if (isNaN(dt.getTime())) return "—";
+    return dt.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
   } catch {
-    return d;
+    return "—";
   }
 }
 
