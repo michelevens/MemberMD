@@ -1100,6 +1100,12 @@ export const encounterService = {
     if (useMockData()) return { data: {} as Encounter };
     return apiFetch<Encounter>(`/encounters/${id}`);
   },
+  // getDetail returns the encounter plus audit_logs. The backend nests
+  // both under `data` so apiFetch's standard unwrapping just works.
+  getDetail: async (id: string): Promise<ApiResponse<Encounter & { auditLogs?: any[] }>> => {
+    if (useMockData()) return { data: { auditLogs: [] } as any };
+    return apiFetch<Encounter & { auditLogs?: any[] }>(`/encounters/${id}/detail`);
+  },
   create: async (data: Partial<Encounter>): Promise<ApiResponse<Encounter>> => {
     if (useMockData()) return mockCreate<Encounter>(data);
     return apiFetch<Encounter>("/encounters", { method: "POST", body: JSON.stringify(data) });

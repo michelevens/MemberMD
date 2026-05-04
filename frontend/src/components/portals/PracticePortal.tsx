@@ -5,6 +5,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { ProviderDetailPage } from "./ProviderDetailPage";
+import { EncounterDetailPage } from "./EncounterDetailPage";
 import { useAuth } from "../../contexts/AuthContext";
 import { dashboardService, membershipPlanService, messageService, patientService, appointmentService, encounterService, prescriptionService, invoiceService, programService, telehealthService, screeningService, couponService, providerService, paymentService, notificationService, apiFetch, billingEnhancedService, documentService, onboardingService, staffService } from "../../lib/api";
 import { formatDob } from "../../lib/format";
@@ -687,6 +688,9 @@ export function PracticePortal() {
   // hash directly rather than nested <Routes> avoids a wider refactor.
   const providerDetailMatch = /^\/practice\/providers\/([^/?]+)/.exec(location.pathname);
   const selectedProviderId = providerDetailMatch ? providerDetailMatch[1] : null;
+  // Same hash-route trick for the encounter detail page.
+  const encounterDetailMatch = /^\/practice\/encounters\/([^/?]+)/.exec(location.pathname);
+  const selectedEncounterId = encounterDetailMatch ? encounterDetailMatch[1] : null;
   const [activeTab, setActiveTab] = useState<TabId>("dashboard");
   const [selectedThread, setSelectedThread] = useState(isDemoMode ? MOCK_THREADS[0].id : "");
   const [searchQuery, setSearchQuery] = useState("");
@@ -7958,7 +7962,7 @@ export function PracticePortal() {
     ];
 
     const rowActions = (enc: Enc): import("../shared/stripe-ui").KebabAction[] => [
-      { label: "View encounter", onClick: () => { setExpandedEncounters((prev) => prev.includes(enc.id) ? prev : [...prev, enc.id]); } },
+      { label: "View encounter", onClick: () => navigate(`/practice/encounters/${enc.id}`) },
       { label: "Edit", onClick: () => { setAmendingEncounter(false); setAmendmentReason(""); setEditingEncounterId(enc.id); setSoapForm({
           chiefComplaint: "", subjective: "", objective: "", assessment: "", plan: "",
           diagnoses: [], vitals: {}, cptCodes: [],
@@ -9704,6 +9708,14 @@ export function PracticePortal() {
           providerId={selectedProviderId}
           embedded
           onBack={() => navigate("/practice")}
+        />
+      );
+    }
+    if (selectedEncounterId) {
+      return (
+        <EncounterDetailPage
+          encounterId={selectedEncounterId}
+          onBack={() => { setActiveTab("encounters"); navigate("/practice"); }}
         />
       );
     }
