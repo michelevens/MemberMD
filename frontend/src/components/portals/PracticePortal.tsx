@@ -2537,6 +2537,52 @@ export function PracticePortal() {
     [appointments]
   );
 
+  // ─── Telehealth waiting queue ──────────────────────────────────────────
+  // Patients who've joined a session and are waiting for the provider
+  // to admit them. Polled every 8s while the portal is open. Empty when
+  // nobody's waiting (badge hides, drawer renders empty state).
+  const [waitingQueue, setWaitingQueue] = useState<Array<{
+    id: string;
+    appointmentId: string;
+    patientName: string;
+    patientJoinedAt: string;
+    waitingSeconds: number;
+    isExternal: boolean;
+    scheduledAt: string | null;
+  }>>([]);
+  const [admittingId, setAdmittingId] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const poll = async () => {
+      const res = await telehealthService.listWaiting();
+      if (cancelled) return;
+      if (res.error || !res.data) {
+        setWaitingQueue([]);
+        return;
+      }
+      setWaitingQueue(res.data);
+    };
+    void poll();
+    const id = window.setInterval(poll, 8000);
+    return () => { cancelled = true; window.clearInterval(id); };
+  }, []);
+
+  const admitWaitingPatient = async (sessionId: string) => {
+    setAdmittingId(sessionId);
+    const res = await telehealthService.admitSession(sessionId);
+    setAdmittingId(null);
+    if (res.error) {
+      setToast({ message: res.error, type: "error" });
+      return;
+    }
+    // Optimistically remove from local queue; next poll confirms.
+    setWaitingQueue((q) => q.filter((w) => w.id !== sessionId));
+    setToast({ message: "Patient admitted.", type: "success" });
+    // Open the room ourselves so the provider lands in the active call.
+    navigate(`/telehealth/${sessionId}`);
+  };
+
   const invoices = useMemo(() => apiInvoices || (isDemoMode ? MOCK_INVOICES : []), [apiInvoices]);
 
   const invoiceSummary = useMemo(() => ({
@@ -6550,6 +6596,54 @@ export function PracticePortal() {
             </div>
           )}
         </div>
+
+        {/* Waiting room — only renders when patients are waiting.
+            Polled every 8s. Click Admit on a row to flip the
+            patient out of their waiting overlay and join the room. */}
+        {waitingQueue.length > 0 && (
+          <div>
+            <h3 className="text-[11px] font-semibold uppercase tracking-wider text-amber-700 mb-3 flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+              {waitingQueue.length === 1 ? "1 patient waiting" : `${waitingQueue.length} patients waiting`}
+            </h3>
+            <div className="space-y-2">
+              {waitingQueue.map((w) => {
+                const mins = Math.floor((w.waitingSeconds || 0) / 60);
+                const secs = (w.waitingSeconds || 0) % 60;
+                const waitedFor = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+                return (
+                  <div
+                    key={w.id}
+                    className="rounded-xl p-4 flex items-center gap-4"
+                    style={{ backgroundColor: "#fffbeb", border: "1px solid #fde68a" }}
+                  >
+                    <div
+                      className="w-9 h-9 rounded-full flex items-center justify-center shrink-0"
+                      style={{ backgroundColor: "#fef3c7" }}
+                    >
+                      <Video className="w-4 h-4" style={{ color: "#92400e" }} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-slate-800 truncate">{w.patientName}</p>
+                      <p className="text-xs text-slate-600 mt-0.5">
+                        Waiting {waitedFor}
+                        {w.scheduledAt ? ` · scheduled ${new Date(w.scheduledAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : ""}
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => void admitWaitingPatient(w.id)}
+                      disabled={admittingId === w.id}
+                      className="px-4 py-2 rounded-lg text-sm font-semibold text-white disabled:opacity-50 transition-opacity hover:opacity-90"
+                      style={{ backgroundColor: "#27ab83" }}
+                    >
+                      {admittingId === w.id ? "Admitting…" : "Admit & Join"}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {/* Today's Telehealth Sessions */}
         <div>

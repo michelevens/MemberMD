@@ -19,6 +19,10 @@ class TelehealthSession extends Model
         'status',
         'started_at', 'ended_at', 'duration_seconds',
         'provider_joined_at', 'patient_joined_at',
+        // Admit-from-queue waiting room: admitted_at = null means
+        // patient is in the waiting overlay; provider clicks Admit
+        // to set both fields.
+        'admitted_at', 'admitted_by_user_id',
         'recording_enabled', 'recording_consent_given',
         'external_video_url', 'is_external',
         'metadata',
@@ -34,6 +38,7 @@ class TelehealthSession extends Model
         'ended_at' => 'datetime',
         'provider_joined_at' => 'datetime',
         'patient_joined_at' => 'datetime',
+        'admitted_at' => 'datetime',
     ];
 
     public function appointment(): BelongsTo { return $this->belongsTo(Appointment::class); }

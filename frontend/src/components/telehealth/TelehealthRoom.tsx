@@ -33,7 +33,7 @@ import type {
   RemoteTrack, RemoteTrackPublication, RemoteParticipant,
   LocalTrackPublication, Participant,
 } from "livekit-client";
-import { telehealthService } from "../../lib/api";
+import { authService, telehealthService } from "../../lib/api";
 
 // ─── Colors ───────────────────────────────────────────────────────────────────
 
@@ -106,6 +106,14 @@ export function TelehealthRoom() {
   const [chatOpen, setChatOpen] = useState(false);
   const [unreadChat, setUnreadChat] = useState(0);
   const [showSettings, setShowSettings] = useState(false);
+  // Waiting room overlay state — patient lands in this state on join
+  // until the provider clicks Admit. The overlay covers the active
+  // layout but the LiveKit room is already connected behind it so
+  // when admitted_at flips, the transition is instant.
+  // Practice/provider role bypasses the waiting check (they don't
+  // wait for themselves to admit).
+  const [isWaiting, setIsWaiting] = useState(false);
+  const [waitingFor, setWaitingFor] = useState("your provider");
 
   // Devices — populated after the local stream is up.
   const [cameras, setCameras] = useState<MediaDeviceInfo[]>([]);
@@ -122,22 +130,23 @@ export function TelehealthRoom() {
     }
     let cancelled = false;
     (async () => {
+      // Resolve current user role first so we can decide whether to
+      // apply the waiting-room gate. Provider/admin/staff bypass it
+      // (they're the ones admitting). Patients always go through it.
+      const meRes = await authService.me();
+      const role = (meRes.data as { role?: string } | null)?.role ?? "";
+      const isStaff = ["practice_admin", "staff", "provider", "superadmin"].includes(role);
+
       const res = await telehealthService.joinSession(sessionId);
       if (cancelled) return;
       if (res.error || !res.data) {
         setPhase({ kind: "error", message: res.error || "Could not load this session." });
         return;
       }
-      const data = res.data as {
-        session: { isExternal: boolean; externalVideoUrl: string | null; roomName: string; roomUrl: string };
-        token: string;
-        roomUrl: string;
-        roomName: string;
-      };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const data = res.data as any;
       const session = data.session;
-      // External (BYOV) — short-circuit. The provider has a Zoom /
-      // Google Meet / Teams personal meeting link; we just hand it
-      // off in a new tab.
+      // External (BYOV) — short-circuit.
       if (session?.isExternal) {
         const url = session.externalVideoUrl || session.roomUrl || "";
         if (!url) {
@@ -151,6 +160,18 @@ export function TelehealthRoom() {
         setPhase({ kind: "error", message: "Server didn't return a usable LiveKit token." });
         return;
       }
+      // Waiting-room gate: patient + admitted_at IS NULL = waiting.
+      const admittedAt = session?.admittedAt ?? session?.admitted_at ?? null;
+      const isPatient = !isStaff;
+      if (isPatient && !admittedAt) {
+        setIsWaiting(true);
+        // Surface provider's name in the waiting overlay if we can.
+        const apt = session?.appointment ?? null;
+        const prov = apt?.provider?.user ?? apt?.providerUser ?? null;
+        const provName = prov?.name
+          ?? [prov?.firstName ?? prov?.first_name, prov?.lastName ?? prov?.last_name].filter(Boolean).join(" ").trim();
+        if (provName) setWaitingFor(provName);
+      }
       setPhase({
         kind: "tech-check",
         sessionToken: data.token,
@@ -160,6 +181,27 @@ export function TelehealthRoom() {
     })();
     return () => { cancelled = true; };
   }, [sessionId]);
+
+  // ─── 1a. Poll session for admittance — only while waiting. ──────────────
+  // The patient is already connected to LiveKit; this just clears the
+  // overlay once the provider clicks Admit on their end. 4s cadence is
+  // a fair balance between perceived latency and server load.
+  useEffect(() => {
+    if (!isWaiting || !sessionId) return;
+    let cancelled = false;
+    const id = window.setInterval(async () => {
+      const res = await telehealthService.getSession(sessionId);
+      if (cancelled) return;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const sess = res.data as any;
+      const admittedAt = sess?.admittedAt ?? sess?.admitted_at ?? null;
+      if (admittedAt) {
+        setIsWaiting(false);
+        window.clearInterval(id);
+      }
+    }, 4000);
+    return () => { cancelled = true; window.clearInterval(id); };
+  }, [isWaiting, sessionId]);
 
   // ─── 2. Tech check — get camera/mic preview before joining ──────────────
   useEffect(() => {
@@ -535,6 +577,48 @@ export function TelehealthRoom() {
             }}
             onClose={() => setShowSettings(false)}
           />
+        )}
+
+        {/* Waiting-room overlay — patient is connected to LiveKit
+            but the provider hasn't clicked Admit yet. Covers the
+            entire video area so they don't see/hear anything until
+            admitted. The provider role bypasses isWaiting entirely
+            so they're never staring at this screen. */}
+        {phase.kind === "active" && isWaiting && (
+          <div
+            style={{
+              position: "absolute", inset: 0,
+              backgroundColor: C.navy900,
+              display: "flex", flexDirection: "column",
+              alignItems: "center", justifyContent: "center",
+              zIndex: 40,
+              textAlign: "center",
+              padding: 24,
+            }}
+          >
+            <div
+              style={{
+                width: 64, height: 64, borderRadius: "50%",
+                backgroundColor: "rgba(39, 171, 131, 0.15)",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                marginBottom: 16,
+              }}
+            >
+              <Loader2 className="w-7 h-7 animate-spin" style={{ color: C.teal500 }} />
+            </div>
+            <h2 className="text-lg font-semibold" style={{ color: C.white }}>
+              You're in the waiting room
+            </h2>
+            <p className="text-sm mt-2 max-w-sm" style={{ color: C.slate400 }}>
+              {waitingFor !== "your provider"
+                ? `${waitingFor} will admit you when they're ready.`
+                : "Your provider will admit you when they're ready."}
+              {" "}This usually takes just a moment.
+            </p>
+            <p className="text-xs mt-6" style={{ color: C.slate500 }}>
+              Your camera and microphone are ready — they'll start when the visit begins.
+            </p>
+          </div>
         )}
       </div>
 

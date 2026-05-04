@@ -1600,6 +1600,25 @@ export const telehealthService = {
     if (useMockData()) return mockUpdate<TelehealthSession>({ id: sessionId, status: "completed" });
     return apiFetch<TelehealthSession>(`/telehealth/${sessionId}/end`, { method: "POST" });
   },
+  /** Provider/admin admits a patient out of the waiting room. */
+  admitSession: async (sessionId: string): Promise<ApiResponse<TelehealthSession>> => {
+    if (useMockData()) return mockUpdate<TelehealthSession>({ id: sessionId });
+    return apiFetch<TelehealthSession>(`/telehealth/${sessionId}/admit`, { method: "POST" });
+  },
+  /** List patients currently in the waiting room. Provider role
+   *  scopes to their own; admin sees the whole tenant. */
+  listWaiting: async (): Promise<ApiResponse<Array<{
+    id: string;
+    appointmentId: string;
+    patientName: string;
+    patientJoinedAt: string;
+    waitingSeconds: number;
+    isExternal: boolean;
+    scheduledAt: string | null;
+  }>>> => {
+    if (useMockData()) return { data: [] };
+    return apiFetch(`/telehealth/waiting`);
+  },
   giveConsent: async (sessionId: string): Promise<ApiResponse<TelehealthSession>> => {
     if (useMockData()) return mockUpdate<TelehealthSession>({ id: sessionId, recordingConsentGiven: true });
     return apiFetch<TelehealthSession>(`/telehealth/${sessionId}/consent`, { method: "POST" });

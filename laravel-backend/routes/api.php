@@ -597,9 +597,14 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
     // ===== Telehealth =====
     Route::prefix('telehealth')->group(function () {
         Route::post('/', [TelehealthController::class, 'store']);
+        // ORDER MATTERS: literal-path routes (waiting, appointment/...)
+        // before the {id} catch-all, otherwise the {id} pattern eats
+        // them and Laravel tries to load a session with id="waiting".
+        Route::get('/waiting', [TelehealthController::class, 'waiting']);
         Route::get('/appointment/{appointmentId}/token', [TelehealthController::class, 'token']);
         Route::get('/{id}', [TelehealthController::class, 'show']);
         Route::post('/{id}/join', [TelehealthController::class, 'join']);
+        Route::post('/{id}/admit', [TelehealthController::class, 'admit']);
         Route::post('/{id}/end', [TelehealthController::class, 'end']);
         Route::post('/{id}/consent', [TelehealthController::class, 'consent']);
     });

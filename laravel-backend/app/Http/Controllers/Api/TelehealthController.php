@@ -143,11 +143,16 @@ class TelehealthController extends Controller
         $isProvider = $session->appointment->provider &&
             $session->appointment->provider->user_id === $user->id;
 
-        // Update join timestamps
+        // Update join timestamps. Provider joining auto-admits any
+        // waiting patient — they explicitly chose to enter the room,
+        // which is the same intent as clicking Admit on the queue.
+        // Saves a click in the common case.
         if ($isProvider && !$session->provider_joined_at) {
             $session->update([
                 'provider_joined_at' => now(),
                 'status' => $session->patient_joined_at ? 'in_progress' : $session->status,
+                'admitted_at' => $session->admitted_at ?? now(),
+                'admitted_by_user_id' => $session->admitted_by_user_id ?? $user->id,
             ]);
             if (!$session->started_at) {
                 $session->update(['started_at' => now()]);
@@ -243,6 +248,103 @@ class TelehealthController extends Controller
         $session->update(['recording_consent_given' => true]);
 
         return response()->json(['data' => $session->fresh()]);
+    }
+
+    /**
+     * POST /telehealth/{id}/admit
+     *
+     * Provider (or admin) clicks Admit on a patient who's in the
+     * waiting room. Stamps admitted_at + admitted_by_user_id. The
+     * patient's TelehealthRoom polls `session.admittedAt`; the
+     * waiting overlay clears once it's non-null.
+     *
+     * Idempotent — calling twice doesn't reset the timestamp.
+     * Returns 422 if the session is already ended/cancelled.
+     */
+    public function admit(Request $request, string $id): JsonResponse
+    {
+        $user = $request->user();
+
+        $session = TelehealthSession::where('tenant_id', $user->tenant_id)
+            ->with(['appointment.provider'])
+            ->findOrFail($id);
+
+        // Provider on the appointment OR practice admin / superadmin.
+        // Patients can't admit themselves.
+        $isProvider = $session->appointment?->provider
+            && $session->appointment->provider->user_id === $user->id;
+        $isAdmin = in_array($user->role, ['practice_admin', 'superadmin'], true);
+        if (!$isProvider && !$isAdmin) {
+            abort(403, 'Only the provider or a practice admin can admit a patient.');
+        }
+
+        if (in_array($session->status, ['completed', 'cancelled'], true)) {
+            return response()->json([
+                'message' => 'Session is no longer active.',
+                'status' => $session->status,
+            ], 422);
+        }
+
+        if ($session->admitted_at === null) {
+            $session->update([
+                'admitted_at' => now(),
+                'admitted_by_user_id' => $user->id,
+            ]);
+        }
+
+        return response()->json(['data' => $session->fresh()]);
+    }
+
+    /**
+     * GET /telehealth/waiting
+     *
+     * Patients currently in the waiting room across the tenant.
+     * Used by the practice portal to render the "N patients waiting"
+     * badge + drawer. A session is "waiting" when:
+     *   patient_joined_at IS NOT NULL  (the patient has loaded the
+     *                                   TelehealthRoom)
+     *   AND admitted_at IS NULL        (provider hasn't clicked Admit)
+     *   AND status NOT IN cancelled/completed
+     *
+     * Provider role: only their own patients. Admin: tenant-wide.
+     */
+    public function waiting(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        abort_if(!in_array($user->role, ['practice_admin', 'staff', 'provider', 'superadmin'], true), 403);
+
+        $query = TelehealthSession::where('tenant_id', $user->tenant_id)
+            ->whereNotNull('patient_joined_at')
+            ->whereNull('admitted_at')
+            ->whereNotIn('status', ['cancelled', 'completed'])
+            ->with(['appointment.patient:id,first_name,last_name', 'appointment.provider:id,user_id'])
+            ->orderBy('patient_joined_at', 'asc');
+
+        // Providers only see their own queue. Practice-admin / staff
+        // see the whole tenant so a front-desk role can route.
+        if ($user->role === 'provider') {
+            $query->whereHas('appointment.provider', fn ($q) => $q->where('user_id', $user->id));
+        }
+
+        $rows = $query->limit(50)->get()->map(function (TelehealthSession $s) {
+            $apt = $s->appointment;
+            $patient = $apt?->patient;
+            $name = trim(($patient?->first_name ?? '') . ' ' . ($patient?->last_name ?? '')) ?: 'Patient';
+            $waitingSeconds = $s->patient_joined_at
+                ? max(0, now()->diffInSeconds($s->patient_joined_at, false) * -1)
+                : 0;
+            return [
+                'id' => $s->id,
+                'appointment_id' => $apt?->id,
+                'patient_name' => $name,
+                'patient_joined_at' => $s->patient_joined_at?->toIso8601String(),
+                'waiting_seconds' => $waitingSeconds,
+                'is_external' => (bool) $s->is_external,
+                'scheduled_at' => $apt?->scheduled_at?->toIso8601String(),
+            ];
+        });
+
+        return response()->json(['data' => $rows]);
     }
 
     /**
