@@ -20,6 +20,16 @@ class DailyService
      */
     public function createRoom(string $appointmentId, array $options = []): array
     {
+        // Fail fast when DAILY_API_KEY isn't configured on the host —
+        // otherwise every room-create returns Daily's generic 401 body
+        // and the user sees "Failed to create room" with no clue why.
+        if (empty($this->apiKey)) {
+            return [
+                'error' => 'Telehealth video isn\'t configured yet — DAILY_API_KEY is not set on the backend. Set it in Railway env vars to enable video calls.',
+                'reason' => 'missing_api_key',
+            ];
+        }
+
         $roomName = 'appt-' . substr(str_replace('-', '', $appointmentId), 0, 12);
 
         $response = Http::withHeaders(['Authorization' => 'Bearer ' . $this->apiKey])
@@ -38,7 +48,14 @@ class DailyService
             ]);
 
         if (!$response->ok()) {
-            return ['error' => $response->body()];
+            // Daily.co returns errors like:
+            // {"error":"already-exists","info":"a room named 'appt-xxx' already exists"}
+            // Surface a parsed message when possible.
+            $body = $response->json();
+            $msg = is_array($body)
+                ? ($body['info'] ?? $body['error'] ?? $response->body())
+                : $response->body();
+            return ['error' => "Daily.co: {$msg}"];
         }
 
         $data = $response->json();

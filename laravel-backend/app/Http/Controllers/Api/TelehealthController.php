@@ -68,10 +68,13 @@ class TelehealthController extends Controller
                 ]);
 
                 if (isset($room['error'])) {
+                    // Distinguish "ops hasn't set the API key yet" (503,
+                    // shown verbatim to the user) from "Daily said no"
+                    // (502, surfaced with their message).
+                    $isConfig = ($room['reason'] ?? null) === 'missing_api_key';
                     return response()->json([
-                        'message' => 'Failed to create video room.',
-                        'error' => $room['error'],
-                    ], 502);
+                        'message' => $room['error'],
+                    ], $isConfig ? 503 : 502);
                 }
 
                 $session = TelehealthSession::create([
