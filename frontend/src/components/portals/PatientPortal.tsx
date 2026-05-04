@@ -93,6 +93,10 @@ interface Appointment {
   date: string;
   time: string;
   provider: string;
+  // Provider id (UUID) — needed by the reschedule slot picker so it
+  // can call /appointments/available-slots?provider_id=...
+  providerId?: string;
+  durationMinutes?: number;
   type: string;
   status: "upcoming" | "completed" | "cancelled";
   isVideo: boolean;
@@ -601,6 +605,8 @@ export function PatientPortal() {
     id: string;
     type: string;
     provider: string;
+    providerId?: string;
+    durationMinutes?: number;
     currentDate: string;
     currentTime: string;
   } | null>(null);
@@ -608,6 +614,11 @@ export function PatientPortal() {
   const [rescheduleNewTime, setRescheduleNewTime] = useState("");
   const [rescheduleSubmitting, setRescheduleSubmitting] = useState(false);
   const [rescheduleError, setRescheduleError] = useState<string | null>(null);
+  // Available slots for the selected date — fetched from
+  // /appointments/available-slots so the patient picks a real slot
+  // instead of free-typing a time and eating a 422.
+  const [rescheduleSlots, setRescheduleSlots] = useState<Array<{ start: string; end: string }>>([]);
+  const [rescheduleSlotsLoading, setRescheduleSlotsLoading] = useState(false);
   const [cancelDialog, setCancelDialog] = useState<{
     id: string;
     type: string;
@@ -867,6 +878,8 @@ export function PatientPortal() {
               date,
               time,
               provider: providerLabel(a),
+              providerId: (a.providerId as string) ?? (a.provider_id as string) ?? a.provider?.id ?? undefined,
+              durationMinutes: (a.durationMinutes as number) ?? (a.duration_minutes as number) ?? undefined,
               type: typeLabel(a),
               status: "upcoming" as const,
               isVideo: !!(a.isVideo ?? a.is_video ?? a.isTelehealth ?? a.is_telehealth),
@@ -1148,15 +1161,48 @@ export function PatientPortal() {
       id: apt.id,
       type: apt.type,
       provider: apt.provider,
+      providerId: apt.providerId,
+      durationMinutes: apt.durationMinutes,
       currentDate: apt.date,
       currentTime: apt.time,
     });
     // Default to current values so the patient can tweak rather than
     // start from blank.
     setRescheduleNewDate(apt.date ? new Date(apt.date).toISOString().slice(0, 10) : "");
-    setRescheduleNewTime(apt.time || "");
+    setRescheduleNewTime("");
+    setRescheduleSlots([]);
     setRescheduleError(null);
   }, []);
+
+  // Fetch available slots whenever the date or provider changes in the
+  // reschedule dialog. Bails if we don't have provider_id (legacy rows
+  // without it fall back to the free-time-input flow).
+  useEffect(() => {
+    if (!rescheduleDialog?.providerId || !rescheduleNewDate) {
+      setRescheduleSlots([]);
+      return;
+    }
+    let cancelled = false;
+    setRescheduleSlotsLoading(true);
+    (async () => {
+      const qs = new URLSearchParams({
+        provider_id: rescheduleDialog.providerId!,
+        date: rescheduleNewDate,
+        duration_minutes: String(rescheduleDialog.durationMinutes ?? 30),
+      });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const res = await apiFetch<any>(`/appointments/available-slots?${qs.toString()}`);
+      if (cancelled) return;
+      setRescheduleSlotsLoading(false);
+      if (res.error || !res.data) {
+        setRescheduleSlots([]);
+        return;
+      }
+      const arr = Array.isArray(res.data) ? res.data : (res.data as { data?: Array<{start:string;end:string}> }).data ?? [];
+      setRescheduleSlots(arr);
+    })();
+    return () => { cancelled = true; };
+  }, [rescheduleDialog?.providerId, rescheduleDialog?.durationMinutes, rescheduleNewDate]);
 
   const handleRescheduleSubmit = useCallback(async () => {
     if (!rescheduleDialog) return;
@@ -1176,7 +1222,11 @@ export function PatientPortal() {
     setRescheduleSubmitting(true);
     setRescheduleError(null);
     try {
-      const res = await apiFetch(`/appointments/${rescheduleDialog.id}`, {
+      // Use the dedicated reschedule endpoint — it re-runs the
+      // availability check, sends a reschedule email, and appends
+      // an audit note. Plain PUT /appointments/{id} would skip
+      // those side-effects.
+      const res = await apiFetch(`/appointments/${rescheduleDialog.id}/reschedule`, {
         method: "PUT",
         body: JSON.stringify({ scheduled_at: local.toISOString() }),
       });
@@ -3362,12 +3412,45 @@ export function PatientPortal() {
               </div>
               <div>
                 <label className="block text-xs font-medium text-slate-600 mb-1">New time</label>
-                <input
-                  type="time"
-                  value={rescheduleNewTime}
-                  onChange={(e) => setRescheduleNewTime(e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400"
-                />
+                {rescheduleDialog.providerId ? (
+                  rescheduleSlotsLoading ? (
+                    <div className="text-xs text-slate-500 px-3 py-3 bg-slate-50 rounded-lg flex items-center gap-2">
+                      <span className="w-3 h-3 rounded-full border-2 border-slate-300 border-t-teal-500 animate-spin" />
+                      Loading available times…
+                    </div>
+                  ) : rescheduleNewDate && rescheduleSlots.length === 0 ? (
+                    <p className="text-xs text-slate-500 px-3 py-3 bg-slate-50 rounded-lg">
+                      No available slots on this day. Try a different date.
+                    </p>
+                  ) : (
+                    <div className="grid grid-cols-3 sm:grid-cols-4 gap-1.5 max-h-48 overflow-y-auto p-1 -m-1">
+                      {rescheduleSlots.map((s) => {
+                        const isSel = rescheduleNewTime === s.start;
+                        return (
+                          <button
+                            key={s.start}
+                            onClick={() => setRescheduleNewTime(s.start)}
+                            className="px-2 py-1.5 rounded-md text-xs font-medium transition-colors"
+                            style={{
+                              backgroundColor: isSel ? COLORS.teal500 : "#ffffff",
+                              color: isSel ? "#ffffff" : COLORS.slate700,
+                              border: `1px solid ${isSel ? COLORS.teal500 : COLORS.slate200}`,
+                            }}
+                          >
+                            {s.start}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )
+                ) : (
+                  <input
+                    type="time"
+                    value={rescheduleNewTime}
+                    onChange={(e) => setRescheduleNewTime(e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400"
+                  />
+                )}
               </div>
               {rescheduleError && (
                 <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
