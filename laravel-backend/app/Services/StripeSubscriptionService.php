@@ -924,6 +924,46 @@ class StripeSubscriptionService
         return $plan->fresh();
     }
 
+    /**
+     * Open a Stripe-hosted Customer Portal session on the practice's
+     * Connect account. Patients use this to update their card on file,
+     * download past invoices, or cancel their subscription without
+     * having to call the practice.
+     *
+     * Returns the portal URL — the caller redirects the patient there.
+     * Stripe terminates the session on its side; we don't track it.
+     */
+    public function createCustomerPortalSession(
+        Practice $practice,
+        Patient $patient,
+        string $returnUrl,
+    ): string {
+        $this->assertPracticeReady($practice);
+
+        $customerId = $patient->stripe_customer_id;
+        if (empty($customerId)) {
+            // The patient may have a customer record on the connected
+            // account from a prior enrollment. ensureCustomer is
+            // idempotent + race-safe so calling it here just resolves
+            // the existing id without creating a duplicate.
+            $customerId = $this->ensureCustomer($practice, $patient);
+        }
+
+        try {
+            $session = $this->stripe()->billingPortal->sessions->create(
+                [
+                    'customer' => $customerId,
+                    'return_url' => $returnUrl,
+                ],
+                ['stripe_account' => $practice->stripe_account_id],
+            );
+        } catch (ApiErrorException $e) {
+            throw new RuntimeException("Failed to open billing portal: {$e->getMessage()}", 0, $e);
+        }
+
+        return $session->url;
+    }
+
     private function assertPracticeReady(Practice $practice): void
     {
         if (empty($practice->stripe_account_id)) {

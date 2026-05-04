@@ -1440,6 +1440,56 @@ class MembershipController extends Controller
      * phone, status} per dependent, derived from the dependent
      * PatientMembership rows.
      */
+    /**
+     * POST /me/billing-portal — opens a Stripe-hosted Customer Portal
+     * on the practice's Connect account so the patient can self-serve
+     * card updates, invoice downloads, and (optionally) cancellation.
+     * Returns the portal URL which the frontend redirects to.
+     */
+    public function myBillingPortal(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        abort_if(!$user->isPatient() || !$user->patient, 403, 'Patient role required.');
+
+        $patient = $user->patient;
+        $practice = Practice::findOrFail($patient->tenant_id);
+        if (!$practice->canAcceptPayments()) {
+            return response()->json([
+                'message' => 'Practice payment processing is not configured. Contact the practice for billing changes.',
+            ], 422);
+        }
+
+        // Has the patient ever subscribed via Stripe? If they're a
+        // free/manual member there's no Stripe customer to open the
+        // portal for.
+        $hasStripeMembership = PatientMembership::where('tenant_id', $practice->id)
+            ->where('patient_id', $patient->id)
+            ->whereNotNull('stripe_subscription_id')
+            ->exists();
+        if (!$hasStripeMembership) {
+            return response()->json([
+                'message' => 'No billed membership on file. Contact the practice for billing changes.',
+            ], 422);
+        }
+
+        $appUrl = (string) config('app.frontend_url', config('app.url', 'https://app.membermd.io'));
+        $returnUrl = rtrim($appUrl, '/') . '/#/patient/billing';
+
+        try {
+            $url = $this->subscriptions->createCustomerPortalSession(
+                practice: $practice,
+                patient: $patient,
+                returnUrl: $returnUrl,
+            );
+        } catch (\Throwable $e) {
+            return response()->json([
+                'message' => 'Could not open billing portal: ' . $e->getMessage(),
+            ], 502);
+        }
+
+        return response()->json(['data' => ['url' => $url]]);
+    }
+
     public function myFamilyMembers(Request $request): JsonResponse
     {
         $user = $request->user();

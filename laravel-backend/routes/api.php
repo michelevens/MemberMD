@@ -381,6 +381,9 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
     Route::get('/family/members', [\App\Http\Controllers\Api\MembershipController::class, 'myFamilyMembers']);
     Route::post('/family/members', [\App\Http\Controllers\Api\MembershipController::class, 'addMyFamilyMember']);
     Route::delete('/family/members/{membershipId}', [\App\Http\Controllers\Api\MembershipController::class, 'removeMyFamilyMember']);
+    // Stripe-hosted Customer Portal for patient self-serve card / invoice
+    // / cancellation management on the practice's Connect account.
+    Route::post('/me/billing-portal', [\App\Http\Controllers\Api\MembershipController::class, 'myBillingPortal']);
 
     // ===== Clinical settings lists =====
     // Five short configurable lists the practice admin manages from

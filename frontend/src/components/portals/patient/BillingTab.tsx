@@ -78,6 +78,10 @@ export function BillingTab() {
   const [refreshKey, setRefreshKey] = useState(0);
 
   const [cancelOpen, setCancelOpen] = useState(false);
+  // Stripe-hosted Customer Portal (port shipping in this commit) — opens
+  // a Stripe URL for self-serve card / invoice / cancellation management.
+  const [billingPortalLoading, setBillingPortalLoading] = useState(false);
+  const [billingPortalError, setBillingPortalError] = useState<string | null>(null);
   const [cardsOpen, setCardsOpen] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
   const [syncingFromStripe, setSyncingFromStripe] = useState(false);
@@ -331,13 +335,35 @@ export function BillingTab() {
         </div>
 
         {/* Action buttons */}
-        <div className="flex items-center gap-2 mt-4 pt-3 border-t" style={{ borderColor: C.slate200 }}>
+        <div className="flex flex-col sm:flex-row items-stretch gap-2 mt-4 pt-3 border-t" style={{ borderColor: C.slate200 }}>
           <button
             onClick={() => setCardsOpen(true)}
             className="flex-1 py-2 rounded-lg text-sm font-medium border flex items-center justify-center gap-1.5 transition-colors hover:bg-slate-50"
             style={{ borderColor: C.slate300, color: C.slate600 }}
           >
             <CreditCard className="w-4 h-4" /> Manage Cards
+          </button>
+          <button
+            onClick={async () => {
+              setBillingPortalLoading(true);
+              setBillingPortalError(null);
+              const res = await apiFetch<{ url: string }>("/me/billing-portal", { method: "POST" });
+              setBillingPortalLoading(false);
+              if (res.error || !res.data?.url) {
+                setBillingPortalError(res.error || "Could not open billing portal.");
+                return;
+              }
+              window.location.href = res.data.url;
+            }}
+            disabled={billingPortalLoading || isCancelled}
+            className="flex-1 py-2 rounded-lg text-sm font-medium border flex items-center justify-center gap-1.5 transition-colors hover:bg-indigo-50 disabled:opacity-40 disabled:cursor-not-allowed"
+            style={{ borderColor: "#a5b4fc", color: "#4338ca" }}
+          >
+            {billingPortalLoading ? (
+              <><Loader2 className="w-4 h-4 animate-spin" /> Opening…</>
+            ) : (
+              <><Receipt className="w-4 h-4" /> Stripe Billing</>
+            )}
           </button>
           <button
             onClick={() => setCancelOpen(true)}
@@ -348,6 +374,9 @@ export function BillingTab() {
             {isCancelled ? "Cancelled" : "Cancel Membership"}
           </button>
         </div>
+        {billingPortalError && (
+          <p className="text-xs mt-2" style={{ color: C.red500 }}>{billingPortalError}</p>
+        )}
       </div>
 
       {/* ── Family on this membership ──────────────────────────────────────
