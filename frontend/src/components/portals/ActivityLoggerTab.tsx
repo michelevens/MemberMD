@@ -137,8 +137,63 @@ export function ActivityLoggerTab() {
   const [notes, setNotes] = useState("");
   const [entitlements, setEntitlements] = useState<Entitlement[]>([]);
   const [selectedEntitlement, setSelectedEntitlement] = useState("");
+  const [requiresApproval, setRequiresApproval] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitSuccess, setSubmitSuccess] = useState(false);
+
+  // Pending approvals queue (supervisor view)
+  interface PendingItem {
+    id: string;
+    patientId: string;
+    patientName: string;
+    activityType: string;
+    subject: string | null;
+    summary: string | null;
+    durationMinutes: number | null;
+    loggedAt: string;
+  }
+  const [pending, setPending] = useState<PendingItem[]>([]);
+  const [pendingLoading, setPendingLoading] = useState(false);
+  const [showPendingPanel, setShowPendingPanel] = useState(false);
+
+  const loadPending = useCallback(async () => {
+    setPendingLoading(true);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const res = await apiFetch<any>("/activity-log/pending");
+    setPendingLoading(false);
+    if (res.error || !res.data) {
+      setPending([]);
+      return;
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const items: any[] = Array.isArray(res.data) ? res.data : (res.data as any).data ?? [];
+    setPending(items.map((p) => ({
+      id: p.id,
+      patientId: p.patientId ?? p.patient_id,
+      patientName: p.patientName ?? p.patient_name,
+      activityType: p.activityType ?? p.activity_type ?? "other",
+      subject: p.subject ?? null,
+      summary: p.summary ?? null,
+      durationMinutes: p.durationMinutes ?? p.duration_minutes ?? null,
+      loggedAt: p.loggedAt ?? p.logged_at,
+    })));
+  }, []);
+
+  useEffect(() => { void loadPending(); }, [loadPending]);
+
+  const approve = async (id: string) => {
+    await apiFetch(`/activity-log/${id}/approve`, { method: "POST" });
+    void loadPending();
+  };
+
+  const reject = async (id: string) => {
+    const reason = window.prompt("Optional reason for rejection:") ?? null;
+    await apiFetch(`/activity-log/${id}/reject`, {
+      method: "POST",
+      body: JSON.stringify({ reason }),
+    });
+    void loadPending();
+  };
 
   // Timer state
   const [timerRunning, setTimerRunning] = useState(false);
@@ -271,6 +326,7 @@ export function ActivityLoggerTab() {
       activityType,
       durationMinutes: duration ? parseInt(duration, 10) : null,
       notes,
+      requiresApproval,
     };
     if (ent) {
       const codeFromEnt = (ent as unknown as { code?: string; entitlementCode?: string }).code
@@ -293,9 +349,12 @@ export function ActivityLoggerTab() {
       setDuration("");
       setNotes("");
       setSelectedEntitlement("");
+      setRequiresApproval(false);
       setTimerSeconds(0);
-      // Refresh activities list
+      // Refresh activities list + pending queue (in case the new entry
+      // was a billable opt-in and now needs supervisor sign-off).
       loadActivities();
+      void loadPending();
     }
   };
 
@@ -448,6 +507,24 @@ export function ActivityLoggerTab() {
               className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none resize-none"
             />
           </div>
+
+          {/* Requires approval — opt-in for billable CCM/RPM time */}
+          <div className="md:col-span-2">
+            <label className="inline-flex items-center gap-2 cursor-pointer text-sm text-slate-700">
+              <input
+                type="checkbox"
+                checked={requiresApproval}
+                onChange={(e) => setRequiresApproval(e.target.checked)}
+                className="rounded"
+              />
+              <span>
+                Requires supervisor approval
+                <span className="ml-2 text-xs text-slate-400">
+                  (use for billable CCM/RPM time)
+                </span>
+              </span>
+            </label>
+          </div>
         </div>
 
         {/* Timer Mode + Submit */}
@@ -499,6 +576,77 @@ export function ActivityLoggerTab() {
           </div>
         </div>
       </div>
+
+      {/* Pending approvals — supervisor sign-off queue for billable time */}
+      {(pending.length > 0 || pendingLoading) && (
+        <div className="glass rounded-xl p-6 border" style={{ borderColor: "#fcd34d", backgroundColor: "#fffbeb" }}>
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <h3 className="text-base font-semibold text-slate-800 flex items-center gap-2">
+                <Clock className="w-5 h-5" style={{ color: "#d97706" }} />
+                Pending approval ({pending.length})
+              </h3>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Time entries that need supervisor sign-off before they're billable.
+              </p>
+            </div>
+            {pending.length > 3 && (
+              <button
+                type="button"
+                onClick={() => setShowPendingPanel((s) => !s)}
+                className="text-xs font-medium text-slate-600 hover:text-slate-900"
+              >
+                {showPendingPanel ? "Show less" : `Show all ${pending.length}`}
+              </button>
+            )}
+          </div>
+          {pendingLoading && pending.length === 0 ? (
+            <p className="text-sm text-slate-500">Loading…</p>
+          ) : (
+            <ul className="divide-y" style={{ borderColor: "#fde68a" }}>
+              {(showPendingPanel ? pending : pending.slice(0, 3)).map((p) => (
+                <li key={p.id} className="py-3 flex items-start gap-3">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-baseline gap-2 flex-wrap">
+                      <span className="text-sm font-semibold text-slate-900">{p.patientName}</span>
+                      <span className="text-xs text-slate-500">{p.subject ?? p.activityType}</span>
+                      {p.durationMinutes != null && (
+                        <span className="text-xs font-medium px-2 py-0.5 rounded" style={{ backgroundColor: "#fef3c7", color: "#92400e" }}>
+                          {p.durationMinutes} min
+                        </span>
+                      )}
+                    </div>
+                    {p.summary && (
+                      <p className="text-xs text-slate-600 mt-1 line-clamp-2">{p.summary}</p>
+                    )}
+                    <p className="text-[11px] text-slate-400 mt-1">
+                      {new Date(p.loggedAt).toLocaleString()}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-1 flex-shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => approve(p.id)}
+                      className="px-2.5 py-1 rounded text-xs font-semibold text-white"
+                      style={{ backgroundColor: "#16a34a" }}
+                    >
+                      Approve
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => reject(p.id)}
+                      className="px-2.5 py-1 rounded text-xs font-semibold"
+                      style={{ color: "#dc2626", backgroundColor: "#fef2f2" }}
+                    >
+                      Reject
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
 
       {/* Recent Activities */}
       <div className="glass rounded-xl p-6">
