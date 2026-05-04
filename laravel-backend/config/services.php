@@ -40,6 +40,16 @@ return [
         'domain' => env('DAILY_DOMAIN', 'membermd'),
     ],
 
+    'livekit' => [
+        // Primary telehealth video stack going forward. URL is the
+        // wss:// host for the SDK; api_key + api_secret mint short-
+        // lived JWT access tokens server-side and create rooms via
+        // LiveKit's REST API. See LiveKitService.
+        'url' => env('LIVEKIT_URL', ''),
+        'api_key' => env('LIVEKIT_API_KEY', ''),
+        'api_secret' => env('LIVEKIT_API_SECRET', ''),
+    ],
+
     'srfax' => [
         'access_id' => env('SRFAX_ACCESS_ID'),
         'access_pwd' => env('SRFAX_ACCESS_PWD'),

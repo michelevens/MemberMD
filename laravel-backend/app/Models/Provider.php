@@ -26,6 +26,10 @@ class Provider extends Model
         'consultation_fee',
         'ical_feed_token',
         'timezone',
+        // Bring-your-own-video: per-provider override that swaps the
+        // built-in LiveKit room for a personal Zoom / Google Meet /
+        // Teams link. video_provider is informational (UI label).
+        'external_video_url', 'video_provider',
     ];
 
     protected $casts = [

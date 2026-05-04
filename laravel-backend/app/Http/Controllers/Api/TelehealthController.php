@@ -5,7 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Appointment;
 use App\Models\TelehealthSession;
-use App\Services\DailyService;
+use App\Services\LiveKitService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -47,59 +47,61 @@ class TelehealthController extends Controller
             return response()->json(['data' => $existing], 200);
         }
 
+        // Resolve which video stack to use, in priority order:
+        //   1. Caller passed is_external + external_video_url explicitly.
+        //   2. Provider has a personal meeting room configured (BYOV
+        //      pattern X — Zoom Personal Meeting Room, Google Meet
+        //      static link, etc.).
+        //   3. Default to LiveKit (built-in, auto-created room).
         $isExternal = $validated['is_external'] ?? false;
+        $externalUrl = $validated['external_video_url'] ?? null;
+
+        if (!$isExternal) {
+            $appointment->loadMissing('provider');
+            $providerExternalUrl = $appointment->provider?->external_video_url;
+            if (!empty($providerExternalUrl)) {
+                $isExternal = true;
+                $externalUrl = $providerExternalUrl;
+            }
+        }
 
         if ($isExternal) {
-            // External video URL (Zoom, etc.)
             $session = TelehealthSession::create([
                 'tenant_id' => $user->tenant_id,
                 'appointment_id' => $appointment->id,
                 'room_name' => 'ext-' . substr(str_replace('-', '', $appointment->id), 0, 12),
-                'room_url' => $validated['external_video_url'] ?? '',
+                'room_url' => (string) ($externalUrl ?? ''),
                 'is_external' => true,
                 'status' => 'created',
             ]);
         } else {
-            // Create Daily.co room
-            try {
-                $daily = new DailyService();
-                $room = $daily->createRoom($appointment->id, [
-                    'enable_recording' => $validated['recording_enabled'] ?? false,
-                ]);
+            $livekit = new LiveKitService();
+            $room = $livekit->createRoom($appointment->id, [
+                'enable_recording' => $validated['recording_enabled'] ?? false,
+            ]);
 
-                if (isset($room['error'])) {
-                    // Distinguish "ops hasn't set the API key yet" (503,
-                    // shown verbatim to the user) from "Daily said no"
-                    // (502, surfaced with their message).
-                    $isConfig = ($room['reason'] ?? null) === 'missing_api_key';
-                    return response()->json([
-                        'message' => $room['error'],
-                    ], $isConfig ? 503 : 502);
-                }
-
-                $session = TelehealthSession::create([
-                    'tenant_id' => $user->tenant_id,
-                    'appointment_id' => $appointment->id,
-                    'room_name' => $room['name'],
-                    'room_url' => $room['url'],
-                    'daily_room_id' => $room['id'],
-                    'recording_enabled' => $validated['recording_enabled'] ?? false,
-                    'status' => 'created',
-                ]);
-            } catch (\Throwable $e) {
-                // Daily.co not configured — create session with placeholder
-                \Log::warning('Daily.co room creation failed: ' . $e->getMessage());
-
-                $roomName = 'appt-' . substr(str_replace('-', '', $appointment->id), 0, 12);
-                $session = TelehealthSession::create([
-                    'tenant_id' => $user->tenant_id,
-                    'appointment_id' => $appointment->id,
-                    'room_name' => $roomName,
-                    'room_url' => '',
-                    'status' => 'created',
-                    'metadata' => ['error' => 'Daily.co not configured'],
-                ]);
+            if (isset($room['error'])) {
+                // Distinguish "ops hasn't set credentials yet" (503,
+                // shown verbatim to the user) from a real LiveKit
+                // failure (502).
+                $isConfig = ($room['reason'] ?? null) === 'missing_credentials';
+                return response()->json([
+                    'message' => $room['error'],
+                ], $isConfig ? 503 : 502);
             }
+
+            $session = TelehealthSession::create([
+                'tenant_id' => $user->tenant_id,
+                'appointment_id' => $appointment->id,
+                'room_name' => $room['name'],
+                'room_url' => $room['url'],
+                // Re-using daily_room_id as the generic provider_room_id
+                // until the next migration renames it; LiveKit's room
+                // name and id are the same string anyway.
+                'daily_room_id' => $room['id'],
+                'recording_enabled' => $validated['recording_enabled'] ?? false,
+                'status' => 'created',
+            ]);
         }
 
         return response()->json(['data' => $session], 201);
@@ -163,22 +165,31 @@ class TelehealthController extends Controller
             $session->update(['status' => 'in_progress']);
         }
 
-        // Generate meeting token
+        // Mint a LiveKit access token (JWT) for the participant.
+        // External sessions don't need a token — the patient just opens
+        // the URL.
         $token = '';
+        $url = (string) $session->room_url;
         if (!$session->is_external && $session->room_name) {
-            try {
-                $daily = new DailyService();
-                $userName = $user->first_name . ' ' . $user->last_name;
-                $token = $daily->createMeetingToken($session->room_name, $userName, $isProvider);
-            } catch (\Throwable $e) {
-                \Log::warning('Daily.co token generation failed: ' . $e->getMessage());
-            }
+            $livekit = new LiveKitService();
+            $userName = trim(($user->first_name ?? '') . ' ' . ($user->last_name ?? '')) ?: 'Participant';
+            $token = $livekit->mintAccessToken(
+                roomName: $session->room_name,
+                identity: (string) $user->id,
+                name: $userName,
+                isOwner: $isProvider,
+            );
+            // For LiveKit the SDK connects to the wss:// URL, not a
+            // browser-navigable URL. We surface the configured
+            // LIVEKIT_URL so the frontend doesn't have to know about
+            // the env var.
+            $url = (string) config('services.livekit.url', $url);
         }
 
         return response()->json([
             'data' => [
                 'token' => $token,
-                'room_url' => $session->room_url,
+                'room_url' => $url,
                 'room_name' => $session->room_name,
                 'session' => $session->fresh(),
             ],
@@ -213,15 +224,9 @@ class TelehealthController extends Controller
             'duration_seconds' => $durationSeconds,
         ]);
 
-        // Clean up Daily.co room
-        if (!$session->is_external && $session->room_name) {
-            try {
-                $daily = new DailyService();
-                $daily->deleteRoom($session->room_name);
-            } catch (\Throwable $e) {
-                \Log::warning('Daily.co room deletion failed: ' . $e->getMessage());
-            }
-        }
+        // No LiveKit room cleanup needed — LiveKit auto-reaps rooms
+        // once the last participant leaves (default `empty_timeout`).
+        // Daily.co required explicit deletion; LiveKit doesn't.
 
         return response()->json(['data' => $session->fresh()]);
     }
