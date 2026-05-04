@@ -1,705 +1,873 @@
 // ===== TelehealthRoom =====
-// HIPAA-compliant video visit room with Daily.co integration
-// States: loading → tech-check → waiting → active → post-session
-// Also handles external video links
+//
+// LiveKit-backed HIPAA-compliant video visit room.
+//
+// Phases:
+//   loading       → resolving session from API
+//   tech-check    → camera/mic preview + device picker before joining
+//   external      → BYOV session (provider's Zoom/Meet/Teams link)
+//   connecting    → LiveKit Room.connect in flight
+//   active        → in-session, controls + chat available
+//   ended         → post-session summary
+//   error         → fatal failure (bad token, room not found, etc.)
+//
+// UI layout intentionally mirrors EnnHealth's TelehealthVideoSession
+// (header strip with status + duration + connection quality, large
+// remote video, picture-in-picture local preview, footer toolbar
+// with mute/cam/share/chat/end, optional chat side panel). What
+// differs: every state here is DRIVEN by real LiveKit events, not
+// fake setTimeouts. There's no "// Simulate connection" — if you
+// see "Connected", you actually are.
 
-import { useState, useEffect, useRef, useCallback } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
 import {
-  Video,
-  VideoOff,
-  Mic,
-  MicOff,
-  Monitor,
-  PhoneOff,
-  Clock,
-  CheckCircle,
-  AlertTriangle,
-  ArrowLeft,
-  ExternalLink,
-  Shield,
-  Loader2,
-  Camera,
+  Video, VideoOff, Mic, MicOff, Monitor, MonitorOff,
+  PhoneOff, Clock, MessageSquare, Send, Loader2, AlertTriangle,
+  CheckCircle, Settings, ExternalLink, Camera, X,
 } from "lucide-react";
+import {
+  Room, RoomEvent, ConnectionQuality, Track,
+} from "livekit-client";
+import type {
+  RemoteTrack, RemoteTrackPublication, RemoteParticipant,
+  LocalTrackPublication, Participant,
+} from "livekit-client";
 import { telehealthService } from "../../lib/api";
-import type { TelehealthSession } from "../../types";
 
-// ─── Colors (no arbitrary Tailwind) ──────────────────────────────────────────
+// ─── Colors ───────────────────────────────────────────────────────────────────
 
 const C = {
-  navy900: "#102a43",
-  navy800: "#243b53",
-  navy700: "#334e68",
-  navy600: "#486581",
+  navy900: "#0f172a",
+  navy800: "#1e293b",
+  navy700: "#334155",
   teal500: "#27ab83",
   teal600: "#147d64",
-  teal700: "#0c6b58",
+  teal50: "#e6fffa",
   slate50: "#f8fafc",
   slate100: "#f1f5f9",
   slate200: "#e2e8f0",
+  slate300: "#cbd5e1",
   slate400: "#94a3b8",
   slate500: "#64748b",
-  slate600: "#475569",
+  slate700: "#334155",
+  white: "#ffffff",
   red500: "#ef4444",
   red600: "#dc2626",
-  green50: "#ecfdf5",
   green500: "#22c55e",
   amber500: "#f59e0b",
-  white: "#ffffff",
 };
 
-type RoomPhase = "loading" | "tech-check" | "waiting" | "active" | "post-session" | "external" | "error";
+// ─── Types ────────────────────────────────────────────────────────────────────
 
-interface TelehealthRoomProps {
-  sessionId?: string;
+type Phase =
+  | { kind: "loading" }
+  | { kind: "tech-check"; sessionToken: string; sessionUrl: string; roomName: string }
+  | { kind: "external"; url: string }
+  | { kind: "connecting"; sessionToken: string; sessionUrl: string; roomName: string }
+  | { kind: "active" }
+  | { kind: "ended"; durationSeconds: number }
+  | { kind: "error"; message: string };
+
+interface ChatEntry {
+  id: string;
+  from: string;
+  text: string;
+  at: Date;
+  mine: boolean;
+  system?: boolean;
 }
 
-export function TelehealthRoom({ sessionId: propSessionId }: TelehealthRoomProps) {
-  const params = useParams<{ sessionId: string }>();
+// ─── Component ────────────────────────────────────────────────────────────────
+
+export function TelehealthRoom() {
+  const { sessionId } = useParams<{ sessionId: string }>();
   const navigate = useNavigate();
-  const sid = propSessionId || params.sessionId || "";
 
-  const [phase, setPhase] = useState<RoomPhase>("loading");
-  const [session, setSession] = useState<TelehealthSession | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [phase, setPhase] = useState<Phase>({ kind: "loading" });
 
-  // Tech check
-  const [cameraOn, setCameraOn] = useState(true);
-  const [micOn, setMicOn] = useState(true);
-  const [consentGiven, setConsentGiven] = useState(false);
-  const [mediaStream, setMediaStream] = useState<MediaStream | null>(null);
-  const videoPreviewRef = useRef<HTMLVideoElement>(null);
+  // LiveKit Room — held in a ref because event handlers close over a
+  // stable instance and we don't want re-renders to recreate it.
+  const roomRef = useRef<Room | null>(null);
+  const localVideoRef = useRef<HTMLVideoElement | null>(null);
+  const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
+  const sessionStartRef = useRef<Date | null>(null);
 
-  // Active session
-  const dailyContainerRef = useRef<HTMLDivElement>(null);
-  const callFrameRef = useRef<ReturnType<typeof import("@daily-co/daily-js").default.createFrame> | null>(null);
-  const [screenSharing, setScreenSharing] = useState(false);
-  const [elapsedSeconds, setElapsedSeconds] = useState(0);
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Active-call state — exposed for UI bindings.
+  const [isCamOn, setIsCamOn] = useState(true);
+  const [isMicOn, setIsMicOn] = useState(true);
+  const [isScreenSharing, setIsScreenSharing] = useState(false);
+  const [remoteJoined, setRemoteJoined] = useState(false);
+  const [remoteName, setRemoteName] = useState<string>("Participant");
+  const [duration, setDuration] = useState(0);
+  const [quality, setQuality] = useState<ConnectionQuality>(ConnectionQuality.Excellent);
+  const [chat, setChat] = useState<ChatEntry[]>([]);
+  const [chatDraft, setChatDraft] = useState("");
+  const [chatOpen, setChatOpen] = useState(false);
+  const [unreadChat, setUnreadChat] = useState(0);
+  const [showSettings, setShowSettings] = useState(false);
 
-  // Polling ref
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Devices — populated after the local stream is up.
+  const [cameras, setCameras] = useState<MediaDeviceInfo[]>([]);
+  const [mics, setMics] = useState<MediaDeviceInfo[]>([]);
+  const [speakers, setSpeakers] = useState<MediaDeviceInfo[]>([]);
+  const [activeCam, setActiveCam] = useState<string>("");
+  const [activeMic, setActiveMic] = useState<string>("");
 
-  // ─── Load Session ──────────────────────────────────────────────────────────
-
+  // ─── 1. Fetch the session + token ───────────────────────────────────────
   useEffect(() => {
-    if (!sid) {
-      setError("No session ID provided");
-      setPhase("error");
+    if (!sessionId) {
+      setPhase({ kind: "error", message: "Missing session id." });
       return;
     }
-    loadSession();
-    return () => {
-      if (pollRef.current) clearInterval(pollRef.current);
-      if (timerRef.current) clearInterval(timerRef.current);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sid]);
-
-  async function loadSession() {
-    const res = await telehealthService.getSession(sid);
-    if (res.error || !res.data) {
-      setError(res.error || "Failed to load session");
-      setPhase("error");
-      return;
-    }
-    const s = res.data;
-    setSession(s);
-
-    if (s.isExternal && s.externalVideoUrl) {
-      setPhase("external");
-    } else if (s.status === "completed" || s.status === "expired") {
-      setPhase("post-session");
-    } else {
-      setPhase("tech-check");
-    }
-  }
-
-  // ─── Tech Check: Camera/Mic Preview ────────────────────────────────────────
-
-  useEffect(() => {
-    if (phase !== "tech-check") return;
-    startPreview();
-    return () => stopPreview();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [phase]);
-
-  async function startPreview() {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-      setMediaStream(stream);
-      if (videoPreviewRef.current) {
-        videoPreviewRef.current.srcObject = stream;
+    let cancelled = false;
+    (async () => {
+      const res = await telehealthService.joinSession(sessionId);
+      if (cancelled) return;
+      if (res.error || !res.data) {
+        setPhase({ kind: "error", message: res.error || "Could not load this session." });
+        return;
       }
-    } catch {
-      // Camera/mic not available — still allow joining
-    }
-  }
+      const data = res.data as {
+        session: { isExternal: boolean; externalVideoUrl: string | null; roomName: string; roomUrl: string };
+        token: string;
+        roomUrl: string;
+        roomName: string;
+      };
+      const session = data.session;
+      // External (BYOV) — short-circuit. The provider has a Zoom /
+      // Google Meet / Teams personal meeting link; we just hand it
+      // off in a new tab.
+      if (session?.isExternal) {
+        const url = session.externalVideoUrl || session.roomUrl || "";
+        if (!url) {
+          setPhase({ kind: "error", message: "External video URL is missing." });
+          return;
+        }
+        setPhase({ kind: "external", url });
+        return;
+      }
+      if (!data.token || !data.roomUrl || !data.roomName) {
+        setPhase({ kind: "error", message: "Server didn't return a usable LiveKit token." });
+        return;
+      }
+      setPhase({
+        kind: "tech-check",
+        sessionToken: data.token,
+        sessionUrl: data.roomUrl,
+        roomName: data.roomName,
+      });
+    })();
+    return () => { cancelled = true; };
+  }, [sessionId]);
 
-  function stopPreview() {
-    if (mediaStream) {
-      mediaStream.getTracks().forEach((t) => t.stop());
-      setMediaStream(null);
-    }
-  }
-
-  // ─── Join Session ──────────────────────────────────────────────────────────
-
-  const handleJoin = useCallback(async () => {
-    if (!session) return;
-
-    // Give consent if needed
-    if (session.recordingEnabled && consentGiven) {
-      await telehealthService.giveConsent(sid);
-    }
-
-    stopPreview();
-
-    // Join via API
-    const joinRes = await telehealthService.joinSession(sid);
-    if (joinRes.error || !joinRes.data) {
-      setError(joinRes.error || "Failed to join session");
-      setPhase("error");
-      return;
-    }
-
-    const { token, roomUrl } = joinRes.data;
-
-    // If Daily.co is available, create frame
-    if (dailyContainerRef.current && roomUrl && !roomUrl.includes("mock")) {
+  // ─── 2. Tech check — get camera/mic preview before joining ──────────────
+  useEffect(() => {
+    if (phase.kind !== "tech-check") return;
+    let cancelled = false;
+    let stream: MediaStream | null = null;
+    (async () => {
       try {
-        const DailyIframe = (await import("@daily-co/daily-js")).default;
-        const callFrame = DailyIframe.createFrame(dailyContainerRef.current, {
-          iframeStyle: { width: "100%", height: "100%", border: "none", borderRadius: "12px" },
-          showLeaveButton: false,
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: true,
+          audio: true,
         });
-        await callFrame.join({ url: roomUrl, token });
-        callFrameRef.current = callFrame;
-        setPhase("active");
-        startTimer();
+        if (cancelled) {
+          stream.getTracks().forEach((t) => t.stop());
+          return;
+        }
+        if (localVideoRef.current) {
+          localVideoRef.current.srcObject = stream;
+        }
+        // Enumerate devices once permissions are granted (labels
+        // come back populated only after getUserMedia succeeds).
+        const all = await navigator.mediaDevices.enumerateDevices();
+        if (cancelled) return;
+        setCameras(all.filter((d) => d.kind === "videoinput"));
+        setMics(all.filter((d) => d.kind === "audioinput"));
+        setSpeakers(all.filter((d) => d.kind === "audiooutput"));
+        const v = stream.getVideoTracks()[0]?.getSettings();
+        const a = stream.getAudioTracks()[0]?.getSettings();
+        if (v?.deviceId) setActiveCam(v.deviceId);
+        if (a?.deviceId) setActiveMic(a.deviceId);
       } catch {
-        // Daily.co not configured — go to waiting/active with message
-        setPhase("active");
-        startTimer();
+        if (!cancelled) {
+          setPhase({
+            kind: "error",
+            message: "Could not access camera or microphone. Check browser permissions.",
+          });
+        }
       }
-    } else {
-      // Mock mode or no container — simulate waiting then active
-      setPhase("waiting");
-      pollRef.current = setInterval(async () => {
-        // In mock mode, auto-transition to active after 3 seconds
-        setPhase("active");
-        startTimer();
-        if (pollRef.current) clearInterval(pollRef.current);
-      }, 3000);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session, consentGiven, sid]);
+    })();
+    return () => {
+      cancelled = true;
+      if (stream) stream.getTracks().forEach((t) => t.stop());
+    };
+  }, [phase.kind]);
 
-  function startTimer() {
-    setElapsedSeconds(0);
-    timerRef.current = setInterval(() => {
-      setElapsedSeconds((prev) => prev + 1);
-    }, 1000);
-  }
+  // ─── 3. Connect to LiveKit ──────────────────────────────────────────────
+  const connect = useCallback(async () => {
+    if (phase.kind !== "tech-check") return;
+    const { sessionToken, sessionUrl, roomName } = phase;
+    setPhase({ kind: "connecting", sessionToken, sessionUrl, roomName });
 
-  function formatDuration(sec: number): string {
-    const h = Math.floor(sec / 3600);
-    const m = Math.floor((sec % 3600) / 60);
-    const s = sec % 60;
-    if (h > 0) return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
-    return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
-  }
-
-  // ─── End Session ───────────────────────────────────────────────────────────
-
-  const handleEndCall = useCallback(async () => {
-    if (timerRef.current) clearInterval(timerRef.current);
-
-    if (callFrameRef.current) {
-      try {
-        await callFrameRef.current.leave();
-        callFrameRef.current.destroy();
-        callFrameRef.current = null;
-      } catch {
-        // Ignore cleanup errors
-      }
-    }
-
-    await telehealthService.endSession(sid);
-    setPhase("post-session");
-  }, [sid]);
-
-  // ─── Toggle Controls ──────────────────────────────────────────────────────
-
-  function toggleCamera() {
-    setCameraOn((prev) => {
-      if (callFrameRef.current) {
-        callFrameRef.current.setLocalVideo(!prev);
-      }
-      if (mediaStream) {
-        mediaStream.getVideoTracks().forEach((t) => { t.enabled = !prev; });
-      }
-      return !prev;
+    const room = new Room({
+      adaptiveStream: true,
+      dynacast: true,
+      videoCaptureDefaults: {
+        deviceId: activeCam || undefined,
+        resolution: { width: 1280, height: 720, frameRate: 30 },
+      },
+      audioCaptureDefaults: {
+        deviceId: activeMic || undefined,
+      },
     });
-  }
+    roomRef.current = room;
 
-  function toggleMic() {
-    setMicOn((prev) => {
-      if (callFrameRef.current) {
-        callFrameRef.current.setLocalAudio(!prev);
-      }
-      if (mediaStream) {
-        mediaStream.getAudioTracks().forEach((t) => { t.enabled = !prev; });
-      }
-      return !prev;
-    });
-  }
+    // ─── Event wiring ──────────────────────────────────────────────────
+    room
+      .on(RoomEvent.Connected, () => {
+        sessionStartRef.current = new Date();
+        setPhase({ kind: "active" });
+        // Kick off mic/cam publishing using the same devices the
+        // tech-check stream was using.
+        void room.localParticipant.setMicrophoneEnabled(true);
+        void room.localParticipant.setCameraEnabled(true);
+      })
+      .on(RoomEvent.Disconnected, (reason) => {
+        const dur = sessionStartRef.current
+          ? Math.floor((Date.now() - sessionStartRef.current.getTime()) / 1000)
+          : 0;
+        setPhase((p) => p.kind === "ended"
+          ? p
+          : { kind: "ended", durationSeconds: dur });
+        if (reason !== undefined) {
+          // eslint-disable-next-line no-console
+          console.warn("LiveKit disconnect reason:", reason);
+        }
+      })
+      .on(RoomEvent.ParticipantConnected, (p: RemoteParticipant) => {
+        setRemoteJoined(true);
+        setRemoteName(p.name || p.identity || "Participant");
+        appendSystem(`${p.name || p.identity} joined`);
+      })
+      .on(RoomEvent.ParticipantDisconnected, (p: RemoteParticipant) => {
+        setRemoteJoined(false);
+        appendSystem(`${p.name || p.identity} left`);
+      })
+      .on(RoomEvent.TrackSubscribed, (track: RemoteTrack, _pub: RemoteTrackPublication, p: RemoteParticipant) => {
+        if (track.kind === Track.Kind.Video && remoteVideoRef.current) {
+          track.attach(remoteVideoRef.current);
+          setRemoteName(p.name || p.identity || "Participant");
+        } else if (track.kind === Track.Kind.Audio && remoteVideoRef.current) {
+          track.attach(remoteVideoRef.current);
+        }
+      })
+      .on(RoomEvent.TrackUnsubscribed, (track: RemoteTrack) => {
+        track.detach();
+      })
+      .on(RoomEvent.LocalTrackPublished, (pub: LocalTrackPublication) => {
+        if (pub.kind === Track.Kind.Video && pub.track && localVideoRef.current) {
+          pub.track.attach(localVideoRef.current);
+        }
+      })
+      .on(RoomEvent.ConnectionQualityChanged, (q: ConnectionQuality, p?: Participant) => {
+        if (!p || p.identity === room.localParticipant.identity) {
+          setQuality(q);
+        }
+      })
+      .on(RoomEvent.DataReceived, (payload: Uint8Array, p?: RemoteParticipant) => {
+        try {
+          const text = new TextDecoder().decode(payload);
+          const parsed = JSON.parse(text) as { kind?: string; text?: string };
+          const msgText = parsed.text;
+          if (parsed.kind === "chat" && typeof msgText === "string") {
+            setChat((prev) => [...prev, {
+              id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+              from: p?.name || p?.identity || "Participant",
+              text: msgText,
+              at: new Date(),
+              mine: false,
+            }]);
+            setUnreadChat((n) => n + 1);
+          }
+        } catch {
+          /* ignore non-JSON payloads */
+        }
+      });
 
-  async function toggleScreenShare() {
-    if (!callFrameRef.current) return;
     try {
-      if (screenSharing) {
-        await callFrameRef.current.stopScreenShare();
-      } else {
-        await callFrameRef.current.startScreenShare();
+      await room.connect(sessionUrl, sessionToken);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Failed to join the video room.";
+      setPhase({ kind: "error", message: msg });
+    }
+  }, [phase, activeCam, activeMic]);
+
+  // ─── 4. Cleanup on unmount ──────────────────────────────────────────────
+  useEffect(() => {
+    return () => {
+      if (roomRef.current) {
+        roomRef.current.disconnect().catch(() => {});
+        roomRef.current = null;
       }
-      setScreenSharing(!screenSharing);
+    };
+  }, []);
+
+  // ─── 5. Duration tick ───────────────────────────────────────────────────
+  useEffect(() => {
+    if (phase.kind !== "active") return;
+    const id = window.setInterval(() => {
+      if (sessionStartRef.current) {
+        setDuration(Math.floor((Date.now() - sessionStartRef.current.getTime()) / 1000));
+      }
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, [phase.kind]);
+
+  // Reset unread chat count when the panel opens.
+  useEffect(() => { if (chatOpen) setUnreadChat(0); }, [chatOpen]);
+
+  // ─── Helpers ────────────────────────────────────────────────────────────
+  function appendSystem(text: string) {
+    setChat((prev) => [...prev, {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      from: "system", text, at: new Date(), mine: false, system: true,
+    }]);
+  }
+
+  async function toggleCam() {
+    const room = roomRef.current;
+    if (!room) return;
+    const next = !isCamOn;
+    await room.localParticipant.setCameraEnabled(next);
+    setIsCamOn(next);
+  }
+  async function toggleMic() {
+    const room = roomRef.current;
+    if (!room) return;
+    const next = !isMicOn;
+    await room.localParticipant.setMicrophoneEnabled(next);
+    setIsMicOn(next);
+  }
+  async function toggleScreenShare() {
+    const room = roomRef.current;
+    if (!room) return;
+    const next = !isScreenSharing;
+    try {
+      await room.localParticipant.setScreenShareEnabled(next);
+      setIsScreenSharing(next);
     } catch {
-      // User cancelled screen share picker
+      // User cancelled the OS picker — silent.
     }
   }
+  async function endCall() {
+    const room = roomRef.current;
+    const dur = sessionStartRef.current
+      ? Math.floor((Date.now() - sessionStartRef.current.getTime()) / 1000)
+      : 0;
+    setPhase({ kind: "ended", durationSeconds: dur });
+    if (room) {
+      try { await room.disconnect(); } catch { /* swallow */ }
+    }
+    if (sessionId) {
+      void telehealthService.endSession(sessionId);
+    }
+  }
+  async function sendChat() {
+    const room = roomRef.current;
+    const text = chatDraft.trim();
+    if (!room || !text) return;
+    const payload = new TextEncoder().encode(JSON.stringify({ kind: "chat", text }));
+    await room.localParticipant.publishData(payload, { reliable: true });
+    setChat((prev) => [...prev, {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      from: "you", text, at: new Date(), mine: true,
+    }]);
+    setChatDraft("");
+  }
 
-  // ─── Render: Loading ───────────────────────────────────────────────────────
-
-  if (phase === "loading") {
+  // ─── Render ─────────────────────────────────────────────────────────────
+  if (phase.kind === "loading") {
+    return <FullPageMessage icon={Loader2} title="Loading session…" spinning />;
+  }
+  if (phase.kind === "error") {
     return (
-      <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: C.navy900 }}>
-        <div className="text-center">
-          <Loader2 className="w-10 h-10 animate-spin mx-auto mb-3" style={{ color: C.teal500 }} />
-          <p className="text-sm" style={{ color: C.slate400 }}>Connecting to your session...</p>
-        </div>
-      </div>
+      <FullPageMessage
+        icon={AlertTriangle}
+        accent={C.red500}
+        title="Couldn't open the video room"
+        body={phase.message}
+        cta={{ label: "Go back", onClick: () => navigate(-1) }}
+      />
+    );
+  }
+  if (phase.kind === "external") {
+    return <ExternalRoomPanel url={phase.url} onLeave={() => navigate(-1)} />;
+  }
+  if (phase.kind === "ended") {
+    return (
+      <FullPageMessage
+        icon={CheckCircle}
+        accent={C.teal500}
+        title="Session ended"
+        body={`Duration: ${formatDuration(phase.durationSeconds)}`}
+        cta={{ label: "Done", onClick: () => navigate(-1) }}
+      />
     );
   }
 
-  // ─── Render: Error ─────────────────────────────────────────────────────────
-
-  if (phase === "error") {
-    return (
-      <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: C.navy900 }}>
-        <div className="text-center max-w-md mx-auto px-6">
-          <AlertTriangle className="w-12 h-12 mx-auto mb-4" style={{ color: C.amber500 }} />
-          <h2 className="text-xl font-bold mb-2" style={{ color: C.white }}>Session Error</h2>
-          <p className="text-sm mb-6" style={{ color: C.slate400 }}>{error || "Something went wrong"}</p>
-          <button
-            onClick={() => navigate(-1)}
-            className="px-6 py-2.5 rounded-xl text-sm font-semibold text-white transition-all hover:opacity-90"
-            style={{ backgroundColor: C.teal500 }}
-          >
-            Return to Dashboard
-          </button>
+  // tech-check + connecting + active share the room frame.
+  return (
+    <div style={{ minHeight: "100vh", backgroundColor: C.navy900, color: C.white, display: "flex", flexDirection: "column" }}>
+      <div style={{ padding: "12px 18px", borderBottom: `1px solid ${C.navy700}`, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div className="flex items-center gap-3">
+          <div className="w-2 h-2 rounded-full" style={{ backgroundColor: phase.kind === "active" ? C.green500 : C.amber500 }} />
+          <span className="text-sm font-semibold">
+            {phase.kind === "tech-check" && "Tech check"}
+            {phase.kind === "connecting" && "Connecting…"}
+            {phase.kind === "active" && (remoteJoined ? `In session with ${remoteName}` : "Waiting for the other participant…")}
+          </span>
+          {phase.kind === "active" && (
+            <span className="text-xs font-medium px-2 py-0.5 rounded-full flex items-center gap-1" style={{ backgroundColor: C.navy800 }}>
+              <Clock className="w-3 h-3" /> {formatDuration(duration)}
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          {phase.kind === "active" && <QualityPill quality={quality} />}
         </div>
       </div>
-    );
-  }
 
-  // ─── Render: External Video ────────────────────────────────────────────────
-
-  if (phase === "external" && session) {
-    return (
-      <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: C.navy900 }}>
-        <div className="text-center max-w-md mx-auto px-6">
-          <div
-            className="w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6"
-            style={{ backgroundColor: C.navy800 }}
-          >
-            <ExternalLink className="w-10 h-10" style={{ color: C.teal500 }} />
-          </div>
-          <h2 className="text-xl font-bold mb-2" style={{ color: C.white }}>External Video Call</h2>
-          <p className="text-sm mb-2" style={{ color: C.slate400 }}>
-            This appointment uses an external video service.
-          </p>
-          <p className="text-xs mb-6 px-4" style={{ color: C.slate500 }}>
-            You will be redirected to a third-party platform. Please ensure your browser allows pop-ups.
-            Your provider has set up this link for your visit.
-          </p>
-          <a
-            href={session.externalVideoUrl || "#"}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-2 px-8 py-3 rounded-xl text-sm font-semibold text-white transition-all hover:opacity-90"
-            style={{ backgroundColor: C.teal500 }}
-          >
-            <Video className="w-4 h-4" /> Join External Video Call
-          </a>
-          <button
-            onClick={() => navigate(-1)}
-            className="block w-full mt-4 text-sm font-medium transition-colors"
-            style={{ color: C.slate400 }}
-          >
-            Back to Dashboard
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  // ─── Render: Tech Check ────────────────────────────────────────────────────
-
-  if (phase === "tech-check") {
-    return (
-      <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: C.navy900 }}>
-        <div className="w-full max-w-lg mx-auto px-6">
-          {/* Header */}
-          <div className="text-center mb-8">
-            <div
-              className="w-14 h-14 rounded-full flex items-center justify-center mx-auto mb-4"
-              style={{ backgroundColor: C.navy800 }}
-            >
-              <Camera className="w-7 h-7" style={{ color: C.teal500 }} />
-            </div>
-            <h2 className="text-xl font-bold mb-1" style={{ color: C.white }}>Device Check</h2>
+      <div style={{ flex: 1, position: "relative", display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden" }}>
+        {phase.kind === "active" && (
+          <video
+            ref={remoteVideoRef}
+            autoPlay
+            playsInline
+            style={{
+              width: "100%",
+              height: "100%",
+              objectFit: "contain",
+              backgroundColor: C.navy900,
+              display: remoteJoined ? "block" : "none",
+            }}
+          />
+        )}
+        {phase.kind === "active" && !remoteJoined && (
+          <div className="text-center">
+            <Loader2 className="w-8 h-8 mx-auto animate-spin mb-3" style={{ color: C.slate400 }} />
             <p className="text-sm" style={{ color: C.slate400 }}>
-              Test your camera and microphone before joining
+              Waiting for {remoteName} to join…
             </p>
           </div>
+        )}
 
-          {/* Video Preview */}
-          <div
-            className="relative rounded-2xl overflow-hidden mb-6"
-            style={{ backgroundColor: C.navy800, aspectRatio: "16/9" }}
-          >
-            <video
-              ref={videoPreviewRef}
-              autoPlay
-              muted
-              playsInline
-              className="w-full h-full object-cover"
-              style={{ transform: "scaleX(-1)" }}
-            />
-            {!mediaStream && (
-              <div className="absolute inset-0 flex items-center justify-center">
-                <p className="text-sm" style={{ color: C.slate400 }}>
-                  Camera preview unavailable
-                </p>
-              </div>
-            )}
-            {/* Preview Controls */}
-            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-3">
-              <button
-                onClick={toggleMic}
-                className="w-10 h-10 rounded-full flex items-center justify-center transition-all"
-                style={{
-                  backgroundColor: micOn ? "rgba(255,255,255,0.15)" : C.red500,
-                  backdropFilter: "blur(8px)",
-                }}
-              >
-                {micOn ? (
-                  <Mic className="w-5 h-5" style={{ color: C.white }} />
-                ) : (
-                  <MicOff className="w-5 h-5" style={{ color: C.white }} />
-                )}
-              </button>
-              <button
-                onClick={toggleCamera}
-                className="w-10 h-10 rounded-full flex items-center justify-center transition-all"
-                style={{
-                  backgroundColor: cameraOn ? "rgba(255,255,255,0.15)" : C.red500,
-                  backdropFilter: "blur(8px)",
-                }}
-              >
-                {cameraOn ? (
-                  <Video className="w-5 h-5" style={{ color: C.white }} />
-                ) : (
-                  <VideoOff className="w-5 h-5" style={{ color: C.white }} />
-                )}
-              </button>
-            </div>
-          </div>
+        <video
+          ref={localVideoRef}
+          autoPlay
+          playsInline
+          muted
+          style={{
+            position: phase.kind === "tech-check" ? "static" : "absolute",
+            bottom: phase.kind === "tech-check" ? undefined : 18,
+            right: phase.kind === "tech-check" ? undefined : 18,
+            width: phase.kind === "tech-check" ? "min(640px, 90%)" : 200,
+            height: phase.kind === "tech-check" ? "auto" : 140,
+            aspectRatio: phase.kind === "tech-check" ? "16/9" : undefined,
+            objectFit: "cover",
+            borderRadius: 12,
+            border: phase.kind === "tech-check" ? `1px solid ${C.navy700}` : `2px solid ${C.navy800}`,
+            backgroundColor: C.navy800,
+          }}
+        />
 
-          {/* Consent */}
-          {session?.recordingEnabled && (
-            <label className="flex items-start gap-3 mb-4 p-3 rounded-xl cursor-pointer" style={{ backgroundColor: C.navy800 }}>
-              <input
-                type="checkbox"
-                checked={consentGiven}
-                onChange={(e) => setConsentGiven(e.target.checked)}
-                className="mt-0.5 rounded"
-              />
-              <div>
-                <p className="text-sm font-medium" style={{ color: C.white }}>
-                  I consent to recording
-                </p>
-                <p className="text-xs mt-0.5" style={{ color: C.slate400 }}>
-                  This session may be recorded for clinical documentation purposes.
-                  All recordings are encrypted and HIPAA-compliant.
-                </p>
-              </div>
-            </label>
-          )}
-
-          {/* Telehealth Consent */}
-          <label className="flex items-start gap-3 mb-6 p-3 rounded-xl cursor-pointer" style={{ backgroundColor: C.navy800 }}>
-            <input
-              type="checkbox"
-              checked={consentGiven || !session?.recordingEnabled}
-              onChange={(e) => setConsentGiven(e.target.checked)}
-              className="mt-0.5 rounded"
-              disabled={!session?.recordingEnabled}
-            />
-            <div>
-              <p className="text-sm font-medium" style={{ color: C.white }}>
-                <Shield className="w-3.5 h-3.5 inline mr-1" style={{ color: C.teal500 }} />
-                HIPAA Notice
-              </p>
-              <p className="text-xs mt-0.5" style={{ color: C.slate400 }}>
-                This telehealth session uses end-to-end encryption. By joining, you acknowledge
-                that you are in a private location and consent to receive care via telehealth.
-              </p>
-            </div>
-          </label>
-
-          {/* Join Button */}
-          <button
-            onClick={handleJoin}
-            className="w-full py-3 rounded-xl text-sm font-bold text-white transition-all hover:opacity-90 flex items-center justify-center gap-2"
-            style={{ backgroundColor: C.teal500 }}
-          >
-            <Video className="w-4 h-4" /> Join Session
-          </button>
-
-          <button
-            onClick={() => navigate(-1)}
-            className="w-full mt-3 py-2 text-sm font-medium transition-colors flex items-center justify-center gap-1"
-            style={{ color: C.slate400 }}
-          >
-            <ArrowLeft className="w-3.5 h-3.5" /> Back
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  // ─── Render: Waiting Room ──────────────────────────────────────────────────
-
-  if (phase === "waiting") {
-    return (
-      <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: C.navy900 }}>
-        <div className="text-center max-w-md mx-auto px-6">
-          <div className="relative w-24 h-24 mx-auto mb-6">
-            <div
-              className="absolute inset-0 rounded-full animate-ping"
-              style={{ backgroundColor: C.teal500, opacity: 0.2 }}
-            />
-            <div
-              className="absolute inset-2 rounded-full animate-pulse"
-              style={{ backgroundColor: C.teal500, opacity: 0.3 }}
-            />
-            <div
-              className="absolute inset-4 rounded-full flex items-center justify-center"
-              style={{ backgroundColor: C.navy800 }}
+        {phase.kind === "tech-check" && (
+          <div style={{ position: "absolute", bottom: 24, left: "50%", transform: "translateX(-50%)", textAlign: "center" }}>
+            <div className="text-xs mb-2" style={{ color: C.slate400 }}>Camera & microphone preview</div>
+            <button
+              onClick={connect}
+              className="inline-flex items-center gap-2 px-6 py-3 rounded-full text-sm font-bold text-white"
+              style={{ backgroundColor: C.teal500 }}
             >
-              <Video className="w-8 h-8" style={{ color: C.teal500 }} />
-            </div>
+              <Video className="w-4 h-4" /> Join session
+            </button>
           </div>
-          <h2 className="text-xl font-bold mb-2" style={{ color: C.white }}>
-            Waiting Room
-          </h2>
-          <p className="text-sm mb-1" style={{ color: C.slate400 }}>
-            Your provider will be with you shortly
-          </p>
-          <p className="text-xs" style={{ color: C.slate500 }}>
-            Please keep this window open. You will be connected automatically.
-          </p>
-          <div className="mt-8 flex items-center justify-center gap-2">
-            <div className="w-2 h-2 rounded-full animate-bounce" style={{ backgroundColor: C.teal500, animationDelay: "0ms" }} />
-            <div className="w-2 h-2 rounded-full animate-bounce" style={{ backgroundColor: C.teal500, animationDelay: "150ms" }} />
-            <div className="w-2 h-2 rounded-full animate-bounce" style={{ backgroundColor: C.teal500, animationDelay: "300ms" }} />
+        )}
+
+        {phase.kind === "connecting" && (
+          <div className="text-center">
+            <Loader2 className="w-8 h-8 mx-auto animate-spin mb-3" style={{ color: C.slate400 }} />
+            <p className="text-sm" style={{ color: C.slate400 }}>Connecting to the room…</p>
           </div>
-        </div>
+        )}
+
+        {phase.kind === "active" && chatOpen && (
+          <ChatPanel
+            messages={chat}
+            draft={chatDraft}
+            onDraftChange={setChatDraft}
+            onSend={sendChat}
+            onClose={() => setChatOpen(false)}
+          />
+        )}
+
+        {showSettings && (
+          <SettingsPanel
+            cameras={cameras}
+            mics={mics}
+            speakers={speakers}
+            activeCam={activeCam}
+            activeMic={activeMic}
+            onSelectCam={async (id) => {
+              setActiveCam(id);
+              const room = roomRef.current;
+              if (room) await room.switchActiveDevice("videoinput", id);
+            }}
+            onSelectMic={async (id) => {
+              setActiveMic(id);
+              const room = roomRef.current;
+              if (room) await room.switchActiveDevice("audioinput", id);
+            }}
+            onSelectSpeaker={async (id) => {
+              const room = roomRef.current;
+              if (room) await room.switchActiveDevice("audiooutput", id);
+            }}
+            onClose={() => setShowSettings(false)}
+          />
+        )}
       </div>
-    );
-  }
 
-  // ─── Render: Post-Session ──────────────────────────────────────────────────
-
-  if (phase === "post-session") {
-    const durationMin = session?.durationSeconds
-      ? Math.round(session.durationSeconds / 60)
-      : Math.round(elapsedSeconds / 60);
-
-    return (
-      <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: C.navy900 }}>
-        <div className="text-center max-w-md mx-auto px-6">
-          <div
-            className="w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6"
-            style={{ backgroundColor: C.navy800 }}
-          >
-            <CheckCircle className="w-10 h-10" style={{ color: C.green500 }} />
-          </div>
-          <h2 className="text-xl font-bold mb-2" style={{ color: C.white }}>Session Complete</h2>
-          <p className="text-sm mb-6" style={{ color: C.slate400 }}>
-            Your telehealth visit has ended successfully.
-          </p>
-
-          <div
-            className="rounded-xl p-4 mb-6 text-left space-y-2"
-            style={{ backgroundColor: C.navy800 }}
-          >
-            <div className="flex items-center justify-between">
-              <span className="text-xs" style={{ color: C.slate400 }}>Duration</span>
-              <span className="text-sm font-semibold" style={{ color: C.white }}>
-                {durationMin > 0 ? `${durationMin} minutes` : `${elapsedSeconds} seconds`}
-              </span>
-            </div>
-            {session?.startedAt && (
-              <div className="flex items-center justify-between">
-                <span className="text-xs" style={{ color: C.slate400 }}>Started</span>
-                <span className="text-sm" style={{ color: C.slate200 }}>
-                  {new Date(session.startedAt).toLocaleTimeString()}
-                </span>
-              </div>
-            )}
-            {session?.endedAt && (
-              <div className="flex items-center justify-between">
-                <span className="text-xs" style={{ color: C.slate400 }}>Ended</span>
-                <span className="text-sm" style={{ color: C.slate200 }}>
-                  {new Date(session.endedAt).toLocaleTimeString()}
-                </span>
-              </div>
-            )}
-          </div>
-
+      {phase.kind === "active" && (
+        <div style={{ padding: "14px 18px", borderTop: `1px solid ${C.navy700}`, display: "flex", justifyContent: "center", gap: 10 }}>
+          <ToolbarButton
+            label={isMicOn ? "Mute" : "Unmute"}
+            icon={isMicOn ? Mic : MicOff}
+            danger={!isMicOn}
+            onClick={toggleMic}
+          />
+          <ToolbarButton
+            label={isCamOn ? "Camera off" : "Camera on"}
+            icon={isCamOn ? Video : VideoOff}
+            danger={!isCamOn}
+            onClick={toggleCam}
+          />
+          <ToolbarButton
+            label="Share screen"
+            icon={isScreenSharing ? MonitorOff : Monitor}
+            active={isScreenSharing}
+            onClick={toggleScreenShare}
+          />
+          <ToolbarButton
+            label="Chat"
+            icon={MessageSquare}
+            badge={unreadChat}
+            active={chatOpen}
+            onClick={() => setChatOpen((v) => !v)}
+          />
+          <ToolbarButton
+            label="Settings"
+            icon={Settings}
+            active={showSettings}
+            onClick={() => setShowSettings((v) => !v)}
+          />
           <button
-            onClick={() => navigate(-1)}
-            className="w-full py-3 rounded-xl text-sm font-bold text-white transition-all hover:opacity-90"
-            style={{ backgroundColor: C.teal500 }}
+            onClick={endCall}
+            className="px-5 py-3 rounded-full text-sm font-bold text-white inline-flex items-center gap-2 hover:opacity-90 transition-opacity"
+            style={{ backgroundColor: C.red500 }}
           >
-            Return to Dashboard
+            <PhoneOff className="w-4 h-4" /> End
           </button>
         </div>
-      </div>
-    );
-  }
+      )}
+    </div>
+  );
+}
 
-  // ─── Render: Active Session ────────────────────────────────────────────────
+// ─── Sub-components ───────────────────────────────────────────────────────────
+
+function ToolbarButton({
+  icon: Icon, label, onClick, active = false, danger = false, badge = 0,
+}: {
+  icon: typeof Video;
+  label: string;
+  onClick: () => void;
+  active?: boolean;
+  danger?: boolean;
+  badge?: number;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      title={label}
+      aria-label={label}
+      className="relative flex flex-col items-center gap-0.5 px-3 py-2 rounded-lg hover:bg-white/10 transition-colors"
+      style={{
+        backgroundColor: active ? "rgba(39, 171, 131, 0.15)" : "transparent",
+        color: danger ? C.red500 : C.white,
+      }}
+    >
+      <Icon className="w-5 h-5" />
+      <span className="text-[10px]" style={{ color: C.slate400 }}>{label}</span>
+      {badge > 0 && (
+        <span
+          className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold flex items-center justify-center"
+          style={{ backgroundColor: C.red500, color: C.white }}
+        >
+          {badge > 9 ? "9+" : badge}
+        </span>
+      )}
+    </button>
+  );
+}
+
+function QualityPill({ quality }: { quality: ConnectionQuality }) {
+  const meta = quality === ConnectionQuality.Excellent
+    ? { color: C.green500, label: "Excellent" }
+    : quality === ConnectionQuality.Good
+      ? { color: C.amber500, label: "Good" }
+      : quality === ConnectionQuality.Poor
+        ? { color: C.red500, label: "Poor" }
+        : { color: C.slate400, label: "Unknown" };
+  return (
+    <span className="text-xs font-medium px-2 py-0.5 rounded-full flex items-center gap-1.5" style={{ backgroundColor: C.navy800 }}>
+      <span className="w-2 h-2 rounded-full" style={{ backgroundColor: meta.color }} />
+      {meta.label}
+    </span>
+  );
+}
+
+function ChatPanel({
+  messages, draft, onDraftChange, onSend, onClose,
+}: {
+  messages: ChatEntry[];
+  draft: string;
+  onDraftChange: (v: string) => void;
+  onSend: () => void;
+  onClose: () => void;
+}) {
+  const endRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
 
   return (
-    <div className="h-screen flex flex-col" style={{ backgroundColor: C.navy900 }}>
-      {/* Top Bar */}
-      <div
-        className="flex items-center justify-between px-4 py-3 shrink-0"
-        style={{ backgroundColor: C.navy800 }}
-      >
-        <div className="flex items-center gap-3">
-          <div
-            className="w-8 h-8 rounded-full flex items-center justify-center"
-            style={{ backgroundColor: C.navy700 }}
-          >
-            <Video className="w-4 h-4" style={{ color: C.teal500 }} />
-          </div>
-          <div>
-            <p className="text-sm font-semibold" style={{ color: C.white }}>
-              Telehealth Session
-            </p>
-            <p className="text-xs" style={{ color: C.slate400 }}>
-              {session?.roomName || "Video Visit"}
-            </p>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-3">
-          {/* Status Badge */}
-          <span
-            className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold"
-            style={{ backgroundColor: C.green50, color: C.green500 }}
-          >
-            <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ backgroundColor: C.green500 }} />
-            Live
-          </span>
-
-          {/* Duration Timer */}
-          <div className="flex items-center gap-1.5 text-sm font-mono" style={{ color: C.white }}>
-            <Clock className="w-3.5 h-3.5" style={{ color: C.slate400 }} />
-            {formatDuration(elapsedSeconds)}
-          </div>
-        </div>
+    <div
+      style={{
+        position: "absolute", top: 0, right: 0, bottom: 0,
+        width: "min(360px, 90%)",
+        backgroundColor: C.navy800,
+        borderLeft: `1px solid ${C.navy700}`,
+        display: "flex", flexDirection: "column",
+        boxShadow: "-10px 0 30px rgba(0,0,0,0.4)",
+      }}
+    >
+      <div style={{ padding: "12px 14px", borderBottom: `1px solid ${C.navy700}`, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <p className="text-sm font-semibold">Chat</p>
+        <button onClick={onClose} className="p-1 rounded hover:bg-white/10">
+          <X className="w-4 h-4" />
+        </button>
       </div>
-
-      {/* Video Area */}
-      <div className="flex-1 relative min-h-0">
-        <div ref={dailyContainerRef} className="absolute inset-0">
-          {/* Daily.co iframe mounts here; fallback message if not available */}
-          {!callFrameRef.current && (
-            <div className="w-full h-full flex items-center justify-center">
-              <div className="text-center">
-                <Video className="w-16 h-16 mx-auto mb-4" style={{ color: C.navy700 }} />
-                <p className="text-sm font-medium" style={{ color: C.slate400 }}>
-                  Video service not configured
-                </p>
-                <p className="text-xs mt-1" style={{ color: C.slate500 }}>
-                  Daily.co API key required for live video.
-                  Session timer is running.
+      <div style={{ flex: 1, overflowY: "auto", padding: "12px 14px" }}>
+        {messages.length === 0 && (
+          <p className="text-xs text-center mt-6" style={{ color: C.slate400 }}>
+            No messages yet — say hi.
+          </p>
+        )}
+        {messages.map((m) => (
+          <div key={m.id} className="mb-2">
+            {m.system ? (
+              <p className="text-[10px] text-center italic" style={{ color: C.slate400 }}>{m.text}</p>
+            ) : (
+              <div style={{ textAlign: m.mine ? "right" : "left" }}>
+                <div
+                  className="inline-block px-3 py-1.5 rounded-2xl text-sm max-w-[80%] text-left"
+                  style={{
+                    backgroundColor: m.mine ? C.teal600 : C.navy700,
+                    color: C.white,
+                  }}
+                >
+                  {m.text}
+                </div>
+                <p className="text-[10px] mt-0.5" style={{ color: C.slate400 }}>
+                  {m.from} · {m.at.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                 </p>
               </div>
-            </div>
-          )}
-        </div>
+            )}
+          </div>
+        ))}
+        <div ref={endRef} />
       </div>
-
-      {/* Controls Bar (glassmorphism) */}
-      <div
-        className="shrink-0 flex items-center justify-center gap-4 px-6 py-4"
-        style={{
-          backgroundColor: "rgba(16, 42, 67, 0.85)",
-          backdropFilter: "blur(16px)",
-          borderTop: `1px solid ${C.navy700}`,
-        }}
-      >
+      <div style={{ padding: "10px 12px", borderTop: `1px solid ${C.navy700}`, display: "flex", gap: 8 }}>
+        <input
+          value={draft}
+          onChange={(e) => onDraftChange(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); onSend(); } }}
+          placeholder="Type a message…"
+          className="flex-1 px-3 py-2 rounded-lg text-sm outline-none"
+          style={{ backgroundColor: C.navy900, color: C.white, border: `1px solid ${C.navy700}` }}
+        />
         <button
-          onClick={toggleMic}
-          className="w-12 h-12 rounded-full flex items-center justify-center transition-all"
-          style={{ backgroundColor: micOn ? C.navy700 : C.red500 }}
-          title={micOn ? "Mute" : "Unmute"}
+          onClick={onSend}
+          disabled={!draft.trim()}
+          className="px-3 py-2 rounded-lg text-sm font-semibold disabled:opacity-50"
+          style={{ backgroundColor: C.teal500, color: C.white }}
         >
-          {micOn ? (
-            <Mic className="w-5 h-5" style={{ color: C.white }} />
-          ) : (
-            <MicOff className="w-5 h-5" style={{ color: C.white }} />
-          )}
-        </button>
-
-        <button
-          onClick={toggleCamera}
-          className="w-12 h-12 rounded-full flex items-center justify-center transition-all"
-          style={{ backgroundColor: cameraOn ? C.navy700 : C.red500 }}
-          title={cameraOn ? "Turn off camera" : "Turn on camera"}
-        >
-          {cameraOn ? (
-            <Video className="w-5 h-5" style={{ color: C.white }} />
-          ) : (
-            <VideoOff className="w-5 h-5" style={{ color: C.white }} />
-          )}
-        </button>
-
-        <button
-          onClick={toggleScreenShare}
-          className="w-12 h-12 rounded-full flex items-center justify-center transition-all"
-          style={{ backgroundColor: screenSharing ? C.teal600 : C.navy700 }}
-          title="Screen Share"
-        >
-          <Monitor className="w-5 h-5" style={{ color: C.white }} />
-        </button>
-
-        <button
-          onClick={handleEndCall}
-          className="w-14 h-12 rounded-full flex items-center justify-center transition-all hover:opacity-90"
-          style={{ backgroundColor: C.red500 }}
-          title="End Call"
-        >
-          <PhoneOff className="w-5 h-5" style={{ color: C.white }} />
+          <Send className="w-4 h-4" />
         </button>
       </div>
     </div>
   );
 }
+
+function SettingsPanel({
+  cameras, mics, speakers, activeCam, activeMic,
+  onSelectCam, onSelectMic, onSelectSpeaker, onClose,
+}: {
+  cameras: MediaDeviceInfo[];
+  mics: MediaDeviceInfo[];
+  speakers: MediaDeviceInfo[];
+  activeCam: string;
+  activeMic: string;
+  onSelectCam: (id: string) => void;
+  onSelectMic: (id: string) => void;
+  onSelectSpeaker: (id: string) => void;
+  onClose: () => void;
+}) {
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: "absolute", inset: 0,
+        backgroundColor: "rgba(0,0,0,0.5)",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        zIndex: 30,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          backgroundColor: C.navy800,
+          borderRadius: 12,
+          padding: "16px 18px",
+          width: "min(420px, 90%)",
+          color: C.white,
+        }}
+      >
+        <div className="flex items-center justify-between mb-3">
+          <p className="text-sm font-semibold">Devices</p>
+          <button onClick={onClose} className="p-1 rounded hover:bg-white/10">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+        <DeviceSelect label="Camera" devices={cameras} value={activeCam} onChange={onSelectCam} />
+        <DeviceSelect label="Microphone" devices={mics} value={activeMic} onChange={onSelectMic} />
+        <DeviceSelect label="Speaker" devices={speakers} value={""} onChange={onSelectSpeaker} placeholder="(default)" />
+      </div>
+    </div>
+  );
+}
+
+function DeviceSelect({
+  label, devices, value, onChange, placeholder,
+}: {
+  label: string;
+  devices: MediaDeviceInfo[];
+  value: string;
+  onChange: (id: string) => void;
+  placeholder?: string;
+}) {
+  return (
+    <div className="mb-3">
+      <label className="block text-xs font-medium mb-1" style={{ color: C.slate400 }}>{label}</label>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full px-3 py-2 rounded-lg text-sm"
+        style={{ backgroundColor: C.navy900, color: C.white, border: `1px solid ${C.navy700}` }}
+      >
+        {placeholder && <option value="">{placeholder}</option>}
+        {devices.map((d) => (
+          <option key={d.deviceId} value={d.deviceId}>{d.label || `Unknown ${label.toLowerCase()}`}</option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
+function ExternalRoomPanel({ url, onLeave }: { url: string; onLeave: () => void }) {
+  return (
+    <div style={{ minHeight: "100vh", backgroundColor: C.slate50, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
+      <div style={{ maxWidth: 480, backgroundColor: C.white, borderRadius: 16, padding: 32, textAlign: "center", boxShadow: "0 10px 30px rgba(0,0,0,0.06)" }}>
+        <div style={{ width: 56, height: 56, borderRadius: "50%", backgroundColor: C.teal50, margin: "0 auto 16px", display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <Camera className="w-7 h-7" style={{ color: C.teal600 }} />
+        </div>
+        <h1 className="text-lg font-semibold mb-1" style={{ color: C.navy800 }}>External video session</h1>
+        <p className="text-sm mb-5" style={{ color: C.slate500 }}>
+          Your provider uses an external video service (Zoom, Google Meet, etc.) for this visit.
+          Click below to open the meeting in a new tab.
+        </p>
+        <a
+          href={url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-bold text-white"
+          style={{ backgroundColor: C.teal500 }}
+        >
+          Open meeting <ExternalLink className="w-3.5 h-3.5" />
+        </a>
+        <p className="text-xs mt-4 break-all" style={{ color: C.slate400 }}>{url}</p>
+        <button
+          onClick={onLeave}
+          className="mt-5 text-xs font-medium hover:underline"
+          style={{ color: C.slate500 }}
+        >
+          Back
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function FullPageMessage({
+  icon: Icon, title, body, accent = C.slate500, spinning = false, cta,
+}: {
+  icon: typeof Video;
+  title: string;
+  body?: string;
+  accent?: string;
+  spinning?: boolean;
+  cta?: { label: string; onClick: () => void };
+}) {
+  return (
+    <div style={{ minHeight: "100vh", backgroundColor: C.slate50, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
+      <div style={{ maxWidth: 420, textAlign: "center" }}>
+        <Icon
+          className={`w-10 h-10 mx-auto mb-3 ${spinning ? "animate-spin" : ""}`}
+          style={{ color: accent }}
+        />
+        <h1 className="text-lg font-semibold mb-1" style={{ color: C.navy800 }}>{title}</h1>
+        {body && <p className="text-sm" style={{ color: C.slate500 }}>{body}</p>}
+        {cta && (
+          <button
+            onClick={cta.onClick}
+            className="mt-4 inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium hover:bg-slate-100"
+            style={{ color: C.slate700, border: `1px solid ${C.slate200}` }}
+          >
+            {cta.label}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function formatDuration(s: number): string {
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  if (h > 0) return `${h}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
+  return `${m}:${String(sec).padStart(2, "0")}`;
+}
+
+export default TelehealthRoom;
