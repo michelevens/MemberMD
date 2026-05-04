@@ -119,55 +119,113 @@ class AppointmentController extends Controller
         $dayOfWeek = $scheduledAt->dayOfWeek;
         $time = $scheduledAt->format('H:i:s');
 
-        $available = ProviderAvailability::where('provider_id', $validated['provider_id'])
-            ->where('tenant_id', $user->tenant_id)
-            ->where('day_of_week', $dayOfWeek)
-            ->where('is_available', true)
-            ->where('start_time', '<=', $time)
-            ->where('end_time', '>=', $time)
-            ->exists();
+        // Enforce practice-level scheduling settings (min lead time, max
+        // advance window, same-day allowed, require-reason). Patients
+        // are bound by all of them; staff bypass min-lead and same-day
+        // (they're booking on the patient's behalf and may need to
+        // place urgent appointments).
+        $svc = app(AvailabilityService::class);
+        $settings = $svc->schedulingSettings($user->tenant_id);
 
-        if (!$available) {
+        if ($isPatientBooking) {
+            $now = \Carbon\Carbon::now($tz);
+            if (!$settings['allow_same_day'] && $scheduledAt->isSameDay($now)) {
+                return response()->json([
+                    'message' => 'Same-day bookings are not allowed by this practice.',
+                    'errors' => ['scheduled_at' => ['Same-day bookings are not allowed.']],
+                ], 422);
+            }
+            if ($settings['min_lead_minutes'] > 0
+                && $scheduledAt->lt($now->copy()->addMinutes($settings['min_lead_minutes']))) {
+                return response()->json([
+                    'message' => "Bookings require at least {$settings['min_lead_minutes']} minutes notice.",
+                    'errors' => ['scheduled_at' => ['Time slot is too soon — minimum lead time required.']],
+                ], 422);
+            }
+        }
+        if ($scheduledAt->gt(now()->addDays($settings['max_advance_days']))) {
             return response()->json([
-                'message' => 'Provider is not available at the requested time.',
-                'errors' => ['scheduled_at' => ['Provider is not available at this time.']]
+                'message' => "Bookings can be made at most {$settings['max_advance_days']} days in advance.",
+                'errors' => ['scheduled_at' => ['Too far in the future — outside the booking window.']],
+            ], 422);
+        }
+        if ($settings['require_reason'] && empty(trim((string) ($validated['notes'] ?? '')))) {
+            return response()->json([
+                'message' => 'A reason for this appointment is required.',
+                'errors' => ['notes' => ['Reason for visit is required.']],
             ], 422);
         }
 
-        // Check for overlapping appointments
+        // Booking critical section: availability check + overlap check +
+        // create must be atomic. Without this, two near-simultaneous
+        // patient bookings can both pass validation and double-book the
+        // slot. We wrap in a transaction and acquire a row-level lock
+        // on the provider so concurrent bookings serialize on the same
+        // provider id. (Postgres FOR UPDATE on the providers row is
+        // enough — overlap detection then sees committed inserts.)
         $endTime = $scheduledAt->copy()->addMinutes($validated['duration_minutes']);
-        $overlap = Appointment::where('provider_id', $validated['provider_id'])
-            ->where('tenant_id', $user->tenant_id)
-            ->whereNotIn('status', ['cancelled', 'no_show'])
-            ->where(function ($q) use ($scheduledAt, $endTime) {
-                $q->whereBetween('scheduled_at', [$scheduledAt, $endTime])
-                  ->orWhere(function ($q2) use ($scheduledAt, $endTime) {
-                      $q2->where('scheduled_at', '<', $scheduledAt)
-                         ->whereRaw(
-                             \DB::getDriverName() === 'sqlite'
-                                 ? "datetime(scheduled_at, '+' || duration_minutes || ' minutes') > ?"
-                                 : "scheduled_at + (duration_minutes * interval '1 minute') > ?",
-                             [$scheduledAt]
-                         );
-                  });
-            })
-            ->exists();
+        try {
+            $appointment = \DB::transaction(function () use (
+                $validated, $user, $isPatientBooking, $dayOfWeek, $time,
+                $scheduledAt, $endTime
+            ) {
+                // Lock the provider row to serialize concurrent bookings.
+                // sharedLock is enough — we just need every concurrent
+                // booker to wait until the previous one commits.
+                \App\Models\Provider::where('id', $validated['provider_id'])
+                    ->where('tenant_id', $user->tenant_id)
+                    ->lockForUpdate()
+                    ->first();
 
-        if ($overlap) {
-            return response()->json([
-                'message' => 'This time slot conflicts with an existing appointment.',
-                'errors' => ['scheduled_at' => ['Time slot conflicts with existing appointment.']]
-            ], 422);
+                $available = ProviderAvailability::where('provider_id', $validated['provider_id'])
+                    ->where('tenant_id', $user->tenant_id)
+                    ->where('day_of_week', $dayOfWeek)
+                    ->where('is_available', true)
+                    ->where('start_time', '<=', $time)
+                    ->where('end_time', '>=', $time)
+                    ->exists();
+
+                if (!$available) {
+                    abort(response()->json([
+                        'message' => 'Provider is not available at the requested time.',
+                        'errors' => ['scheduled_at' => ['Provider is not available at this time.']],
+                    ], 422));
+                }
+
+                $overlap = Appointment::where('provider_id', $validated['provider_id'])
+                    ->where('tenant_id', $user->tenant_id)
+                    ->whereNotIn('status', ['cancelled', 'no_show'])
+                    ->where(function ($q) use ($scheduledAt, $endTime) {
+                        $q->whereBetween('scheduled_at', [$scheduledAt, $endTime])
+                          ->orWhere(function ($q2) use ($scheduledAt, $endTime) {
+                              $q2->where('scheduled_at', '<', $scheduledAt)
+                                 ->whereRaw(
+                                     \DB::getDriverName() === 'sqlite'
+                                         ? "datetime(scheduled_at, '+' || duration_minutes || ' minutes') > ?"
+                                         : "scheduled_at + (duration_minutes * interval '1 minute') > ?",
+                                     [$scheduledAt]
+                                 );
+                          });
+                    })
+                    ->lockForUpdate()
+                    ->exists();
+
+                if ($overlap) {
+                    abort(response()->json([
+                        'message' => 'This time slot conflicts with an existing appointment.',
+                        'errors' => ['scheduled_at' => ['Time slot conflicts with existing appointment.']],
+                    ], 422));
+                }
+
+                $validated['tenant_id'] = $user->tenant_id;
+                $validated['status'] = 'scheduled';
+                $validated['confirmed_at'] = $isPatientBooking ? null : now();
+
+                return Appointment::create($validated);
+            });
+        } catch (\Symfony\Component\HttpKernel\Exception\HttpResponseException $e) {
+            return $e->getResponse();
         }
-
-        $validated['tenant_id'] = $user->tenant_id;
-        $validated['status'] = 'scheduled';
-        // Patient self-booked → unconfirmed (staff confirms via update);
-        // Staff-booked → auto-confirmed since the booking actor IS the
-        // person who would otherwise confirm.
-        $validated['confirmed_at'] = $isPatientBooking ? null : now();
-
-        $appointment = Appointment::create($validated);
 
         // Handle recurrence: generate child appointments
         if (!empty($validated['recurrence_rule'])) {
@@ -523,6 +581,71 @@ class AppointmentController extends Controller
         $entry->delete();
 
         return response()->json(['data' => ['message' => 'Waitlist entry removed.']]);
+    }
+
+    /**
+     * Send an "invite to book" email to a waitlist entry. Stamps
+     * notified_at + status='invited' so the row no longer appears as
+     * "untouched" on the practice portal. Idempotent enough — if the
+     * staff member double-clicks, the email goes twice but state is
+     * the same after.
+     *
+     * Frontend has been calling this endpoint since the waitlist UI
+     * shipped; until now it 404'd silently because the route never
+     * landed. (See PracticePortal.tsx waitlist kebab → "Invite to enroll".)
+     */
+    public function waitlistInvite(Request $request, string $id): JsonResponse
+    {
+        $user = $request->user();
+        abort_if(!in_array($user->role, ['practice_admin', 'staff']), 403);
+
+        $entry = AppointmentWaitlist::where('tenant_id', $user->tenant_id)
+            ->with(['patient', 'provider.user'])
+            ->findOrFail($id);
+
+        $patient = $entry->patient;
+        if (!$patient) {
+            return response()->json(['message' => 'Waitlist entry has no patient linked.'], 422);
+        }
+        if (!$patient->email) {
+            return response()->json([
+                'message' => 'Patient has no email on file — cannot send invite.',
+            ], 422);
+        }
+
+        $practice = \App\Models\Practice::find($user->tenant_id);
+
+        try {
+            $appUrl = (string) config('app.frontend_url', config('app.url', 'https://app.membermd.io'));
+            $loginUrl = rtrim($appUrl, '/') . '/#/login';
+
+            \Illuminate\Support\Facades\Mail::to($patient->email)->send(
+                new \App\Mail\WaitlistInvitation(
+                    practice: $practice,
+                    patient: $patient,
+                    loginUrl: $loginUrl,
+                )
+            );
+
+            $entry->update([
+                'status' => 'invited',
+                'notified_at' => now(),
+            ]);
+        } catch (\Throwable $e) {
+            \Log::warning('Waitlist invite email failed', [
+                'waitlist_id' => $entry->id,
+                'patient_id' => $patient->id,
+                'error' => $e->getMessage(),
+            ]);
+            return response()->json([
+                'message' => 'Could not send invite — please try again.',
+            ], 500);
+        }
+
+        return response()->json([
+            'data' => $entry->fresh()->load(['patient', 'provider.user', 'appointmentType']),
+            'message' => "Invite sent to {$patient->email}.",
+        ]);
     }
 
     /**

@@ -264,6 +264,7 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
     // dismissing the dashboard banner / checklist).
     Route::post('/practice/onboarding/complete', [PracticeController::class, 'completeOnboarding']);
     Route::put('/practice/branding', [PracticeController::class, 'updateBranding']);
+    Route::put('/practice/scheduling', [PracticeController::class, 'updateScheduling']);
     Route::post('/practice/logo', [PracticeController::class, 'uploadLogo']);
 
     // Master Data (SuperAdmin)
@@ -581,6 +582,7 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
     Route::put('/appointments/{id}/reschedule', [AppointmentController::class, 'reschedule']);
     Route::get('/appointments/waitlist', [AppointmentController::class, 'waitlistIndex']);
     Route::post('/appointments/waitlist', [AppointmentController::class, 'waitlistStore']);
+    Route::post('/appointments/waitlist/{id}/invite', [AppointmentController::class, 'waitlistInvite']);
     Route::delete('/appointments/waitlist/{id}', [AppointmentController::class, 'waitlistDestroy']);
 
     // ===== Telehealth =====

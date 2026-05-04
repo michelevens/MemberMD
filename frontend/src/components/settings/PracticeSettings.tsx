@@ -556,6 +556,35 @@ export function PracticeSettings({ initialTab }: { initialTab?: string }) {
         showToast(dirtyIds.length > 0 ? "Document templates saved." : "Settings saved");
         setDocTemplatesDirty({});
       }
+    } else if (activeTab === "scheduling") {
+      // Translate the form's friendly tokens into the numeric shape
+      // the backend AvailabilityService reads.
+      const advanceMap: Record<string, number> = {
+        "1week": 7, "2weeks": 14, "1month": 30,
+        "2months": 60, "3months": 90, "6months": 180,
+      };
+      const noticeMap: Record<string, number> = {
+        "0h": 0, "1h": 1, "4h": 4, "12h": 12, "24h": 24, "48h": 48, "72h": 72,
+      };
+      const body = {
+        buffer_minutes: parseInt(bufferTime, 10) || 0,
+        min_lead_minutes: 0, // exposed in the form later — keep as 0 default
+        max_advance_days: advanceMap[maxAdvance] ?? 60,
+        require_reason: requireReason,
+        cancel_notice_hours: noticeMap[cancelNotice] ?? 24,
+        allow_same_day: sameDayBooking,
+        late_cancel_fee: lateCancelFee,
+        no_show_fee: noShowFee,
+      };
+      const r = await apiFetch("/practice/scheduling", {
+        method: "PUT",
+        body: JSON.stringify(body),
+      });
+      if (r.error) {
+        showToast(r.error);
+        return;
+      }
+      showToast("Scheduling settings saved");
     } else {
       showToast("Settings saved");
     }

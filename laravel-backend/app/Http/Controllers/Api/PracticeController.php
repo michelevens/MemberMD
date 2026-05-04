@@ -167,6 +167,57 @@ class PracticeController extends Controller
     }
 
     /**
+     * PUT /practice/scheduling — persist scheduling rules into the
+     * Practice.settings JSONB under the "scheduling" key. Read by
+     * AvailabilityService and AppointmentController::store so the
+     * Practice Settings → Scheduling tab toggles actually do
+     * something. Until this shipped, those toggles were decorative.
+     *
+     * Field semantics:
+     *   buffer_minutes      pad before+after every booked slot when
+     *                       computing available slots
+     *   min_lead_minutes    how far in advance booking is allowed
+     *                       (e.g. 60 = no same-hour bookings)
+     *   max_advance_days    how far OUT booking is allowed (e.g. 60)
+     *   require_reason      whether scheduled.notes must be non-empty
+     *   cancel_notice_hours hard-block on cancel within N hours
+     *                       (UI today; backend enforcement is a
+     *                       follow-up — kept here so the value
+     *                       persists)
+     *   allow_same_day      whether same-day bookings are permitted
+     *   late_cancel_fee     dollar amount; informational for now
+     *   no_show_fee         dollar amount; informational for now
+     */
+    public function updateScheduling(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        abort_if(!$user->isPracticeAdmin() && !$user->isSuperAdmin(), 403);
+
+        $validated = $request->validate([
+            'buffer_minutes' => 'nullable|integer|min:0|max:240',
+            'min_lead_minutes' => 'nullable|integer|min:0|max:43200', // up to 30d
+            'max_advance_days' => 'nullable|integer|min:1|max:365',
+            'require_reason' => 'sometimes|boolean',
+            'cancel_notice_hours' => 'nullable|integer|min:0|max:168',
+            'allow_same_day' => 'sometimes|boolean',
+            'late_cancel_fee' => 'nullable|numeric|min:0|max:10000',
+            'no_show_fee' => 'nullable|numeric|min:0|max:10000',
+        ]);
+
+        $practice = Practice::findOrFail($user->tenant_id);
+        $settings = (array) ($practice->settings ?? []);
+        $existing = (array) ($settings['scheduling'] ?? []);
+        $settings['scheduling'] = array_merge($existing, $validated);
+
+        $practice->update(['settings' => $settings]);
+
+        return response()->json([
+            'data' => ['scheduling' => $settings['scheduling']],
+            'message' => 'Scheduling settings saved.',
+        ]);
+    }
+
+    /**
      * Accept a logo image upload from the practice settings page and
      * store it under storage/app/public/logos so it can be served via
      * the public storage symlink. Returns the public URL which the
