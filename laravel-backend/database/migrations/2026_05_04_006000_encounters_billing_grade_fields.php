@@ -1,7 +1,7 @@
 <?php
 
 use Illuminate\Database\Migrations\Migration;
-use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 /**
@@ -45,70 +45,119 @@ use Illuminate\Support\Facades\Schema;
  *
  *   cosigned_at               When the supervisor signed off.
  *
- * Idempotent — every column wrapped in hasColumn so re-running this
- * migration on an environment where it partially applied is safe.
+ * Postgres transactional-DDL note: $withinTransaction = false is set
+ * because we want each ALTER TABLE to commit independently. Without
+ * it, ANY caught throwable (e.g. FK already-exists) poisons the
+ * surrounding transaction and every subsequent statement fails with
+ * "current transaction is aborted". Same fix as the entitlement_types
+ * catalog migration (commit 4a42428).
  */
 return new class extends Migration {
+    public $withinTransaction = false;
+
+    /** Run a DDL statement; swallow only "already exists" / duplicate
+     * errors. Each call uses its own autocommit so prior failures
+     * don't poison subsequent statements. */
+    private function safeStatement(string $sql, string $label): void
+    {
+        try {
+            DB::statement($sql);
+        } catch (\Throwable $e) {
+            $msg = $e->getMessage();
+            $benign = str_contains($msg, 'already exists')
+                || str_contains($msg, 'duplicate')
+                || str_contains($msg, 'does not exist'); // for IF EXISTS guards
+            if (!$benign) {
+                throw $e;
+            }
+            // Otherwise treat as a no-op — already in the desired state.
+            \Log::info("encounters billing migration: {$label} skipped — {$msg}");
+        }
+    }
+
     public function up(): void
     {
-        Schema::table('encounters', function (Blueprint $table) {
-            if (!Schema::hasColumn('encounters', 'duration_minutes_actual')) {
-                $table->integer('duration_minutes_actual')->nullable()->after('encounter_type');
-            }
-            if (!Schema::hasColumn('encounters', 'time_spent_documenting')) {
-                $table->integer('time_spent_documenting')->nullable()->after('duration_minutes_actual');
-            }
-            if (!Schema::hasColumn('encounters', 'total_time_minutes')) {
-                $table->integer('total_time_minutes')->nullable()->after('time_spent_documenting');
-            }
-            if (!Schema::hasColumn('encounters', 'cpt_codes')) {
-                $table->jsonb('cpt_codes')->nullable()->after('diagnoses');
-            }
-            if (!Schema::hasColumn('encounters', 'units_billed')) {
-                $table->integer('units_billed')->nullable()->after('cpt_codes');
-            }
-            if (!Schema::hasColumn('encounters', 'bill_status')) {
-                $table->string('bill_status', 20)->default('not_billed')->after('units_billed');
-            }
-            if (!Schema::hasColumn('encounters', 'cosigner_user_id')) {
-                $table->foreignUuid('cosigner_user_id')->nullable()
-                    ->after('signed_by')
-                    ->constrained('users')->nullOnDelete();
-            }
-            if (!Schema::hasColumn('encounters', 'cosigned_at')) {
-                $table->timestamp('cosigned_at')->nullable()->after('cosigner_user_id');
-            }
-        });
+        // Add columns one statement at a time so a benign collision
+        // on one column doesn't abort the rest. IF NOT EXISTS is
+        // Postgres-native and idempotent.
+        $this->safeStatement(
+            'ALTER TABLE encounters ADD COLUMN IF NOT EXISTS duration_minutes_actual integer',
+            'col duration_minutes_actual'
+        );
+        $this->safeStatement(
+            'ALTER TABLE encounters ADD COLUMN IF NOT EXISTS time_spent_documenting integer',
+            'col time_spent_documenting'
+        );
+        $this->safeStatement(
+            'ALTER TABLE encounters ADD COLUMN IF NOT EXISTS total_time_minutes integer',
+            'col total_time_minutes'
+        );
+        $this->safeStatement(
+            'ALTER TABLE encounters ADD COLUMN IF NOT EXISTS cpt_codes jsonb',
+            'col cpt_codes'
+        );
+        $this->safeStatement(
+            'ALTER TABLE encounters ADD COLUMN IF NOT EXISTS units_billed integer',
+            'col units_billed'
+        );
+        $this->safeStatement(
+            "ALTER TABLE encounters ADD COLUMN IF NOT EXISTS bill_status varchar(20) DEFAULT 'not_billed'",
+            'col bill_status'
+        );
+        $this->safeStatement(
+            'ALTER TABLE encounters ADD COLUMN IF NOT EXISTS cosigner_user_id uuid',
+            'col cosigner_user_id'
+        );
+        $this->safeStatement(
+            'ALTER TABLE encounters ADD COLUMN IF NOT EXISTS cosigned_at timestamp',
+            'col cosigned_at'
+        );
+
+        // FK constraint as its own statement. Postgres has no native
+        // ADD CONSTRAINT IF NOT EXISTS, so we check the catalog first.
+        if (!Schema::hasColumn('encounters', 'cosigner_user_id')) {
+            return; // column add must've truly failed — bail without FK.
+        }
+        $fkExists = DB::selectOne(
+            "SELECT 1 AS ok FROM pg_constraint WHERE conname = 'encounters_cosigner_user_id_foreign'"
+        );
+        if (!$fkExists) {
+            $this->safeStatement(
+                'ALTER TABLE encounters ADD CONSTRAINT encounters_cosigner_user_id_foreign '
+                . 'FOREIGN KEY (cosigner_user_id) REFERENCES users(id) ON DELETE SET NULL',
+                'fk cosigner_user_id'
+            );
+        }
 
         // Indexes for the most common queries:
         //   "show me unsigned charts older than X days"
         //   "show me encounters not yet billed"
-        try {
-            Schema::table('encounters', function (Blueprint $table) {
-                $table->index(['tenant_id', 'status', 'signed_at'], 'encounters_tenant_status_signed_idx');
-            });
-        } catch (\Throwable) { /* already exists */ }
-
-        try {
-            Schema::table('encounters', function (Blueprint $table) {
-                $table->index(['tenant_id', 'bill_status'], 'encounters_tenant_bill_status_idx');
-            });
-        } catch (\Throwable) { /* already exists */ }
+        $this->safeStatement(
+            'CREATE INDEX IF NOT EXISTS encounters_tenant_status_signed_idx '
+            . 'ON encounters (tenant_id, status, signed_at)',
+            'idx tenant_status_signed'
+        );
+        $this->safeStatement(
+            'CREATE INDEX IF NOT EXISTS encounters_tenant_bill_status_idx '
+            . 'ON encounters (tenant_id, bill_status)',
+            'idx tenant_bill_status'
+        );
     }
 
     public function down(): void
     {
-        Schema::table('encounters', function (Blueprint $table) {
-            try { $table->dropIndex('encounters_tenant_bill_status_idx'); } catch (\Throwable) {}
-            try { $table->dropIndex('encounters_tenant_status_signed_idx'); } catch (\Throwable) {}
-            try { $table->dropForeign(['cosigner_user_id']); } catch (\Throwable) {}
-            $cols = [
-                'cosigned_at', 'cosigner_user_id', 'bill_status', 'units_billed',
-                'cpt_codes', 'total_time_minutes', 'time_spent_documenting',
-                'duration_minutes_actual',
-            ];
-            $present = array_filter($cols, fn ($c) => Schema::hasColumn('encounters', $c));
-            if ($present) $table->dropColumn($present);
-        });
+        $this->safeStatement('DROP INDEX IF EXISTS encounters_tenant_bill_status_idx', 'drop idx bill_status');
+        $this->safeStatement('DROP INDEX IF EXISTS encounters_tenant_status_signed_idx', 'drop idx status_signed');
+        $this->safeStatement(
+            'ALTER TABLE encounters DROP CONSTRAINT IF EXISTS encounters_cosigner_user_id_foreign',
+            'drop fk cosigner_user_id'
+        );
+        foreach ([
+            'cosigned_at', 'cosigner_user_id', 'bill_status', 'units_billed',
+            'cpt_codes', 'total_time_minutes', 'time_spent_documenting',
+            'duration_minutes_actual',
+        ] as $col) {
+            $this->safeStatement("ALTER TABLE encounters DROP COLUMN IF EXISTS {$col}", "drop col {$col}");
+        }
     }
 };
