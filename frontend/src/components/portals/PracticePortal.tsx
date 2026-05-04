@@ -7,6 +7,7 @@ import { useNavigate, useLocation } from "react-router-dom";
 import { ProviderDetailPage } from "./ProviderDetailPage";
 import { useAuth } from "../../contexts/AuthContext";
 import { dashboardService, membershipPlanService, messageService, patientService, appointmentService, encounterService, prescriptionService, invoiceService, programService, telehealthService, screeningService, couponService, providerService, paymentService, notificationService, apiFetch, billingEnhancedService, documentService, onboardingService, staffService } from "../../lib/api";
+import { formatDob } from "../../lib/format";
 import { PortalShell, type NavSection as ShellNavSection, type PortalColor } from "../shared/PortalShell";
 import { MobileSheet } from "../shared/MobileSheet";
 import { PhoneField, FaxField, EmailField, NPIField, ZipField, AddressField } from "../shared/fields";
@@ -533,22 +534,11 @@ const MOCK_THREADS = [
 // All tabs are now implemented — no coming-soon tabs remain
 
 // ─── Helper Components ──────────────────────────────────────────────────────
-
-/**
- * Format a date-of-birth value for display. The API returns ISO strings
- * like "1988-05-18T00:00:00.000000Z"; we render them as "May 18, 1988".
- * Defensive against bad inputs (returns "" so the caller's "—" fallback
- * fires instead of "Invalid Date").
- */
-function formatDob(value: string | null | undefined): string {
-  if (!value) return "";
-  // Strip time portion if present so timezone shifts don't move the date
-  // by a day (DOB is calendar-day, not an instant).
-  const dateOnly = String(value).slice(0, 10);
-  const d = new Date(dateOnly + "T00:00:00");
-  if (isNaN(d.getTime())) return "";
-  return d.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
-}
+//
+// formatDob et al. consolidated to lib/format.ts (refactor 2026-05-04).
+// The shared version returns "—" on bad input instead of "" — callers
+// previously had `|| pt.memberSince` fallbacks that worked around this;
+// those have been simplified since the shared helper never returns "".
 
 /**
  * Small label/value field for the Stripe-style detail drawer. Pattern
@@ -3399,7 +3389,7 @@ export function PracticePortal() {
                   {pt.memberSince && (
                     <div className="flex items-center gap-1.5">
                       <Calendar className="w-4 h-4" />
-                      <span>Member since {formatDob(pt.memberSince) || pt.memberSince}</span>
+                      <span>Member since {formatDob(pt.memberSince)}</span>
                     </div>
                   )}
                   {pt.lastVisit && (
@@ -3960,7 +3950,7 @@ export function PracticePortal() {
                 <h3 className="font-semibold text-slate-800">Personal Information</h3>
                 <div className="grid grid-cols-2 gap-4 text-sm">
                   <div><p className="text-slate-400 text-xs">Full Name</p><p className="text-slate-700 font-medium">{pt.name}</p></div>
-                  <div><p className="text-slate-400 text-xs">Date of Birth</p><p className="text-slate-700 font-medium">{formatDob(pt.dob) || "—"}</p></div>
+                  <div><p className="text-slate-400 text-xs">Date of Birth</p><p className="text-slate-700 font-medium">{formatDob(pt.dob)}</p></div>
                   <div><p className="text-slate-400 text-xs">Gender</p><p className="text-slate-700 font-medium">{pt.gender || "—"}</p></div>
                   <div><p className="text-slate-400 text-xs">Pronouns</p><p className="text-slate-700 font-medium">{pt.pronouns || "—"}</p></div>
                   <div><p className="text-slate-400 text-xs">Phone</p><p className="text-slate-700 font-medium">{pt.phone}</p></div>
@@ -4515,7 +4505,7 @@ export function PracticePortal() {
                     ) : null}
                     {pt.memberSince ? (
                       <p className="text-white text-xs opacity-70">
-                        Member since {formatDob(pt.memberSince) || pt.memberSince}
+                        Member since {formatDob(pt.memberSince)}
                       </p>
                     ) : null}
                   </div>

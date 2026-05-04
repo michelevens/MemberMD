@@ -23,6 +23,7 @@ import {
   clinicalSettingsService,
   apiFetch,
 } from "../../../lib/api";
+import { formatDate, formatCurrency } from "../../../lib/format";
 import { MyAgreementsSection } from "./MyAgreementsSection";
 import { FamilyMembersSection } from "./FamilyMembersSection";
 import type { PatientMembership, Invoice, PatientEntitlement } from "../../../types";
@@ -52,20 +53,6 @@ const C = {
   green50: "#dcfce7",
 };
 
-// ─── Helpers ────────────────────────────────────────────────────────────────
-
-function formatDate(d?: string | null): string {
-  if (!d) return "—";
-  try { return new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }); }
-  catch { return d; }
-}
-
-function formatCurrency(n?: number | string | null): string {
-  if (n == null) return "—";
-  const v = typeof n === "string" ? parseFloat(n) : n;
-  if (Number.isNaN(v)) return "—";
-  return `$${v.toFixed(2)}`;
-}
 
 // ─── Component ──────────────────────────────────────────────────────────────
 

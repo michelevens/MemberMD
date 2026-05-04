@@ -12,6 +12,7 @@ import { UserSettingsDropdown } from "../shared/UserSettingsDropdown";
 import { RefreshButton } from "../shared/RefreshButton";
 import { useConfirm } from "../shared/ConfirmDialog";
 import { CommandPalette, useCommandPaletteShortcut } from "../shared/CommandPalette";
+import { formatCurrencyWhole as formatCurrency, formatNumber } from "../../lib/format";
 import {
   DataTable,
   EntityId,
@@ -901,19 +902,8 @@ function PlanBadge({ plan }: { plan: string }) {
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
-
-function formatCurrency(amount: number): string {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(amount);
-}
-
-function formatNumber(n: number): string {
-  return new Intl.NumberFormat("en-US").format(n);
-}
+// formatCurrency + formatNumber consolidated to lib/format.ts
+// (refactor 2026-05-04). Whole-dollar variant for high-level metrics.
 
 function StatusBadge({ status }: { status: "active" | "trial" | "suspended" | "pending" }) {
   const config = {
