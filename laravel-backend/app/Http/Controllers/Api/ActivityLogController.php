@@ -86,12 +86,12 @@ class ActivityLogController extends Controller
             'other' => 'other',
         ];
 
-        // provider_id on communication_logs is FK to providers.id, not
-        // users.id. Look up the provider row attached to this user (if
-        // any) — staff users won't have one, leave null in that case.
-        $providerId = \App\Models\Provider::where('tenant_id', $user->tenant_id)
-            ->where('user_id', $user->id)
-            ->value('id');
+        // provider_id on communication_logs is FK to users.id (despite the
+        // column name) — see the create_communication_logs_table migration.
+        // Earlier this controller looked up providers.id and wrote that,
+        // which threw 23503 foreign-key violations for any user logging
+        // an activity. Just stamp the acting user's id.
+        $providerId = $user->id;
 
         // requires_approval=true → status pending. Default 'approved' so
         // routine logs (e.g. an admin documenting a phone call) don't
