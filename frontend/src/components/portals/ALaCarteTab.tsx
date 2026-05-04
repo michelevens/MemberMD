@@ -22,20 +22,47 @@ import {
 
 interface ALaCartePrice {
   id: string;
-  entitlementType: string;
-  label: string;
-  price: number;
-  active: boolean;
+  // The API returns the entitlement_type relation joined as a nested
+  // object. After apiFetch's snake→camel transform it lands as
+  // `entitlementType: { id, name, code, category, ... }`. There is
+  // also entitlementTypeId (the FK column) on the row itself.
+  entitlementTypeId: string;
+  entitlementType?: {
+    id: string;
+    name: string;
+    code: string;
+    category?: string;
+    unitOfMeasure?: string;
+  } | null;
+  // Server-side numeric in JSON; cast to number for display.
+  price: number | string;
+  description?: string | null;
+  isActive: boolean;
+}
+
+interface EntitlementTypeOption {
+  id: string;
+  name: string;
+  code: string;
+  category?: string;
+  isSystem?: boolean;
 }
 
 interface VisitPack {
   id: string;
   name: string;
-  entitlementType: string;
+  // Backend stores entitlement_type_id (FK) + joins entitlementType.
+  entitlementTypeId: string;
+  entitlementType?: {
+    id: string;
+    name: string;
+    code: string;
+    category?: string;
+  } | null;
   quantity: number;
-  price: number;
+  price: number | string;
   description?: string;
-  active: boolean;
+  isActive: boolean;
 }
 
 interface PatientSearchResult {
@@ -110,11 +137,19 @@ export function ALaCarteTab() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editPrice, setEditPrice] = useState("");
   const [savingPrice, setSavingPrice] = useState(false);
+  // Catalog of entitlement_types for the "+ Add price" picker. Loaded
+  // once on mount so the dialog is instant.
+  const [entitlementTypes, setEntitlementTypes] = useState<EntitlementTypeOption[]>([]);
+  const [showAddPrice, setShowAddPrice] = useState(false);
+  const [addPriceTypeId, setAddPriceTypeId] = useState("");
+  const [addPriceValue, setAddPriceValue] = useState("");
+  const [addPriceSearch, setAddPriceSearch] = useState("");
+  const [addingPrice, setAddingPrice] = useState(false);
 
   // Visit Packs state
   const [packs, setPacks] = useState<VisitPack[]>([]);
   const [showCreatePack, setShowCreatePack] = useState(false);
-  const [newPack, setNewPack] = useState({ name: "", entitlementType: "", quantity: "", price: "", description: "" });
+  const [newPack, setNewPack] = useState({ name: "", entitlementTypeId: "", quantity: "", price: "", description: "" });
   const [creatingPack, setCreatingPack] = useState(false);
 
   // Checkout state
@@ -142,14 +177,42 @@ export function ALaCarteTab() {
   const loadPrices = useCallback(async () => {
     setLoading(true);
     setError(null);
-    const res = await apiFetch<ALaCartePrice[]>("/a-la-carte/prices");
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const res = await apiFetch<any>("/a-la-carte/prices");
     if (res.error) {
       setError(res.error);
     } else if (res.data) {
-      setPrices(res.data);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const list: ALaCartePrice[] = Array.isArray(res.data)
+        ? res.data
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        : Array.isArray((res.data as any)?.data)
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          ? (res.data as any).data
+          : [];
+      setPrices(list);
     }
     setLoading(false);
   }, []);
+
+  // Load the entitlement-type catalog once for the "+ Add price"
+  // picker. Backend returns system + tenant rows deduped.
+  const loadEntitlementTypes = useCallback(async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const res = await apiFetch<any>("/entitlement-types?is_active=true");
+    if (res.error || !res.data) return;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const list: EntitlementTypeOption[] = Array.isArray(res.data)
+      ? res.data
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      : Array.isArray((res.data as any)?.data)
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        ? (res.data as any).data
+        : [];
+    setEntitlementTypes(list);
+  }, []);
+
+  useEffect(() => { void loadEntitlementTypes(); }, [loadEntitlementTypes]);
 
   const loadPacks = useCallback(async () => {
     setLoading(true);
@@ -205,17 +268,50 @@ export function ALaCarteTab() {
 
   // ─── Save Price ─────────────────────────────────────────────────────────
 
-  const handleSavePrice = async (id: string) => {
+  const handleSavePrice = async (priceRow: ALaCartePrice) => {
+    // Backend upserts on (tenant_id, entitlement_type_id), so we send
+    // the entitlement_type_id from the existing row + new price. The
+    // controller doesn't accept an `id` field; passing it was a noop
+    // and is why edits never persisted before this fix.
     setSavingPrice(true);
     const res = await apiFetch<ALaCartePrice>("/a-la-carte/prices", {
       method: "POST",
-      body: JSON.stringify({ id, price: parseFloat(editPrice) }),
+      body: JSON.stringify({
+        entitlement_type_id: priceRow.entitlementTypeId,
+        price: parseFloat(editPrice),
+        is_active: priceRow.isActive,
+      }),
     });
     setSavingPrice(false);
     if (!res.error) {
       setEditingId(null);
       setEditPrice("");
       loadPrices();
+    } else {
+      setError(res.error);
+    }
+  };
+
+  const handleAddPrice = async () => {
+    if (!addPriceTypeId || !addPriceValue) return;
+    setAddingPrice(true);
+    const res = await apiFetch<ALaCartePrice>("/a-la-carte/prices", {
+      method: "POST",
+      body: JSON.stringify({
+        entitlement_type_id: addPriceTypeId,
+        price: parseFloat(addPriceValue),
+        is_active: true,
+      }),
+    });
+    setAddingPrice(false);
+    if (!res.error) {
+      setShowAddPrice(false);
+      setAddPriceTypeId("");
+      setAddPriceValue("");
+      setAddPriceSearch("");
+      loadPrices();
+    } else {
+      setError(res.error);
     }
   };
 
@@ -227,7 +323,7 @@ export function ALaCarteTab() {
       method: "POST",
       body: JSON.stringify({
         name: newPack.name,
-        entitlementType: newPack.entitlementType,
+        entitlement_type_id: newPack.entitlementTypeId,
         quantity: parseInt(newPack.quantity, 10),
         price: parseFloat(newPack.price),
         description: newPack.description,
@@ -236,24 +332,34 @@ export function ALaCarteTab() {
     setCreatingPack(false);
     if (!res.error) {
       setShowCreatePack(false);
-      setNewPack({ name: "", entitlementType: "", quantity: "", price: "", description: "" });
+      setNewPack({ name: "", entitlementTypeId: "", quantity: "", price: "", description: "" });
       loadPacks();
+    } else {
+      setError(res.error);
     }
   };
 
   // ─── Checkout ───────────────────────────────────────────────────────────
 
   const selectedPriceItem = prices.find((p) => p.id === checkoutService);
-  const checkoutTotal = selectedPriceItem ? selectedPriceItem.price * parseInt(checkoutQuantity || "0", 10) : 0;
+  const checkoutTotal = selectedPriceItem
+    ? (typeof selectedPriceItem.price === "string" ? parseFloat(selectedPriceItem.price) : selectedPriceItem.price)
+      * parseInt(checkoutQuantity || "0", 10)
+    : 0;
 
   const handleCheckout = async () => {
     if (!checkoutPatient || !checkoutService) return;
+    const priceRow = prices.find((p) => p.id === checkoutService);
+    if (!priceRow) return;
     setCheckoutSubmitting(true);
+    // Backend expects entitlement_type_id (it looks up the
+    // ALaCartePrice row by tenant + type internally), not the
+    // ALaCartePrice row id.
     const res = await apiFetch<CheckoutResult>("/a-la-carte/checkout", {
       method: "POST",
       body: JSON.stringify({
-        patientId: checkoutPatient.id,
-        priceId: checkoutService,
+        patient_id: checkoutPatient.id,
+        entitlement_type_id: priceRow.entitlementTypeId,
         quantity: parseInt(checkoutQuantity, 10),
       }),
     });
@@ -270,41 +376,78 @@ export function ALaCarteTab() {
 
   // ─── Render Pricing Tab ─────────────────────────────────────────────────
 
-  const renderPricing = () => (
+  const renderPricing = () => {
+    // Filter the catalog for the "+ Add price" picker — exclude
+    // entitlement types that already have a price row.
+    const pricedTypeIds = new Set(prices.map((p) => p.entitlementTypeId));
+    const lower = addPriceSearch.trim().toLowerCase();
+    const pickable = entitlementTypes
+      .filter((et) => !pricedTypeIds.has(et.id))
+      .filter((et) => !lower
+        || et.name.toLowerCase().includes(lower)
+        || et.code.toLowerCase().includes(lower));
+
+    return (
     <div className="glass rounded-xl p-6">
-      <h3 className="text-lg font-semibold text-slate-800 mb-4 flex items-center gap-2">
-        <Tag className="w-5 h-5" style={{ color: "#1e40af" }} />
-        A La Carte Pricing
-      </h3>
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-lg font-semibold text-slate-800 flex items-center gap-2">
+          <Tag className="w-5 h-5" style={{ color: "#1e40af" }} />
+          A La Carte Pricing
+        </h3>
+        <button
+          onClick={() => setShowAddPrice(true)}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-semibold text-white"
+          style={{ backgroundColor: "#27ab83" }}
+        >
+          <Plus className="w-3.5 h-3.5" /> Add price
+        </button>
+      </div>
 
       {loading ? (
         <div className="text-center py-12 text-slate-400">Loading prices...</div>
       ) : prices.length === 0 ? (
-        <div className="text-center py-12 text-slate-400">No pricing configured yet.</div>
+        <div className="text-center py-12">
+          <Tag className="w-8 h-8 mx-auto mb-2 text-slate-300" />
+          <p className="text-sm text-slate-500">No pricing configured yet.</p>
+          <p className="text-xs text-slate-400 mt-1">
+            Click "Add price" to set self-pay rates from your entitlement catalog.
+          </p>
+        </div>
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-slate-200">
-                <th className="text-left py-3 px-3 font-semibold text-slate-600">Entitlement Type</th>
-                <th className="text-left py-3 px-3 font-semibold text-slate-600">Label</th>
+                <th className="text-left py-3 px-3 font-semibold text-slate-600">Entitlement</th>
+                <th className="text-left py-3 px-3 font-semibold text-slate-600">Category</th>
                 <th className="text-left py-3 px-3 font-semibold text-slate-600">Price</th>
                 <th className="text-left py-3 px-3 font-semibold text-slate-600">Status</th>
                 <th className="text-right py-3 px-3 font-semibold text-slate-600">Actions</th>
               </tr>
             </thead>
             <tbody>
-              {prices.map((p) => (
+              {prices.map((p) => {
+                const et = p.entitlementType;
+                const name = et?.name ?? "(unknown)";
+                const code = et?.code ?? "";
+                const category = et?.category ?? "";
+                const priceNum = typeof p.price === "string" ? parseFloat(p.price) : p.price;
+                return (
                 <tr key={p.id} className="border-b border-slate-100 hover:bg-slate-50/50 transition-colors">
                   <td className="py-3 px-3">
-                    <span
-                      className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium"
-                      style={{ backgroundColor: "#e0ecff", color: "#1e40af" }}
-                    >
-                      {p.entitlementType}
-                    </span>
+                    <p className="font-medium text-slate-800">{name}</p>
+                    <p className="text-xs text-slate-400 font-mono">{code}</p>
                   </td>
-                  <td className="py-3 px-3 font-medium text-slate-800">{p.label}</td>
+                  <td className="py-3 px-3">
+                    {category && (
+                      <span
+                        className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium"
+                        style={{ backgroundColor: "#e0ecff", color: "#1e40af" }}
+                      >
+                        {category.replace(/_/g, " ")}
+                      </span>
+                    )}
+                  </td>
                   <td className="py-3 px-3">
                     {editingId === p.id ? (
                       <div className="flex items-center gap-2">
@@ -320,25 +463,25 @@ export function ALaCarteTab() {
                         />
                       </div>
                     ) : (
-                      <span className="font-medium text-slate-800">${p.price.toFixed(2)}</span>
+                      <span className="font-medium text-slate-800">${(priceNum || 0).toFixed(2)}</span>
                     )}
                   </td>
                   <td className="py-3 px-3">
                     <span
                       className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium"
                       style={{
-                        backgroundColor: p.active ? "#e6f7f2" : "#f1f5f9",
-                        color: p.active ? "#147d64" : "#64748b",
+                        backgroundColor: p.isActive ? "#e6f7f2" : "#f1f5f9",
+                        color: p.isActive ? "#147d64" : "#64748b",
                       }}
                     >
-                      {p.active ? "Active" : "Inactive"}
+                      {p.isActive ? "Active" : "Inactive"}
                     </span>
                   </td>
                   <td className="py-3 px-3 text-right">
                     {editingId === p.id ? (
                       <div className="flex items-center justify-end gap-1">
                         <button
-                          onClick={() => handleSavePrice(p.id)}
+                          onClick={() => handleSavePrice(p)}
                           disabled={savingPrice}
                           className="p-1.5 rounded hover:bg-green-50 transition-colors"
                           title="Save"
@@ -355,7 +498,7 @@ export function ALaCarteTab() {
                       </div>
                     ) : (
                       <button
-                        onClick={() => { setEditingId(p.id); setEditPrice(p.price.toString()); }}
+                        onClick={() => { setEditingId(p.id); setEditPrice(String(priceNum)); }}
                         className="p-1.5 rounded hover:bg-slate-100 transition-colors"
                         title="Edit price"
                       >
@@ -364,13 +507,104 @@ export function ALaCarteTab() {
                     )}
                   </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>
       )}
+
+      <DialogOverlay
+        open={showAddPrice}
+        onClose={() => { setShowAddPrice(false); setAddPriceTypeId(""); setAddPriceValue(""); setAddPriceSearch(""); }}
+        title="Add à la carte price"
+      >
+        <p className="text-xs text-slate-500 mb-3">
+          Pick an entitlement from your catalog and set the self-pay price. Practice members can buy this from their portal under "À La Carte" or staff can charge it on their behalf via Checkout.
+        </p>
+
+        <label className="block text-xs font-medium text-slate-600 mb-1">Entitlement</label>
+        <div className="relative mb-3">
+          <Search className="w-4 h-4 absolute left-2 top-1/2 -translate-y-1/2 text-slate-400" />
+          <input
+            value={addPriceSearch}
+            onChange={(e) => setAddPriceSearch(e.target.value)}
+            placeholder="Search by name or code…"
+            className="w-full pl-8 pr-3 py-2 rounded-lg border border-slate-200 text-sm outline-none"
+          />
+        </div>
+        <div className="max-h-56 overflow-y-auto rounded-lg border border-slate-200 mb-3">
+          {pickable.length === 0 ? (
+            <p className="text-xs text-slate-400 text-center py-6">
+              {entitlementTypes.length === 0
+                ? "Loading catalog…"
+                : "Every entitlement already has a price. Edit existing rows above."}
+            </p>
+          ) : (
+            <div className="divide-y divide-slate-100">
+              {pickable.slice(0, 50).map((et) => {
+                const sel = addPriceTypeId === et.id;
+                return (
+                  <button
+                    key={et.id}
+                    onClick={() => setAddPriceTypeId(et.id)}
+                    className="w-full text-left px-3 py-2 transition-colors"
+                    style={{
+                      backgroundColor: sel ? "#eff6ff" : "transparent",
+                    }}
+                  >
+                    <p className="text-sm font-medium text-slate-800">{et.name}</p>
+                    <p className="text-xs text-slate-400 font-mono">
+                      {et.code}
+                      {et.category ? ` · ${et.category.replace(/_/g, " ")}` : ""}
+                      {et.isSystem ? " · platform default" : ""}
+                    </p>
+                  </button>
+                );
+              })}
+              {pickable.length > 50 && (
+                <p className="text-xs text-slate-400 text-center py-2">
+                  Showing first 50 — refine your search to narrow.
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+
+        <label className="block text-xs font-medium text-slate-600 mb-1">Price (USD)</label>
+        <div className="flex items-center gap-2 mb-4">
+          <span className="text-slate-400">$</span>
+          <input
+            type="number"
+            min="0"
+            step="0.01"
+            value={addPriceValue}
+            onChange={(e) => setAddPriceValue(e.target.value)}
+            placeholder="0.00"
+            className="flex-1 px-3 py-2 rounded-lg border border-slate-200 text-sm outline-none"
+          />
+        </div>
+
+        <div className="flex justify-end gap-2">
+          <button
+            onClick={() => { setShowAddPrice(false); setAddPriceTypeId(""); setAddPriceValue(""); setAddPriceSearch(""); }}
+            className="px-3 py-2 text-sm font-medium text-slate-600 rounded-lg hover:bg-slate-100"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleAddPrice}
+            disabled={!addPriceTypeId || !addPriceValue || addingPrice}
+            className="px-4 py-2 text-sm font-semibold text-white rounded-lg disabled:opacity-50"
+            style={{ backgroundColor: "#27ab83" }}
+          >
+            {addingPrice ? "Saving…" : "Add price"}
+          </button>
+        </div>
+      </DialogOverlay>
     </div>
-  );
+    );
+  };
 
   // ─── Render Visit Packs Tab ─────────────────────────────────────────────
 
@@ -398,25 +632,28 @@ export function ALaCarteTab() {
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {packs.map((pack) => (
+          {packs.map((pack) => {
+            const priceNum = typeof pack.price === "string" ? parseFloat(pack.price) : pack.price;
+            const etName = pack.entitlementType?.name ?? "Entitlement";
+            return (
             <div key={pack.id} className="glass rounded-xl p-5 hover-lift">
               <div className="flex items-start justify-between mb-3">
                 <h4 className="font-semibold text-slate-800">{pack.name}</h4>
                 <span
                   className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium"
                   style={{
-                    backgroundColor: pack.active ? "#e6f7f2" : "#f1f5f9",
-                    color: pack.active ? "#147d64" : "#64748b",
+                    backgroundColor: pack.isActive ? "#e6f7f2" : "#f1f5f9",
+                    color: pack.isActive ? "#147d64" : "#64748b",
                   }}
                 >
-                  {pack.active ? "Active" : "Inactive"}
+                  {pack.isActive ? "Active" : "Inactive"}
                 </span>
               </div>
               <span
                 className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium mb-3"
                 style={{ backgroundColor: "#f3e8ff", color: "#7c3aed" }}
               >
-                {pack.entitlementType}
+                {etName}
               </span>
               {pack.description && (
                 <p className="text-sm text-slate-500 mb-3">{pack.description}</p>
@@ -427,11 +664,12 @@ export function ALaCarteTab() {
                   <span className="font-medium text-slate-800">{pack.quantity}</span>
                 </div>
                 <div>
-                  <span className="text-2xl font-bold text-slate-800">${pack.price.toFixed(2)}</span>
+                  <span className="text-2xl font-bold text-slate-800">${(priceNum || 0).toFixed(2)}</span>
                 </div>
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
@@ -449,14 +687,19 @@ export function ALaCarteTab() {
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Entitlement Type *</label>
-            <input
-              type="text"
-              value={newPack.entitlementType}
-              onChange={(e) => setNewPack({ ...newPack, entitlementType: e.target.value })}
-              placeholder="e.g., office_visit"
-              className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-            />
+            <label className="block text-sm font-medium text-slate-700 mb-1">Entitlement *</label>
+            <select
+              value={newPack.entitlementTypeId}
+              onChange={(e) => setNewPack({ ...newPack, entitlementTypeId: e.target.value })}
+              className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-white"
+            >
+              <option value="">Select an entitlement…</option>
+              {entitlementTypes.map((et) => (
+                <option key={et.id} value={et.id}>
+                  {et.name}{et.category ? ` (${et.category.replace(/_/g, " ")})` : ""}
+                </option>
+              ))}
+            </select>
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div>
@@ -502,7 +745,7 @@ export function ALaCarteTab() {
             </button>
             <button
               onClick={handleCreatePack}
-              disabled={!newPack.name || !newPack.entitlementType || !newPack.quantity || !newPack.price || creatingPack}
+              disabled={!newPack.name || !newPack.entitlementTypeId || !newPack.quantity || !newPack.price || creatingPack}
               className="px-4 py-2 rounded-lg text-sm font-semibold text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed"
               style={{ backgroundColor: "#1e40af" }}
             >
@@ -587,9 +830,13 @@ export function ALaCarteTab() {
               className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none appearance-none"
             >
               <option value="">Select service...</option>
-              {prices.filter((p) => p.active).map((p) => (
-                <option key={p.id} value={p.id}>{p.label} — ${p.price.toFixed(2)}</option>
-              ))}
+              {prices.filter((p) => p.isActive).map((p) => {
+                const priceNum = typeof p.price === "string" ? parseFloat(p.price) : p.price;
+                const label = p.entitlementType?.name ?? "Service";
+                return (
+                  <option key={p.id} value={p.id}>{label} — ${(priceNum || 0).toFixed(2)}</option>
+                );
+              })}
             </select>
             <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
           </div>
@@ -633,11 +880,14 @@ export function ALaCarteTab() {
     <div className="space-y-6">
       {/* Stats */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <StatCard icon={Tag} label="Active Prices" value={prices.filter((p) => p.active).length.toString()} color="#1e40af" />
+        <StatCard icon={Tag} label="Active Prices" value={prices.filter((p) => p.isActive).length.toString()} color="#1e40af" />
         <StatCard icon={Package} label="Visit Packs" value={packs.length.toString()} color="#7c3aed" />
         <StatCard icon={DollarSign} label="Avg. Pack Price" value={
           packs.length > 0
-            ? "$" + (packs.reduce((s, p) => s + p.price, 0) / packs.length).toFixed(0)
+            ? "$" + (packs.reduce((s, p) => {
+                const n = typeof p.price === "string" ? parseFloat(p.price) : p.price;
+                return s + (n || 0);
+              }, 0) / packs.length).toFixed(0)
             : "$0"
         } color="#147d64" />
       </div>
