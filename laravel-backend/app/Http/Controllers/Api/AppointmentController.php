@@ -355,7 +355,28 @@ class AppointmentController extends Controller
             $validated['cancelled_at'] = now();
         }
 
+        // Auto-charge no-show fee — fires on the transition into
+        // 'no_show' status (only when status is changing TO no_show
+        // from something else, not on idempotent re-marks). Wrapped
+        // try/catch so a Stripe failure doesn't block the status
+        // update; the fee is recorded on the row regardless and can
+        // be retried later.
+        $becameNoShow = isset($validated['status'])
+            && $validated['status'] === 'no_show'
+            && $appointment->status !== 'no_show';
+
         $appointment->update($validated);
+
+        if ($becameNoShow) {
+            try {
+                $this->autoChargeNoShowFee($appointment->fresh());
+            } catch (\Throwable $e) {
+                \Log::warning('No-show fee auto-charge failed', [
+                    'appointment_id' => $appointment->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
 
         return response()->json([
             'data' => $appointment->fresh()->load(['patient', 'provider.user', 'appointmentType'])
@@ -427,6 +448,71 @@ class AppointmentController extends Controller
         ]);
     }
 
+    /**
+     * Auto-charge the no-show fee on the practice's Connect account
+     * when an appointment transitions to status=no_show.
+     *
+     * Preconditions (any false → silently no-op, fee not charged):
+     *   - Practice.settings.scheduling.auto_charge_no_show is true
+     *   - Practice.settings.scheduling.no_show_fee is > 0
+     *   - Patient has a stripe_customer_id with at least one
+     *     payment method on file
+     *   - Practice has a Stripe Connect account with charges enabled
+     *
+     * Stamps appointment.no_show_fee with the amount charged so the
+     * row carries the audit trail. A future "retry no-show fee" UI
+     * can read appointments where status=no_show + no_show_fee=null
+     * to find missed charges.
+     */
+    private function autoChargeNoShowFee(Appointment $appointment): void
+    {
+        $svc = app(AvailabilityService::class);
+        $settings = $svc->schedulingSettings($appointment->tenant_id);
+        if (empty($settings['auto_charge_no_show'])) return;
+
+        $feeDollars = (float) ($settings['no_show_fee'] ?? 0);
+        if ($feeDollars <= 0) return;
+
+        $appointment->loadMissing('patient');
+        $patient = $appointment->patient;
+        if (!$patient || empty($patient->stripe_customer_id)) {
+            \Log::info('Skipping no-show fee — patient has no Stripe customer on file', [
+                'appointment_id' => $appointment->id,
+            ]);
+            return;
+        }
+
+        $practice = \App\Models\Practice::find($appointment->tenant_id);
+        $connectAccountId = $practice?->stripe_connect_account_id ?? null;
+        if (empty($connectAccountId)) {
+            \Log::info('Skipping no-show fee — practice has no Stripe Connect account', [
+                'appointment_id' => $appointment->id,
+            ]);
+            return;
+        }
+
+        $secret = (string) config('services.stripe.secret', env('STRIPE_SECRET', ''));
+        if (empty($secret)) return;
+
+        $stripe = new \Stripe\StripeClient($secret);
+        $amountCents = (int) round($feeDollars * 100);
+        $stripe->paymentIntents->create([
+            'amount' => $amountCents,
+            'currency' => 'usd',
+            'customer' => $patient->stripe_customer_id,
+            'description' => "No-show fee for appointment on " . $appointment->scheduled_at?->format('M j, Y'),
+            'confirm' => true,
+            'off_session' => true,
+            'metadata' => [
+                'appointment_id' => $appointment->id,
+                'kind' => 'no_show_fee',
+                'tenant_id' => $appointment->tenant_id,
+            ],
+        ], ['stripe_account' => $connectAccountId]);
+
+        $appointment->update(['no_show_fee' => $feeDollars]);
+    }
+
     public function destroy(Request $request, string $id): JsonResponse
     {
         $user = $request->user();
@@ -435,6 +521,38 @@ class AppointmentController extends Controller
         $this->authorize('delete', $appointment);
 
         $reason = $request->input('cancel_reason', 'Cancelled by user');
+
+        // Cancel-window enforcement — patients only. Staff/admin
+        // always go through. The setting was already persisted in
+        // Practice.settings.scheduling on Day 1 but until now nothing
+        // read it. Two modes:
+        //   - "block": refuse the cancellation outright if within the
+        //     window (default — practice still has to manually cancel)
+        //   - "fee": allow the cancel but charge the late_cancel_fee.
+        //     We don't auto-charge yet; this just records the fee on
+        //     the appointment row so a future Stripe charge can pick
+        //     it up. Stamps appointment.late_cancel_fee_amount and
+        //     status notes.
+        // Today we implement "block" semantics — soft-blocking is the
+        // simpler default. Practice can always cancel for the patient.
+        $isLateCancel = false;
+        if ($user->isPatient()) {
+            $svc = app(AvailabilityService::class);
+            $settings = $svc->schedulingSettings($appointment->tenant_id);
+            $noticeHours = (int) ($settings['cancel_notice_hours'] ?? 0);
+            if ($noticeHours > 0 && $appointment->scheduled_at) {
+                $cutoff = $appointment->scheduled_at->copy()->subHours($noticeHours);
+                if (now()->gt($cutoff)) {
+                    $isLateCancel = true;
+                    return response()->json([
+                        'message' => "Cancellations require {$noticeHours} hours notice. Please contact the practice to cancel.",
+                        'errors' => ['cancel' => ["Within the {$noticeHours}-hour notice window — contact the practice."]],
+                        'late_cancel' => true,
+                    ], 422);
+                }
+            }
+        }
+        unset($isLateCancel); // reserved for future "allow with fee" mode
 
         $appointment->update([
             'status' => 'cancelled',

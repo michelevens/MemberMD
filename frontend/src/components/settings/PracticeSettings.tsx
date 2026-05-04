@@ -575,6 +575,7 @@ export function PracticeSettings({ initialTab }: { initialTab?: string }) {
         allow_same_day: sameDayBooking,
         late_cancel_fee: lateCancelFee,
         no_show_fee: noShowFee,
+        auto_charge_no_show: autoChargeNoShow,
       };
       const r = await apiFetch("/practice/scheduling", {
         method: "PUT",

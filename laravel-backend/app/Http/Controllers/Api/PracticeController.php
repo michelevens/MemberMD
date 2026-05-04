@@ -202,6 +202,7 @@ class PracticeController extends Controller
             'allow_same_day' => 'sometimes|boolean',
             'late_cancel_fee' => 'nullable|numeric|min:0|max:10000',
             'no_show_fee' => 'nullable|numeric|min:0|max:10000',
+            'auto_charge_no_show' => 'sometimes|boolean',
         ]);
 
         $practice = Practice::findOrFail($user->tenant_id);
