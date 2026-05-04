@@ -19,6 +19,8 @@ import {
   Eye,
   Save,
   ExternalLink,
+  Shield,
+  ShieldOff,
 } from "lucide-react";
 import {
   tenantDomainService,
@@ -300,6 +302,7 @@ function DomainRow({ domain, onChanged }: { domain: TenantDomain; onChanged: () 
           <div className="flex items-center gap-2 flex-wrap">
             <h4 className="text-base font-semibold truncate" style={{ color: C.navy900 }}>{domain.domain}</h4>
             <DomainStatusBadge domain={domain} />
+            <SslStatusBadge domain={domain} />
             {domain.isPrimary && (
               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold" style={{ backgroundColor: C.teal500, color: C.white }}>
                 <Star className="w-3 h-3" />
@@ -374,12 +377,72 @@ function DomainRow({ domain, onChanged }: { domain: TenantDomain; onChanged: () 
       )}
 
       {domain.isVerified && (
-        <div className="text-xs" style={{ color: C.slate500 }}>
-          Verified {domain.verifiedAt ? new Date(domain.verifiedAt).toLocaleDateString() : ""} · SSL: {domain.sslStatus}
+        <div className="text-xs space-y-1.5" style={{ color: C.slate500 }}>
+          <div>Verified {domain.verifiedAt ? new Date(domain.verifiedAt).toLocaleDateString() : ""}</div>
+          {domain.sslStatus !== "active" && (
+            <SslStatusExplainer status={domain.sslStatus} domain={domain.domain} />
+          )}
         </div>
       )}
     </div>
   );
+}
+
+function SslStatusBadge({ domain }: { domain: TenantDomain }) {
+  if (!domain.isVerified) return null;
+  const status = domain.sslStatus ?? "pending";
+  if (status === "active") {
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold" style={{ backgroundColor: C.green50, color: C.green700 }}>
+        <Shield className="w-3 h-3" />
+        SSL active
+      </span>
+    );
+  }
+  if (status === "failed") {
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold" style={{ backgroundColor: "#fef2f2", color: "#991b1b" }}>
+        <ShieldOff className="w-3 h-3" />
+        SSL failed
+      </span>
+    );
+  }
+  // pending
+  return (
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold" style={{ backgroundColor: C.amber50, color: C.amber800 }}>
+      <Loader2 className="w-3 h-3 animate-spin" />
+      SSL provisioning
+    </span>
+  );
+}
+
+function SslStatusExplainer({ status, domain }: { status: string; domain: string }) {
+  if (status === "pending") {
+    return (
+      <div className="rounded-lg p-3 text-[11px] leading-relaxed" style={{ backgroundColor: C.amber50, color: C.amber800 }}>
+        <p className="font-semibold mb-0.5">SSL certificate is being issued</p>
+        <p>
+          Railway issues a Let's Encrypt cert automatically once the domain is reachable. This usually
+          completes within 5–15 minutes after DNS propagation. The site is reachable over HTTPS the
+          moment the cert is active. Refresh in a few minutes.
+        </p>
+      </div>
+    );
+  }
+  if (status === "failed") {
+    return (
+      <div className="rounded-lg p-3 text-[11px] leading-relaxed" style={{ backgroundColor: "#fef2f2", color: "#991b1b" }}>
+        <p className="font-semibold mb-0.5">SSL certificate failed to issue</p>
+        <p>
+          The certificate authority couldn't validate <code className="font-mono">{domain}</code>.
+          Common causes: DNS pointing to the wrong target, AAAA records mismatched, or the domain
+          using a CDN (Cloudflare proxy) that intercepts the validation request. Disable proxying
+          temporarily and click "Verify" again.
+        </p>
+      </div>
+    );
+  }
+  return null;
 }
 
 function DomainStatusBadge({ domain }: { domain: TenantDomain }) {
