@@ -785,15 +785,58 @@ export function PracticePortal() {
   const [sendLinkLoading, setSendLinkLoading] = useState(false);
   const [sendLinkError, setSendLinkError] = useState<string | null>(null);
 
-  // "Add dependent" — staff adds a family member to an existing primary
-  // membership. Backend POST /memberships/{id}/dependents creates the
-  // child PatientMembership + bumps the Stripe quantity (+1 seat).
-  const [addDependentFor, setAddDependentFor] = useState<{ membershipId: string; primaryName: string } | null>(null);
+  // "Manage family" — practice-side dependent management. The modal
+  // shows the current dependents list with Remove buttons and an
+  // inline "Add dependent" form. Stripe quantity adjusts on each
+  // add/remove (handled by the backend; the seat count is part of
+  // the next invoice).
+  const [manageFamilyFor, setManageFamilyFor] = useState<{ membershipId: string; primaryName: string } | null>(null);
+  interface DependentRow {
+    id: string;
+    patientId: string;
+    firstName: string | null;
+    lastName: string | null;
+    dateOfBirth: string | null;
+    email: string | null;
+    phone: string | null;
+    relationship: string | null;
+    status: string;
+    cancelledAt: string | null;
+  }
+  const [dependents, setDependents] = useState<DependentRow[]>([]);
+  const [dependentsLoading, setDependentsLoading] = useState(false);
   const [addDependentForm, setAddDependentForm] = useState<{ firstName: string; lastName: string; dateOfBirth: string; relationship: "spouse" | "child" | "parent" | "other"; email: string; phone: string }>({
     firstName: "", lastName: "", dateOfBirth: "", relationship: "spouse", email: "", phone: "",
   });
   const [addDependentLoading, setAddDependentLoading] = useState(false);
   const [addDependentError, setAddDependentError] = useState<string | null>(null);
+
+  const loadDependents = useCallback(async (membershipId: string) => {
+    setDependentsLoading(true);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const res = await apiFetch<any>(`/memberships/${membershipId}/dependents`);
+    setDependentsLoading(false);
+    if (res.error || !res.data) {
+      setDependents([]);
+      return;
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const items: any[] = Array.isArray(res.data) ? res.data : (res.data as any).data ?? [];
+    setDependents(items.map((d) => ({
+      id: d.id,
+      patientId: d.patientId ?? d.patient_id,
+      firstName: d.firstName ?? d.first_name ?? null,
+      lastName: d.lastName ?? d.last_name ?? null,
+      dateOfBirth: d.dateOfBirth ?? d.date_of_birth ?? null,
+      email: d.email ?? null,
+      phone: d.phone ?? null,
+      relationship: d.relationship ?? null,
+      status: d.status ?? "active",
+      cancelledAt: d.cancelledAt ?? d.cancelled_at ?? null,
+    })));
+    setAddDependentForm({ firstName: "", lastName: "", dateOfBirth: "", relationship: "spouse", email: "", phone: "" });
+    setAddDependentError(null);
+  }, []);
 
   // "Request signature" — practice picks a consent template and emails the
   // patient a tokened sign-link. Reuses the same backend that EnrollmentWidget
@@ -2897,7 +2940,7 @@ export function PracticePortal() {
       ...(patient.status === "active" && patient.membershipId
         ? [
             { label: "Change plan", onClick: () => { setRosterPlanDialog({ patientId: patient.id, patientName: patient.name, membershipId: patient.membershipId, mode: "change" as const }); fetchRosterPlans(); setRosterSelectedPlanId(null); } },
-            { label: "Add dependent", onClick: () => { if (patient.membershipId) { setAddDependentFor({ membershipId: patient.membershipId, primaryName: patient.name }); setAddDependentForm({ firstName: "", lastName: "", dateOfBirth: "", relationship: "spouse", email: "", phone: "" }); setAddDependentError(null); } } },
+            { label: "Manage family", onClick: () => { if (patient.membershipId) { setManageFamilyFor({ membershipId: patient.membershipId, primaryName: patient.name }); void loadDependents(patient.membershipId); } } },
             { label: "Pause membership", onClick: () => { setConfirmDialog({ title: "Pause Membership", message: `Pause ${patient.name}'s membership? They will retain their plan but benefits will be suspended.`, confirmLabel: "Pause", onConfirm: async () => { if (patient.membershipId) { await handlePauseMembership(patient.membershipId, patient.name); } setConfirmDialog(null); } }); } },
             { label: "Cancel membership", danger: true, onClick: () => { if (patient.membershipId) { setRosterCancelDialog({ patientId: patient.id, patientName: patient.name, membershipId: patient.membershipId }); setRosterCancelReason(""); } } },
           ]
@@ -10056,110 +10099,180 @@ export function PracticePortal() {
         )}
       </MobileSheet>
 
-      {/* ─── Add Dependent Modal ───────────────────────────────────────────
-          POSTs /memberships/{id}/dependents — creates a child
-          PatientMembership linked to the primary + bumps the Stripe
-          subscription quantity by 1. Backend already handles all the
-          validation (plan must be family_eligible, primary must be
-          active, no nesting families). */}
+      {/* ─── Manage Family Modal ────────────────────────────────────────
+          Shows current dependents on the primary's membership, with
+          Remove inline + an Add form at the bottom. Each add/remove
+          adjusts the primary's Stripe subscription quantity by ±1
+          seat (handled by the backend). */}
       <MobileSheet
-        open={!!addDependentFor}
-        onClose={() => { setAddDependentFor(null); setAddDependentError(null); }}
-        maxWidth="max-w-md"
+        open={!!manageFamilyFor}
+        onClose={() => { setManageFamilyFor(null); setAddDependentError(null); }}
+        maxWidth="max-w-lg"
         title={
           <div>
-            <div>Add family dependent</div>
+            <div>Manage family</div>
             <div className="text-xs text-slate-500 font-normal mt-0.5">
-              {addDependentFor ? `Add to ${addDependentFor.primaryName}'s family plan. The next invoice picks up the extra seat.` : ""}
+              {manageFamilyFor ? `Dependents on ${manageFamilyFor.primaryName}'s plan. Each addition or removal adjusts the next invoice.` : ""}
             </div>
           </div>
         }
       >
-        {addDependentFor && (
+        {manageFamilyFor && (
           <>
-            <div className="p-6 space-y-4">
-              {addDependentError && (
-                <div className="rounded-lg p-3 text-sm" style={{ backgroundColor: "#fef2f2", color: "#dc2626" }}>{addDependentError}</div>
+            <div className="p-6 space-y-5">
+              {/* Active dependents */}
+              <div>
+                <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2">
+                  Current dependents
+                </h4>
+                {dependentsLoading && <p className="text-sm text-slate-500">Loading…</p>}
+                {!dependentsLoading && dependents.filter((d) => d.status === "active").length === 0 && (
+                  <p className="text-sm text-slate-500">No active dependents yet.</p>
+                )}
+                {!dependentsLoading && dependents.filter((d) => d.status === "active").length > 0 && (
+                  <ul className="divide-y border rounded-lg" style={{ borderColor: "#e2e8f0" }}>
+                    {dependents.filter((d) => d.status === "active").map((d) => (
+                      <li key={d.id} className="px-3 py-2.5 flex items-center gap-3">
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-slate-900">
+                            {[d.firstName, d.lastName].filter(Boolean).join(" ") || "Unknown"}
+                            {d.relationship && (
+                              <span className="ml-2 text-xs text-slate-500 capitalize">({d.relationship})</span>
+                            )}
+                          </p>
+                          {d.dateOfBirth && (
+                            <p className="text-[11px] text-slate-400">
+                              DOB {formatDob(d.dateOfBirth)}
+                            </p>
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            if (!manageFamilyFor) return;
+                            const ok = await confirm({
+                              title: "Remove dependent?",
+                              message: `${[d.firstName, d.lastName].filter(Boolean).join(" ") || "This dependent"} will lose access immediately. The next invoice drops one seat.`,
+                              confirmLabel: "Remove",
+                              variant: "danger",
+                            });
+                            if (!ok) return;
+                            const res = await apiFetch(`/memberships/${manageFamilyFor.membershipId}/dependents/${d.id}`, { method: "DELETE" });
+                            if (res.error) {
+                              setToast({ message: res.error, type: "error" });
+                              return;
+                            }
+                            setToast({ message: "Dependent removed.", type: "success" });
+                            void loadDependents(manageFamilyFor.membershipId);
+                          }}
+                          className="px-2.5 py-1 rounded text-xs font-semibold"
+                          style={{ color: "#dc2626", backgroundColor: "#fef2f2" }}
+                        >
+                          Remove
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+
+              {/* Removed history (collapsed if any) */}
+              {dependents.some((d) => d.status === "cancelled") && (
+                <details className="text-xs">
+                  <summary className="cursor-pointer text-slate-500 hover:text-slate-700">
+                    Removed history ({dependents.filter((d) => d.status === "cancelled").length})
+                  </summary>
+                  <ul className="mt-2 space-y-1 pl-2">
+                    {dependents.filter((d) => d.status === "cancelled").map((d) => (
+                      <li key={d.id} className="text-slate-500">
+                        {[d.firstName, d.lastName].filter(Boolean).join(" ")}
+                        {d.cancelledAt && <span className="ml-2 text-slate-400">— removed {new Date(d.cancelledAt).toLocaleDateString()}</span>}
+                      </li>
+                    ))}
+                  </ul>
+                </details>
               )}
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">First name *</label>
-                  <input className="w-full border rounded-lg px-3 py-2 text-sm" value={addDependentForm.firstName}
-                    onChange={(e) => setAddDependentForm(f => ({ ...f, firstName: e.target.value }))} />
+
+              {/* Add new dependent */}
+              <div className="pt-4 border-t" style={{ borderColor: "#e2e8f0" }}>
+                <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-3">
+                  Add a dependent
+                </h4>
+                {addDependentError && (
+                  <div className="rounded-lg p-3 text-sm mb-3" style={{ backgroundColor: "#fef2f2", color: "#dc2626" }}>{addDependentError}</div>
+                )}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">First name *</label>
+                    <input className="w-full border rounded-lg px-3 py-2 text-sm" value={addDependentForm.firstName}
+                      onChange={(e) => setAddDependentForm(f => ({ ...f, firstName: e.target.value }))} />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">Last name *</label>
+                    <input className="w-full border rounded-lg px-3 py-2 text-sm" value={addDependentForm.lastName}
+                      onChange={(e) => setAddDependentForm(f => ({ ...f, lastName: e.target.value }))} />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">Date of birth *</label>
+                    <input type="date" className="w-full border rounded-lg px-3 py-2 text-sm" value={addDependentForm.dateOfBirth}
+                      onChange={(e) => setAddDependentForm(f => ({ ...f, dateOfBirth: e.target.value }))} />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">Relationship *</label>
+                    <select className="w-full border rounded-lg px-3 py-2 text-sm" value={addDependentForm.relationship}
+                      onChange={(e) => setAddDependentForm(f => ({ ...f, relationship: e.target.value as "spouse" | "child" | "parent" | "other" }))}>
+                      <option value="spouse">Spouse</option>
+                      <option value="child">Child</option>
+                      <option value="parent">Parent</option>
+                      <option value="other">Other</option>
+                    </select>
+                  </div>
+                  <div className="col-span-2">
+                    <label className="block text-xs font-medium text-slate-700 mb-1">Email (optional)</label>
+                    <input type="email" className="w-full border rounded-lg px-3 py-2 text-sm" value={addDependentForm.email}
+                      onChange={(e) => setAddDependentForm(f => ({ ...f, email: e.target.value }))} />
+                  </div>
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Last name *</label>
-                  <input className="w-full border rounded-lg px-3 py-2 text-sm" value={addDependentForm.lastName}
-                    onChange={(e) => setAddDependentForm(f => ({ ...f, lastName: e.target.value }))} />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Date of birth *</label>
-                  <input type="date" className="w-full border rounded-lg px-3 py-2 text-sm" value={addDependentForm.dateOfBirth}
-                    onChange={(e) => setAddDependentForm(f => ({ ...f, dateOfBirth: e.target.value }))} />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Relationship *</label>
-                  <select className="w-full border rounded-lg px-3 py-2 text-sm" value={addDependentForm.relationship}
-                    onChange={(e) => setAddDependentForm(f => ({ ...f, relationship: e.target.value as "spouse" | "child" | "parent" | "other" }))}>
-                    <option value="spouse">Spouse</option>
-                    <option value="child">Child</option>
-                    <option value="parent">Parent</option>
-                    <option value="other">Other</option>
-                  </select>
-                </div>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Email (optional)</label>
-                <input type="email" className="w-full border rounded-lg px-3 py-2 text-sm" value={addDependentForm.email}
-                  onChange={(e) => setAddDependentForm(f => ({ ...f, email: e.target.value }))} />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Phone (optional)</label>
-                <input className="w-full border rounded-lg px-3 py-2 text-sm" value={addDependentForm.phone}
-                  onChange={(e) => setAddDependentForm(f => ({ ...f, phone: e.target.value }))} />
+                <button
+                  className="mt-3 w-full px-4 py-2 rounded-lg text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50"
+                  disabled={addDependentLoading}
+                  onClick={async () => {
+                    if (!manageFamilyFor) return;
+                    if (!addDependentForm.firstName || !addDependentForm.lastName || !addDependentForm.dateOfBirth) {
+                      setAddDependentError("First name, last name, and date of birth are required.");
+                      return;
+                    }
+                    setAddDependentLoading(true);
+                    setAddDependentError(null);
+                    const res = await apiFetch(`/memberships/${manageFamilyFor.membershipId}/dependents`, {
+                      method: "POST",
+                      body: JSON.stringify({
+                        first_name: addDependentForm.firstName,
+                        last_name: addDependentForm.lastName,
+                        date_of_birth: addDependentForm.dateOfBirth,
+                        relationship: addDependentForm.relationship,
+                        email: addDependentForm.email || null,
+                        phone: addDependentForm.phone || null,
+                      }),
+                    });
+                    setAddDependentLoading(false);
+                    if (res.error) {
+                      setAddDependentError(res.error);
+                      return;
+                    }
+                    setToast({ message: "Dependent added.", type: "success" });
+                    void loadDependents(manageFamilyFor.membershipId);
+                  }}
+                >
+                  {addDependentLoading ? "Adding…" : "Add dependent"}
+                </button>
               </div>
             </div>
             <div className="px-6 pb-6 flex items-center justify-end gap-3">
               <button
                 className="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100"
-                onClick={() => { setAddDependentFor(null); setAddDependentError(null); }}
-              >Cancel</button>
-              <button
-                className="px-6 py-2 rounded-lg text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50"
-                disabled={addDependentLoading}
-                onClick={async () => {
-                  if (!addDependentFor) return;
-                  if (!addDependentForm.firstName || !addDependentForm.lastName || !addDependentForm.dateOfBirth) {
-                    setAddDependentError("First name, last name, and date of birth are required.");
-                    return;
-                  }
-                  setAddDependentLoading(true);
-                  setAddDependentError(null);
-                  const res = await apiFetch(`/memberships/${addDependentFor.membershipId}/dependents`, {
-                    method: "POST",
-                    body: JSON.stringify({
-                      first_name: addDependentForm.firstName,
-                      last_name: addDependentForm.lastName,
-                      date_of_birth: addDependentForm.dateOfBirth,
-                      relationship: addDependentForm.relationship,
-                      email: addDependentForm.email || null,
-                      phone: addDependentForm.phone || null,
-                    }),
-                  });
-                  setAddDependentLoading(false);
-                  if (res.error) {
-                    setAddDependentError(res.error);
-                    return;
-                  }
-                  setToast({ message: `Dependent added to ${addDependentFor.primaryName}'s plan.`, type: "success" });
-                  setAddDependentFor(null);
-                  loadPracticeData();
-                }}
-              >
-                {addDependentLoading ? "Adding…" : "Add dependent"}
-              </button>
+                onClick={() => { setManageFamilyFor(null); loadPracticeData(); }}
+              >Done</button>
             </div>
           </>
         )}

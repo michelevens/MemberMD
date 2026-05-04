@@ -1338,6 +1338,56 @@ class MembershipController extends Controller
     }
 
     /**
+     * GET /memberships/{id}/dependents — practice-side list of every
+     * dependent on a primary membership. Mirrors the response shape
+     * familyService expects from the patient endpoint, plus the
+     * cancelled history rows so the UI can show "Add" alongside
+     * "Removed on YYYY-MM-DD".
+     */
+    public function listDependents(Request $request, string $id): JsonResponse
+    {
+        $user = $request->user();
+        abort_if(!in_array($user->role, ['practice_admin', 'staff', 'provider', 'superadmin']), 403);
+
+        $primary = PatientMembership::where('tenant_id', $user->tenant_id)->findOrFail($id);
+
+        $rows = PatientMembership::where('tenant_id', $user->tenant_id)
+            ->where('parent_membership_id', $primary->id)
+            ->with('patient:id,first_name,last_name,date_of_birth,email,phone')
+            ->orderByDesc('created_at')
+            ->get();
+
+        // Pull the relationship label from patient_family_members (linked
+        // by primary patient + dependent patient ids — same shape used in
+        // myFamilyMembers).
+        $links = \App\Models\PatientFamilyMember::where('tenant_id', $user->tenant_id)
+            ->where('primary_patient_id', $primary->patient_id)
+            ->whereIn('member_patient_id', $rows->pluck('patient_id'))
+            ->get()
+            ->keyBy('member_patient_id');
+
+        return response()->json([
+            'data' => $rows->map(function (PatientMembership $m) use ($links) {
+                $link = $links->get($m->patient_id);
+                $p = $m->patient;
+                return [
+                    'id' => $m->id,                    // dependent membership id (used by DELETE)
+                    'patient_id' => $m->patient_id,
+                    'first_name' => $p?->first_name,
+                    'last_name' => $p?->last_name,
+                    'date_of_birth' => $p?->date_of_birth,
+                    'email' => $p?->email,
+                    'phone' => $p?->phone,
+                    'relationship' => $link?->relationship,
+                    'status' => $m->status,
+                    'started_at' => $m->started_at,
+                    'cancelled_at' => $m->cancelled_at,
+                ];
+            }),
+        ]);
+    }
+
+    /**
      * Remove a dependent — cancels their (sub-)membership immediately and
      * decrements the primary's Stripe subscription quantity.
      */

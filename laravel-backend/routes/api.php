@@ -863,6 +863,7 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
     Route::post('memberships/{id}/preview-plan-change', [MembershipController::class, 'previewPlanChange']);
     Route::post('memberships/{id}/change-plan', [MembershipController::class, 'changePlan']);
     // Family management — admin/staff only. Patient self-service may follow.
+    Route::get('memberships/{id}/dependents', [MembershipController::class, 'listDependents']);
     Route::post('memberships/{id}/dependents', [MembershipController::class, 'addDependent']);
     Route::delete('memberships/{id}/dependents/{dependentId}', [MembershipController::class, 'removeDependent']);
 
