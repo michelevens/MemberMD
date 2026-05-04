@@ -327,6 +327,9 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
 
     // ===== Encounters =====
     Route::post('/encounters/{id}/sign', [EncounterController::class, 'sign']);
+    // Detail endpoint — encounter + audit_logs for the dedicated page.
+    // Must be declared BEFORE apiResource so it doesn't get shadowed.
+    Route::get('/encounters/{id}/detail', [EncounterController::class, 'detail']);
     Route::apiResource('encounters', EncounterController::class)->except(['destroy']);
 
     // ===== Prescriptions =====

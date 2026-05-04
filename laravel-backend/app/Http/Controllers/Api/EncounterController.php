@@ -65,6 +65,45 @@ class EncounterController extends Controller
         return response()->json(['data' => $encounter]);
     }
 
+    /**
+     * Detail endpoint for the dedicated encounter detail page.
+     * Returns everything show() does, plus signer/cosigner/program
+     * relations and an audit-log slice — all nested under `data` so
+     * the frontend's standard apiFetch unwrap captures it.
+     */
+    public function detail(Request $request, string $id): JsonResponse
+    {
+        $user = $request->user();
+        $encounter = Encounter::where('tenant_id', $user->tenant_id)
+            ->with([
+                'patient', 'provider.user', 'appointment', 'program',
+                'prescriptions', 'screeningResponses.template',
+                'signer', 'cosigner',
+                'chartTemplate', 'chartTemplateResponses',
+            ])
+            ->findOrFail($id);
+
+        $this->authorize('view', $encounter);
+
+        // Audit trail. Joins user names so the UI can show "Signed by
+        // Dr. X" / "Amended by Y" without a second round-trip.
+        $auditLogs = \App\Models\AuditLog::where('tenant_id', $user->tenant_id)
+            ->where('resource', 'Encounter')
+            ->where('resource_id', $id)
+            ->with('user:id,name,email')
+            ->orderBy('created_at', 'desc')
+            ->limit(50)
+            ->get();
+
+        // Append audit_logs into the model's array shape so apiFetch's
+        // unwrap surfaces it. Resource transformers would be cleaner but
+        // we don't have one for Encounter yet.
+        $payload = $encounter->toArray();
+        $payload['audit_logs'] = $auditLogs->toArray();
+
+        return response()->json(['data' => $payload]);
+    }
+
     public function store(StoreEncounterRequest $request): JsonResponse
     {
         $this->authorize('create', Encounter::class);
