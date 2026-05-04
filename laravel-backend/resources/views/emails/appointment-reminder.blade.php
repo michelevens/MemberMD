@@ -76,9 +76,7 @@ Reminder: Your appointment is tomorrow at {{ \Carbon\Carbon::parse($appointment-
 <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin-bottom: 24px;">
     <tr>
         <td align="center">
-            <a href="{{ $appointment->video_link }}" class="btn-primary" style="display: inline-block; padding: 14px 36px; background-color: #27ab83; color: #ffffff; font-size: 16px; font-weight: 600; text-decoration: none; border-radius: 8px;">
-                Join Video Session
-            </a>
+            @include('emails.partials.button', ['url' => $appointment->video_link, 'text' => 'Join Video Session'])
         </td>
     </tr>
 </table>
@@ -112,9 +110,7 @@ Reminder: Your appointment is tomorrow at {{ \Carbon\Carbon::parse($appointment-
 <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin-bottom: 8px;">
     <tr>
         <td align="center">
-            <a href="{{ env('FRONTEND_URL', 'https://app.membermd.io') }}/#/appointments" class="btn-primary" style="display: inline-block; padding: 14px 36px; background-color: #27ab83; color: #ffffff; font-size: 16px; font-weight: 600; text-decoration: none; border-radius: 8px;">
-                Manage Appointment
-            </a>
+            @include('emails.partials.button', ['url' => env('FRONTEND_URL', 'https://app.membermd.io') . '/#/appointments', 'text' => 'Manage Appointment'])
         </td>
     </tr>
 </table>

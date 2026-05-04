@@ -23,9 +23,7 @@ Confirm your email address to finish setting up your {{ $practiceName ?? 'Member
 <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin-bottom: 24px;">
     <tr>
         <td align="center">
-            <a href="{{ $verificationUrl }}" class="btn-primary" style="display: inline-block; padding: 14px 36px; background-color: {{ $primaryColor ?? '#27ab83' }}; color: #ffffff; font-size: 16px; font-weight: 600; text-decoration: none; border-radius: 8px;">
-                Verify Email
-            </a>
+            @include('emails.partials.button', ['url' => $verificationUrl, 'text' => 'Verify Email', 'color' => $primaryColor ?? null])
         </td>
     </tr>
 </table>

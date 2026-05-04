@@ -56,9 +56,7 @@ Your appointment has been canceled.
 <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
     <tr>
         <td align="center">
-            <a href="{{ $frontendUrl }}/#/patient/appointments" class="btn-primary" style="display: inline-block; padding: 14px 36px; background-color: {{ $primaryColor ?? '#27ab83' }}; color: #ffffff; font-size: 16px; font-weight: 600; text-decoration: none; border-radius: 8px;">
-                Book a New Time
-            </a>
+            @include('emails.partials.button', ['url' => $frontendUrl . '/#/patient/appointments', 'text' => 'Book a New Time', 'color' => $primaryColor ?? null])
         </td>
     </tr>
 </table>

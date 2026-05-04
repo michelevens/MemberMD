@@ -24,9 +24,7 @@ You requested a password reset for your MemberMD account.
 <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin-bottom: 24px;">
     <tr>
         <td align="center">
-            <a href="{{ $resetUrl }}" class="btn-primary" style="display: inline-block; padding: 14px 36px; background-color: #27ab83; color: #ffffff; font-size: 16px; font-weight: 600; text-decoration: none; border-radius: 8px;">
-                Reset Password
-            </a>
+            @include('emails.partials.button', ['url' => $resetUrl, 'text' => 'Reset Password'])
         </td>
     </tr>
 </table>

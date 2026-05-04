@@ -96,9 +96,7 @@ Your practice is set up and ready to accept members on MemberMD.
 <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin-bottom: 24px;">
     <tr>
         <td align="center">
-            <a href="{{ env('FRONTEND_URL', 'https://app.membermd.io') }}" class="btn-primary" style="display: inline-block; padding: 14px 36px; background-color: #27ab83; color: #ffffff; font-size: 16px; font-weight: 600; text-decoration: none; border-radius: 8px; letter-spacing: 0.3px;">
-                Go to Dashboard
-            </a>
+            @include('emails.partials.button', ['url' => env('FRONTEND_URL', 'https://app.membermd.io'), 'text' => 'Go to Dashboard'])
         </td>
     </tr>
 </table>
