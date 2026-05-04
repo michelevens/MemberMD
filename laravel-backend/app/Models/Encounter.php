@@ -31,6 +31,10 @@ class Encounter extends Model
         'duration_minutes_actual', 'time_spent_documenting', 'total_time_minutes',
         'cpt_codes', 'units_billed', 'bill_status',
         'cosigner_user_id', 'cosigned_at',
+        // CMS Place of Service code (2026_05_04_007000 migration).
+        // Two-character code from the CMS code list, e.g. '11' (office),
+        // '02' (telehealth — provider site), '10' (telehealth — patient home).
+        'place_of_service',
     ];
 
     protected $casts = [

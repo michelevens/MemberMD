@@ -744,6 +744,199 @@ class ChartTemplateSeeder extends Seeder
                     ],
                 ],
             ],
+
+            // ─── SOAP Note (default for follow-ups) ───
+            [
+                'name' => 'SOAP Note',
+                'description' => 'Classic Subjective / Objective / Assessment / Plan template — the default for most follow-up visits.',
+                'visit_type' => 'followup',
+                'sort_order' => 5,
+                'fields' => [
+                    [
+                        'id' => 'chief_complaint', 'label' => 'Chief Complaint',
+                        'type' => 'text', 'options' => null, 'required' => false,
+                        'section' => 'Visit', 'unit' => null, 'reference_range' => null,
+                    ],
+                    [
+                        'id' => 'subjective', 'label' => 'S — Subjective',
+                        'type' => 'textarea', 'options' => null, 'required' => false,
+                        'section' => 'SOAP', 'unit' => null, 'reference_range' => null,
+                    ],
+                    [
+                        'id' => 'objective', 'label' => 'O — Objective',
+                        'type' => 'textarea', 'options' => null, 'required' => false,
+                        'section' => 'SOAP', 'unit' => null, 'reference_range' => null,
+                    ],
+                    [
+                        'id' => 'assessment', 'label' => 'A — Assessment',
+                        'type' => 'textarea', 'options' => null, 'required' => false,
+                        'section' => 'SOAP', 'unit' => null, 'reference_range' => null,
+                    ],
+                    [
+                        'id' => 'plan', 'label' => 'P — Plan',
+                        'type' => 'textarea', 'options' => null, 'required' => false,
+                        'section' => 'SOAP', 'unit' => null, 'reference_range' => null,
+                    ],
+                ],
+            ],
+
+            // ─── Med Management (psychiatry) ───
+            [
+                'name' => 'Med Management',
+                'description' => 'Psychiatric medication management visit — current meds, response, side effects, MSE, A/P. Default for psych follow-ups.',
+                'visit_type' => 'chronic',
+                'sort_order' => 6,
+                'fields' => [
+                    [
+                        'id' => 'current_meds_response', 'label' => 'Response to current medications',
+                        'type' => 'textarea', 'options' => null, 'required' => false,
+                        'section' => 'Medications', 'unit' => null, 'reference_range' => null,
+                    ],
+                    [
+                        'id' => 'side_effects', 'label' => 'Side effects reported',
+                        'type' => 'textarea', 'options' => null, 'required' => false,
+                        'section' => 'Medications', 'unit' => null, 'reference_range' => null,
+                    ],
+                    [
+                        'id' => 'adherence', 'label' => 'Adherence',
+                        'type' => 'select',
+                        'options' => ['Fully adherent', 'Mostly adherent (occasional missed doses)', 'Partial', 'Non-adherent'],
+                        'required' => false, 'section' => 'Medications', 'unit' => null, 'reference_range' => null,
+                    ],
+                    [
+                        'id' => 'mse_appearance', 'label' => 'Appearance / behavior',
+                        'type' => 'select',
+                        'options' => ['WNL', 'Disheveled', 'Agitated', 'Withdrawn', 'Other (note)'],
+                        'required' => false, 'section' => 'Mental Status Exam', 'unit' => null, 'reference_range' => null,
+                    ],
+                    [
+                        'id' => 'mse_mood', 'label' => 'Mood',
+                        'type' => 'select',
+                        'options' => ['Euthymic', 'Depressed', 'Anxious', 'Irritable', 'Elevated', 'Other (note)'],
+                        'required' => false, 'section' => 'Mental Status Exam', 'unit' => null, 'reference_range' => null,
+                    ],
+                    [
+                        'id' => 'mse_thought', 'label' => 'Thought process / content',
+                        'type' => 'textarea', 'options' => null, 'required' => false,
+                        'section' => 'Mental Status Exam', 'unit' => null, 'reference_range' => null,
+                    ],
+                    [
+                        'id' => 'si_hi', 'label' => 'SI / HI',
+                        'type' => 'select',
+                        'options' => ['Denies SI/HI', 'Passive SI', 'Active SI without plan', 'Active SI with plan', 'HI present (specify in note)'],
+                        'required' => true, 'section' => 'Risk Assessment', 'unit' => null, 'reference_range' => null,
+                    ],
+                    [
+                        'id' => 'phq9_score', 'label' => 'PHQ-9 score',
+                        'type' => 'number', 'options' => null, 'required' => false,
+                        'section' => 'Screenings', 'unit' => null, 'reference_range' => ['min' => 0, 'max' => 27],
+                    ],
+                    [
+                        'id' => 'gad7_score', 'label' => 'GAD-7 score',
+                        'type' => 'number', 'options' => null, 'required' => false,
+                        'section' => 'Screenings', 'unit' => null, 'reference_range' => ['min' => 0, 'max' => 21],
+                    ],
+                    [
+                        'id' => 'assessment', 'label' => 'Assessment',
+                        'type' => 'textarea', 'options' => null, 'required' => false,
+                        'section' => 'Plan', 'unit' => null, 'reference_range' => null,
+                    ],
+                    [
+                        'id' => 'plan', 'label' => 'Plan / med changes',
+                        'type' => 'textarea', 'options' => null, 'required' => false,
+                        'section' => 'Plan', 'unit' => null, 'reference_range' => null,
+                    ],
+                    [
+                        'id' => 'follow_up', 'label' => 'Follow-up',
+                        'type' => 'select',
+                        'options' => ['1 week', '2 weeks', '4 weeks', '6 weeks', '3 months', 'PRN'],
+                        'required' => false, 'section' => 'Plan', 'unit' => null, 'reference_range' => null,
+                    ],
+                ],
+            ],
+
+            // ─── Telehealth Visit ───
+            [
+                'name' => 'Telehealth Visit',
+                'description' => 'Abbreviated visit template for video encounters — consent + location + brief assessment. Default when appointment is telehealth.',
+                'visit_type' => 'followup',
+                'sort_order' => 7,
+                'fields' => [
+                    [
+                        'id' => 'consent_verified', 'label' => 'Telehealth consent verified',
+                        'type' => 'checkbox', 'options' => null, 'required' => true,
+                        'section' => 'Compliance', 'unit' => null, 'reference_range' => null,
+                    ],
+                    [
+                        'id' => 'patient_location', 'label' => 'Patient location at time of visit',
+                        'type' => 'text', 'options' => null, 'required' => true,
+                        'section' => 'Compliance', 'unit' => null, 'reference_range' => null,
+                    ],
+                    [
+                        'id' => 'identity_verified', 'label' => 'Patient identity verified (DOB / photo ID)',
+                        'type' => 'checkbox', 'options' => null, 'required' => true,
+                        'section' => 'Compliance', 'unit' => null, 'reference_range' => null,
+                    ],
+                    [
+                        'id' => 'video_audio_quality', 'label' => 'Video / audio quality',
+                        'type' => 'select',
+                        'options' => ['Good', 'Acceptable', 'Poor (note workaround)'],
+                        'required' => false, 'section' => 'Compliance', 'unit' => null, 'reference_range' => null,
+                    ],
+                    [
+                        'id' => 'subjective', 'label' => 'Subjective',
+                        'type' => 'textarea', 'options' => null, 'required' => false,
+                        'section' => 'Visit', 'unit' => null, 'reference_range' => null,
+                    ],
+                    [
+                        'id' => 'observed_findings', 'label' => 'Observed findings (no in-person exam)',
+                        'type' => 'textarea', 'options' => null, 'required' => false,
+                        'section' => 'Visit', 'unit' => null, 'reference_range' => null,
+                    ],
+                    [
+                        'id' => 'assessment', 'label' => 'Assessment',
+                        'type' => 'textarea', 'options' => null, 'required' => false,
+                        'section' => 'Plan', 'unit' => null, 'reference_range' => null,
+                    ],
+                    [
+                        'id' => 'plan', 'label' => 'Plan',
+                        'type' => 'textarea', 'options' => null, 'required' => false,
+                        'section' => 'Plan', 'unit' => null, 'reference_range' => null,
+                    ],
+                ],
+            ],
+
+            // ─── Brief Follow-up ───
+            [
+                'name' => 'Brief Follow-up',
+                'description' => 'One-paragraph quick chart for stable patients — status + plan. Use sparingly; not appropriate for new problems.',
+                'visit_type' => 'followup',
+                'sort_order' => 8,
+                'fields' => [
+                    [
+                        'id' => 'status', 'label' => 'Status',
+                        'type' => 'select',
+                        'options' => ['Stable / no changes', 'Stable / minor adjustments', 'Worsening — escalate'],
+                        'required' => true, 'section' => 'Status', 'unit' => null, 'reference_range' => null,
+                    ],
+                    [
+                        'id' => 'note', 'label' => 'Note',
+                        'type' => 'textarea', 'options' => null, 'required' => true,
+                        'section' => 'Status', 'unit' => null, 'reference_range' => null,
+                    ],
+                    [
+                        'id' => 'plan', 'label' => 'Plan',
+                        'type' => 'textarea', 'options' => null, 'required' => false,
+                        'section' => 'Plan', 'unit' => null, 'reference_range' => null,
+                    ],
+                    [
+                        'id' => 'follow_up', 'label' => 'Follow-up',
+                        'type' => 'select',
+                        'options' => ['1 week', '2 weeks', '1 month', '3 months', '6 months', 'PRN'],
+                        'required' => false, 'section' => 'Plan', 'unit' => null, 'reference_range' => null,
+                    ],
+                ],
+            ],
         ];
 
         foreach ($templates as $template) {

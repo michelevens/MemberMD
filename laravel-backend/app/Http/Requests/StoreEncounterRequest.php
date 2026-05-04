@@ -37,6 +37,9 @@ class StoreEncounterRequest extends FormRequest
             'cpt_codes' => 'nullable|array',
             'cpt_codes.*' => 'string|max:10',
             'units_billed' => 'nullable|integer|min:0',
+            'place_of_service' => 'nullable|string|max:4',
+            'template_id' => 'nullable|uuid|exists:chart_templates,id',
+            'structured_data' => 'nullable|array',
         ];
     }
 }
