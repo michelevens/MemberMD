@@ -1360,8 +1360,9 @@ export function AppointmentBookingWidget({
                 </div>
                 {/* Format toggle — defaults to the appointment_type's
                     is_telehealth flag but the booker can override.
-                    Telehealth here means "Daily.co room auto-created
-                    on book"; in-office means no room. */}
+                    Telehealth here means "LiveKit room (or provider's
+                    BYOV link) auto-created on book"; in-office means
+                    no room. */}
                 {(() => {
                   const effectiveFormat = formatOverride
                     ?? (selectedType.isTeleHealth ? "telehealth" : "in_office");

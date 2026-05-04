@@ -11,7 +11,7 @@ use App\Models\ProviderAvailability;
 use App\Models\TelehealthSession;
 use App\Services\AvailabilityService;
 use App\Services\CalendarService;
-use App\Services\DailyService;
+use App\Services\LiveKitService;
 use App\Services\ReminderGenerationService;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
@@ -248,24 +248,48 @@ class AppointmentController extends Controller
             ]);
         }
 
-        // Auto-create telehealth session if telehealth appointment
+        // Auto-create telehealth session if telehealth appointment.
+        //
+        // BYOV path: when the provider has external_video_url set,
+        // we create the session as is_external + use that URL. This
+        // matches the explicit POST /telehealth flow's resolution
+        // logic (see TelehealthController::store).
+        //
+        // Built-in path: LiveKit room is created lazily on first
+        // join — we just record the room descriptor here so the
+        // session row exists.
         if ($appointment->is_telehealth) {
             try {
-                $daily = new DailyService();
-                $room = $daily->createRoom($appointment->id);
+                $appointment->loadMissing('provider');
+                $providerExternalUrl = $appointment->provider?->external_video_url;
 
-                if (!isset($room['error'])) {
+                if (!empty($providerExternalUrl)) {
                     TelehealthSession::create([
                         'tenant_id' => $user->tenant_id,
                         'appointment_id' => $appointment->id,
-                        'room_name' => $room['name'],
-                        'room_url' => $room['url'],
-                        'daily_room_id' => $room['id'],
+                        'room_name' => 'ext-' . substr(str_replace('-', '', $appointment->id), 0, 12),
+                        'room_url' => $providerExternalUrl,
+                        'is_external' => true,
                         'status' => 'created',
                     ]);
+                } else {
+                    $livekit = new LiveKitService();
+                    $room = $livekit->createRoom($appointment->id);
+                    if (!isset($room['error'])) {
+                        TelehealthSession::create([
+                            'tenant_id' => $user->tenant_id,
+                            'appointment_id' => $appointment->id,
+                            'room_name' => $room['name'],
+                            'room_url' => $room['url'],
+                            'daily_room_id' => $room['id'],
+                            'status' => 'created',
+                        ]);
+                    }
                 }
             } catch (\Throwable $e) {
-                // Daily.co not configured — don't block appointment creation
+                // LiveKit not configured / network blip — don't
+                // block appointment creation. The session can still
+                // be created on-demand when someone clicks Join.
                 \Log::warning('Auto-create telehealth session failed: ' . $e->getMessage());
             }
         }

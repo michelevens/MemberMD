@@ -1596,7 +1596,7 @@ export function PracticeSettings({ initialTab }: { initialTab?: string }) {
         disabled: false,
       },
       {
-        name: "Telehealth (Daily.co)",
+        name: "Telehealth (LiveKit)",
         description: "Enabled by default for all practices",
         category: "Video Visits",
         status: "Enabled",

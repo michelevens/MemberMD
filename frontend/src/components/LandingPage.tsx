@@ -59,7 +59,7 @@ const features = [
   {
     icon: Video,
     title: "Telehealth",
-    description: "Built-in video visits powered by Daily.co with consent capture, recording, and encounter documentation.",
+    description: "Built-in HIPAA-compliant video visits powered by LiveKit with consent capture, in-call chat, and encounter documentation.",
   },
   {
     icon: Stethoscope,

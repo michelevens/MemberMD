@@ -6486,7 +6486,7 @@ export function PracticePortal() {
               />
               <span className="text-sm font-medium text-slate-700">Use MemberMD Built-in Video</span>
               <span className="px-2 py-0.5 rounded text-xs font-medium" style={{ backgroundColor: "#e6f7f2", color: "#147d64" }}>
-                Daily.co
+                LiveKit
               </span>
             </label>
             <label className="flex items-center gap-2 cursor-pointer">
@@ -6633,7 +6633,7 @@ export function PracticePortal() {
           </div>
           <div className="flex-1">
             <p className="text-sm font-medium text-slate-700">
-              {telehealthMode === "builtin" ? "Daily.co Integration" : `${platformLabels[externalPlatform]} Integration`}
+              {telehealthMode === "builtin" ? "LiveKit Integration" : `${platformLabels[externalPlatform]} Integration`}
             </p>
             <p className="text-xs text-slate-400">
               {telehealthMode === "builtin"

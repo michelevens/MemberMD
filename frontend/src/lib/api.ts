@@ -1593,7 +1593,7 @@ export const telehealthService = {
     return apiFetch<TelehealthSession>(`/telehealth/${id}`);
   },
   joinSession: async (sessionId: string): Promise<ApiResponse<{ token: string; roomUrl: string; roomName: string; session: TelehealthSession }>> => {
-    if (useMockData()) return { data: { token: "mock_meeting_token", roomUrl: "https://membermd.daily.co/mock-room", roomName: "mock-room", session: {} as TelehealthSession } };
+    if (useMockData()) return { data: { token: "mock_meeting_token", roomUrl: "wss://mock.livekit.cloud", roomName: "mock-room", session: {} as TelehealthSession } };
     return apiFetch<{ token: string; roomUrl: string; roomName: string; session: TelehealthSession }>(`/telehealth/${sessionId}/join`, { method: "POST" });
   },
   endSession: async (sessionId: string): Promise<ApiResponse<TelehealthSession>> => {
@@ -1605,7 +1605,7 @@ export const telehealthService = {
     return apiFetch<TelehealthSession>(`/telehealth/${sessionId}/consent`, { method: "POST" });
   },
   getToken: async (appointmentId: string): Promise<ApiResponse<{ token: string; roomUrl: string }>> => {
-    if (useMockData()) return { data: { token: "mock_meeting_token", roomUrl: "https://membermd.daily.co/mock-room" } };
+    if (useMockData()) return { data: { token: "mock_meeting_token", roomUrl: "wss://mock.livekit.cloud" } };
     return apiFetch<{ token: string; roomUrl: string }>(`/telehealth/appointment/${appointmentId}/token`);
   },
   /**

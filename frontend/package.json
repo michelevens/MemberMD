@@ -15,7 +15,6 @@
     "e2e:report": "playwright show-report"
   },
   "dependencies": {
-    "@daily-co/daily-js": "^0.87.0",
     "livekit-client": "^2.5.10",
     "@stripe/connect-js": "^3.3.39",
     "@stripe/react-connect-js": "^3.3.36",
