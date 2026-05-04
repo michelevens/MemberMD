@@ -52,6 +52,10 @@ class ActivityLogController extends Controller
             'duration_minutes' => 'nullable|integer|min:0',
             'notes' => 'nullable|string|max:2000',
             'entitlement_code' => 'nullable|string|max:100',
+            // CCM/RPM-style billable time tracking flow: the logger marks
+            // the entry as needing approval; supervisor reviews via the
+            // approve/reject endpoints below.
+            'requires_approval' => 'sometimes|boolean',
         ]);
 
         $response = ['data' => []];
@@ -89,6 +93,10 @@ class ActivityLogController extends Controller
             ->where('user_id', $user->id)
             ->value('id');
 
+        // requires_approval=true → status pending. Default 'approved' so
+        // routine logs (e.g. an admin documenting a phone call) don't
+        // require sign-off — only billable-time entries opt in.
+        $needsApproval = (bool) ($validated['requires_approval'] ?? false);
         $commLog = CommunicationLog::create([
             'tenant_id' => $user->tenant_id,
             'patient_id' => $validated['patient_id'],
@@ -101,6 +109,11 @@ class ActivityLogController extends Controller
             'duration_seconds' => isset($validated['duration_minutes'])
                 ? $validated['duration_minutes'] * 60
                 : null,
+            'approval_status' => $needsApproval
+                ? CommunicationLog::APPROVAL_PENDING
+                : CommunicationLog::APPROVAL_APPROVED,
+            'approved_at' => $needsApproval ? null : now(),
+            'approved_by_user_id' => $needsApproval ? null : $user->id,
         ]);
 
         $response['data']['communication_log'] = $commLog;
@@ -294,5 +307,85 @@ class ActivityLogController extends Controller
             ->values();
 
         return response()->json(['data' => $activities]);
+    }
+
+    /**
+     * GET /activity-log/pending — list entries awaiting supervisor approval.
+     * Used by the Activity Log tab's "Pending approval" filter.
+     */
+    public function pending(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        abort_if(!in_array($user->role, ['practice_admin', 'provider', 'staff', 'superadmin']), 403);
+
+        $rows = CommunicationLog::where('tenant_id', $user->tenant_id)
+            ->where('approval_status', CommunicationLog::APPROVAL_PENDING)
+            ->with('patient:id,first_name,last_name')
+            ->orderByDesc('logged_at')
+            ->limit(200)
+            ->get();
+
+        return response()->json(['data' => $rows->map(function (CommunicationLog $log) {
+            return [
+                'id' => $log->id,
+                'patient_id' => $log->patient_id,
+                'patient_name' => trim(($log->patient->first_name ?? '') . ' ' . ($log->patient->last_name ?? '')) ?: 'Unknown',
+                'activity_type' => $log->channel,
+                'subject' => $log->subject,
+                'summary' => $log->summary,
+                'duration_minutes' => $log->duration_seconds !== null ? (int) round($log->duration_seconds / 60) : null,
+                'logged_at' => $log->logged_at?->toIso8601String(),
+            ];
+        })->values()]);
+    }
+
+    /**
+     * POST /activity-log/{id}/approve
+     */
+    public function approve(Request $request, string $id): JsonResponse
+    {
+        $user = $request->user();
+        abort_if(!in_array($user->role, ['practice_admin', 'provider', 'superadmin']), 403);
+
+        $log = CommunicationLog::where('tenant_id', $user->tenant_id)->findOrFail($id);
+        if ($log->approval_status !== CommunicationLog::APPROVAL_PENDING) {
+            return response()->json([
+                'message' => 'Only pending entries can be approved.',
+                'current_status' => $log->approval_status,
+            ], 422);
+        }
+        $log->update([
+            'approval_status' => CommunicationLog::APPROVAL_APPROVED,
+            'approved_at' => now(),
+            'approved_by_user_id' => $user->id,
+            'rejection_reason' => null,
+        ]);
+        return response()->json(['data' => $log->fresh(), 'message' => 'Approved.']);
+    }
+
+    /**
+     * POST /activity-log/{id}/reject
+     */
+    public function reject(Request $request, string $id): JsonResponse
+    {
+        $user = $request->user();
+        abort_if(!in_array($user->role, ['practice_admin', 'provider', 'superadmin']), 403);
+
+        $data = $request->validate(['reason' => 'nullable|string|max:1000']);
+
+        $log = CommunicationLog::where('tenant_id', $user->tenant_id)->findOrFail($id);
+        if ($log->approval_status !== CommunicationLog::APPROVAL_PENDING) {
+            return response()->json([
+                'message' => 'Only pending entries can be rejected.',
+                'current_status' => $log->approval_status,
+            ], 422);
+        }
+        $log->update([
+            'approval_status' => CommunicationLog::APPROVAL_REJECTED,
+            'approved_at' => null,
+            'approved_by_user_id' => $user->id,
+            'rejection_reason' => $data['reason'] ?? null,
+        ]);
+        return response()->json(['data' => $log->fresh(), 'message' => 'Rejected.']);
     }
 }
