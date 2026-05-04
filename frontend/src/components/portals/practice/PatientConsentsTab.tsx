@@ -27,10 +27,18 @@ interface SignatureRow {
 export function PatientConsentsTab({
   patientId,
   setToast,
+  hideRequestButton = false,
 }: {
   patientId: string;
-  setToast: (t: { message: string; type: "success" | "error" }) => void;
+  // Optional — practice portal wires its inline toast; the patient
+  // portal reuses this same component without one (download/preview
+  // failures still surface via the loading-state UI in the row).
+  setToast?: (t: { message: string; type: "success" | "error" }) => void;
+  // The "Request Consent" CTA is admin-only — patients viewing their
+  // own list shouldn't see it.
+  hideRequestButton?: boolean;
 }) {
+  const toast = setToast ?? (() => {});
   const [signatures, setSignatures] = useState<SignatureRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
@@ -64,7 +72,7 @@ export function PatientConsentsTab({
       setPreviewContent(fullSig.template?.content ?? "");
     } catch {
       setPreviewContent("");
-      setToast({ message: "Could not load agreement content.", type: "error" });
+      toast({ message: "Could not load agreement content.", type: "error" });
     }
   };
 
@@ -73,9 +81,9 @@ export function PatientConsentsTab({
     try {
       const filename = `${sig.template?.name ?? "Agreement"} - ${formatDate(sig.signed_at)}.pdf`;
       await consentService.downloadSignaturePdf(sig.id, filename);
-      setToast({ message: "Download started.", type: "success" });
+      toast({ message: "Download started.", type: "success" });
     } catch {
-      setToast({ message: "Download failed.", type: "error" });
+      toast({ message: "Download failed.", type: "error" });
     } finally {
       setDownloadingId(null);
     }
@@ -85,15 +93,17 @@ export function PatientConsentsTab({
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h3 className="font-semibold text-slate-800">Consents & Authorizations</h3>
-        <button
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold text-white transition-colors"
-          style={{ backgroundColor: "#635bff" }}
-          onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#544ee0")}
-          onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "#635bff")}
-          onClick={() => setToast({ message: "Request Consent flow — coming soon.", type: "success" })}
-        >
-          <Send className="w-3.5 h-3.5" /> Request Consent
-        </button>
+        {!hideRequestButton && (
+          <button
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold text-white transition-colors"
+            style={{ backgroundColor: "#635bff" }}
+            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#544ee0")}
+            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "#635bff")}
+            onClick={() => toast({ message: "Request Consent flow — coming soon.", type: "success" })}
+          >
+            <Send className="w-3.5 h-3.5" /> Request Consent
+          </button>
+        )}
       </div>
 
       {loading ? (

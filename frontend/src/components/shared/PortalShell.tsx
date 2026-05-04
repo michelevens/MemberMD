@@ -25,6 +25,7 @@ import {
   X,
   Search,
   MessageSquare,
+  ShieldCheck,
 } from "lucide-react";
 import { NotificationBell } from "./NotificationBell";
 
@@ -105,6 +106,11 @@ interface PortalShellProps {
   onOpenMessages?: () => void;
   messagesUnreadCount?: number;
   onOpenSettings?: () => void;
+  // Patient-only: opens the consents list. When omitted, no entry is
+  // shown in the avatar dropdown — practice/superadmin portals don't
+  // surface their own consents (consents are scoped per-patient and
+  // viewed by admins via the patient detail page).
+  onOpenConsents?: () => void;
 }
 
 // ─── Color palette ──────────────────────────────────────────────────────────
@@ -205,6 +211,7 @@ export function PortalShell({
   onOpenMessages,
   messagesUnreadCount = 0,
   onOpenSettings,
+  onOpenConsents,
 }: PortalShellProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
@@ -607,6 +614,17 @@ export function PortalShell({
                       >
                         <Settings className="w-4 h-4" /> Settings
                       </button>
+                      {onOpenConsents && (
+                        <button
+                          onClick={() => {
+                            setUserMenuOpen(false);
+                            onOpenConsents();
+                          }}
+                          className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                        >
+                          <ShieldCheck className="w-4 h-4" /> My Consents
+                        </button>
+                      )}
                       <button className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50">
                         <HelpCircle className="w-4 h-4" /> Help Center
                       </button>

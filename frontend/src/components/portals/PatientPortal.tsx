@@ -19,6 +19,7 @@ import { EntitlementsTab } from "./patient/EntitlementsTab";
 import { LabResultsTab } from "./patient/LabResultsTab";
 import { LocationsTab } from "./patient/LocationsTab";
 import { FamilyMembersSection } from "./patient/FamilyMembersSection";
+import { PatientConsentsTab } from "./practice/PatientConsentsTab";
 import { usePushNotifications } from "../../hooks/usePushNotifications";
 import {
   familyService,
@@ -84,6 +85,7 @@ type TabId =
   | "account"
   | "family"
   | "profile"
+  | "consents"
   | "settings";
 
 interface Appointment {
@@ -3222,6 +3224,24 @@ export function PatientPortal() {
       case "profile":
         // Profile-tab landing — personal info pane preselected.
         return <ProfilePage onBack={() => setActiveTab("home")} initialTab="profile" />;
+      case "consents":
+        // Reuses the same component the practice portal uses on the
+        // patient detail page. Backend scopes /consent-signatures to
+        // the requester's own patient_id, so the patient sees only
+        // their own list.
+        return (
+          <div className="space-y-5">
+            <div>
+              <h1 className="text-2xl font-semibold tracking-tight" style={{ color: COLORS.navy800 }}>
+                My Consents
+              </h1>
+              <p className="text-sm mt-0.5" style={{ color: COLORS.slate500 }}>
+                Every agreement you've signed with this practice — view or download.
+              </p>
+            </div>
+            <PatientConsentsTab patientId={patient.id} hideRequestButton />
+          </div>
+        );
       case "settings":
         // Settings-tab landing — security pane preselected (password +
         // MFA controls live in there). Same component as Profile so
@@ -3249,6 +3269,7 @@ export function PatientPortal() {
     account: "Billing & Account",
     family: "Family Members",
     profile: "Profile",
+    consents: "My Consents",
     settings: "Settings",
   };
 
@@ -3284,6 +3305,7 @@ export function PatientPortal() {
         onOpenMessages={() => setActiveTab("messages" as TabId)}
         messagesUnreadCount={unreadCount}
         onOpenSettings={() => setActiveTab("profile" as TabId)}
+        onOpenConsents={() => setActiveTab("consents" as TabId)}
         // Mobile bottom tab bar — 5 most-used tabs, left→right.
         // Entitlements + Profile remain reachable via the in-app surfaces
         // (Account → Entitlements section, header avatar dropdown).
