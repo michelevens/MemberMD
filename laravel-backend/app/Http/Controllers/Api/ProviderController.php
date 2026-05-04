@@ -220,6 +220,13 @@ class ProviderController extends Controller
             // Validated as a non-empty string here; bad values would
             // surface as availability misses rather than crashes.
             'timezone' => 'nullable|string|max:50',
+            // BYOV: per-provider override that swaps the built-in LiveKit
+            // room for a personal Zoom / Google Meet / Teams link. Empty
+            // string clears the override. URL is loose-validated — the
+            // user might paste a teams.microsoft.com path or a custom
+            // subdomain.
+            'external_video_url' => 'nullable|string|max:500|url',
+            'video_provider' => 'nullable|string|in:zoom,google_meet,teams,other',
         ];
         $validated = $request->validate($rules);
 

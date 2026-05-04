@@ -938,7 +938,10 @@ export function PracticePortal() {
   // ─── Edit Provider Modal ──────────────────────────────────────────────
   const [showEditProvider, setShowEditProvider] = useState(false);
   const [editProviderId, setEditProviderId] = useState<string | null>(null);
-  const [editProviderForm, setEditProviderForm] = useState({ firstName: "", lastName: "", credentials: "", specialty: "", npiNumber: "", email: "", phone: "", telehealth: false });
+  // BYOV (bring-your-own-video): per-provider override that
+  // replaces the built-in LiveKit room with a personal Zoom /
+  // Google Meet / Teams link. Empty string = use built-in.
+  const [editProviderForm, setEditProviderForm] = useState({ firstName: "", lastName: "", credentials: "", specialty: "", npiNumber: "", email: "", phone: "", telehealth: false, externalVideoUrl: "", videoProvider: "" });
   const [editProviderLoading, setEditProviderLoading] = useState(false);
 
   // ─── Invite Staff Modal ───────────────────────────────────────────────
@@ -2403,6 +2406,7 @@ export function PracticePortal() {
     }
     setEditProviderLoading(true);
     try {
+      const trimmedExt = (editProviderForm.externalVideoUrl || "").trim();
       const res = await providerService.update(editProviderId, {
         firstName: editProviderForm.firstName,
         lastName: editProviderForm.lastName,
@@ -2412,12 +2416,17 @@ export function PracticePortal() {
         email: editProviderForm.email || undefined,
         phone: editProviderForm.phone || undefined,
         telehealth: editProviderForm.telehealth,
+        // BYOV: empty string clears the override (back to built-in
+        // LiveKit). Send null when cleared so the backend nulls the
+        // column instead of writing "".
+        externalVideoUrl: trimmedExt === "" ? null : trimmedExt,
+        videoProvider: trimmedExt === "" ? null : (editProviderForm.videoProvider || "other"),
       } as Record<string, unknown>);
       if (res.data || !res.error) {
         setToast({ message: "Provider updated successfully.", type: "success" });
         setShowEditProvider(false);
         setEditProviderId(null);
-        setEditProviderForm({ firstName: "", lastName: "", credentials: "", specialty: "", npiNumber: "", email: "", phone: "", telehealth: false });
+        setEditProviderForm({ firstName: "", lastName: "", credentials: "", specialty: "", npiNumber: "", email: "", phone: "", telehealth: false, externalVideoUrl: "", videoProvider: "" });
         setProvidersLoaded(false);
         loadPracticeData();
       } else {
@@ -11048,6 +11057,48 @@ export function PracticePortal() {
                   <span className="text-sm text-slate-700">Telehealth enabled</span>
                 </label>
               </div>
+
+              {/* BYOV — only meaningful when telehealth is enabled */}
+              {editProviderForm.telehealth && (
+                <div className="rounded-lg border border-slate-200 p-4 bg-slate-50">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1">Video service</p>
+                  <p className="text-xs text-slate-500 mb-3">
+                    By default, telehealth visits use MemberMD's built-in video room. To use a personal Zoom / Google Meet / Teams link instead, paste it below — patients will get this link in their appointment emails.
+                  </p>
+                  <div className="grid grid-cols-3 gap-3">
+                    <div className="col-span-2">
+                      <label className="block text-xs font-medium text-slate-600 mb-1">Personal meeting link <span className="text-slate-400 font-normal">(optional)</span></label>
+                      <input
+                        type="url"
+                        className="w-full border rounded-lg px-3 py-2 text-sm"
+                        value={editProviderForm.externalVideoUrl}
+                        onChange={(e) => setEditProviderForm((f) => ({ ...f, externalVideoUrl: e.target.value }))}
+                        placeholder="https://zoom.us/j/1234567890 or https://meet.google.com/abc-defg-hij"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-600 mb-1">Vendor</label>
+                      <select
+                        className="w-full border rounded-lg px-3 py-2 text-sm bg-white"
+                        value={editProviderForm.videoProvider}
+                        onChange={(e) => setEditProviderForm((f) => ({ ...f, videoProvider: e.target.value }))}
+                        disabled={!editProviderForm.externalVideoUrl}
+                      >
+                        <option value="">— (built-in)</option>
+                        <option value="zoom">Zoom</option>
+                        <option value="google_meet">Google Meet</option>
+                        <option value="teams">Microsoft Teams</option>
+                        <option value="other">Other</option>
+                      </select>
+                    </div>
+                  </div>
+                  {editProviderForm.externalVideoUrl && (
+                    <p className="text-xs text-amber-700 mt-2">
+                      Heads up: this link is shared with every patient on every visit. The same room is used for back-to-back appointments — make sure that works for your workflow before saving.
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
             <div className="px-6 pb-6 flex items-center justify-end gap-3">
               <button className="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100 transition-colors" onClick={() => { setShowEditProvider(false); setEditProviderId(null); }}>Cancel</button>
