@@ -688,6 +688,22 @@ export function PracticePortal() {
   // Same hash-route trick for the encounter detail page.
   const encounterDetailMatch = /^\/practice\/encounters\/([^/?]+)/.exec(location.pathname);
   const selectedEncounterId = encounterDetailMatch ? encounterDetailMatch[1] : null;
+  // The portal mixes two navigation systems — URL-routed detail
+  // pages (provider, encounter) and state-driven ones (patient,
+  // active tab). When a user clicks a sidebar item, only `activeTab`
+  // updates; if `selectedPatient` is still set, renderContent()
+  // would keep showing the patient drawer no matter what tab is
+  // active. The wrapper below ensures the three sticky surfaces
+  // (selectedPatient, providerDetail URL, encounterDetail URL) all
+  // clear in lockstep when the user picks a tab. Same wrapper
+  // covers nav, search palette, header, recent-activity, etc.
+  const goToTab = (id: string) => {
+    setActiveTab(id as TabId);
+    setSelectedPatient(null);
+    if (selectedProviderId || selectedEncounterId) {
+      navigate("/practice");
+    }
+  };
   const [activeTab, setActiveTab] = useState<TabId>("dashboard");
   const [selectedThread, setSelectedThread] = useState(isDemoMode ? MOCK_THREADS[0].id : "");
   const [searchQuery, setSearchQuery] = useState("");
@@ -2746,11 +2762,11 @@ export function PracticePortal() {
             Connect banner once they've dismissed the checklist. */}
         {!onboardingDismissed ? (
           <OnboardingChecklist
-            onNavigate={(tab) => setActiveTab(tab as TabId)}
+            onNavigate={(tab) => goToTab(tab)}
             onDismiss={() => loadPracticeData()}
           />
         ) : (
-          <ConnectSetupBanner onSetup={() => setActiveTab("practice-settings" as TabId)} />
+          <ConnectSetupBanner onSetup={() => goToTab("practice-settings")} />
         )}
 
         {/* Compliance score — port from Credentik. Widget self-fetches
@@ -2826,7 +2842,7 @@ export function PracticePortal() {
         {documentationPendingCount > 0 && (
           <button
             type="button"
-            onClick={() => setActiveTab("encounters")}
+            onClick={() => goToTab("encounters")}
             className="w-full text-left rounded-xl border border-amber-300 bg-amber-50 p-4 flex items-center gap-3 hover:bg-amber-100 transition-colors"
           >
             <div className="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0" style={{ backgroundColor: "#fef3c7" }}>
@@ -3071,7 +3087,7 @@ export function PracticePortal() {
       { label: "Book appointment", onClick: () => { setBookApptStaffPatientId(patient.id); setBookApptStaffPatientName(patient.name || ""); setShowBookAppointment(true); } },
       { label: "Send message", onClick: () => { setSelectedPatient(patient); setPatientDetailTab("messages"); } },
       { label: "Request signature", onClick: () => { setSignatureRequestPatient({ id: patient.id, name: patient.name, email: patient.email ?? null }); fetchSignatureTemplates(); } },
-      { label: "Log activity", onClick: () => { setActiveTab("activity-log"); } },
+      { label: "Log activity", onClick: () => { goToTab("activity-log"); } },
       { label: "Create encounter", onClick: () => { setEncounterForm(f => ({ ...f, patientId: patient.id })); setShowNewEncounter(true); } },
       ...(patient.status === "active" && patient.membershipId
         ? [
@@ -9566,11 +9582,11 @@ export function PracticePortal() {
         userSubtitle={userSubtitle}
         nav={filteredSections}
         activeTab={activeTab}
-        onTabChange={(id) => setActiveTab(id as TabId)}
+        onTabChange={(id) => goToTab(id)}
         onLogout={auth.logout}
         headerTitle={activeLabel}
-        onOpenMessages={() => setActiveTab("messages" as TabId)}
-        onOpenSettings={() => setActiveTab("settings" as TabId)}
+        onOpenMessages={() => goToTab("messages")}
+        onOpenSettings={() => goToTab("settings")}
       >
         {dataLoading && (
           <div className="h-0.5 w-full overflow-hidden mb-4 -mt-2 bg-slate-100">
@@ -11426,7 +11442,7 @@ export function PracticePortal() {
         open={paletteOpen}
         onClose={() => setPaletteOpen(false)}
         items={paletteItems}
-        onSelect={(id) => setActiveTab(id as TabId)}
+        onSelect={(id) => goToTab(id)}
       />
 
       {/* Add Allergy dialog — opened from patient detail Medical tab. */}

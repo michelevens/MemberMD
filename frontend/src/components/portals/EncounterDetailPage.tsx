@@ -127,6 +127,20 @@ export function EncounterDetailPage({ encounterId, onBack, onSaved }: EncounterD
     let cancelled = false;
     setLoading(true);
     setError(null);
+    // Reset all per-encounter state up front so navigating from
+    // encounter A → B never flashes A's chart, edit mode, audit log,
+    // or template while B's fetch is in flight. Without this reset,
+    // the page can appear "stuck" on the previous encounter until a
+    // refresh re-runs initial state.
+    setEncounter(null);
+    setAuditLogs([]);
+    setTemplate(null);
+    setDraft(emptyDraft());
+    setStructuredDraft({});
+    setIsEditing(false);
+    setIsAmending(false);
+    setAmendmentReason("");
+    setSaveError(null);
     encounterService.getDetail(encounterId).then((res) => {
       if (cancelled) return;
       if (res.error) {
