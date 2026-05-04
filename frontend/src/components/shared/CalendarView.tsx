@@ -86,6 +86,9 @@ interface CalendarAppointment {
   /** Type-color tint shown as a thin left border on the block. */
   color: string;
   status: string;
+  /** null = patient self-booked, awaiting staff confirmation.
+   *  Non-null = staff confirmed timestamp. */
+  confirmedAt?: string | null;
 }
 
 type ViewMode = "day" | "week" | "month" | "list";
@@ -128,6 +131,7 @@ function mapAppointment(api: ApiAppointment): CalendarAppointment | null {
   const patientName = [patientFirst, patientLast].filter(Boolean).join(" ").trim() || "Patient";
   const isTeleHealth = !!(api.isTelehealth ?? api.is_telehealth);
   const duration = api.durationMinutes ?? api.duration_minutes ?? 30;
+  const confirmedAt = api.confirmedAt ?? api.confirmed_at ?? null;
   return {
     id: api.id,
     patientName,
@@ -140,6 +144,7 @@ function mapAppointment(api: ApiAppointment): CalendarAppointment | null {
     isTeleHealth,
     color: t?.color ?? DEFAULT_TYPE_COLOR,
     status: api.status,
+    confirmedAt,
   };
 }
 
@@ -295,6 +300,49 @@ function CalendarViewInner({ onAppointmentClick, onBookNew, onReschedule }: Cale
     if (handled === true) return;
     const apt = appointments.find((a) => a.id === id);
     if (apt) setDetailFor(apt);
+  }
+
+  // Patient self-booked appointments land with confirmedAt=null;
+  // staff approves via POST /appointments/{id}/confirm. Deny is a
+  // soft-DELETE with a "denied by staff" cancel reason so the row
+  // stays in the audit trail with a clear paper-trail of why.
+  async function approveAppointment(id: string) {
+    setDetailBusy(true);
+    setDetailMsg(null);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const res = await apiFetch<any>(`/appointments/${id}/confirm`, { method: "POST" });
+    setDetailBusy(false);
+    if (res.error) {
+      setDetailMsg(res.error);
+      return;
+    }
+    setAppointments((prev) => prev.map((a) =>
+      a.id === id
+        ? { ...a, status: "confirmed", confirmedAt: new Date().toISOString() }
+        : a
+    ));
+    setDetailFor(null);
+  }
+
+  async function denyAppointment(id: string) {
+    const reason = window.prompt("Reason for denying this appointment (visible to the patient):")?.trim();
+    if (!reason) return;
+    setDetailBusy(true);
+    setDetailMsg(null);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const res = await apiFetch<any>(`/appointments/${id}`, {
+      method: "DELETE",
+      body: JSON.stringify({ cancel_reason: `Denied by staff: ${reason}` }),
+    });
+    setDetailBusy(false);
+    if (res.error) {
+      setDetailMsg(res.error);
+      return;
+    }
+    setAppointments((prev) => prev.map((a) =>
+      a.id === id ? { ...a, status: "cancelled" } : a
+    ));
+    setDetailFor(null);
   }
 
   async function cancelAppointment(id: string) {
@@ -1022,8 +1070,8 @@ function CalendarViewInner({ onAppointmentClick, onBookNew, onReschedule }: Cale
             }}
           >
             <div style={{ padding: "16px 18px", borderBottom: `1px solid ${C.slate200}` }}>
-              <p className="text-xs uppercase tracking-wider font-semibold mb-1" style={{ color: C.slate400 }}>
-                {getStatusStyle(detailFor.status).label}
+              <p className="text-xs uppercase tracking-wider font-semibold mb-1" style={{ color: !detailFor.confirmedAt ? "#d97706" : C.slate400 }}>
+                {!detailFor.confirmedAt ? "Pending approval" : getStatusStyle(detailFor.status).label}
               </p>
               <h3 className="text-base font-semibold" style={{ color: C.navy800 }}>
                 {detailFor.patientName}
@@ -1061,31 +1109,61 @@ function CalendarViewInner({ onAppointmentClick, onBookNew, onReschedule }: Cale
               </button>
               {!["cancelled", "completed", "no_show"].includes(detailFor.status) && (
                 <>
-                  <button
-                    onClick={() => cancelAppointment(detailFor.id)}
-                    disabled={detailBusy}
-                    className="px-3 py-2 text-sm font-medium rounded-lg hover:bg-red-50 disabled:opacity-50"
-                    style={{ color: C.red500, border: `1px solid ${C.slate200}` }}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={() => markComplete(detailFor.id)}
-                    disabled={detailBusy}
-                    className="px-3 py-2 text-sm font-semibold rounded-lg disabled:opacity-50"
-                    style={{ color: C.navy700, border: `1px solid ${C.slate200}` }}
-                  >
-                    Mark complete
-                  </button>
-                  {detailFor.isTeleHealth && (
-                    <button
-                      onClick={() => joinTelehealth(detailFor.id)}
-                      disabled={detailBusy}
-                      className="px-3 py-2 text-sm font-semibold rounded-lg text-white flex items-center gap-1.5 disabled:opacity-50"
-                      style={{ backgroundColor: C.teal500 }}
-                    >
-                      <Video className="w-3.5 h-3.5" /> Join video
-                    </button>
+                  {/* Patient self-booked — confirmedAt null = waiting
+                      for staff approval. Approve flips to confirmed +
+                      stamps confirmed_at; Deny soft-cancels with a
+                      "Denied by staff" reason so the patient's email
+                      tells them why. Once approved/denied, these
+                      buttons disappear and the normal Cancel / Mark
+                      complete / Join video set takes over. */}
+                  {!detailFor.confirmedAt ? (
+                    <>
+                      <button
+                        onClick={() => denyAppointment(detailFor.id)}
+                        disabled={detailBusy}
+                        className="px-3 py-2 text-sm font-medium rounded-lg hover:bg-red-50 disabled:opacity-50"
+                        style={{ color: C.red500, border: `1px solid ${C.slate200}` }}
+                      >
+                        Deny
+                      </button>
+                      <button
+                        onClick={() => approveAppointment(detailFor.id)}
+                        disabled={detailBusy}
+                        className="px-3 py-2 text-sm font-semibold rounded-lg text-white disabled:opacity-50"
+                        style={{ backgroundColor: C.teal500 }}
+                      >
+                        Approve
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <button
+                        onClick={() => cancelAppointment(detailFor.id)}
+                        disabled={detailBusy}
+                        className="px-3 py-2 text-sm font-medium rounded-lg hover:bg-red-50 disabled:opacity-50"
+                        style={{ color: C.red500, border: `1px solid ${C.slate200}` }}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={() => markComplete(detailFor.id)}
+                        disabled={detailBusy}
+                        className="px-3 py-2 text-sm font-semibold rounded-lg disabled:opacity-50"
+                        style={{ color: C.navy700, border: `1px solid ${C.slate200}` }}
+                      >
+                        Mark complete
+                      </button>
+                      {detailFor.isTeleHealth && (
+                        <button
+                          onClick={() => joinTelehealth(detailFor.id)}
+                          disabled={detailBusy}
+                          className="px-3 py-2 text-sm font-semibold rounded-lg text-white flex items-center gap-1.5 disabled:opacity-50"
+                          style={{ backgroundColor: C.teal500 }}
+                        >
+                          <Video className="w-3.5 h-3.5" /> Join video
+                        </button>
+                      )}
+                    </>
                   )}
                 </>
               )}

@@ -352,10 +352,51 @@ class AppointmentController extends Controller
         $this->authorize('update', $appointment);
         abort_if($user->isPatient(), 403);
 
+        $wasUnconfirmed = $appointment->confirmed_at === null;
         $appointment->update([
             'status' => 'confirmed',
             'confirmed_at' => $appointment->confirmed_at ?? now(),
         ]);
+
+        // Notify the patient if THIS confirm call was the transition
+        // from "patient self-booked, awaiting review" to confirmed.
+        // Subsequent confirms (admin reconfirming an already-confirmed
+        // row, etc.) are no-ops — don't spam the inbox.
+        if ($wasUnconfirmed) {
+            try {
+                $appointment->loadMissing(['patient', 'provider.user', 'appointmentType']);
+                $patient = $appointment->patient;
+                $practice = \App\Models\Practice::find($appointment->tenant_id);
+                if ($patient && $patient->email && $practice) {
+                    \App\Services\MailDispatcher::send(
+                        $patient->email,
+                        new \App\Mail\AppointmentConfirmation(
+                            appointment: $appointment,
+                            patient: $patient,
+                            practice: $practice,
+                        ),
+                        'appointment-confirmation',
+                    );
+                }
+                // Also drop an in-app notification on the patient's
+                // bell so the change is visible the next time they
+                // log in even if the email is missed.
+                if ($patient && $patient->user_id) {
+                    $patientUser = \App\Models\User::find($patient->user_id);
+                    if ($patientUser) {
+                        $patientUser->notify(new \App\Notifications\AppointmentStatusChanged(
+                            appointment: $appointment,
+                            transition: 'approved',
+                        ));
+                    }
+                }
+            } catch (\Throwable $e) {
+                \Log::warning('Appointment-confirm notifications failed', [
+                    'appointment_id' => $appointment->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
 
         return response()->json([
             'data' => $appointment->fresh()->load(['patient', 'provider.user', 'appointmentType'])
@@ -392,6 +433,31 @@ class AppointmentController extends Controller
                 ),
                 'appointment-canceled',
             );
+        }
+
+        // In-app notification — only when STAFF cancelled (e.g. deny
+        // path or "we had to cancel" — patient who cancelled their own
+        // doesn't need a bell-ping reminding them what they just did).
+        if (!$user->isPatient() && $appointment->patient && $appointment->patient->user_id) {
+            try {
+                $patientUser = \App\Models\User::find($appointment->patient->user_id);
+                if ($patientUser) {
+                    // Distinguish "denied" (status was unconfirmed) from
+                    // "cancelled" (status was confirmed/scheduled). The
+                    // wording in the bell entry differs slightly.
+                    $transition = str_starts_with($reason, 'Denied by staff') ? 'denied' : 'cancelled';
+                    $patientUser->notify(new \App\Notifications\AppointmentStatusChanged(
+                        appointment: $appointment,
+                        transition: $transition,
+                        reason: $reason,
+                    ));
+                }
+            } catch (\Throwable $e) {
+                \Log::warning('Appointment-cancel in-app notification failed', [
+                    'appointment_id' => $appointment->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
         }
 
         return response()->json(['data' => ['message' => 'Appointment cancelled.']]);
