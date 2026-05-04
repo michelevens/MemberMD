@@ -449,6 +449,72 @@ class AppointmentController extends Controller
     }
 
     /**
+     * PUT /appointments/{id}/series
+     *
+     * Apply an update to this appointment AND all future occurrences
+     * in the same recurring series. Past occurrences are NOT touched
+     * (we don't rewrite history). Useful when a provider's standard
+     * weekly slot moves an hour earlier and the patient should see
+     * every future visit shift, but the ones already completed stay
+     * as they were.
+     *
+     * Series root: walks up via parent_appointment_id until we hit a
+     * row whose parent is null (the series anchor). All rows in the
+     * series share that root. We then update everything where
+     * scheduled_at >= this appointment's scheduled_at.
+     *
+     * Currently supports: notes, duration_minutes, is_telehealth.
+     * Time-of-day shifts (changing the hour/minute uniformly across
+     * the series) are intentionally NOT in scope here — that's a
+     * separate "shift series by N minutes" operation that would need
+     * its own UI flow + per-row availability re-check.
+     */
+    public function updateSeries(Request $request, string $id): JsonResponse
+    {
+        $user = $request->user();
+        $appointment = Appointment::where('tenant_id', $user->tenant_id)->findOrFail($id);
+        $this->authorize('update', $appointment);
+        abort_if($user->isPatient(), 403); // patient is bound to single occurrence
+
+        $data = $request->validate([
+            'duration_minutes' => 'sometimes|integer|min:5|max:480',
+            'notes' => 'sometimes|nullable|string|max:1000',
+            'is_telehealth' => 'sometimes|boolean',
+        ]);
+        if (empty($data)) {
+            return response()->json(['message' => 'Nothing to update.'], 422);
+        }
+
+        // Walk to the series root.
+        $root = $appointment;
+        while ($root->parent_appointment_id) {
+            $next = Appointment::where('tenant_id', $user->tenant_id)
+                ->find($root->parent_appointment_id);
+            if (!$next) break;
+            $root = $next;
+        }
+
+        // Apply to this appointment + all future siblings under the
+        // same root. "Future" = scheduled_at >= this appointment's.
+        $affected = Appointment::where('tenant_id', $user->tenant_id)
+            ->where(function ($q) use ($root) {
+                $q->where('id', $root->id)
+                  ->orWhere('parent_appointment_id', $root->id);
+            })
+            ->where('scheduled_at', '>=', $appointment->scheduled_at)
+            ->whereNotIn('status', ['cancelled', 'completed', 'no_show'])
+            ->update($data);
+
+        return response()->json([
+            'data' => [
+                'updated_count' => $affected,
+                'series_root_id' => $root->id,
+            ],
+            'message' => "Updated {$affected} occurrence(s) in this series.",
+        ]);
+    }
+
+    /**
      * Auto-charge the no-show fee on the practice's Connect account
      * when an appointment transitions to status=no_show.
      *

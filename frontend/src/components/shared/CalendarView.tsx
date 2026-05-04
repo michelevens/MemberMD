@@ -89,6 +89,10 @@ interface CalendarAppointment {
   /** null = patient self-booked, awaiting staff confirmation.
    *  Non-null = staff confirmed timestamp. */
   confirmedAt?: string | null;
+  /** True when this row is part of a recurring series — either the
+   *  parent (recurrence_rule set) or a child (parent_appointment_id
+   *  set). Drives "Skip this week" and "Apply to series" UI. */
+  isRecurring?: boolean;
 }
 
 type ViewMode = "day" | "week" | "month" | "list";
@@ -132,6 +136,9 @@ function mapAppointment(api: ApiAppointment): CalendarAppointment | null {
   const isTeleHealth = !!(api.isTelehealth ?? api.is_telehealth);
   const duration = api.durationMinutes ?? api.duration_minutes ?? 30;
   const confirmedAt = api.confirmedAt ?? api.confirmed_at ?? null;
+  const parentId = api.parentAppointmentId ?? api.parent_appointment_id ?? null;
+  const recurrenceRule = api.recurrenceRule ?? api.recurrence_rule ?? null;
+  const isRecurring = !!(parentId || recurrenceRule);
   return {
     id: api.id,
     patientName,
@@ -145,6 +152,7 @@ function mapAppointment(api: ApiAppointment): CalendarAppointment | null {
     color: t?.color ?? DEFAULT_TYPE_COLOR,
     status: api.status,
     confirmedAt,
+    isRecurring,
   };
 }
 
@@ -667,6 +675,12 @@ function EditAppointmentDialog({
   const [time, setTime] = useState(fmtTime(appointment.startHour, appointment.startMinute));
   const [duration, setDuration] = useState(appointment.durationMinutes);
   const [isTelehealth, setIsTelehealth] = useState(appointment.isTeleHealth);
+  // Series-edit toggle — only meaningful when this appointment is
+  // recurring. Applies non-time fields (duration, telehealth flag,
+  // notes) to this AND all future occurrences. Time-of-day shifts
+  // intentionally stay single-row only because every occurrence
+  // would need its own availability re-check.
+  const [applyToSeries, setApplyToSeries] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -681,6 +695,10 @@ function EditAppointmentDialog({
       setError("Invalid date or time.");
       return;
     }
+
+    // Step 1 — always update THIS row (date/time can only apply to
+    // a single occurrence; series-wide time shifts aren't supported
+    // here).
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const res = await apiFetch<any>(`/appointments/${appointment.id}`, {
       method: "PUT",
@@ -690,11 +708,36 @@ function EditAppointmentDialog({
         is_telehealth: isTelehealth,
       }),
     });
-    setSubmitting(false);
     if (res.error) {
+      setSubmitting(false);
       setError(res.error);
       return;
     }
+
+    // Step 2 — if "apply to series" is checked, propagate the
+    // non-time fields (duration + telehealth) to all future siblings
+    // via the dedicated /series endpoint. Time-of-day stays per-row
+    // since the future occurrences are at different absolute dates.
+    if (applyToSeries && appointment.isRecurring) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const r2 = await apiFetch<any>(`/appointments/${appointment.id}/series`, {
+        method: "PUT",
+        body: JSON.stringify({
+          duration_minutes: duration,
+          is_telehealth: isTelehealth,
+        }),
+      });
+      if (r2.error) {
+        // Don't roll back — the single-row update succeeded; the
+        // series update is a best-effort follow-on. Surface the
+        // partial failure so the user knows.
+        setSubmitting(false);
+        setError(`This visit was updated, but applying to the series failed: ${r2.error}`);
+        return;
+      }
+    }
+
+    setSubmitting(false);
     onSaved({
       ...appointment,
       date: dt,
@@ -775,6 +818,29 @@ function EditAppointmentDialog({
             />
             Telehealth visit
           </label>
+          {/* Series-edit toggle — only when this row is part of a
+              recurring series. Date/time still applies only to this
+              occurrence; duration + telehealth flag propagate. */}
+          {appointment.isRecurring && (
+            <label
+              className="flex items-start gap-2 text-xs cursor-pointer p-2 rounded-lg"
+              style={{ color: "#475569", backgroundColor: "#f8fafc", border: "1px solid #e2e8f0" }}
+            >
+              <input
+                type="checkbox"
+                checked={applyToSeries}
+                onChange={(e) => setApplyToSeries(e.target.checked)}
+                className="mt-0.5"
+              />
+              <span>
+                <span className="font-semibold">Apply duration + format to all future occurrences</span>
+                <br />
+                <span style={{ color: "#94a3b8" }}>
+                  Date and time still apply only to this visit. Past occurrences are untouched.
+                </span>
+              </span>
+            </label>
+          )}
           {error && (
             <div className="text-xs px-3 py-2 rounded-lg" style={{ backgroundColor: "#fef2f2", color: "#b91c1c" }}>{error}</div>
           )}
@@ -881,6 +947,29 @@ function CalendarViewInner({ onAppointmentClick, onBookNew, onReschedule }: Cale
     const res = await apiFetch<any>(`/appointments/${id}`, {
       method: "DELETE",
       body: JSON.stringify({ cancel_reason: `Denied by staff: ${reason}` }),
+    });
+    setDetailBusy(false);
+    if (res.error) {
+      setDetailMsg(res.error);
+      return;
+    }
+    setAppointments((prev) => prev.map((a) =>
+      a.id === id ? { ...a, status: "cancelled" } : a
+    ));
+    setDetailFor(null);
+  }
+
+  // Skip a single occurrence in a recurring series — soft-delete with
+  // reason="skipped" so the row is preserved for audit (the series
+  // continues; only this date is dropped).
+  async function skipOccurrence(id: string) {
+    if (!window.confirm("Skip this occurrence? The rest of the recurring series stays scheduled.")) return;
+    setDetailBusy(true);
+    setDetailMsg(null);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const res = await apiFetch<any>(`/appointments/${id}`, {
+      method: "DELETE",
+      body: JSON.stringify({ cancel_reason: "Skipped (recurring series continues)" }),
     });
     setDetailBusy(false);
     if (res.error) {
@@ -1969,6 +2058,16 @@ function CalendarViewInner({ onAppointmentClick, onBookNew, onReschedule }: Cale
               onClick={() => { markComplete(ctxMenu.appointment.id); setCtxMenu(null); }}
             >
               Mark complete
+            </CtxMenuItem>
+          )}
+          {/* Recurring-only: skip this single occurrence. Useful when
+              the patient is travelling one week but the series continues. */}
+          {ctxMenu.appointment.isRecurring
+           && !["completed", "cancelled", "no_show"].includes(ctxMenu.appointment.status) && (
+            <CtxMenuItem
+              onClick={() => { skipOccurrence(ctxMenu.appointment.id); setCtxMenu(null); }}
+            >
+              Skip this week
             </CtxMenuItem>
           )}
           <div style={{ borderTop: `1px solid ${C.slate100}`, marginTop: 4, paddingTop: 4 }}>

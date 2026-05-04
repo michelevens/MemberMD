@@ -317,6 +317,7 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
     Route::post('/appointments/{id}/confirm', [AppointmentController::class, 'confirm']);
     Route::get('/appointments/{id}/calendar-links', [AppointmentController::class, 'calendarLinks']);
     Route::put('/appointments/{id}/reschedule', [AppointmentController::class, 'reschedule']);
+    Route::put('/appointments/{id}/series', [AppointmentController::class, 'updateSeries']);
     Route::apiResource('appointments', AppointmentController::class);
 
     // Appointment type list for the booking widgets. Patient-callable
