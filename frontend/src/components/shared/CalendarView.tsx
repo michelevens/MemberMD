@@ -761,6 +761,16 @@ function CalendarViewInner({ onAppointmentClick, onBookNew, onReschedule }: Cale
   const [viewMode, setViewMode] = useState<ViewMode>("week");
   const [currentDate, setCurrentDate] = useState(new Date());
   const [appointments, setAppointments] = useState<CalendarAppointment[]>([]);
+  // Toolbar filters — client-side narrow on the already-fetched window.
+  // "all" = no filter for that dimension. Provider id "all" leaves the
+  // dropdown showing all unique providers in the visible appointments.
+  const [filterProvider, setFilterProvider] = useState<string>("all");
+  const [filterFormat, setFilterFormat] = useState<"all" | "telehealth" | "in_office">("all");
+  const [filterStatus, setFilterStatus] = useState<string>("all");
+  // Toggle: when true, only show appointments awaiting staff
+  // confirmation (confirmedAt === null AND not cancelled / completed).
+  // Wired to the "N awaiting approval" badge in the toolbar.
+  const [filterPending, setFilterPending] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [reschedFailed, setReschedFailed] = useState<string | null>(null);
@@ -1027,14 +1037,98 @@ function CalendarViewInner({ onAppointmentClick, onBookNew, onReschedule }: Cale
     setCurrentDate(d);
   }
 
+  // ─── Keyboard nav — global shortcuts when no input is focused. ───────
+  // ←/→  paginate by view granularity
+  // T    today
+  // D/W/M/L  switch view
+  // Esc  close topmost open dialog (ctx menu, edit, quick-create, detail)
+  useEffect(() => {
+    const isTextEditing = (el: EventTarget | null): boolean => {
+      if (!(el instanceof HTMLElement)) return false;
+      const tag = el.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return true;
+      if (el.isContentEditable) return true;
+      return false;
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (isTextEditing(e.target)) return;
+
+      if (e.key === "Escape") {
+        if (ctxMenu) { setCtxMenu(null); return; }
+        if (editFor) { setEditFor(null); return; }
+        if (quickCreate) { setQuickCreate(null); return; }
+        if (detailFor) { setDetailFor(null); return; }
+        return;
+      }
+
+      // Skip nav keys while any modal is open — Esc is the explicit
+      // close. Avoids paginating the calendar behind a focused dialog.
+      if (detailFor || editFor || quickCreate || ctxMenu) return;
+
+      switch (e.key) {
+        case "ArrowLeft":  e.preventDefault(); navigate(-1); break;
+        case "ArrowRight": e.preventDefault(); navigate(1); break;
+        case "t": case "T": e.preventDefault(); setCurrentDate(new Date()); break;
+        case "d": case "D": e.preventDefault(); setViewMode("day"); break;
+        case "w": case "W": e.preventDefault(); setViewMode("week"); break;
+        case "m": case "M": e.preventDefault(); setViewMode("month"); break;
+        case "l": case "L": e.preventDefault(); setViewMode("list"); break;
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // currentDate / viewMode change every key press; intentionally
+    // omit so the listener stays stable. The handler closes over
+    // setters which are referentially stable.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ctxMenu, editFor, quickCreate, detailFor]);
+
   function goToday() {
     setCurrentDate(new Date());
   }
 
   // ─── Filter appointments ──────────────────────────────────────────────────
+  // Filters apply BEFORE the day-bucketing so the count badges on the
+  // toolbar reflect what's actually rendered. List of providers /
+  // statuses for the filter dropdowns is derived from the visible
+  // window so the dropdown never offers options that have zero matches.
+  const filteredAppointments = useMemo(() => {
+    return appointments.filter((a) => {
+      if (filterProvider !== "all" && a.providerName !== filterProvider) return false;
+      if (filterFormat === "telehealth" && !a.isTeleHealth) return false;
+      if (filterFormat === "in_office" && a.isTeleHealth) return false;
+      if (filterStatus !== "all" && a.status !== filterStatus) return false;
+      if (filterPending) {
+        if (a.confirmedAt) return false;
+        if (["cancelled", "completed", "no_show"].includes(a.status)) return false;
+      }
+      return true;
+    });
+  }, [appointments, filterProvider, filterFormat, filterStatus, filterPending]);
+
+  const pendingCount = useMemo(
+    () => appointments.filter((a) =>
+      !a.confirmedAt
+      && !["cancelled", "completed", "no_show"].includes(a.status)
+    ).length,
+    [appointments]
+  );
+
+  const providerOptions = useMemo(() => {
+    const set = new Set<string>();
+    appointments.forEach((a) => set.add(a.providerName));
+    return Array.from(set).sort();
+  }, [appointments]);
+
+  const statusOptions = useMemo(() => {
+    const set = new Set<string>();
+    appointments.forEach((a) => set.add(a.status));
+    return Array.from(set).sort();
+  }, [appointments]);
 
   function getAppointmentsForDay(date: Date): CalendarAppointment[] {
-    return appointments.filter((a) => isSameDay(a.date, date));
+    return filteredAppointments.filter((a) => isSameDay(a.date, date));
   }
 
   // ─── Current Time Indicator ───────────────────────────────────────────────
@@ -1368,7 +1462,7 @@ function CalendarViewInner({ onAppointmentClick, onBookNew, onReschedule }: Cale
 
   function renderListView() {
     const weekDays = getWeekDays(currentDate);
-    const weekAppts = appointments
+    const weekAppts = filteredAppointments
       .filter((a) => weekDays.some((d) => isSameDay(d, a.date)))
       .sort((a, b) => {
         const dayDiff = a.date.getTime() - b.date.getTime();
@@ -1506,7 +1600,73 @@ function CalendarViewInner({ onAppointmentClick, onBookNew, onReschedule }: Cale
           </h3>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Filters — narrow the visible appointments client-side.
+              Provider list is derived from the loaded window so the
+              dropdown never offers options that have zero matches. */}
+          <select
+            value={filterProvider}
+            onChange={(e) => setFilterProvider(e.target.value)}
+            className="text-xs font-medium px-2.5 py-1.5 rounded-lg bg-white outline-none"
+            style={{ border: `1px solid ${filterProvider !== "all" ? C.teal500 : C.slate200}`, color: C.slate600 }}
+            title="Filter by provider"
+          >
+            <option value="all">All providers</option>
+            {providerOptions.map((p) => (
+              <option key={p} value={p}>{p}</option>
+            ))}
+          </select>
+          <select
+            value={filterFormat}
+            onChange={(e) => setFilterFormat(e.target.value as "all" | "telehealth" | "in_office")}
+            className="text-xs font-medium px-2.5 py-1.5 rounded-lg bg-white outline-none"
+            style={{ border: `1px solid ${filterFormat !== "all" ? C.teal500 : C.slate200}`, color: C.slate600 }}
+            title="Filter by visit format"
+          >
+            <option value="all">All formats</option>
+            <option value="telehealth">Telehealth</option>
+            <option value="in_office">In-office</option>
+          </select>
+          <select
+            value={filterStatus}
+            onChange={(e) => setFilterStatus(e.target.value)}
+            className="text-xs font-medium px-2.5 py-1.5 rounded-lg bg-white outline-none"
+            style={{ border: `1px solid ${filterStatus !== "all" ? C.teal500 : C.slate200}`, color: C.slate600 }}
+            title="Filter by status"
+          >
+            <option value="all">All statuses</option>
+            {statusOptions.map((s) => (
+              <option key={s} value={s}>{(STATUS_COLORS[s]?.label ?? s)}</option>
+            ))}
+          </select>
+          {(filterProvider !== "all" || filterFormat !== "all" || filterStatus !== "all" || filterPending) && (
+            <button
+              onClick={() => { setFilterProvider("all"); setFilterFormat("all"); setFilterStatus("all"); setFilterPending(false); }}
+              className="text-xs font-medium px-2.5 py-1.5 rounded-lg hover:bg-slate-100"
+              style={{ color: C.slate500 }}
+            >
+              Clear
+            </button>
+          )}
+
+          {/* Pending-approval badge — clickable filter. Hides when zero
+              so it doesn't clutter the toolbar in steady state. */}
+          {pendingCount > 0 && (
+            <button
+              onClick={() => setFilterPending((v) => !v)}
+              className="text-xs font-semibold px-2.5 py-1.5 rounded-full flex items-center gap-1.5 transition-colors"
+              style={{
+                backgroundColor: filterPending ? "#fde68a" : "#fffbeb",
+                color: "#92400e",
+                border: `1px solid ${filterPending ? "#f59e0b" : "#fde68a"}`,
+              }}
+              title={filterPending ? "Showing only pending — click to show all" : "Show only appointments awaiting approval"}
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+              {pendingCount} awaiting approval
+            </button>
+          )}
+
           {/* View Mode Tabs */}
           <div className="flex rounded-lg overflow-hidden" style={{ border: `1px solid ${C.slate200}` }}>
             {(["day", "week", "month", "list"] as ViewMode[]).map((mode) => (
