@@ -612,6 +612,102 @@ function PlanBadge({ plan }: { plan: string }) {
   );
 }
 
+// ─── Countdown ──────────────────────────────────────────────────────────
+// Renders a live "Starts in 12m" / "Starting now" / "Started 5m ago"
+// pill for an appointment row. Updates every 30s — no second-by-second
+// tick because appointments are minute-grained and re-rendering 8 rows
+// every second is wasteful.
+//
+// Color shifts:
+//   slate     when > 60 min away (calm)
+//   indigo    when 16–60 min away (heads-up)
+//   amber     when 1–15 min away (imminent)
+//   green     in the "now" window (-2m to +2m around scheduled_at)
+//   slate-400 once ≥ 5 min past (de-emphasized)
+//
+// scheduledAt accepts ISO strings or any value Date can parse. Returns
+// null if the value is missing or unparseable so callers can fall back
+// to the static time label.
+function Countdown({
+  scheduledAt,
+  durationMinutes,
+  className = "",
+}: {
+  scheduledAt: string | null | undefined;
+  durationMinutes?: number;
+  className?: string;
+}) {
+  const [now, setNow] = useState<number>(() => Date.now());
+
+  useEffect(() => {
+    if (!scheduledAt) return;
+    const id = window.setInterval(() => setNow(Date.now()), 30_000);
+    return () => window.clearInterval(id);
+  }, [scheduledAt]);
+
+  if (!scheduledAt) return null;
+  const target = new Date(scheduledAt).getTime();
+  if (!Number.isFinite(target)) return null;
+
+  const diffMs = target - now;
+  const diffMin = Math.round(diffMs / 60_000);
+  const absMin = Math.abs(diffMin);
+
+  // Visit-end threshold: if we know the duration, after end + 2 min
+  // we hide the pill (stops re-rendering "Started 47m ago" all day).
+  if (durationMinutes && diffMin < -(durationMinutes + 2)) return null;
+
+  let label: string;
+  let bg: string;
+  let color: string;
+  if (diffMin >= -2 && diffMin <= 2) {
+    label = "Starting now";
+    bg = "#dcfce7";
+    color = "#15803d";
+  } else if (diffMin > 2) {
+    if (diffMin < 60) {
+      label = `Starts in ${diffMin}m`;
+    } else if (diffMin < 60 * 24) {
+      const h = Math.floor(diffMin / 60);
+      const m = diffMin % 60;
+      label = m > 0 ? `Starts in ${h}h ${m}m` : `Starts in ${h}h`;
+    } else {
+      const days = Math.floor(diffMin / (60 * 24));
+      label = `Starts in ${days}d`;
+    }
+    if (diffMin <= 15) {
+      bg = "#fef3c7"; color = "#92400e";
+    } else if (diffMin <= 60) {
+      bg = "#e0e7ff"; color = "#3730a3";
+    } else {
+      bg = "#f1f5f9"; color = "#475569";
+    }
+  } else {
+    // Past — within visit window or just after.
+    if (durationMinutes && diffMin >= -durationMinutes) {
+      label = "In progress";
+      bg = "#dcfce7"; color = "#15803d";
+    } else {
+      const h = Math.floor(absMin / 60);
+      const m = absMin % 60;
+      const ago = h > 0 ? (m > 0 ? `${h}h ${m}m ago` : `${h}h ago`) : `${absMin}m ago`;
+      label = `Started ${ago}`;
+      bg = "#f1f5f9"; color = "#94a3b8";
+    }
+  }
+
+  return (
+    <span
+      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium tabular-nums ${className}`}
+      style={{ backgroundColor: bg, color }}
+      title={new Date(target).toLocaleString()}
+    >
+      <Clock className="w-3 h-3" />
+      {label}
+    </span>
+  );
+}
+
 function StatCard({
   icon: Icon,
   label,
@@ -1285,12 +1381,16 @@ export function PracticePortal() {
       const apptList = Array.isArray(appointmentsRes.value.data) ? appointmentsRes.value.data : (appointmentsRes.value.data as any).data || [];
       setApiAppointments(apptList.map((a: any) => ({
         id: a.id,
+        // scheduledAt kept as the raw ISO so the countdown widget can
+        // compute remaining time. `time` is the display label.
+        scheduledAt: a.scheduledAt || a.scheduled_at || null,
         time: a.scheduledAt ? new Date(a.scheduledAt).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true }) : a.time || "",
         patient: a.patient ? [a.patient.firstName, a.patient.lastName].filter(Boolean).join(" ") : a.patientName || "",
         plan: a.patient?.activeMembership?.plan?.name || a.planName || "",
         program: a.program?.name || a.programName || "DPC Membership",
         type: a.appointmentType?.name || a.type || a.typeName || "Visit",
         duration: a.durationMinutes ? `${a.durationMinutes} min` : a.duration || "30 min",
+        durationMinutes: a.durationMinutes ?? a.duration_minutes ?? 30,
         provider: a.provider ? `${a.provider.title || ""} ${a.provider.lastName || ""}`.trim() : a.providerName || "",
         status: a.status || "confirmed",
         isTelehealth: a.isTelehealth ?? a.is_telehealth ?? false,
@@ -2598,7 +2698,28 @@ export function PracticePortal() {
     [patients, searchQuery]
   );
 
-  const appointments = useMemo(() => apiAppointments || (isDemoMode ? MOCK_APPOINTMENTS : []), [apiAppointments]);
+  const appointments = useMemo(() => {
+    const list = apiAppointments || (isDemoMode ? MOCK_APPOINTMENTS : []);
+    // Demo mock rows carry only a friendly "8:00 AM" label. Synthesize
+    // a real scheduledAt by combining today's date with the parsed
+    // hour/minute, so the Countdown component has something to count
+    // toward. Real API rows already carry scheduledAt — pass through.
+    const today = new Date();
+    return list.map((a) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const aa = a as any;
+      if (aa.scheduledAt) return aa;
+      const m = /^(\d{1,2}):(\d{2})\s*(AM|PM)$/i.exec(aa.time || "");
+      if (!m) return aa;
+      let h = parseInt(m[1], 10);
+      const min = parseInt(m[2], 10);
+      const ampm = m[3].toUpperCase();
+      if (ampm === "PM" && h < 12) h += 12;
+      if (ampm === "AM" && h === 12) h = 0;
+      const synth = new Date(today.getFullYear(), today.getMonth(), today.getDate(), h, min, 0, 0);
+      return { ...aa, scheduledAt: synth.toISOString() };
+    });
+  }, [apiAppointments]);
 
   // All telehealth appointments (any date). Used by the Telehealth tab's
   // upcoming/recent lists.
@@ -2944,7 +3065,15 @@ export function PracticePortal() {
                         key={apt.id}
                         className="border-t border-slate-100 hover:bg-slate-50 transition-colors"
                       >
-                        <td className="px-4 py-3 font-medium text-slate-700">{apt.time}</td>
+                        <td className="px-4 py-3 font-medium text-slate-700">
+                          <div className="flex flex-col gap-1">
+                            <span>{apt.time}</span>
+                            <Countdown
+                              scheduledAt={(apt as { scheduledAt?: string }).scheduledAt}
+                              durationMinutes={(apt as { durationMinutes?: number }).durationMinutes}
+                            />
+                          </div>
+                        </td>
                         <td className="px-4 py-3 text-slate-700">{apt.patient}</td>
                         <td className="px-4 py-3">
                           <span className="text-xs font-medium text-slate-500">{apt.program}</span>
@@ -6790,10 +6919,14 @@ export function PracticePortal() {
                 const sc = statusConfig[apt.status] || statusConfig.confirmed;
                 return (
                   <div key={apt.id} className="glass rounded-xl p-4 flex flex-col sm:flex-row sm:items-center gap-4">
-                    {/* Time */}
-                    <div className="shrink-0 text-center sm:text-left" style={{ minWidth: "70px" }}>
+                    {/* Time + countdown */}
+                    <div className="shrink-0 text-center sm:text-left" style={{ minWidth: "120px" }}>
                       <p className="text-lg font-bold text-slate-800">{apt.time}</p>
-                      <p className="text-xs text-slate-400">{apt.duration}</p>
+                      <p className="text-xs text-slate-400 mb-1">{apt.duration}</p>
+                      <Countdown
+                        scheduledAt={(apt as { scheduledAt?: string }).scheduledAt}
+                        durationMinutes={(apt as { durationMinutes?: number }).durationMinutes}
+                      />
                     </div>
 
                     {/* Patient + Program */}
