@@ -13,6 +13,7 @@ import { InstallPrompt } from "./components/shared/InstallPrompt";
 import { ImpersonationBannerHost } from "./components/shared/ImpersonationBanner";
 import { PlanCapModalHost } from "./components/shared/PlanCapModalHost";
 import { ConfirmProvider } from "./components/shared/ConfirmDialog";
+import { HelpCenterHost } from "./components/shared/HelpCenterHost";
 
 // ─── Error Boundary ─────────────────────────────────────────────────────────────
 
@@ -264,6 +265,7 @@ export default function App() {
                 <PlanCapModalHost />
                 <AuthGate />
                 <InstallPrompt />
+                <HelpCenterHost />
               </ConfirmProvider>
             </AuthProvider>
           </HashRouter>

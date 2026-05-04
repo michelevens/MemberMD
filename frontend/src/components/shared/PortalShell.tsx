@@ -516,15 +516,11 @@ export function PortalShell({
               </button>
             )}
 
-            {/* Help — desktop-only. On mobile it lives in the user menu. */}
+            {/* Help — opens the Help Center modal (port from InsureFlow).
+                Desktop-only; on mobile help lives in the user menu. */}
             <button
               type="button"
-              onClick={() => {
-                // Lightweight help: surface the keyboard shortcut hint via
-                // a native title until a real help center ships. The
-                // CommandPalette is reachable via Cmd+K from anywhere.
-                alert("Tip: press Cmd+K (Mac) or Ctrl+K (Windows) to jump to any section.\n\nDocs and support coming soon.");
-              }}
+              onClick={() => window.dispatchEvent(new Event("help:open"))}
               aria-label="Help"
               className="hidden sm:inline-flex p-2 rounded-xl hover:bg-gray-100 transition-colors"
             >

@@ -117,6 +117,14 @@ Route::prefix('external')->middleware('throttle:60,1')->group(function () {
     Route::post('/signature-requests/{token}/sign', [\App\Http\Controllers\Api\SignatureRequestController::class, 'publicSign'])->middleware('throttle:10,1');
 });
 
+// ===== Help Center (public, no auth) =====
+Route::prefix('help')->middleware('throttle:120,1')->group(function () {
+    Route::get('/categories', [\App\Http\Controllers\Api\HelpCenterController::class, 'categories']);
+    Route::get('/articles', [\App\Http\Controllers\Api\HelpCenterController::class, 'articles']);
+    Route::get('/articles/{slug}', [\App\Http\Controllers\Api\HelpCenterController::class, 'show']);
+    Route::post('/articles/{slug}/vote', [\App\Http\Controllers\Api\HelpCenterController::class, 'vote'])->middleware('throttle:5,60');
+});
+
 // ===== Public Registration Data (no auth) =====
 Route::get('/registration/program-templates', [MasterProgramController::class, 'publicIndex'])->middleware('throttle:30,1');
 

@@ -49,6 +49,7 @@ class DatabaseSeeder extends Seeder
             MasterSpecialtySeeder::class,
             ScreeningTemplateSeeder::class,
             ConsentTemplateSeeder::class,
+            HelpCenterSeeder::class,
             ProgramTemplateSeeder::class,
             HipaaComplianceSeeder::class,
             ChartTemplateSeeder::class,
