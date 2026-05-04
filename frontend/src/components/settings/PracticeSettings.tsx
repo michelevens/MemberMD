@@ -530,6 +530,28 @@ export function PracticeSettings({ initialTab }: { initialTab?: string }) {
         return;
       }
       showToast("Branding saved");
+    } else if (activeTab === "clinical") {
+      // Persist auto_request toggles for any document templates the user
+      // touched on this tab. Each template needs its own PATCH; failures
+      // are surfaced once at the end so a single transient error doesn't
+      // wipe the user's other progress.
+      const dirtyIds = Object.keys(docTemplatesDirty).filter((id) => docTemplatesDirty[id]);
+      let failed = 0;
+      for (const id of dirtyIds) {
+        const tpl = documentTemplates.find((t) => t.id === id);
+        if (!tpl) continue;
+        const r = await apiFetch(`/consent-templates/${id}`, {
+          method: "PUT",
+          body: JSON.stringify({ auto_request: tpl.autoRequest }),
+        });
+        if (r.error) failed++;
+      }
+      if (failed > 0) {
+        showToast(`${failed} template${failed === 1 ? "" : "s"} failed to save.`);
+      } else {
+        showToast(dirtyIds.length > 0 ? "Document templates saved." : "Settings saved");
+        setDocTemplatesDirty({});
+      }
     } else {
       showToast("Settings saved");
     }
@@ -753,16 +775,34 @@ export function PracticeSettings({ initialTab }: { initialTab?: string }) {
     "Initial Psychiatric Evaluation", "Follow-up Visit",
     "Wellness Assessment",
   ]);
-  // Document templates carry an extra "auto-request" flag.
+  // Document templates — backed by consent_templates rows. The "auto-request"
+  // toggle is the auto_request column; flipping it persists via PATCH on
+  // save. Templates are loaded once on mount; "add new" still uses local
+  // state since the full content authoring flow is a separate surface.
   const [documentTemplates, setDocumentTemplates] = useState<
-    Array<{ name: string; autoRequest: boolean }>
-  >([
-    { name: "Intake Form", autoRequest: true },
-    { name: "HIPAA Consent", autoRequest: true },
-    { name: "Treatment Consent", autoRequest: true },
-    { name: "Insurance Card", autoRequest: false },
-    { name: "Photo ID", autoRequest: false },
-  ]);
+    Array<{ id?: string; name: string; autoRequest: boolean; type?: string }>
+  >([]);
+  const [docTemplatesDirty, setDocTemplatesDirty] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const res = await apiFetch<any>("/consent-templates");
+      if (cancelled || res.error || !res.data) return;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const items: any[] = Array.isArray(res.data) ? res.data : (res.data as any).data ?? [];
+      setDocumentTemplates(items
+        .filter((t) => t.isActive !== false && t.is_active !== false)
+        .map((t) => ({
+          id: t.id,
+          name: t.name,
+          autoRequest: !!(t.autoRequest ?? t.auto_request),
+          type: t.type,
+        })));
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   // ─── Helpers for tracked onChange ────────────────────────────────────────
   function set<T>(setter: React.Dispatch<React.SetStateAction<T>>) {
@@ -1964,6 +2004,9 @@ export function PracticeSettings({ initialTab }: { initialTab?: string }) {
                         const next = [...documentTemplates];
                         next[idx] = { ...doc, autoRequest: e.target.checked };
                         setDocumentTemplates(next);
+                        if (doc.id) {
+                          setDocTemplatesDirty((d) => ({ ...d, [doc.id!]: true }));
+                        }
                         markChanged();
                       }}
                     />
