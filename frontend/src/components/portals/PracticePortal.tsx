@@ -9436,12 +9436,15 @@ export function PracticePortal() {
       {/* ─── Toast Notification ──────────────────────────────────────────── */}
       {toast && (
         <div
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
           className="fixed top-4 right-4 z-50 flex items-center gap-3 px-4 py-3 rounded-xl shadow-lg text-sm font-medium text-white"
           style={{ backgroundColor: toast.type === "success" ? "#27ab83" : "#dc2626", minWidth: "280px" }}
         >
           {toast.type === "success" ? <Check className="w-4 h-4 shrink-0" /> : <XCircle className="w-4 h-4 shrink-0" />}
           <span className="flex-1">{toast.message}</span>
-          <button onClick={() => setToast(null)} className="p-0.5 rounded shrink-0" style={{ backgroundColor: "rgba(255,255,255,0.2)" }}>
+          <button onClick={() => setToast(null)} aria-label="Dismiss" className="p-0.5 rounded shrink-0" style={{ backgroundColor: "rgba(255,255,255,0.2)" }}>
             <X className="w-3.5 h-3.5" />
           </button>
         </div>

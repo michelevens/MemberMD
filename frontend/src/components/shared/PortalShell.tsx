@@ -634,6 +634,8 @@ export function PortalShell({
             so content + safe-area inset aren't hidden behind it.
             Desktop sidebar callers (no mobileBottomNav) get no extra pad. */}
         <main
+          id="main-content"
+          tabIndex={-1}
           className={`flex-1 overflow-y-auto p-4 lg:p-6 ${mobileBottomNav ? "pb-24 lg:pb-6" : ""}`}
           style={mobileBottomNav ? { paddingBottom: "calc(6rem + env(safe-area-inset-bottom, 0px))" } : undefined}
         >

@@ -261,6 +261,15 @@ export default function App() {
           <HashRouter>
             <AuthProvider>
               <ConfirmProvider>
+                {/* Skip link for keyboard users — visually hidden until
+                    focused, then jumps past the sidebar nav to the
+                    main content. WCAG 2.1 SC 2.4.1 (Bypass Blocks). */}
+                <a
+                  href="#main-content"
+                  className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-[100] focus:px-4 focus:py-2 focus:rounded-lg focus:bg-indigo-600 focus:text-white focus:font-semibold focus:shadow-lg"
+                >
+                  Skip to main content
+                </a>
                 <ImpersonationBannerHost />
                 <PlanCapModalHost />
                 <AuthGate />
