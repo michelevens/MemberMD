@@ -111,6 +111,7 @@ Route::prefix('external')->middleware('throttle:60,1')->group(function () {
     // Public consent template preview for the enrollment widget — patients
     // need to read full agreement text BEFORE checking the consent boxes.
     Route::get('/consent-templates/{tenantCode}', [\App\Http\Controllers\Api\ConsentTemplateController::class, 'publicForEnrollment']);
+    Route::get('/facilities/{tenantCode}', [\App\Http\Controllers\Api\PracticeFacilityController::class, 'publicIndex']);
     // Token-signed e-signature requests — patient lands here from the
     // email link without auth and signs.
     Route::get('/signature-requests/{token}', [\App\Http\Controllers\Api\SignatureRequestController::class, 'publicShow']);
@@ -384,6 +385,10 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
     // Stripe-hosted Customer Portal for patient self-serve card / invoice
     // / cancellation management on the practice's Connect account.
     Route::post('/me/billing-portal', [\App\Http\Controllers\Api\MembershipController::class, 'myBillingPortal']);
+    Route::get('/me/facilities', [\App\Http\Controllers\Api\PracticeFacilityController::class, 'myFacilities']);
+
+    // Practice-side facility CRUD (Practice Settings → Locations).
+    Route::apiResource('facilities', \App\Http\Controllers\Api\PracticeFacilityController::class)->only(['index', 'store', 'update', 'destroy']);
 
     // ===== Clinical settings lists =====
     // Five short configurable lists the practice admin manages from

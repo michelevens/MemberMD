@@ -38,6 +38,7 @@ import { BrandedWidgets } from "./BrandedWidgets";
 import { AgreementEditor } from "./AgreementEditor";
 import { PlatformSubscriptionSection } from "./PlatformSubscriptionSection";
 import { WebhooksPanel } from "./WebhooksPanel";
+import { FacilitiesPanel } from "./FacilitiesPanel";
 import { PhoneField, EmailField, NPIField, ZipField, AddressField } from "../shared/fields";
 
 // ─── Colors ──────────────────────────────────────────────────────────────────
@@ -859,6 +860,9 @@ export function PracticeSettings({ initialTab }: { initialTab?: string }) {
             <ZipField label="ZIP" value={zip} onChange={(v) => setZip(v)} />
           </div>
         </SectionCard>
+
+        {/* Multi-location — surfaces in patient portal Locations tab */}
+        <FacilitiesPanel />
 
         <SectionCard title="Legal / Tax">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

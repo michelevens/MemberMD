@@ -17,6 +17,7 @@ import { MobileSheet } from "../shared/MobileSheet";
 import { BillingTab } from "./patient/BillingTab";
 import { EntitlementsTab } from "./patient/EntitlementsTab";
 import { LabResultsTab } from "./patient/LabResultsTab";
+import { LocationsTab } from "./patient/LocationsTab";
 import { FamilyMembersSection } from "./patient/FamilyMembersSection";
 import { usePushNotifications } from "../../hooks/usePushNotifications";
 import {
@@ -78,6 +79,7 @@ type TabId =
   | "health"
   | "care-team"
   | "lab-results"
+  | "locations"
   | "entitlements"
   | "account"
   | "family"
@@ -1466,6 +1468,7 @@ export function PatientPortal() {
       label: "Care & Resources",
       items: [
         { id: "care-team", label: "Care Team", icon: Users },
+        { id: "locations", label: "Locations", icon: MapPin },
       ],
     },
     {
@@ -3186,6 +3189,18 @@ export function PatientPortal() {
         return renderCareTeam();
       case "lab-results":
         return renderLabResults();
+      case "locations":
+        return (
+          <div className="space-y-5">
+            <div>
+              <h1 className="text-2xl font-semibold tracking-tight" style={{ color: COLORS.navy800 }}>Locations</h1>
+              <p className="text-sm mt-0.5" style={{ color: COLORS.slate500 }}>
+                Where to find your care team in person.
+              </p>
+            </div>
+            <LocationsTab />
+          </div>
+        );
       case "entitlements":
         return <EntitlementsTab patientId={patient.id} />;
       case "account":
@@ -3229,6 +3244,7 @@ export function PatientPortal() {
     health: "Health Records",
     "care-team": "Care Team",
     "lab-results": "Lab Results",
+    locations: "Locations",
     entitlements: "Entitlements",
     account: "Billing & Account",
     family: "Family Members",
