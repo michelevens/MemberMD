@@ -330,7 +330,7 @@ export function PatientConsentsTab({
                 {expanded && (
                   <div className="px-4 pb-4 pt-0 -mt-2">
                     <dl className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-1.5 text-xs bg-slate-50 rounded-lg p-3 border border-slate-200">
-                      <AuditField label="Signed at (UTC)" value={new Date(sig.signed_at).toISOString()} />
+                      <AuditField label="Signed at (UTC)" value={safeIsoString(sig.signed_at)} />
                       <AuditField
                         label="Patient timezone"
                         value={sig.signed_timezone
@@ -594,9 +594,22 @@ function RequestConsentModal({
 function formatDate(d?: string | null): string {
   if (!d) return "—";
   try {
-    return new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+    const dt = new Date(d);
+    if (isNaN(dt.getTime())) return "—";
+    return dt.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
   } catch {
-    return d;
+    return "—";
+  }
+}
+
+function safeIsoString(d?: string | null): string | null {
+  if (!d) return null;
+  try {
+    const dt = new Date(d);
+    if (isNaN(dt.getTime())) return null;
+    return dt.toISOString();
+  } catch {
+    return null;
   }
 }
 
