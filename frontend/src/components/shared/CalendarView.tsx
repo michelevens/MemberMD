@@ -390,8 +390,11 @@ function QuickCreateDialog({
   const [patients, setPatients] = useState<any[]>([]);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [providers, setProviders] = useState<any[]>([]);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [facilities, setFacilities] = useState<any[]>([]);
   const [patientId, setPatientId] = useState<string>("");
   const [providerId, setProviderId] = useState<string>("");
+  const [facilityId, setFacilityId] = useState<string>("");
   const [duration, setDuration] = useState<number>(30);
   const [isTelehealth, setIsTelehealth] = useState(false);
   const [notes, setNotes] = useState("");
@@ -402,14 +405,16 @@ function QuickCreateDialog({
     let cancelled = false;
     (async () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const [pRes, prRes] = await Promise.all([
+      const [pRes, prRes, fRes] = await Promise.all([
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         apiFetch<any>("/patients?per_page=200"),
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         apiFetch<any>("/providers"),
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        apiFetch<any>("/facilities"),
       ]);
       if (cancelled) return;
-      // Patients are paginated; providers are a flat list.
+      // Patients are paginated; providers + facilities are flat.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const pList: any[] = Array.isArray(pRes.data)
         ? pRes.data
@@ -426,10 +431,26 @@ function QuickCreateDialog({
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           ? (prRes.data as any).data
           : [];
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const fList: any[] = Array.isArray(fRes.data)
+        ? fRes.data
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        : Array.isArray((fRes.data as any)?.data)
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          ? (fRes.data as any).data
+          : [];
       setPatients(pList);
       setProviders(prList);
-      // Auto-select the only provider when there's just one.
+      // Filter to active facilities only — single-facility practice
+      // ends up with 1 item and the picker stays hidden.
+      const activeFacilities = fList.filter((f) => f.isActive !== false && f.is_active !== false);
+      setFacilities(activeFacilities);
       if (prList.length === 1) setProviderId(prList[0].id);
+      // Auto-pick the primary facility (or the only one).
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const primary = activeFacilities.find((f: any) => f.isPrimary || f.is_primary)
+        ?? activeFacilities[0];
+      if (primary) setFacilityId(primary.id);
     })();
     return () => { cancelled = true; };
   }, []);
@@ -451,6 +472,10 @@ function QuickCreateDialog({
       body: JSON.stringify({
         patient_id: patientId,
         provider_id: providerId,
+        // Telehealth visits don't need a facility; in-person visits at
+        // multi-facility practices send the picked id; single-facility
+        // practices send the auto-picked primary.
+        facility_id: isTelehealth ? null : (facilityId || null),
         scheduled_at: dt.toISOString(),
         duration_minutes: duration,
         is_telehealth: isTelehealth,
@@ -563,6 +588,27 @@ function QuickCreateDialog({
               </label>
             </div>
           </div>
+          {/* Facility picker — only renders when the practice has 2+
+              active facilities AND the visit isn't telehealth.
+              Single-facility practices auto-pick their primary and
+              the field stays hidden (no extra UI noise). */}
+          {!isTelehealth && facilities.length > 1 && (
+            <div>
+              <label className="block text-xs font-medium mb-1" style={{ color: "#475569" }}>Location</label>
+              <select
+                value={facilityId}
+                onChange={(e) => setFacilityId(e.target.value)}
+                className="w-full px-3 py-2 rounded-lg border text-sm"
+                style={{ borderColor: "#e2e8f0" }}
+              >
+                {facilities.map((f) => (
+                  <option key={f.id} value={f.id}>
+                    {f.name}{(f.isPrimary || f.is_primary) ? " (primary)" : ""}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
           <div>
             <label className="block text-xs font-medium mb-1" style={{ color: "#475569" }}>Notes <span style={{ color: "#94a3b8" }}>(optional)</span></label>
             <textarea

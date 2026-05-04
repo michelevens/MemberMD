@@ -17,7 +17,8 @@ class Appointment extends Model
     use HasFactory, HasUuids, BelongsToTenant, Auditable, SoftDeletes;
 
     protected $fillable = [
-        'tenant_id', 'patient_id', 'provider_id', 'appointment_type_id', 'program_id',
+        'tenant_id', 'patient_id', 'provider_id', 'facility_id',
+        'appointment_type_id', 'program_id',
         'scheduled_at', 'duration_minutes', 'status',
         'is_telehealth', 'video_room_url',
         'cancel_reason', 'cancelled_at', 'no_show_fee',

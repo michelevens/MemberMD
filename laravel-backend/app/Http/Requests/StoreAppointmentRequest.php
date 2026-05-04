@@ -16,6 +16,10 @@ class StoreAppointmentRequest extends FormRequest
         return [
             'patient_id' => 'required|uuid|exists:patients,id',
             'provider_id' => 'required|uuid|exists:providers,id',
+            // Multi-location practices: pin the visit to a specific
+            // facility. Nullable — single-facility practices and
+            // telehealth visits can omit it.
+            'facility_id' => 'nullable|uuid|exists:practice_facilities,id',
             'appointment_type_id' => 'nullable|uuid|exists:appointment_types,id',
             'scheduled_at' => 'required|date|after:now',
             'duration_minutes' => 'required|integer|min:5|max:480',
