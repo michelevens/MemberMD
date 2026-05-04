@@ -108,6 +108,21 @@ class Kernel extends ConsoleKernel
                 \Log::error('Scheduled change executor failed');
             });
 
+        // Nudge providers about draft encounters that have gone unsigned
+        // past 3 / 7 / 14 day thresholds. Daily cadence — encounters age
+        // in days, not hours. The command is idempotent per-tier: each
+        // threshold fires once per encounter via a marker in
+        // structured_data so a stuck draft only annoys the provider 3
+        // times total, not 3 times per day.
+        $schedule->command('encounters:notify-unsigned')
+            ->daily()
+            ->at('07:00')
+            ->name('unsigned_chart_nudge')
+            ->withoutOverlapping()
+            ->onFailure(function () {
+                \Log::error('Unsigned chart nudge processing failed');
+            });
+
         // Sweep stuck enrollment Checkouts whose webhook never fired AND
         // whose patient never landed on the success page (closed tab,
         // mobile background-kill). Layer 2A of the webhook-resilience

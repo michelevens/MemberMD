@@ -25,7 +25,13 @@ class AppointmentController extends Controller
 
         $user = $request->user();
         $query = Appointment::where('tenant_id', $user->tenant_id)
-            ->with(['patient', 'provider.user', 'appointmentType']);
+            ->with([
+                'patient', 'provider.user', 'appointmentType',
+                // Eager-load encounter so the UI can show a "Doc pending" badge
+                // for completed appointments without a signed chart. Selecting
+                // only the columns we need to keep payloads light.
+                'encounter:id,appointment_id,status,signed_at',
+            ]);
 
         // Patients see only their own
         if ($user->isPatient()) {
