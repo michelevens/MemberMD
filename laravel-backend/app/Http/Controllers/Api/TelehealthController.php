@@ -231,9 +231,74 @@ class TelehealthController extends Controller
 
         // No LiveKit room cleanup needed — LiveKit auto-reaps rooms
         // once the last participant leaves (default `empty_timeout`).
-        // Daily.co required explicit deletion; LiveKit doesn't.
+
+        // Auto-draft encounter for the appointment + stamp actual call
+        // duration. Idempotent (skips if encounter already exists).
+        // Wrapped — chart-draft failure shouldn't block session-end.
+        try {
+            $appointment = $session->appointment;
+            if ($appointment) {
+                $this->autoDraftEncounterAfterCall($appointment, $durationSeconds);
+                // Also flip the appointment to completed so the
+                // calendar reflects the visit ended. Note: this
+                // CANNOT be the only completion path because telehealth-
+                // less appointments still need a way to be marked
+                // complete — but for video visits, ending the call IS
+                // completing the visit.
+                if ($appointment->status !== 'completed') {
+                    $appointment->update([
+                        'status' => 'completed',
+                        'completed_at' => now(),
+                    ]);
+                }
+            }
+        } catch (\Throwable $e) {
+            \Log::warning('Auto-draft encounter on telehealth end failed', [
+                'session_id' => $session->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
 
         return response()->json(['data' => $session->fresh()]);
+    }
+
+    /**
+     * Create a draft encounter linked to the appointment, capturing
+     * the actual call duration in minutes. Mirrors
+     * AppointmentController::autoDraftEncounterForAppointment but
+     * adds the duration_minutes_actual from the call.
+     */
+    private function autoDraftEncounterAfterCall(\App\Models\Appointment $appointment, ?int $durationSeconds): void
+    {
+        $existing = \App\Models\Encounter::where('appointment_id', $appointment->id)
+            ->where('tenant_id', $appointment->tenant_id)
+            ->first();
+
+        $minutes = $durationSeconds !== null
+            ? max(1, (int) round($durationSeconds / 60))
+            : null;
+
+        if ($existing) {
+            // Encounter already drafted — just refine the actual
+            // duration with what we measured from the call. Don't
+            // touch anything else (provider may have started the
+            // SOAP).
+            if ($minutes !== null && empty($existing->duration_minutes_actual)) {
+                $existing->update(['duration_minutes_actual' => $minutes]);
+            }
+            return;
+        }
+
+        \App\Models\Encounter::create([
+            'tenant_id' => $appointment->tenant_id,
+            'patient_id' => $appointment->patient_id,
+            'provider_id' => $appointment->provider_id,
+            'appointment_id' => $appointment->id,
+            'encounter_date' => $appointment->scheduled_at?->toDateString() ?? now()->toDateString(),
+            'encounter_type' => 'telehealth',
+            'status' => 'draft',
+            'duration_minutes_actual' => $minutes,
+        ]);
     }
 
     /**

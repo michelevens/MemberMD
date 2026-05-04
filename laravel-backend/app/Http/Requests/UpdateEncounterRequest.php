@@ -27,6 +27,12 @@ class UpdateEncounterRequest extends FormRequest
             'follow_up_weeks' => 'nullable|integer|min:1|max:52',
             'screening_scores' => 'nullable|array',
             'amendment_reason' => 'nullable|string|max:500',
+            // Billing-grade additions:
+            'duration_minutes_actual' => 'nullable|integer|min:0|max:1440',
+            'time_spent_documenting' => 'nullable|integer|min:0|max:480',
+            'cpt_codes' => 'nullable|array',
+            'cpt_codes.*' => 'string|max:10',
+            'units_billed' => 'nullable|integer|min:0',
         ];
     }
 }

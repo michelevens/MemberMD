@@ -26,6 +26,11 @@ class Encounter extends Model
         'template_id', 'structured_data',
         'status', 'signed_at', 'signed_by',
         'amended_at', 'amendment_reason',
+        // Billing-grade fields (2026-05-04 migration). All nullable;
+        // populated when the practice opts into insurance billing.
+        'duration_minutes_actual', 'time_spent_documenting', 'total_time_minutes',
+        'cpt_codes', 'units_billed', 'bill_status',
+        'cosigner_user_id', 'cosigned_at',
     ];
 
     protected $casts = [
@@ -49,6 +54,14 @@ class Encounter extends Model
         'amended_at' => 'datetime',
         'follow_up_weeks' => 'integer',
         'structured_data' => 'array',
+        // Billing-grade columns. cpt_codes is plaintext array (codes
+        // are reportable, not PHI). Time fields are integers.
+        'cpt_codes' => 'array',
+        'duration_minutes_actual' => 'integer',
+        'time_spent_documenting' => 'integer',
+        'total_time_minutes' => 'integer',
+        'units_billed' => 'integer',
+        'cosigned_at' => 'datetime',
     ];
 
     public function patient(): BelongsTo { return $this->belongsTo(Patient::class); }
@@ -58,6 +71,21 @@ class Encounter extends Model
     public function prescriptions(): HasMany { return $this->hasMany(Prescription::class); }
     public function screeningResponses(): HasMany { return $this->hasMany(ScreeningResponse::class); }
     public function signer(): BelongsTo { return $this->belongsTo(User::class, 'signed_by'); }
+    public function cosigner(): BelongsTo { return $this->belongsTo(User::class, 'cosigner_user_id'); }
     public function chartTemplate(): BelongsTo { return $this->belongsTo(ChartTemplate::class, 'template_id'); }
     public function chartTemplateResponses(): HasMany { return $this->hasMany(ChartTemplateResponse::class); }
+
+    protected static function booted(): void
+    {
+        // Auto-compute total_time_minutes whenever the two component
+        // fields are both set. Stored (not derived) so reports +
+        // billing dashboards can sort/filter on it without a JOIN.
+        static::saving(function (Encounter $enc) {
+            $actual = $enc->duration_minutes_actual;
+            $doc = $enc->time_spent_documenting;
+            if ($actual !== null || $doc !== null) {
+                $enc->total_time_minutes = (int) ($actual ?? 0) + (int) ($doc ?? 0);
+            }
+        });
+    }
 }

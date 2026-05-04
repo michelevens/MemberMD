@@ -365,6 +365,10 @@ class AppointmentController extends Controller
             && $validated['status'] === 'no_show'
             && $appointment->status !== 'no_show';
 
+        $becameCompleted = isset($validated['status'])
+            && $validated['status'] === 'completed'
+            && $appointment->status !== 'completed';
+
         $appointment->update($validated);
 
         if ($becameNoShow) {
@@ -372,6 +376,22 @@ class AppointmentController extends Controller
                 $this->autoChargeNoShowFee($appointment->fresh());
             } catch (\Throwable $e) {
                 \Log::warning('No-show fee auto-charge failed', [
+                    'appointment_id' => $appointment->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
+        // Auto-draft an encounter when the appointment transitions into
+        // 'completed'. Idempotent — if an encounter already exists for
+        // this appointment we skip. Provider can edit / sign later from
+        // the Encounters tab; chart-document state is independent of
+        // appointment.status by design (see lifecycle docs).
+        if ($becameCompleted) {
+            try {
+                $this->autoDraftEncounterForAppointment($appointment->fresh());
+            } catch (\Throwable $e) {
+                \Log::warning('Auto-draft encounter on appointment.complete failed', [
                     'appointment_id' => $appointment->id,
                     'error' => $e->getMessage(),
                 ]);
@@ -577,6 +597,69 @@ class AppointmentController extends Controller
         ], ['stripe_account' => $connectAccountId]);
 
         $appointment->update(['no_show_fee' => $feeDollars]);
+    }
+
+    /**
+     * Auto-draft a chart record when an appointment transitions to
+     * status=completed. Pre-fills patient/provider/date/type from the
+     * appointment so the provider just opens the SOAP editor and
+     * writes the note.
+     *
+     * Idempotent — if an encounter already exists with this
+     * appointment_id, we skip. Provider may have already drafted one
+     * via the manual "+ New encounter" path.
+     *
+     * encounter_type mapping from appointment:
+     *   is_telehealth=true                 → 'telehealth'
+     *   appointment_type.name suggests it  → derived
+     *   else                               → 'follow_up' (safe default)
+     */
+    private function autoDraftEncounterForAppointment(Appointment $appointment): void
+    {
+        // Already documented? Don't create a duplicate.
+        $existing = \App\Models\Encounter::where('appointment_id', $appointment->id)
+            ->where('tenant_id', $appointment->tenant_id)
+            ->first();
+        if ($existing) return;
+
+        // Map appointment shape to encounter_type. Falls back to
+        // follow_up which matches the StoreEncounterRequest enum.
+        $type = $this->deriveEncounterTypeFromAppointment($appointment);
+
+        \App\Models\Encounter::create([
+            'tenant_id' => $appointment->tenant_id,
+            'patient_id' => $appointment->patient_id,
+            'provider_id' => $appointment->provider_id,
+            'appointment_id' => $appointment->id,
+            'encounter_date' => $appointment->scheduled_at?->toDateString() ?? now()->toDateString(),
+            'encounter_type' => $type,
+            'status' => 'draft',
+            // Capture the appointment's scheduled duration as a starting
+            // baseline for duration_minutes_actual. Provider edits to
+            // the real number when they sign.
+            'duration_minutes_actual' => $appointment->duration_minutes,
+        ]);
+    }
+
+    /**
+     * Map an appointment to one of the encounter_type enum values:
+     * office_visit / telehealth / phone / urgent / follow_up /
+     * annual_wellness / procedure.
+     */
+    private function deriveEncounterTypeFromAppointment(Appointment $appointment): string
+    {
+        if ($appointment->is_telehealth) return 'telehealth';
+
+        $appointment->loadMissing('appointmentType');
+        $typeName = strtolower((string) ($appointment->appointmentType?->name ?? ''));
+        if ($typeName === '') return 'follow_up';
+
+        if (str_contains($typeName, 'annual') || str_contains($typeName, 'wellness')) return 'annual_wellness';
+        if (str_contains($typeName, 'procedure')) return 'procedure';
+        if (str_contains($typeName, 'urgent') || str_contains($typeName, 'sick')) return 'urgent';
+        if (str_contains($typeName, 'phone')) return 'phone';
+        if (str_contains($typeName, 'office') || str_contains($typeName, 'in-office')) return 'office_visit';
+        return 'follow_up';
     }
 
     public function destroy(Request $request, string $id): JsonResponse
