@@ -6383,6 +6383,7 @@ export function PracticePortal() {
 
         {showBookingWidget && (
           <AppointmentBookingWidget
+            mode="staff"
             onClose={() => setShowBookingWidget(false)}
             onBooked={() => setShowBookingWidget(false)}
           />
