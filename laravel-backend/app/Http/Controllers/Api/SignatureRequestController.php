@@ -102,7 +102,22 @@ class SignatureRequestController extends Controller
             'expires_at' => $expiresInDays ? now()->addDays($expiresInDays) : null,
         ]);
 
-        $this->dispatchEmail($req->fresh(['template', 'patient']));
+        $req = $req->fresh(['template', 'patient']);
+        $this->dispatchEmail($req);
+
+        // In-app notification to the patient (email is primary; this
+        // ensures the patient sees a bell-badge entry next time they
+        // open the portal even if the email is missed).
+        try {
+            if ($patient->user_id) {
+                $patientUser = \App\Models\User::find($patient->user_id);
+                if ($patientUser) {
+                    $patientUser->notify(new \App\Notifications\SignatureRequestReceived($req));
+                }
+            }
+        } catch (Throwable $e) {
+            Log::warning('Signature-request in-app notification failed', ['error' => $e->getMessage()]);
+        }
 
         return response()->json([
             'data' => $req->load(['template:id,name,type,version', 'patient:id,first_name,last_name,email']),

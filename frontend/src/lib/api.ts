@@ -1406,6 +1406,50 @@ export const consentService = {
   },
 };
 
+// ─── Signature Requests (admin → patient via email) ──────────────────────────
+
+export interface SignatureRequestRow {
+  id: string;
+  status: "pending" | "signed" | "cancelled" | "expired";
+  template_id: string;
+  patient_id: string;
+  message?: string | null;
+  expires_at?: string | null;
+  reminded_at?: string | null;
+  created_at: string;
+  template?: { id: string; name: string; type: string; version: string | number };
+  patient?: { id: string; first_name: string; last_name: string; email: string };
+}
+
+export const signatureRequestService = {
+  list: async (params?: { patient_id?: string; status?: string }): Promise<ApiResponse<SignatureRequestRow[]>> => {
+    if (useMockData()) return { data: [] };
+    const q = params ? "?" + new URLSearchParams(params as Record<string, string>).toString() : "";
+    return apiFetch<SignatureRequestRow[]>(`/signature-requests${q}`);
+  },
+  create: async (data: {
+    template_id: string;
+    patient_id: string;
+    membership_id?: string | null;
+    message?: string | null;
+    expires_in_days?: number | null;
+  }): Promise<ApiResponse<SignatureRequestRow>> => {
+    if (useMockData()) return mockCreate<SignatureRequestRow>(data as Partial<SignatureRequestRow>);
+    return apiFetch<SignatureRequestRow>("/signature-requests", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  },
+  cancel: async (id: string): Promise<ApiResponse<SignatureRequestRow>> => {
+    if (useMockData()) return { data: {} as SignatureRequestRow };
+    return apiFetch<SignatureRequestRow>(`/signature-requests/${id}/cancel`, { method: "POST" });
+  },
+  resend: async (id: string): Promise<ApiResponse<SignatureRequestRow>> => {
+    if (useMockData()) return { data: {} as SignatureRequestRow };
+    return apiFetch<SignatureRequestRow>(`/signature-requests/${id}/resend`, { method: "POST" });
+  },
+};
+
 /**
  * Fetch a binary endpoint with the auth token and trigger a browser
  * download. Used by signed-PDF download buttons.
