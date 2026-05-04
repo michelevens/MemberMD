@@ -105,18 +105,21 @@ interface TeamMember {
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
+// Ordered to read top-to-bottom as two logical rows when the strip wraps:
+//   Row 1 — identity & front-of-house: Info → Branding → Widgets → Scheduling → Team
+//   Row 2 — billing & back-of-house: Subscription → Membership → Payments → Clinical → Agreements → Notifications → Compliance → Integrations
 const TAB_CONFIG: { id: PracticeTab; label: string; icon: React.ElementType }[] = [
   { id: "info", label: "Practice Info", icon: Building2 },
-  { id: "subscription", label: "Platform Subscription", icon: CreditCard },
   { id: "branding", label: "Branding", icon: Palette },
   { id: "widgets", label: "Branded Widgets", icon: Sparkles },
   { id: "scheduling", label: "Scheduling", icon: Calendar },
+  { id: "team", label: "Team", icon: Users },
+  { id: "subscription", label: "Platform Subscription", icon: CreditCard },
   { id: "membership", label: "Membership", icon: CreditCard },
   { id: "payments", label: "Payments", icon: Wallet },
   { id: "clinical", label: "Clinical Config", icon: Stethoscope },
   { id: "agreements", label: "Agreements", icon: FileText },
   { id: "notifications", label: "Notifications", icon: Bell },
-  { id: "team", label: "Team", icon: Users },
   { id: "compliance", label: "Compliance", icon: Shield },
   { id: "integrations", label: "Integrations", icon: Puzzle },
 ];
@@ -2102,9 +2105,9 @@ export function PracticeSettings({ initialTab }: { initialTab?: string }) {
 
   return (
     <div>
-      {/* Tab Bar */}
-      <div className="mb-6 overflow-x-auto">
-        <div className="flex gap-1 p-1 rounded-xl min-w-max" style={{ backgroundColor: C.slate100 }}>
+      {/* Tab Bar — wraps to 2 rows on wider screens, more on narrow */}
+      <div className="mb-6">
+        <div className="flex flex-wrap gap-1 p-1 rounded-xl" style={{ backgroundColor: C.slate100 }}>
           {TAB_CONFIG.map((tab) => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.id;
