@@ -191,6 +191,12 @@ export function AppointmentBookingWidget({
   const [recurrenceFreq, setRecurrenceFreq] = useState<"weekly" | "biweekly" | "monthly">("weekly");
   const [recurrenceEndDate, setRecurrenceEndDate] = useState("");
   const [telehealthConsent, setTelehealthConsent] = useState(false);
+  // Format override on the review screen — defaults to the
+  // appointment_type.is_telehealth flag but the booker can flip it
+  // (e.g. patient prefers telehealth for a visit type the practice
+  // normally does in-office, or vice-versa). Reset whenever the
+  // selected type changes so the default tracks the new type.
+  const [formatOverride, setFormatOverride] = useState<"telehealth" | "in_office" | null>(null);
   const [calendarMonth, setCalendarMonth] = useState(new Date());
   const [booking, setBooking] = useState(false);
   const [bookingError, setBookingError] = useState<string | null>(null);
@@ -696,6 +702,12 @@ export function AppointmentBookingWidget({
     // the provider sees both. "Anxiety — Sleep has been off the past
     // two weeks" reads better than two separate truncated fields.
     const chief = [selectedVisitReason, notes].filter(Boolean).join(" — ").trim() || null;
+    // Effective format respects the booker's review-screen override
+    // and falls back to the appointment_type default. Used for both
+    // mock-mode + real POST so the success screen reflects the choice.
+    const effectiveIsTelehealth = formatOverride
+      ? formatOverride === "telehealth"
+      : selectedType.isTeleHealth;
 
     // In demo mode, return a fabricated appointment so the UI flow still
     // demos. In production we make a real API call — without this, success
@@ -713,7 +725,7 @@ export function AppointmentBookingWidget({
         durationMinutes: selectedType.durationMinutes,
         chiefComplaint: chief,
         notes: null,
-        isTeleHealth: selectedType.isTeleHealth,
+        isTeleHealth: effectiveIsTelehealth,
         teleHealthUrl: null,
         canceledAt: null,
         cancelReason: null,
@@ -742,7 +754,7 @@ export function AppointmentBookingWidget({
       scheduledAt: scheduled.toISOString(),
       durationMinutes: selectedType.durationMinutes,
       chiefComplaint: chief,
-      isTeleHealth: selectedType.isTeleHealth,
+      isTeleHealth: effectiveIsTelehealth,
     } as Partial<Appointment>);
 
     if (res.error || !res.data) {
@@ -1074,6 +1086,10 @@ export function AppointmentBookingWidget({
                     key={type.id}
                     onClick={() => {
                       setSelectedType(type);
+                      // Reset the format override so the next type's
+                      // default (is_telehealth) takes effect on the
+                      // review screen until the booker chooses again.
+                      setFormatOverride(null);
                       setStep(3);
                     }}
                     className="w-full flex items-center gap-4 p-4 rounded-xl text-left transition-all"
@@ -1342,18 +1358,42 @@ export function AppointmentBookingWidget({
                     <p className="text-sm font-medium" style={{ color: C.navy800 }}>{selectedTime}</p>
                   </div>
                 </div>
-                {selectedType.isTeleHealth && (
-                  <div className="flex items-center gap-1.5">
-                    <Video className="w-3.5 h-3.5" style={{ color: C.teal500 }} />
-                    <span className="text-xs font-medium" style={{ color: C.teal600 }}>Telehealth Video Visit</span>
-                  </div>
-                )}
-                {!selectedType.isTeleHealth && (
-                  <div className="flex items-center gap-1.5">
-                    <MapPin className="w-3.5 h-3.5" style={{ color: C.slate500 }} />
-                    <span className="text-xs font-medium" style={{ color: C.slate600 }}>In-Office Visit</span>
-                  </div>
-                )}
+                {/* Format toggle — defaults to the appointment_type's
+                    is_telehealth flag but the booker can override.
+                    Telehealth here means "Daily.co room auto-created
+                    on book"; in-office means no room. */}
+                {(() => {
+                  const effectiveFormat = formatOverride
+                    ?? (selectedType.isTeleHealth ? "telehealth" : "in_office");
+                  return (
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setFormatOverride("in_office")}
+                        className="flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full transition-colors"
+                        style={{
+                          backgroundColor: effectiveFormat === "in_office" ? C.slate100 : "transparent",
+                          color: effectiveFormat === "in_office" ? C.navy800 : C.slate500,
+                          border: `1px solid ${effectiveFormat === "in_office" ? C.slate300 : C.slate200}`,
+                        }}
+                      >
+                        <MapPin className="w-3 h-3" /> In-office
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setFormatOverride("telehealth")}
+                        className="flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full transition-colors"
+                        style={{
+                          backgroundColor: effectiveFormat === "telehealth" ? "#e6fffa" : "transparent",
+                          color: effectiveFormat === "telehealth" ? C.teal600 : C.slate500,
+                          border: `1px solid ${effectiveFormat === "telehealth" ? C.teal500 : C.slate200}`,
+                        }}
+                      >
+                        <Video className="w-3 h-3" /> Telehealth
+                      </button>
+                    </div>
+                  );
+                })()}
               </div>
 
               {/* Reason for visit — required dropdown sourced from
@@ -1446,8 +1486,11 @@ export function AppointmentBookingWidget({
               {/* Telehealth Consent — patient mode only. In staff mode
                   consent is verbal/already on file; the checkbox would
                   imply staff is consenting on the patient's behalf
-                  which is the wrong record-keeping model. */}
-              {selectedType.isTeleHealth && !isStaffMode && (
+                  which is the wrong record-keeping model. Reads the
+                  effective format (override or type default) so a
+                  patient who flipped a non-telehealth type to
+                  telehealth still sees the consent prompt. */}
+              {(formatOverride ? formatOverride === "telehealth" : selectedType.isTeleHealth) && !isStaffMode && (
                 <label className="flex items-start gap-3 p-3 rounded-xl cursor-pointer" style={{ backgroundColor: C.teal50, border: `1px solid ${C.teal500}` }}>
                   <input
                     type="checkbox"
@@ -1486,7 +1529,9 @@ export function AppointmentBookingWidget({
                   disabled={
                     booking
                     // Telehealth consent gate is patient-mode only.
-                    || (!isStaffMode && selectedType.isTeleHealth && !telehealthConsent)
+                    // Reads effective format so override → telehealth
+                    // still requires consent.
+                    || (!isStaffMode && (formatOverride ? formatOverride === "telehealth" : selectedType.isTeleHealth) && !telehealthConsent)
                     // Block submit when the practice has visit reasons
                     // configured but the user hasn't picked one. Same
                     // rule applies in both modes — structured chief
