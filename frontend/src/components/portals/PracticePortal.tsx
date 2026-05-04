@@ -6378,7 +6378,6 @@ export function PracticePortal() {
     return (
       <div className="space-y-4">
         <CalendarView
-          onAppointmentClick={(_id) => { /* TODO: open appointment detail */ }}
           onBookNew={() => setShowBookingWidget(true)}
         />
 

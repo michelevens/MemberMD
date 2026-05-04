@@ -6,7 +6,7 @@
 // Drag-drop powered by react-dnd. The component wraps its content in a
 // DndProvider so callers don't have to.
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useMemo } from "react";
 import { DndProvider, useDrag, useDrop } from "react-dnd";
 import { HTML5Backend } from "react-dnd-html5-backend";
 import {
@@ -18,7 +18,9 @@ import {
   GripVertical,
   CalendarDays,
   List,
+  Loader2,
 } from "lucide-react";
+import { apiFetch } from "../../lib/api";
 
 // ─── Colors ──────────────────────────────────────────────────────────────────
 
@@ -88,32 +90,57 @@ interface CalendarAppointment {
 type ViewMode = "day" | "week" | "month" | "list";
 
 interface CalendarViewProps {
-  onAppointmentClick?: (appointmentId: string) => void;
+  /** Called BEFORE the built-in detail modal opens. Return true from
+   *  this callback to suppress the modal (host wants to handle it). */
+  onAppointmentClick?: (appointmentId: string) => boolean | void;
   onBookNew?: () => void;
   /** Optional: notify caller when an appointment is rescheduled via drag-drop. */
   onReschedule?: (appointmentId: string, newDate: Date) => void;
 }
 
-// ─── Mock Calendar Appointments ──────────────────────────────────────────────
+// ─── API → CalendarAppointment mapping ───────────────────────────────────────
+//
+// The /appointments endpoint returns Eloquent models with eager-loaded
+// patient + provider.user + appointmentType. Map them to the local
+// CalendarAppointment shape that the rendering code expects.
 
-function generateMockAppointments(): CalendarAppointment[] {
-  const today = new Date();
-  const y = today.getFullYear();
-  const m = today.getMonth();
-  const d = today.getDate();
+interface ApiAppointment {
+  id: string;
+  scheduled_at: string;
+  duration_minutes: number;
+  is_telehealth: boolean;
+  status: string;
+  patient?: { first_name?: string; last_name?: string } | null;
+  provider?: { user?: { first_name?: string; last_name?: string; name?: string } | null } | null;
+  appointment_type?: { name?: string; color?: string } | null;
+  appointmentType?: { name?: string; color?: string } | null;
+}
 
-  return [
-    { id: "ca1", patientName: "Sarah Johnson", providerName: "Dr. Michel", typeName: "Psychiatric Eval", date: new Date(y, m, d), startHour: 9, startMinute: 0, durationMinutes: 60, isTeleHealth: true, color: "#7c3aed", status: "confirmed" },
-    { id: "ca2", patientName: "James Williams", providerName: "Dr. Michel", typeName: "Med Management", date: new Date(y, m, d), startHour: 10, startMinute: 30, durationMinutes: 30, isTeleHealth: true, color: "#2563eb", status: "checked_in" },
-    { id: "ca3", patientName: "Emily Davis", providerName: "Dr. Chen", typeName: "Annual Wellness", date: new Date(y, m, d), startHour: 11, startMinute: 0, durationMinutes: 45, isTeleHealth: false, color: "#059669", status: "scheduled" },
-    { id: "ca4", patientName: "Michael Brown", providerName: "Dr. Kim", typeName: "Well-Child Check", date: new Date(y, m, d), startHour: 14, startMinute: 0, durationMinutes: 30, isTeleHealth: false, color: "#f59e0b", status: "completed" },
-    { id: "ca5", patientName: "Lisa Anderson", providerName: "Dr. Chen", typeName: "Sick Visit", date: new Date(y, m, d), startHour: 15, startMinute: 0, durationMinutes: 20, isTeleHealth: false, color: "#dc2626", status: "in_session" },
-    { id: "ca6", patientName: "Robert Taylor", providerName: "Dr. Michel", typeName: "Therapy Follow-up", date: new Date(y, m, d + 1), startHour: 9, startMinute: 30, durationMinutes: 45, isTeleHealth: true, color: "#0891b2", status: "scheduled" },
-    { id: "ca7", patientName: "Anna Martinez", providerName: "Dr. Kim", typeName: "Immunization", date: new Date(y, m, d + 1), startHour: 10, startMinute: 0, durationMinutes: 15, isTeleHealth: false, color: "#10b981", status: "confirmed" },
-    { id: "ca8", patientName: "David Wilson", providerName: "Dr. Chen", typeName: "Telehealth Consult", date: new Date(y, m, d + 2), startHour: 13, startMinute: 0, durationMinutes: 30, isTeleHealth: true, color: "#7c3aed", status: "scheduled" },
-    { id: "ca9", patientName: "Karen Thomas", providerName: "Dr. Michel", typeName: "Crisis Intervention", date: new Date(y, m, d - 1), startHour: 16, startMinute: 0, durationMinutes: 60, isTeleHealth: false, color: "#dc2626", status: "no_show" },
-    { id: "ca10", patientName: "Mark Adams", providerName: "Dr. Kim", typeName: "Med Management", date: new Date(y, m, d - 2), startHour: 11, startMinute: 0, durationMinutes: 30, isTeleHealth: true, color: "#2563eb", status: "cancelled" },
-  ];
+// Default block tint when an appointment_type has no color set.
+const DEFAULT_TYPE_COLOR = "#64748b";
+
+function mapAppointment(api: ApiAppointment): CalendarAppointment | null {
+  if (!api?.scheduled_at) return null;
+  const dt = new Date(api.scheduled_at);
+  if (isNaN(dt.getTime())) return null;
+  const t = api.appointment_type ?? api.appointmentType ?? null;
+  const providerUser = api.provider?.user ?? null;
+  const providerName = providerUser?.name
+    ?? ([providerUser?.first_name, providerUser?.last_name].filter(Boolean).join(" ").trim() || "Provider");
+  const patientName = [api.patient?.first_name, api.patient?.last_name].filter(Boolean).join(" ").trim() || "Patient";
+  return {
+    id: api.id,
+    patientName,
+    providerName,
+    typeName: t?.name ?? "Appointment",
+    date: dt,
+    startHour: dt.getHours(),
+    startMinute: dt.getMinutes(),
+    durationMinutes: api.duration_minutes || 30,
+    isTeleHealth: !!api.is_telehealth,
+    color: t?.color ?? DEFAULT_TYPE_COLOR,
+    status: api.status,
+  };
 }
 
 // ─── Time Helpers ────────────────────────────────────────────────────────────
@@ -253,32 +280,164 @@ function DropDay({
 function CalendarViewInner({ onAppointmentClick, onBookNew, onReschedule }: CalendarViewProps) {
   const [viewMode, setViewMode] = useState<ViewMode>("week");
   const [currentDate, setCurrentDate] = useState(new Date());
-  const [appointments, setAppointments] = useState<CalendarAppointment[]>(
-    () => generateMockAppointments()
-  );
+  const [appointments, setAppointments] = useState<CalendarAppointment[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [reschedFailed, setReschedFailed] = useState<string | null>(null);
+  const [detailFor, setDetailFor] = useState<CalendarAppointment | null>(null);
+  const [detailBusy, setDetailBusy] = useState(false);
+  const [detailMsg, setDetailMsg] = useState<string | null>(null);
+
+  function handleAppointmentClick(id: string) {
+    // Host has the chance to intercept — if they return true, we
+    // assume they're handling the click and skip the built-in modal.
+    const handled = onAppointmentClick?.(id);
+    if (handled === true) return;
+    const apt = appointments.find((a) => a.id === id);
+    if (apt) setDetailFor(apt);
+  }
+
+  async function cancelAppointment(id: string) {
+    if (!window.confirm("Cancel this appointment?")) return;
+    setDetailBusy(true);
+    setDetailMsg(null);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const res = await apiFetch<any>(`/appointments/${id}`, { method: "DELETE" });
+    setDetailBusy(false);
+    if (res.error) {
+      setDetailMsg(res.error);
+      return;
+    }
+    setAppointments((prev) => prev.map((a) => (a.id === id ? { ...a, status: "cancelled" } : a)));
+    setDetailFor(null);
+  }
+
+  async function markComplete(id: string) {
+    setDetailBusy(true);
+    setDetailMsg(null);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const res = await apiFetch<any>(`/appointments/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ status: "completed" }),
+    });
+    setDetailBusy(false);
+    if (res.error) {
+      setDetailMsg(res.error);
+      return;
+    }
+    setAppointments((prev) => prev.map((a) => (a.id === id ? { ...a, status: "completed" } : a)));
+    setDetailFor(null);
+  }
+
+  // ─── Compute the date range to fetch based on view + currentDate ──────────
+  // Fetch one extra week of padding around the visible window so when the
+  // user pages forward we usually already have the data cached locally.
+  const range = useMemo(() => {
+    const start = new Date(currentDate);
+    const end = new Date(currentDate);
+    if (viewMode === "day") {
+      start.setDate(start.getDate() - 1);
+      end.setDate(end.getDate() + 1);
+    } else if (viewMode === "week" || viewMode === "list") {
+      const week = getWeekDays(currentDate);
+      start.setTime(week[0].getTime());
+      start.setDate(start.getDate() - 1);
+      end.setTime(week[6].getTime());
+      end.setDate(end.getDate() + 1);
+    } else {
+      start.setDate(1);
+      start.setDate(start.getDate() - 7);
+      end.setMonth(end.getMonth() + 1);
+      end.setDate(7);
+    }
+    const fmt = (d: Date) => d.toISOString().slice(0, 10);
+    return { from: fmt(start), to: fmt(end) };
+  }, [currentDate, viewMode]);
+
+  // ─── Fetch appointments whenever the visible range changes ────────────────
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    (async () => {
+      // Pull a generous page size so a busy week doesn't get truncated.
+      // Backend caps via per_page validation.
+      const qs = new URLSearchParams({
+        date_from: range.from,
+        date_to: range.to,
+        per_page: "200",
+      });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const res = await apiFetch<any>(`/appointments?${qs.toString()}`);
+      if (cancelled) return;
+      setLoading(false);
+      if (res.error) {
+        setError(res.error);
+        setAppointments([]);
+        return;
+      }
+      // Index returns { data: { current_page, data: [...], ... } } via
+      // Laravel's paginator. Some envs return a flat array; tolerate both.
+      const raw = res.data;
+      const items: ApiAppointment[] = Array.isArray(raw)
+        ? raw
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        : Array.isArray((raw as any)?.data)
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          ? (raw as any).data
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          : Array.isArray((raw as any)?.data?.data)
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            ? (raw as any).data.data
+            : [];
+      setAppointments(items.map(mapAppointment).filter((a): a is CalendarAppointment => a !== null));
+    })();
+    return () => { cancelled = true; };
+  }, [range.from, range.to]);
 
   // ─── Reschedule Handler ────────────────────────────────────────────────────
+  // Optimistic local update + API PATCH. On failure we roll back and
+  // surface the server's validation error (e.g. "time slot conflicts
+  // with existing appointment"). Same date but different time isn't
+  // possible via drag-drop today (drop targets are days, not time
+  // slots) — only the day shifts; the time-of-day stays.
   const handleDrop = useCallback(
     (item: DragItem, newDate: Date) => {
-      setAppointments((prev) =>
-        prev.map((a) =>
-          a.id === item.id
-            ? {
-                ...a,
-                date: new Date(
-                  newDate.getFullYear(),
-                  newDate.getMonth(),
-                  newDate.getDate(),
-                  a.startHour,
-                  a.startMinute
-                ),
-              }
-            : a
-        )
+      const original = appointments.find((a) => a.id === item.id);
+      if (!original) return;
+      const newDateTime = new Date(
+        newDate.getFullYear(), newDate.getMonth(), newDate.getDate(),
+        original.startHour, original.startMinute,
       );
+
+      // Optimistic update.
+      setAppointments((prev) =>
+        prev.map((a) => (a.id === item.id ? { ...a, date: newDateTime } : a))
+      );
+
+      // Backend wants ISO datetime. PATCH to /appointments/{id}/reschedule
+      // (the existing endpoint that re-checks availability + sends an
+      // email + appends an audit note).
+      (async () => {
+        const isoLocal = newDateTime.toISOString();
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const res = await apiFetch<any>(`/appointments/${item.id}/reschedule`, {
+          method: "PUT",
+          body: JSON.stringify({ scheduled_at: isoLocal }),
+        });
+        if (res.error) {
+          // Roll back.
+          setAppointments((prev) =>
+            prev.map((a) => (a.id === item.id ? { ...a, date: original.date } : a))
+          );
+          setReschedFailed(res.error);
+          window.setTimeout(() => setReschedFailed(null), 5000);
+        }
+      })();
+
       onReschedule?.(item.id, newDate);
     },
-    [onReschedule]
+    [appointments, onReschedule]
   );
 
   // ─── Navigation ────────────────────────────────────────────────────────────
@@ -336,7 +495,7 @@ function CalendarViewInner({ onAppointmentClick, onBookNew, onReschedule }: Cale
       <DraggableBlock
         key={apt.id}
         appointment={apt}
-        onClick={() => onAppointmentClick?.(apt.id)}
+        onClick={() => handleAppointmentClick(apt.id)}
       >
         <div
           className="absolute left-1 right-1 rounded-lg overflow-hidden text-left transition-all hover:opacity-90 z-10"
@@ -652,7 +811,7 @@ function CalendarViewInner({ onAppointmentClick, onBookNew, onReschedule }: Cale
                   return (
                     <button
                       key={apt.id}
-                      onClick={() => onAppointmentClick?.(apt.id)}
+                      onClick={() => handleAppointmentClick(apt.id)}
                       className="w-full flex items-center gap-3 p-3 rounded-lg text-left transition-colors hover:bg-slate-50"
                       style={{ border: `1px solid ${C.slate200}` }}
                     >
@@ -767,6 +926,24 @@ function CalendarViewInner({ onAppointmentClick, onBookNew, onReschedule }: Cale
         </div>
       </div>
 
+      {/* Status banners — loading / error / reschedule failure */}
+      {loading && (
+        <div className="flex items-center gap-2 text-xs px-3 py-2 rounded-lg" style={{ backgroundColor: C.slate50, color: C.slate500 }}>
+          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+          Loading appointments…
+        </div>
+      )}
+      {error && !loading && (
+        <div className="text-xs px-3 py-2 rounded-lg" style={{ backgroundColor: "#fef2f2", color: "#b91c1c", border: `1px solid #fecaca` }}>
+          Couldn't load appointments: {error}
+        </div>
+      )}
+      {reschedFailed && (
+        <div className="text-xs px-3 py-2 rounded-lg" style={{ backgroundColor: "#fef2f2", color: "#b91c1c", border: `1px solid #fecaca` }}>
+          Reschedule failed: {reschedFailed}
+        </div>
+      )}
+
       {/* Calendar Content */}
       {viewMode === "day" && renderDayView()}
       {viewMode === "week" && renderWeekView()}
@@ -806,6 +983,90 @@ function CalendarViewInner({ onAppointmentClick, onBookNew, onReschedule }: Cale
           </span>
         </div>
       </div>
+
+      {/* Built-in appointment detail modal — host can suppress by
+          returning true from onAppointmentClick. */}
+      {detailFor && (
+        <div
+          onClick={() => setDetailFor(null)}
+          style={{
+            position: "fixed", inset: 0,
+            backgroundColor: "rgba(15, 23, 42, 0.55)",
+            backdropFilter: "blur(4px)",
+            zIndex: 50, display: "flex", alignItems: "center", justifyContent: "center",
+            padding: "16px",
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              backgroundColor: C.white, borderRadius: "12px",
+              maxWidth: "440px", width: "100%",
+              boxShadow: "0 20px 50px rgba(0,0,0,0.25)",
+            }}
+          >
+            <div style={{ padding: "16px 18px", borderBottom: `1px solid ${C.slate200}` }}>
+              <p className="text-xs uppercase tracking-wider font-semibold mb-1" style={{ color: C.slate400 }}>
+                {getStatusStyle(detailFor.status).label}
+              </p>
+              <h3 className="text-base font-semibold" style={{ color: C.navy800 }}>
+                {detailFor.patientName}
+              </h3>
+              <p className="text-sm mt-0.5" style={{ color: C.slate500 }}>
+                {detailFor.typeName} · {detailFor.providerName}
+              </p>
+            </div>
+            <div style={{ padding: "14px 18px" }}>
+              <dl className="grid grid-cols-2 gap-y-1.5 text-xs">
+                <dt style={{ color: C.slate400 }}>When</dt>
+                <dd style={{ color: C.navy700 }}>
+                  {detailFor.date.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}
+                  {" · "}
+                  {formatTime(detailFor.startHour, detailFor.startMinute)}
+                </dd>
+                <dt style={{ color: C.slate400 }}>Duration</dt>
+                <dd style={{ color: C.navy700 }}>{detailFor.durationMinutes} min</dd>
+                <dt style={{ color: C.slate400 }}>Format</dt>
+                <dd style={{ color: C.navy700 }}>{detailFor.isTeleHealth ? "Telehealth" : "On-site"}</dd>
+              </dl>
+              {detailMsg && (
+                <p className="mt-3 text-xs px-3 py-2 rounded-lg" style={{ backgroundColor: "#fef2f2", color: "#b91c1c" }}>
+                  {detailMsg}
+                </p>
+              )}
+            </div>
+            <div style={{ padding: "12px 18px", borderTop: `1px solid ${C.slate200}`, display: "flex", justifyContent: "flex-end", gap: 8 }}>
+              <button
+                onClick={() => setDetailFor(null)}
+                className="px-3 py-2 text-sm font-medium rounded-lg hover:bg-slate-100"
+                style={{ color: C.slate600 }}
+              >
+                Close
+              </button>
+              {!["cancelled", "completed", "no_show"].includes(detailFor.status) && (
+                <>
+                  <button
+                    onClick={() => cancelAppointment(detailFor.id)}
+                    disabled={detailBusy}
+                    className="px-3 py-2 text-sm font-medium rounded-lg hover:bg-red-50 disabled:opacity-50"
+                    style={{ color: C.red500, border: `1px solid ${C.slate200}` }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => markComplete(detailFor.id)}
+                    disabled={detailBusy}
+                    className="px-3 py-2 text-sm font-semibold rounded-lg text-white disabled:opacity-50"
+                    style={{ backgroundColor: C.teal500 }}
+                  >
+                    Mark complete
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
