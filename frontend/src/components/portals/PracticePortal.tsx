@@ -708,6 +708,49 @@ function Countdown({
   );
 }
 
+// ─── Provider queue card ────────────────────────────────────────────────
+// Smaller cousin of StatCard, used on the provider dashboard's "My
+// queue" row. Tone (ok/warning/danger) drives the border + icon color
+// so a glance tells the provider what's on fire vs what's clean.
+function ProviderQueueCard({
+  icon: Icon,
+  label,
+  value,
+  detail,
+  tone,
+  onClick,
+}: {
+  icon: React.ElementType;
+  label: string;
+  value: string;
+  detail: string;
+  tone: "ok" | "warning" | "danger";
+  onClick?: () => void;
+}) {
+  const palette = {
+    ok:      { border: "#e2e8f0", bg: "#ffffff",  iconBg: "#f1f5f9", iconFg: "#64748b", value: "#0f172a", detail: "#94a3b8" },
+    warning: { border: "#fcd34d", bg: "#fffbeb",  iconBg: "#fef3c7", iconFg: "#b45309", value: "#92400e", detail: "#a16207" },
+    danger:  { border: "#fca5a5", bg: "#fef2f2",  iconBg: "#fee2e2", iconFg: "#b91c1c", value: "#991b1b", detail: "#b91c1c" },
+  }[tone];
+  const Tag = onClick ? "button" : "div";
+  return (
+    <Tag
+      onClick={onClick}
+      className={`text-left rounded-xl border p-4 transition-colors ${onClick ? "hover:opacity-90 cursor-pointer" : ""}`}
+      style={{ borderColor: palette.border, backgroundColor: palette.bg }}
+    >
+      <div className="flex items-center gap-3 mb-2">
+        <div className="w-9 h-9 rounded-lg flex items-center justify-center" style={{ backgroundColor: palette.iconBg }}>
+          <Icon className="w-4 h-4" style={{ color: palette.iconFg }} />
+        </div>
+        <div className="text-xs font-medium" style={{ color: palette.detail }}>{label}</div>
+      </div>
+      <div className="text-2xl font-bold tabular-nums" style={{ color: palette.value }}>{value}</div>
+      <div className="text-xs mt-0.5" style={{ color: palette.detail }}>{detail}</div>
+    </Tag>
+  );
+}
+
 function StatCard({
   icon: Icon,
   label,
@@ -1381,6 +1424,9 @@ export function PracticePortal() {
       const apptList = Array.isArray(appointmentsRes.value.data) ? appointmentsRes.value.data : (appointmentsRes.value.data as any).data || [];
       setApiAppointments(apptList.map((a: any) => ({
         id: a.id,
+        // providerId carried through so the provider dashboard can
+        // filter "my schedule today" client-side.
+        providerId: a.providerId ?? a.provider_id ?? a.provider?.id ?? null,
         // scheduledAt kept as the raw ISO so the countdown widget can
         // compute remaining time. `time` is the display label.
         scheduledAt: a.scheduledAt || a.scheduled_at || null,
@@ -1404,8 +1450,14 @@ export function PracticePortal() {
       setApiEncountersRaw(encList);
       setApiEncounters(encList.map((e: any) => ({
         id: e.id,
+        // providerId carried through so the provider dashboard can
+        // filter "my unsigned charts" client-side without a refetch.
+        providerId: e.providerId ?? e.provider_id ?? e.provider?.id ?? null,
+        encounterDate: e.encounterDate ?? e.encounter_date ?? null,
+        signedAt: e.signedAt ?? e.signed_at ?? null,
         date: e.encounterDate ? new Date(e.encounterDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : e.date || "",
         patient: e.patient ? [e.patient.firstName, e.patient.lastName].filter(Boolean).join(" ") : e.patientName || "",
+        patientId: e.patientId ?? e.patient_id ?? e.patient?.id ?? null,
         provider: e.provider ? `${e.provider.title || ""} ${e.provider.lastName || ""}`.trim() : e.providerName || "",
         type: e.encounterType || e.type || "Follow-Up",
         program: e.program?.name || e.programName || "DPC Membership",
@@ -1420,7 +1472,11 @@ export function PracticePortal() {
       const rxList = Array.isArray(prescriptionsRes.value.data) ? prescriptionsRes.value.data : (prescriptionsRes.value.data as any).data || [];
       setApiPrescriptions(rxList.map((rx: any) => ({
         id: rx.id,
+        // providerId carried through so the provider dashboard can
+        // filter "my refill requests" client-side.
+        providerId: rx.providerId ?? rx.provider_id ?? rx.prescriber?.providerId ?? null,
         patient: rx.patient ? [rx.patient.firstName, rx.patient.lastName].filter(Boolean).join(" ") : rx.patientName || "",
+        patientId: rx.patientId ?? rx.patient_id ?? rx.patient?.id ?? null,
         medication: rx.medicationName || rx.medication || "",
         dosage: rx.dosage || "",
         frequency: rx.frequency || "",
@@ -2875,7 +2931,323 @@ export function PracticePortal() {
     );
   }
 
+  // ─── Provider personal sections ───────────────────────────────────────
+  // Rendered for any user with a linked provider record (auth.user.providerId).
+  // For role=provider it's the entire dashboard; for role=practice_admin
+  // who is also a provider (solo DPC), it sits ABOVE the admin sections.
+  function renderProviderSections() {
+    const myProviderId = (auth.user as { providerId?: string | null } | null)?.providerId ?? null;
+    const myFirstName = auth.user?.firstName || "";
+
+    // My appointments today, sorted by scheduledAt.
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const myToday = (appointments || [])
+      .filter((a: any) => {
+        const provMatch = !myProviderId || a.providerId === myProviderId;
+        if (!provMatch) return false;
+        const raw = a.scheduledAt ?? a.scheduled_at ?? "";
+        if (!raw) return false;
+        const parsed = new Date(raw);
+        if (isNaN(parsed.getTime())) return false;
+        return parsed.toISOString().slice(0, 10) === todayStr && a.status !== "cancelled";
+      })
+      .sort((a: any, b: any) => new Date(a.scheduledAt).getTime() - new Date(b.scheduledAt).getTime());
+
+    // My unsigned encounters (drafts + in_progress), age-tiered.
+    const dayMs = 24 * 3600 * 1000;
+    const myUnsigned = (apiEncounters || [])
+      .filter((e: any) => {
+        if (myProviderId && e.providerId && e.providerId !== myProviderId) return false;
+        const isSigned = !!e.signedAt || e.status === "signed";
+        return !isSigned;
+      })
+      .map((e: any) => {
+        const enc = e.encounterDate ? new Date(e.encounterDate).getTime() : Date.now();
+        const ageDays = Math.floor((Date.now() - enc) / dayMs);
+        return { ...e, ageDays };
+      })
+      .sort((a: any, b: any) => b.ageDays - a.ageDays);
+
+    // My refill requests pending action.
+    const myRefills = (apiPrescriptions || [])
+      .filter((rx: any) => {
+        if (myProviderId && rx.providerId && rx.providerId !== myProviderId) return false;
+        return rx.status === "refill_requested";
+      });
+
+    // Unread message threads where I'm the recipient. Best-effort —
+    // apiThreads shape varies; we count anything with unreadCount > 0.
+    const myUnreadThreads = (apiThreads || []).filter((t: any) => {
+      const unread = t.unreadCount ?? t.unread_count ?? 0;
+      return unread > 0;
+    }).length;
+
+    // Patients on my panel — patients whose .providerId or assigned
+    // provider matches me. Falls back to total when there's no signal.
+    const myPanel = myProviderId
+      ? (apiPatients || []).filter((p: any) => {
+          const pid = p.providerId ?? p.provider_id ?? p.assignedProviderId ?? null;
+          return pid === myProviderId;
+        })
+      : (apiPatients || []);
+
+    return (
+      <>
+        {/* Greeting */}
+        <div>
+          <h2 className="text-2xl font-semibold text-slate-900 tracking-tight">
+            {myFirstName ? `Welcome back, ${myFirstName}` : "Welcome back"}
+          </h2>
+          <p className="text-sm text-slate-500 mt-0.5">Today's schedule, pending charts, and your panel snapshot.</p>
+        </div>
+
+        {/* Today's schedule (my appointments only) */}
+        <div>
+          <div className="flex items-baseline justify-between mb-3">
+            <h3 className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Today's schedule ({myToday.length})</h3>
+            <button
+              onClick={() => goToTab("appointments")}
+              className="text-xs text-indigo-600 hover:text-indigo-800"
+            >
+              Open calendar →
+            </button>
+          </div>
+          {myToday.length === 0 ? (
+            <div className="glass rounded-xl p-6 text-center text-sm text-slate-400">Nothing on the books today.</div>
+          ) : (
+            <div className="glass rounded-xl divide-y divide-slate-100 overflow-hidden">
+              {myToday.slice(0, 8).map((apt: any) => (
+                <div key={apt.id} className="px-4 py-3 flex items-center gap-3">
+                  <div className="shrink-0 text-center" style={{ minWidth: "84px" }}>
+                    <div className="text-sm font-bold text-slate-800">{apt.time}</div>
+                    <Countdown
+                      scheduledAt={apt.scheduledAt}
+                      durationMinutes={apt.durationMinutes}
+                      className="mt-0.5"
+                    />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium text-slate-800 truncate">{apt.patient}</div>
+                    <div className="text-xs text-slate-500 truncate flex items-center gap-1.5">
+                      {apt.isTelehealth ? <Video className="w-3 h-3 text-emerald-600" /> : <Building2 className="w-3 h-3 text-slate-400" />}
+                      {apt.type}
+                    </div>
+                  </div>
+                  {apt.isTelehealth ? (
+                    <button
+                      onClick={async () => {
+                        if (apt.sessionId) { navigate(`/telehealth/${apt.sessionId}`); return; }
+                        const res = await telehealthService.openForAppointment(apt.id);
+                        if (res.data?.sessionId) navigate(`/telehealth/${res.data.sessionId}`);
+                        else setToast({ message: res.error || "Failed to start video.", type: "error" });
+                      }}
+                      className="px-3 py-1.5 rounded-md text-xs font-semibold text-white"
+                      style={{ backgroundColor: "#22c55e" }}
+                    >
+                      Start video
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => goToTab("appointments")}
+                      className="px-3 py-1.5 rounded-md text-xs font-medium border border-slate-200 text-slate-700 hover:bg-slate-50"
+                    >
+                      Open
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* My queue — four chase items */}
+        <div>
+          <h3 className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-3">My queue</h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <ProviderQueueCard
+              icon={FileText}
+              label="Unsigned charts"
+              value={myUnsigned.length.toString()}
+              detail={
+                myUnsigned.length === 0
+                  ? "All caught up"
+                  : myUnsigned.filter((e: any) => e.ageDays >= 7).length > 0
+                    ? `${myUnsigned.filter((e: any) => e.ageDays >= 7).length} over 7 days`
+                    : `Oldest: ${myUnsigned[0].ageDays}d`
+              }
+              tone={myUnsigned.filter((e: any) => e.ageDays >= 7).length > 0 ? "danger" : myUnsigned.length > 0 ? "warning" : "ok"}
+              onClick={() => goToTab("encounters")}
+            />
+            <ProviderQueueCard
+              icon={Pill}
+              label="Refill requests"
+              value={myRefills.length.toString()}
+              detail={myRefills.length === 0 ? "Nothing pending" : "Awaiting your approval"}
+              tone={myRefills.length > 0 ? "warning" : "ok"}
+              onClick={() => goToTab("prescriptions")}
+            />
+            <ProviderQueueCard
+              icon={MessageSquare}
+              label="Unread messages"
+              value={myUnreadThreads.toString()}
+              detail={myUnreadThreads === 0 ? "Inbox zero" : "From patients & staff"}
+              tone={myUnreadThreads > 0 ? "warning" : "ok"}
+              onClick={() => goToTab("messages")}
+            />
+            <ProviderQueueCard
+              icon={FlaskConical}
+              label="Lab reviews"
+              value="—"
+              detail="Coming soon"
+              tone="ok"
+            />
+          </div>
+        </div>
+
+        {/* My panel snapshot */}
+        <div>
+          <h3 className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-3">My panel</h3>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <StatCard
+              icon={Users}
+              label={myProviderId ? "Patients on my panel" : "Patients (practice-wide)"}
+              value={myPanel.length.toString()}
+              trend={myProviderId ? "" : "No provider link — showing all"}
+              trendColor="#94a3b8"
+            />
+            <StatCard
+              icon={Calendar}
+              label="Today's visits"
+              value={myToday.length.toString()}
+              trend={myToday.filter((a: any) => a.isTelehealth).length > 0 ? `${myToday.filter((a: any) => a.isTelehealth).length} telehealth` : ""}
+              trendColor="#147d64"
+            />
+            <StatCard
+              icon={ClipboardList}
+              label="Charts to sign"
+              value={myUnsigned.length.toString()}
+              trend={myUnsigned.length > 0 ? `Oldest ${myUnsigned[0].ageDays}d` : "All current"}
+              trendColor={myUnsigned.length === 0 ? "#147d64" : "#d97706"}
+            />
+          </div>
+        </div>
+
+        {/* Quick actions */}
+        <div>
+          <h3 className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-3">Quick actions</h3>
+          <div className="flex flex-wrap gap-2">
+            <button
+              onClick={() => { setEncounterForm((f) => ({ ...f, patientId: "" })); setShowNewEncounter(true); }}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium text-white"
+              style={{ backgroundColor: "#635bff" }}
+            >
+              <FileText className="w-3.5 h-3.5" /> New encounter
+            </button>
+            <button
+              onClick={() => goToTab("messages")}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium border border-slate-200 text-slate-700 hover:bg-slate-50"
+            >
+              <MessageSquare className="w-3.5 h-3.5" /> Send message
+            </button>
+            <button
+              onClick={() => goToTab("prescriptions")}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium border border-slate-200 text-slate-700 hover:bg-slate-50"
+            >
+              <Pill className="w-3.5 h-3.5" /> Prescriptions
+            </button>
+            <button
+              onClick={() => goToTab("appointments")}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium border border-slate-200 text-slate-700 hover:bg-slate-50"
+            >
+              <Calendar className="w-3.5 h-3.5" /> Open calendar
+            </button>
+          </div>
+        </div>
+      </>
+    );
+  }
+
+  function renderProviderDashboard() {
+    return (
+      <div className="space-y-5">
+        <div className="flex items-end justify-end">
+          <RefreshButton onRefresh={loadPracticeData} title="Refresh dashboard" />
+        </div>
+        {renderProviderSections()}
+      </div>
+    );
+  }
+
+  // ─── Action Queue (admin) ─────────────────────────────────────────────
+  // The first row on the admin dashboard. Surfaces items the admin
+  // needs to clear today — failed payments, stale signature requests,
+  // pending intakes, members at usage risk. Counts derive from the
+  // same hooks the rest of the dashboard reads, so no extra fetch.
+  function renderAdminActionQueue() {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const intakesPending = (apiIntakes || []).filter((i: any) => (i.status ?? "submitted") === "submitted").length;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const failedPayments = (apiInvoices || []).filter((inv: any) => inv.status === "failed" || inv.status === "past_due").length;
+    // Doc-pending count is already derived elsewhere; reuse it.
+    const docPending = documentationPendingCount;
+
+    const items = [
+      { count: intakesPending, label: "Intakes pending review", tone: intakesPending > 0 ? "warning" : "ok", onClick: () => goToTab("intakes") },
+      { count: failedPayments, label: "Failed / past-due invoices", tone: failedPayments > 0 ? "danger" : "ok", onClick: () => goToTab("payments") },
+      { count: docPending, label: "Encounters needing documentation", tone: docPending > 0 ? "warning" : "ok", onClick: () => goToTab("encounters") },
+    ];
+
+    const anyAction = items.some((i) => i.count > 0);
+    if (!anyAction) {
+      return (
+        <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 flex items-center gap-3">
+          <Check className="w-5 h-5 text-emerald-600" />
+          <div className="text-sm text-emerald-900">
+            <span className="font-semibold">Inbox zero.</span> No items need your attention right now.
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div>
+        <h3 className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-3">Needs attention</h3>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          {items.filter((i) => i.count > 0).map((it, idx) => (
+            <button
+              key={idx}
+              onClick={it.onClick}
+              className={`text-left rounded-xl border p-4 transition-colors ${
+                it.tone === "danger"
+                  ? "border-red-200 bg-red-50 hover:bg-red-100"
+                  : "border-amber-200 bg-amber-50 hover:bg-amber-100"
+              }`}
+            >
+              <div className={`text-2xl font-bold ${it.tone === "danger" ? "text-red-700" : "text-amber-800"}`}>
+                {it.count}
+              </div>
+              <div className={`text-xs mt-0.5 ${it.tone === "danger" ? "text-red-700" : "text-amber-800"}`}>
+                {it.label}
+              </div>
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   function renderDashboard() {
+    // Role + provider-link routing.
+    //   provider only            → provider dashboard
+    //   admin without provider    → admin dashboard (no personal sections)
+    //   admin AND provider link   → blended (personal sections first, then admin)
+    const role = auth.user?.role ?? "";
+    const ownProviderId = (auth.user as { providerId?: string | null } | null)?.providerId ?? null;
+    if (role === "provider") {
+      return renderProviderDashboard();
+    }
+    const isBlended = role === "practice_admin" && !!ownProviderId;
+
     const totalMRR = apiDashStats?.totalMrr ?? (isDemoMode ? 39328 : 0);
 
     // Onboarding gate — show the checklist for fresh practices, the
@@ -2894,10 +3266,18 @@ export function PracticePortal() {
         <div className="flex items-end justify-between gap-4">
           <div>
             <h2 className="text-2xl font-semibold text-slate-900 tracking-tight">Dashboard</h2>
-            <p className="text-sm text-slate-500 mt-0.5">Revenue, members, programs, and today's activity</p>
+            <p className="text-sm text-slate-500 mt-0.5">
+              {isBlended ? "Your day, then the practice." : "Revenue, members, and what needs your attention today."}
+            </p>
           </div>
           <RefreshButton onRefresh={loadPracticeData} title="Refresh dashboard" />
         </div>
+
+        {/* Provider sections first when admin is also a provider. */}
+        {isBlended && renderProviderSections()}
+
+        {/* Action queue — surfaces items the admin needs to clear today. */}
+        {renderAdminActionQueue()}
 
         {/* Onboarding checklist (full) for fresh practices, or compact
             Connect banner once they've dismissed the checklist. */}
@@ -2948,20 +3328,10 @@ export function PracticePortal() {
           </div>
         </div>
 
-        {/* Quick Stats Row */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <StatCard
-            icon={Layers}
-            label="Active Programs"
-            value={apiDashStats?.activePrograms?.toString() ?? (isDemoMode ? "4" : "0")}
-            trend={isDemoMode && !apiDashStats ? "All performing" : ""}
-          />
-          <StatCard
-            icon={Users}
-            label="Total Enrolled"
-            value={apiDashStats?.activeMembers?.toString() ?? apiDashStats?.active_members?.toString() ?? (isDemoMode ? "700" : "0")}
-            trend={isDemoMode && !apiDashStats ? "+15 this month" : ""}
-          />
+        {/* Operational stats — kept tight. Active Programs / Total Enrolled
+            were dropped — the by-source revenue cards above already imply
+            enrollment, and program counts belong on the Programs tab. */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <StatCard
             icon={Calendar}
             label="Appointments Today"
