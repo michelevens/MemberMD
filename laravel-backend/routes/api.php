@@ -300,10 +300,23 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
     Route::post('/intakes/{id}/archive', [IntakeController::class, 'archive']);
 
     // ===== Appointments =====
+    //
+    // ORDER MATTERS: literal-path routes (waitlist, available-slots,
+    // today) MUST be registered BEFORE Route::apiResource — otherwise
+    // the {id} pattern in the resource swallows them and Laravel tries
+    // to load an Appointment with id="waitlist", causing a 22P02 uuid
+    // cast error on Postgres. Lesson learned the hard way.
     Route::get('/appointments/today', [AppointmentController::class, 'today']);
+    Route::get('/appointments/available-slots', [AppointmentController::class, 'availableSlots']);
+    Route::get('/appointments/waitlist', [AppointmentController::class, 'waitlistIndex']);
+    Route::post('/appointments/waitlist', [AppointmentController::class, 'waitlistStore']);
+    Route::post('/appointments/waitlist/{id}/invite', [AppointmentController::class, 'waitlistInvite']);
+    Route::delete('/appointments/waitlist/{id}', [AppointmentController::class, 'waitlistDestroy']);
     // Staff/provider one-click "Confirm" for a patient-self-booked appointment.
     // Patient-callable would be a no-op (policy blocks them); see controller.
     Route::post('/appointments/{id}/confirm', [AppointmentController::class, 'confirm']);
+    Route::get('/appointments/{id}/calendar-links', [AppointmentController::class, 'calendarLinks']);
+    Route::put('/appointments/{id}/reschedule', [AppointmentController::class, 'reschedule']);
     Route::apiResource('appointments', AppointmentController::class);
 
     // Appointment type list for the booking widgets. Patient-callable
@@ -576,14 +589,10 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
     Route::post('consent-signatures/{id}/revoke', [\App\Http\Controllers\Api\SignatureRequestController::class, 'revoke']);
     Route::get('memberships/{id}/agreement-pdf', [\App\Http\Controllers\Api\ConsentSignatureController::class, 'membershipAgreementPdf']);
 
-    // ===== Appointment Enhancements =====
-    Route::get('/appointments/available-slots', [AppointmentController::class, 'availableSlots']);
-    Route::get('/appointments/{id}/calendar-links', [AppointmentController::class, 'calendarLinks']);
-    Route::put('/appointments/{id}/reschedule', [AppointmentController::class, 'reschedule']);
-    Route::get('/appointments/waitlist', [AppointmentController::class, 'waitlistIndex']);
-    Route::post('/appointments/waitlist', [AppointmentController::class, 'waitlistStore']);
-    Route::post('/appointments/waitlist/{id}/invite', [AppointmentController::class, 'waitlistInvite']);
-    Route::delete('/appointments/waitlist/{id}', [AppointmentController::class, 'waitlistDestroy']);
+    // (Appointment enhancement routes — available-slots, waitlist,
+    // calendar-links, reschedule — were moved up above Route::apiResource
+    // earlier in this file to fix a routing collision. See the long
+    // comment there.)
 
     // ===== Telehealth =====
     Route::prefix('telehealth')->group(function () {
