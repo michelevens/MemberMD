@@ -869,6 +869,9 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
     });
 
     // ===== Entitlement Types =====
+    // Fork registered before apiResource so the {id}/fork path doesn't
+    // get eaten by the {id} catch-all.
+    Route::post('entitlement-types/{id}/fork', [EntitlementTypeController::class, 'fork']);
     Route::apiResource('entitlement-types', EntitlementTypeController::class);
 
     // ===== Plan Entitlements =====

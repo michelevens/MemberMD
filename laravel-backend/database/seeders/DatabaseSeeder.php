@@ -54,6 +54,7 @@ class DatabaseSeeder extends Seeder
             HipaaComplianceSeeder::class,
             ChartTemplateSeeder::class,
             EntitlementTypeSeeder::class,
+            EntitlementTypeCatalogSeeder::class,
             PlatformPlanSeeder::class,
             SuperAdminCancellationReasonSeeder::class,
         ]);
