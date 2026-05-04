@@ -20,7 +20,8 @@ import {
   List,
   Loader2,
 } from "lucide-react";
-import { apiFetch } from "../../lib/api";
+import { useNavigate } from "react-router-dom";
+import { apiFetch, telehealthService } from "../../lib/api";
 
 // ─── Colors ──────────────────────────────────────────────────────────────────
 
@@ -101,33 +102,32 @@ interface CalendarViewProps {
 // ─── API → CalendarAppointment mapping ───────────────────────────────────────
 //
 // The /appointments endpoint returns Eloquent models with eager-loaded
-// patient + provider.user + appointmentType. Map them to the local
-// CalendarAppointment shape that the rendering code expects.
+// patient + provider.user + appointmentType. apiFetch runs snake→camel
+// on every response so we read camelCase first; snake_case fallbacks
+// kept in case a future call path skips the transform.
 
-interface ApiAppointment {
-  id: string;
-  scheduled_at: string;
-  duration_minutes: number;
-  is_telehealth: boolean;
-  status: string;
-  patient?: { first_name?: string; last_name?: string } | null;
-  provider?: { user?: { first_name?: string; last_name?: string; name?: string } | null } | null;
-  appointment_type?: { name?: string; color?: string } | null;
-  appointmentType?: { name?: string; color?: string } | null;
-}
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type ApiAppointment = any;
 
-// Default block tint when an appointment_type has no color set.
 const DEFAULT_TYPE_COLOR = "#64748b";
 
 function mapAppointment(api: ApiAppointment): CalendarAppointment | null {
-  if (!api?.scheduled_at) return null;
-  const dt = new Date(api.scheduled_at);
+  if (!api) return null;
+  const scheduledAt = api.scheduledAt ?? api.scheduled_at ?? null;
+  if (!scheduledAt) return null;
+  const dt = new Date(scheduledAt);
   if (isNaN(dt.getTime())) return null;
-  const t = api.appointment_type ?? api.appointmentType ?? null;
+  const t = api.appointmentType ?? api.appointment_type ?? null;
   const providerUser = api.provider?.user ?? null;
+  const firstName = providerUser?.firstName ?? providerUser?.first_name;
+  const lastName = providerUser?.lastName ?? providerUser?.last_name;
   const providerName = providerUser?.name
-    ?? ([providerUser?.first_name, providerUser?.last_name].filter(Boolean).join(" ").trim() || "Provider");
-  const patientName = [api.patient?.first_name, api.patient?.last_name].filter(Boolean).join(" ").trim() || "Patient";
+    ?? ([firstName, lastName].filter(Boolean).join(" ").trim() || "Provider");
+  const patientFirst = api.patient?.firstName ?? api.patient?.first_name;
+  const patientLast = api.patient?.lastName ?? api.patient?.last_name;
+  const patientName = [patientFirst, patientLast].filter(Boolean).join(" ").trim() || "Patient";
+  const isTeleHealth = !!(api.isTelehealth ?? api.is_telehealth);
+  const duration = api.durationMinutes ?? api.duration_minutes ?? 30;
   return {
     id: api.id,
     patientName,
@@ -136,8 +136,8 @@ function mapAppointment(api: ApiAppointment): CalendarAppointment | null {
     date: dt,
     startHour: dt.getHours(),
     startMinute: dt.getMinutes(),
-    durationMinutes: api.duration_minutes || 30,
-    isTeleHealth: !!api.is_telehealth,
+    durationMinutes: duration,
+    isTeleHealth,
     color: t?.color ?? DEFAULT_TYPE_COLOR,
     status: api.status,
   };
@@ -310,6 +310,22 @@ function CalendarViewInner({ onAppointmentClick, onBookNew, onReschedule }: Cale
     }
     setAppointments((prev) => prev.map((a) => (a.id === id ? { ...a, status: "cancelled" } : a)));
     setDetailFor(null);
+  }
+
+  // useNavigate alias — there's a local navigate(dir) helper below
+  // for prev/next paging that takes precedence on the bare name.
+  const routerNavigate = useNavigate();
+  async function joinTelehealth(id: string) {
+    setDetailBusy(true);
+    setDetailMsg(null);
+    const res = await telehealthService.openForAppointment(id);
+    setDetailBusy(false);
+    if (res.error || !res.data?.sessionId) {
+      setDetailMsg(res.error || "Could not open the video room.");
+      return;
+    }
+    setDetailFor(null);
+    routerNavigate(`/telehealth/${res.data.sessionId}`);
   }
 
   async function markComplete(id: string) {
@@ -1056,11 +1072,21 @@ function CalendarViewInner({ onAppointmentClick, onBookNew, onReschedule }: Cale
                   <button
                     onClick={() => markComplete(detailFor.id)}
                     disabled={detailBusy}
-                    className="px-3 py-2 text-sm font-semibold rounded-lg text-white disabled:opacity-50"
-                    style={{ backgroundColor: C.teal500 }}
+                    className="px-3 py-2 text-sm font-semibold rounded-lg disabled:opacity-50"
+                    style={{ color: C.navy700, border: `1px solid ${C.slate200}` }}
                   >
                     Mark complete
                   </button>
+                  {detailFor.isTeleHealth && (
+                    <button
+                      onClick={() => joinTelehealth(detailFor.id)}
+                      disabled={detailBusy}
+                      className="px-3 py-2 text-sm font-semibold rounded-lg text-white flex items-center gap-1.5 disabled:opacity-50"
+                      style={{ backgroundColor: C.teal500 }}
+                    >
+                      <Video className="w-3.5 h-3.5" /> Join video
+                    </button>
+                  )}
                 </>
               )}
             </div>
