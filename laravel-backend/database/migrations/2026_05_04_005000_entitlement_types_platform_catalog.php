@@ -42,80 +42,97 @@ use Illuminate\Support\Facades\Schema;
  * is safe.
  */
 return new class extends Migration {
+    /**
+     * Don't wrap the whole migration in one transaction. Postgres
+     * marks the entire transaction as failed when ANY statement
+     * throws, even when we catch the PHP exception — every
+     * subsequent statement then errors with "current transaction is
+     * aborted, commands ignored until end of transaction block."
+     * Per-statement autocommit lets each guarded ALTER fail
+     * independently and keep going.
+     */
+    public $withinTransaction = false;
+
     public function up(): void
     {
-        Schema::table('entitlement_types', function (Blueprint $table) {
-            // Make tenant_id nullable. Postgres lets us alter via change()
-            // when doctrine/dbal is around; if not, this works via raw.
-            // Use raw because Laravel's change() needs doctrine which we
-            // don't carry. (No-op if already nullable.)
-        });
-        // Drop the old unique that includes tenant_id (NOT NULL semantics).
-        // Postgres-only; SQLite test environments use raw drop_if_exists
-        // pattern in case the index name differs.
-        try {
-            DB::statement('ALTER TABLE entitlement_types ALTER COLUMN tenant_id DROP NOT NULL');
-        } catch (\Throwable $e) { /* already nullable, ignore */ }
+        $isPg = DB::getDriverName() === 'pgsql';
 
-        // Drop the existing unique constraint by name. The original migration
-        // used Laravel's auto-generated name — try the common shapes.
-        foreach ([
-            'entitlement_types_tenant_id_code_unique',
-        ] as $idx) {
-            try {
-                DB::statement("ALTER TABLE entitlement_types DROP CONSTRAINT {$idx}");
-            } catch (\Throwable $e) { /* not present */ }
+        // 1. Make tenant_id nullable — guarded; no-op if already so.
+        $this->safeStatement('ALTER TABLE entitlement_types ALTER COLUMN tenant_id DROP NOT NULL');
+
+        // 2. Drop the old (tenant_id, code) UNIQUE if it still exists.
+        //    Postgres uses IF EXISTS for clean idempotency.
+        if ($isPg) {
+            $this->safeStatement('ALTER TABLE entitlement_types DROP CONSTRAINT IF EXISTS entitlement_types_tenant_id_code_unique');
         }
 
-        Schema::table('entitlement_types', function (Blueprint $table) {
-            if (!Schema::hasColumn('entitlement_types', 'is_system')) {
-                $table->boolean('is_system')->default(false)->after('tenant_id');
-            }
-            if (!Schema::hasColumn('entitlement_types', 'parent_entitlement_type_id')) {
-                $table->uuid('parent_entitlement_type_id')->nullable()->after('is_system');
-            }
-            if (!Schema::hasColumn('entitlement_types', 'visibility')) {
-                $table->string('visibility', 20)->default('everyone')->after('parent_entitlement_type_id');
-            }
-            if (!Schema::hasColumn('entitlement_types', 'metadata')) {
-                $table->jsonb('metadata')->nullable()->after('visibility');
-            }
+        // 3. Add new columns. Each is hasColumn-guarded so re-runs are
+        //    no-ops. Wrapped per-column so one failure doesn't break
+        //    the rest.
+        $this->safeColumn('is_system', function (Blueprint $t) {
+            $t->boolean('is_system')->default(false)->after('tenant_id');
+        });
+        $this->safeColumn('parent_entitlement_type_id', function (Blueprint $t) {
+            $t->uuid('parent_entitlement_type_id')->nullable()->after('is_system');
+        });
+        $this->safeColumn('visibility', function (Blueprint $t) {
+            $t->string('visibility', 20)->default('everyone')->after('parent_entitlement_type_id');
+        });
+        $this->safeColumn('metadata', function (Blueprint $t) {
+            $t->jsonb('metadata')->nullable()->after('visibility');
         });
 
-        // FK + indexes outside the column block so each can fail
-        // independently if it already exists.
-        try {
-            Schema::table('entitlement_types', function (Blueprint $table) {
-                $table->foreign('parent_entitlement_type_id')
-                    ->references('id')->on('entitlement_types')
-                    ->nullOnDelete();
-            });
-        } catch (\Throwable) { /* already exists */ }
+        // 4. FK on parent_entitlement_type_id — guarded.
+        $this->safeStatement('ALTER TABLE entitlement_types
+            ADD CONSTRAINT entitlement_types_parent_fk
+            FOREIGN KEY (parent_entitlement_type_id)
+            REFERENCES entitlement_types(id) ON DELETE SET NULL');
 
-        try {
-            Schema::table('entitlement_types', function (Blueprint $table) {
-                $table->index('parent_entitlement_type_id', 'entitlement_types_parent_idx');
-            });
-        } catch (\Throwable) { /* already exists */ }
+        // 5. Indexes — each idempotent via IF NOT EXISTS.
+        if ($isPg) {
+            $this->safeStatement('CREATE INDEX IF NOT EXISTS entitlement_types_parent_idx
+                ON entitlement_types(parent_entitlement_type_id)');
+            $this->safeStatement('CREATE INDEX IF NOT EXISTS entitlement_types_system_active_idx
+                ON entitlement_types(is_system, is_active)');
+            // Two partial uniques replacing the old combined one.
+            $this->safeStatement('CREATE UNIQUE INDEX IF NOT EXISTS entitlement_types_system_code_unique
+                ON entitlement_types(code) WHERE tenant_id IS NULL');
+            $this->safeStatement('CREATE UNIQUE INDEX IF NOT EXISTS entitlement_types_tenant_code_unique
+                ON entitlement_types(tenant_id, code) WHERE tenant_id IS NOT NULL');
+        }
+    }
 
+    /**
+     * Run a raw statement, swallow exceptions. With $withinTransaction
+     * false at the migration level, each call gets its own autocommit
+     * so a failure here doesn't poison subsequent statements.
+     */
+    private function safeStatement(string $sql): void
+    {
         try {
-            Schema::table('entitlement_types', function (Blueprint $table) {
-                $table->index(['is_system', 'is_active'], 'entitlement_types_system_active_idx');
-            });
-        } catch (\Throwable) { /* already exists */ }
+            DB::statement($sql);
+        } catch (\Throwable $e) {
+            \Log::info('Migration safeStatement skipped', [
+                'sql' => $sql,
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
 
-        // Replace the old (tenant_id, code) unique with two partial
-        // indexes — one for system rows (tenant_id IS NULL), one for
-        // tenant rows. Postgres-only; SQLite skips silently.
-        if (DB::getDriverName() === 'pgsql') {
-            try {
-                DB::statement('CREATE UNIQUE INDEX IF NOT EXISTS entitlement_types_system_code_unique
-                    ON entitlement_types(code) WHERE tenant_id IS NULL');
-            } catch (\Throwable) {}
-            try {
-                DB::statement('CREATE UNIQUE INDEX IF NOT EXISTS entitlement_types_tenant_code_unique
-                    ON entitlement_types(tenant_id, code) WHERE tenant_id IS NOT NULL');
-            } catch (\Throwable) {}
+    /**
+     * Add a column via Schema::table — guarded by hasColumn so
+     * re-runs are no-ops.
+     */
+    private function safeColumn(string $name, \Closure $cb): void
+    {
+        if (Schema::hasColumn('entitlement_types', $name)) return;
+        try {
+            Schema::table('entitlement_types', $cb);
+        } catch (\Throwable $e) {
+            \Log::info('Migration safeColumn skipped', [
+                'column' => $name,
+                'error' => $e->getMessage(),
+            ]);
         }
     }
 
