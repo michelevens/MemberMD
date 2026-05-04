@@ -109,15 +109,44 @@ export function EntitlementsTab({ patientId }: Props) {
       const am = (patientRes.data as { activeMembership?: ActiveMembership } | undefined)?.activeMembership ?? null;
       setMembership(am);
 
-      // 2. Entitlement balances + utilization (only if there's a membership)
+      // 2. Entitlement balances + utilization (only if there's a membership).
+      //
+      // Two endpoints, two response shapes:
+      //   /memberships/{id}/entitlements    → { data: PatientEntitlement[] }
+      //                                       (legacy single-row counter)
+      //   /entitlement-usage/patient/{id}   → { data: { entitlements:
+      //                                       UtilizationItem[], plan,
+      //                                       totalSavings, ... } }
+      // The utilization endpoint is the rich one (per-benefit list with
+      // entitlementType joined). We previously did Array.isArray(data)
+      // on its response — but data is the wrapping object, not an
+      // array, so the check always failed silently and the benefits
+      // list never rendered. Read raw.entitlements instead.
       if (am?.id) {
         const [entRes, utilRes] = await Promise.all([
-          apiFetch<EntitlementRow[]>(`/memberships/${am.id}/entitlements`),
-          apiFetch<UtilizationItem[]>(`/entitlement-usage/patient/${am.id}`),
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          apiFetch<any>(`/memberships/${am.id}/entitlements`),
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          apiFetch<any>(`/entitlement-usage/patient/${am.id}`),
         ]);
         if (!cancelled) {
-          setEntitlements(Array.isArray(entRes.data) ? entRes.data : []);
-          setUtilization(Array.isArray(utilRes.data) ? utilRes.data : []);
+          // Legacy entitlements: backend returns an array directly.
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const entRaw = entRes.data as any;
+          const entList: EntitlementRow[] = Array.isArray(entRaw)
+            ? entRaw
+            : (Array.isArray(entRaw?.data) ? entRaw.data : []);
+          setEntitlements(entList);
+
+          // Utilization: backend wraps the entitlements list in an
+          // object. Tolerate both shapes (wrapped object vs flat array)
+          // so we don't break if the server changes.
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const utilRaw = utilRes.data as any;
+          const utilList: UtilizationItem[] = Array.isArray(utilRaw?.entitlements)
+            ? utilRaw.entitlements
+            : (Array.isArray(utilRaw) ? utilRaw : []);
+          setUtilization(utilList);
         }
       } else {
         setEntitlements([]);
