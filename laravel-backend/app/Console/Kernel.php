@@ -37,6 +37,17 @@ class Kernel extends ConsoleKernel
                 \Log::error('Appointment reminders processing failed');
             });
 
+        // Nudge providers ~24h post-visit when the patient hasn't yet
+        // booked a follow-up. Hourly cadence matches the 23h-25h
+        // window the command checks against.
+        $schedule->command('appointments:notify-followup-needed')
+            ->hourly()
+            ->name('appointment_followup_nudge')
+            ->withoutOverlapping()
+            ->onFailure(function () {
+                \Log::error('Follow-up nudge processing failed');
+            });
+
         // Walk dunning policies once a day. Practices configure step.day
         // offsets in their policy; this job is what actually advances them.
         // Daily cadence matches step granularity (steps are day-keyed).
