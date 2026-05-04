@@ -567,6 +567,20 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
+/**
+ * Compact label/value row used in wizard review steps and modal previews.
+ * Single line with a subtle separator — meant for ~5-row summaries, not
+ * dense detail panels (Field is the wider variant for those).
+ */
+function ReviewLine({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-baseline justify-between gap-3 text-sm">
+      <span className="text-xs text-slate-500">{label}</span>
+      <span className="text-slate-800 font-medium text-right truncate">{value}</span>
+    </div>
+  );
+}
+
 function StatusBadge({ status }: { status: string }) {
   const config: Record<string, { bg: string; text: string; dot: string }> = {
     active: { bg: "#ecf9ec", text: "#2f8132", dot: "#3f9142" },
@@ -881,8 +895,10 @@ export function PracticePortal() {
   }, [showNewCoupon, couponForm.code, generateCouponCode]);
   const [couponLoading, setCouponLoading] = useState(false);
 
-  // ─── Add Provider Modal ───────────────────────────────────────────────
+  // ─── Add Provider Modal — 4-step wizard ───────────────────────────────
   const [showAddProvider, setShowAddProvider] = useState(false);
+  // Step 0=Identity, 1=NPI lookup, 2=Contact, 3=Review
+  const [addProviderStep, setAddProviderStep] = useState(0);
   const [providerForm, setProviderForm] = useState({ firstName: "", lastName: "", credentials: "", specialty: "", npiNumber: "", email: "", phone: "", telehealth: false, consultationFee: "" });
   const [addProviderLoading, setAddProviderLoading] = useState(false);
 
@@ -8763,7 +8779,7 @@ export function PracticePortal() {
               style={{ backgroundColor: "#635bff" }}
               onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#544ee0")}
               onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "#635bff")}
-              onClick={() => setShowAddProvider(true)}
+              onClick={() => { setAddProviderStep(0); setShowAddProvider(true); }}
             >
               <Plus className="w-4 h-4" />
               Add provider
@@ -10704,100 +10720,162 @@ export function PracticePortal() {
         </div>
       )}
 
-      {/* ─── Add Provider Modal ──────────────────────────────────────────── */}
-      {showAddProvider && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: "rgba(0,0,0,0.5)" }}>
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden">
-            <div className="px-6 py-4 border-b border-slate-100">
-              <h3 className="text-base font-semibold text-slate-900">Add provider</h3>
-              <p className="text-sm text-slate-500 mt-0.5">Onboard a new clinician to your practice.</p>
-            </div>
-            <div className="p-6 space-y-4 max-h-96 overflow-y-auto">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">First Name *</label>
-                  <input className="w-full border rounded-lg px-3 py-2 text-sm" value={providerForm.firstName} onChange={e => setProviderForm(f => ({ ...f, firstName: e.target.value }))} placeholder="First name" />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Last Name *</label>
-                  <input className="w-full border rounded-lg px-3 py-2 text-sm" value={providerForm.lastName} onChange={e => setProviderForm(f => ({ ...f, lastName: e.target.value }))} placeholder="Last name" />
+      {/* ─── Add Provider Wizard (4-step) ────────────────────────────────
+          Step 0=Identity, 1=NPI lookup, 2=Contact, 3=Review.
+          The submit logic is unchanged from the previous single-page form
+          (handleAddProvider) — wizard is purely presentation. */}
+      {showAddProvider && (() => {
+        const steps = ["Identity", "Credentials", "Contact", "Review"] as const;
+        const stepValid = [
+          () => providerForm.firstName.trim().length > 0 && providerForm.lastName.trim().length > 0,
+          () => true, // credentials/NPI optional
+          () => providerForm.email.trim().length > 0,
+          () => true,
+        ];
+        const canAdvance = stepValid[addProviderStep]?.() ?? true;
+        const isLast = addProviderStep === steps.length - 1;
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: "rgba(0,0,0,0.5)" }}>
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden">
+              <div className="px-6 py-4 border-b border-slate-100">
+                <h3 className="text-base font-semibold text-slate-900">Add provider</h3>
+                <p className="text-sm text-slate-500 mt-0.5">Step {addProviderStep + 1} of {steps.length} — {steps[addProviderStep]}</p>
+                {/* Progress bar */}
+                <div className="mt-3 flex gap-1">
+                  {steps.map((_, i) => (
+                    <div
+                      key={i}
+                      className="h-1 flex-1 rounded-full"
+                      style={{ backgroundColor: i <= addProviderStep ? "#635bff" : "#e2e8f0" }}
+                    />
+                  ))}
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Credentials</label>
-                  <input className="w-full border rounded-lg px-3 py-2 text-sm" value={providerForm.credentials} onChange={e => setProviderForm(f => ({ ...f, credentials: e.target.value }))} placeholder="e.g. MD, DNP, NP" />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Specialty</label>
-                  <input className="w-full border rounded-lg px-3 py-2 text-sm" value={providerForm.specialty} onChange={e => setProviderForm(f => ({ ...f, specialty: e.target.value }))} placeholder="e.g. Family Medicine" />
-                </div>
+              <div className="p-6 space-y-4 max-h-96 overflow-y-auto">
+                {addProviderStep === 0 && (
+                  <>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-slate-700 mb-1">First Name *</label>
+                        <input className="w-full border rounded-lg px-3 py-2 text-sm" autoFocus value={providerForm.firstName} onChange={e => setProviderForm(f => ({ ...f, firstName: e.target.value }))} placeholder="Jane" />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-slate-700 mb-1">Last Name *</label>
+                        <input className="w-full border rounded-lg px-3 py-2 text-sm" value={providerForm.lastName} onChange={e => setProviderForm(f => ({ ...f, lastName: e.target.value }))} placeholder="Doe" />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-1">Credentials</label>
+                      <input className="w-full border rounded-lg px-3 py-2 text-sm" value={providerForm.credentials} onChange={e => setProviderForm(f => ({ ...f, credentials: e.target.value }))} placeholder="e.g. MD, DNP, NP" />
+                      <p className="text-xs text-slate-400 mt-1">Shown after the provider's name (e.g. "Jane Doe, MD").</p>
+                    </div>
+                  </>
+                )}
+
+                {addProviderStep === 1 && (
+                  <>
+                    <p className="text-xs text-slate-500 -mt-1">
+                      Look up the provider's NPI to auto-fill specialty + credentials. You can skip this step.
+                    </p>
+                    <div className="flex gap-2 items-end">
+                      <div className="flex-1">
+                        <NPIField
+                          label="NPI Number"
+                          value={providerForm.npiNumber}
+                          onChange={(v) => setProviderForm(f => ({ ...f, npiNumber: v }))}
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => lookupNpiAndFill(providerForm.npiNumber, "add")}
+                        disabled={providerForm.npiNumber.length !== 10 || npiLookupLoading}
+                        className="px-3 py-2 rounded-lg border border-slate-200 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed mb-5"
+                      >
+                        {npiLookupLoading ? "..." : "Lookup"}
+                      </button>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-1">Specialty</label>
+                      <input className="w-full border rounded-lg px-3 py-2 text-sm" value={providerForm.specialty} onChange={e => setProviderForm(f => ({ ...f, specialty: e.target.value }))} placeholder="e.g. Family Medicine" />
+                    </div>
+                  </>
+                )}
+
+                {addProviderStep === 2 && (
+                  <>
+                    <p className="text-xs text-slate-500 -mt-1">
+                      The email is also the provider's login. They'll get a setup link automatically.
+                    </p>
+                    <EmailField
+                      label="Email"
+                      required
+                      value={providerForm.email}
+                      onChange={(v) => setProviderForm(f => ({ ...f, email: v }))}
+                      placeholder="provider@example.com"
+                    />
+                    <PhoneField
+                      label="Phone"
+                      value={providerForm.phone}
+                      onChange={(v) => setProviderForm(f => ({ ...f, phone: v }))}
+                    />
+                  </>
+                )}
+
+                {addProviderStep === 3 && (
+                  <>
+                    <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 space-y-2">
+                      <ReviewLine label="Name" value={`${providerForm.firstName} ${providerForm.lastName}${providerForm.credentials ? ', ' + providerForm.credentials : ''}`} />
+                      {providerForm.specialty && <ReviewLine label="Specialty" value={providerForm.specialty} />}
+                      {providerForm.npiNumber && <ReviewLine label="NPI" value={providerForm.npiNumber} />}
+                      <ReviewLine label="Email" value={providerForm.email} />
+                      {providerForm.phone && <ReviewLine label="Phone" value={providerForm.phone} />}
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-1">Consultation Fee (USD)</label>
+                      <input
+                        type="number"
+                        min={0}
+                        step="0.01"
+                        className="w-full max-w-xs border rounded-lg px-3 py-2 text-sm"
+                        value={providerForm.consultationFee}
+                        onChange={e => setProviderForm(f => ({ ...f, consultationFee: e.target.value }))}
+                        placeholder="e.g. 150.00"
+                      />
+                      <p className="text-xs text-slate-500 mt-1">Default per-visit fee. Leave blank to skip.</p>
+                    </div>
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input type="checkbox" checked={providerForm.telehealth} onChange={e => setProviderForm(f => ({ ...f, telehealth: e.target.checked }))} className="accent-teal-600" />
+                      <span className="text-sm text-slate-700">Telehealth enabled</span>
+                    </label>
+                  </>
+                )}
               </div>
-              <div className="flex gap-2 items-end">
-                <div className="flex-1">
-                  <NPIField
-                    label="NPI Number"
-                    value={providerForm.npiNumber}
-                    onChange={(v) => setProviderForm(f => ({ ...f, npiNumber: v }))}
-                  />
-                </div>
+              <div className="px-6 pb-6 flex items-center justify-between gap-3">
                 <button
-                  type="button"
-                  onClick={() => lookupNpiAndFill(providerForm.npiNumber, "add")}
-                  disabled={providerForm.npiNumber.length !== 10 || npiLookupLoading}
-                  className="px-3 py-2 rounded-lg border border-slate-200 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed mb-5"
+                  className="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100 transition-colors"
+                  onClick={() => addProviderStep === 0 ? setShowAddProvider(false) : setAddProviderStep((s) => s - 1)}
                 >
-                  {npiLookupLoading ? "..." : "Lookup"}
+                  {addProviderStep === 0 ? "Cancel" : "Back"}
+                </button>
+                <button
+                  className="px-6 py-2 rounded-lg text-sm font-medium text-white transition-colors disabled:opacity-50"
+                  style={{ backgroundColor: "#635bff" }}
+                  disabled={!canAdvance || addProviderLoading}
+                  onClick={() => {
+                    if (isLast) {
+                      handleAddProvider();
+                    } else {
+                      setAddProviderStep((s) => s + 1);
+                    }
+                  }}
+                >
+                  {addProviderLoading ? "Adding..." : isLast ? "Add Provider" : "Continue"}
                 </button>
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <EmailField
-                  label="Email"
-                  required
-                  value={providerForm.email}
-                  onChange={(v) => setProviderForm(f => ({ ...f, email: v }))}
-                  placeholder="provider@example.com"
-                />
-                <PhoneField
-                  label="Phone"
-                  value={providerForm.phone}
-                  onChange={(v) => setProviderForm(f => ({ ...f, phone: v }))}
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Consultation Fee (USD)</label>
-                <input
-                  type="number"
-                  min={0}
-                  step="0.01"
-                  className="w-full max-w-xs border rounded-lg px-3 py-2 text-sm"
-                  value={providerForm.consultationFee}
-                  onChange={e => setProviderForm(f => ({ ...f, consultationFee: e.target.value }))}
-                  placeholder="e.g. 150.00"
-                />
-                <p className="text-xs text-slate-500 mt-1">Default fee for visits that don't have a per-type override. Leave blank to skip.</p>
-              </div>
-              <div className="flex items-center gap-3">
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input type="checkbox" checked={providerForm.telehealth} onChange={e => setProviderForm(f => ({ ...f, telehealth: e.target.checked }))} className="accent-teal-600" />
-                  <span className="text-sm text-slate-700">Telehealth enabled</span>
-                </label>
-              </div>
-            </div>
-            <div className="px-6 pb-6 flex items-center justify-end gap-3">
-              <button className="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100 transition-colors" onClick={() => setShowAddProvider(false)}>Cancel</button>
-              <button
-                className="px-6 py-2 rounded-lg text-sm font-medium text-white transition-colors"
-                style={{ backgroundColor: "#635bff" }}
-                onClick={handleAddProvider}
-                disabled={addProviderLoading}
-              >
-                {addProviderLoading ? "Adding..." : "Add Provider"}
-              </button>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* ─── Edit Provider Modal ─────────────────────────────────────────── */}
       {showEditProvider && (
