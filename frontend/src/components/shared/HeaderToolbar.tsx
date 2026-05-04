@@ -3,7 +3,7 @@
 // Messages, Notifications, Settings, Dark Mode, UserSettingsDropdown
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import { MessageSquare, Bell, Settings, Moon, Sun, X, Building2, ChevronDown, ArrowLeftRight } from "lucide-react";
+import { MessageSquare, Bell, Settings, Moon, Sun, X, Building2, ChevronDown, ArrowLeftRight, HelpCircle } from "lucide-react";
 import { UserSettingsDropdown } from "./UserSettingsDropdown";
 import { useTheme } from "../../contexts/ThemeContext";
 import { useAuth } from "../../contexts/AuthContext";
@@ -389,6 +389,15 @@ export function HeaderToolbar({ variant, onNavigate }: HeaderToolbarProps) {
           </MiniPanel>
         )}
       </div>
+
+      {/* Help — opens shared HelpCenterModal via the help:open event. */}
+      <button
+        className={iconBtnClass}
+        onClick={() => window.dispatchEvent(new Event("help:open"))}
+        title="Help"
+      >
+        <HelpCircle className="w-5 h-5" style={{ color: COLORS.slate500 }} />
+      </button>
 
       {/* Settings */}
       <button
