@@ -5,7 +5,8 @@ import {
   Calendar, User, ShieldAlert, CheckCircle2, AlertCircle, Pill,
   Pencil, X, Save, Sparkles,
 } from "lucide-react";
-import { encounterService } from "../../lib/api";
+import { encounterService, chartTemplateService } from "../../lib/api";
+import type { ChartTemplate, ChartTemplateField } from "../../lib/api";
 
 interface EncounterDetailPageProps {
   encounterId: string;
@@ -87,6 +88,14 @@ export function EncounterDetailPage({ encounterId, onBack, onSaved }: EncounterD
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
+  // Template-driven authoring. When the encounter has a template_id we
+  // fetch the template definition, render its fields above the SOAP
+  // narrative, and persist responses into structured_data on the
+  // encounter. SOAP narrative columns stay so we keep a queryable
+  // canonical summary even when most authoring is structured.
+  const [template, setTemplate] = useState<ChartTemplate | null>(null);
+  const [structuredDraft, setStructuredDraft] = useState<Record<string, unknown>>({});
+
   const reload = () => {
     setLoading(true);
     setError(null);
@@ -99,6 +108,16 @@ export function EncounterDetailPage({ encounterId, onBack, onSaved }: EncounterD
         setEncounter(d);
         setAuditLogs(Array.isArray(d.auditLogs) ? d.auditLogs : []);
         setDraft(draftFromEncounter(d));
+        setStructuredDraft(d?.structuredData && typeof d.structuredData === "object" ? { ...d.structuredData } : {});
+        // Fetch template if linked. Errors are non-fatal — fall back
+        // to free-form SOAP rendering if the template is missing.
+        if (d?.templateId) {
+          chartTemplateService.get(d.templateId).then((tres) => {
+            if (tres.data) setTemplate(tres.data);
+          });
+        } else {
+          setTemplate(null);
+        }
       }
       setLoading(false);
     });
@@ -118,6 +137,17 @@ export function EncounterDetailPage({ encounterId, onBack, onSaved }: EncounterD
         setEncounter(d);
         setAuditLogs(Array.isArray(d.auditLogs) ? d.auditLogs : []);
         setDraft(draftFromEncounter(d));
+        setStructuredDraft(d?.structuredData && typeof d.structuredData === "object" ? { ...d.structuredData } : {});
+        // Same template fetch as reload(). Kept inline here so we can
+        // race-guard against unmount via `cancelled`.
+        if (d?.templateId) {
+          chartTemplateService.get(d.templateId).then((tres) => {
+            if (cancelled) return;
+            if (tres.data) setTemplate(tres.data);
+          });
+        } else {
+          setTemplate(null);
+        }
         // Auto-edit on load: only for un-signed drafts. Signed charts
         // require an explicit "Amend" click — never silent edits.
         if (initialEdit && !d.signedAt && d.status !== "signed") {
@@ -135,6 +165,7 @@ export function EncounterDetailPage({ encounterId, onBack, onSaved }: EncounterD
     setIsAmending(false);
     setAmendmentReason("");
     setDraft(draftFromEncounter(encounter));
+    setStructuredDraft(encounter?.structuredData && typeof encounter.structuredData === "object" ? { ...encounter.structuredData } : {});
     setIsEditing(true);
     setActiveTab("chart");
   };
@@ -144,6 +175,7 @@ export function EncounterDetailPage({ encounterId, onBack, onSaved }: EncounterD
     setIsAmending(true);
     setAmendmentReason("");
     setDraft(draftFromEncounter(encounter));
+    setStructuredDraft(encounter?.structuredData && typeof encounter.structuredData === "object" ? { ...encounter.structuredData } : {});
     setIsEditing(true);
     setActiveTab("chart");
   };
@@ -154,6 +186,7 @@ export function EncounterDetailPage({ encounterId, onBack, onSaved }: EncounterD
     setIsAmending(false);
     setAmendmentReason("");
     setDraft(draftFromEncounter(encounter));
+    setStructuredDraft(encounter?.structuredData && typeof encounter.structuredData === "object" ? { ...encounter.structuredData } : {});
   };
 
   const handleSave = async (alsoSign: boolean) => {
@@ -172,6 +205,11 @@ export function EncounterDetailPage({ encounterId, onBack, onSaved }: EncounterD
       };
       const vitalsHasAny = Object.values(draft.vitals).some((v) => (v ?? "").toString().trim() !== "");
 
+      // structuredData: only send when at least one key has a non-empty
+      // value so an empty template doesn't poison the column with {}.
+      const structuredHasAny = Object.values(structuredDraft).some(
+        (v) => v !== undefined && v !== null && (Array.isArray(v) ? v.length > 0 : v.toString().trim() !== "")
+      );
       const updateRes = await encounterService.update(encounterId, {
         chiefComplaint: draft.chiefComplaint,
         subjective: draft.subjective,
@@ -185,6 +223,7 @@ export function EncounterDetailPage({ encounterId, onBack, onSaved }: EncounterD
         timeSpentDocumenting: numOrNull(draft.timeSpentDocumenting),
         followUpInstructions: draft.followUpInstructions.trim() || null,
         followUpWeeks: numOrNull(draft.followUpWeeks),
+        structuredData: structuredHasAny ? structuredDraft : null,
         ...(isAmending ? { amendmentReason: amendmentReason.trim() } : {}),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } as any);
@@ -356,6 +395,9 @@ export function EncounterDetailPage({ encounterId, onBack, onSaved }: EncounterD
         <ChartEditor
           draft={draft}
           setDraft={setDraft}
+          template={template}
+          structuredDraft={structuredDraft}
+          setStructuredDraft={setStructuredDraft}
           isAmending={isAmending}
           amendmentReason={amendmentReason}
           setAmendmentReason={setAmendmentReason}
@@ -382,6 +424,9 @@ export function EncounterDetailPage({ encounterId, onBack, onSaved }: EncounterD
 interface ChartEditorProps {
   draft: SoapDraft;
   setDraft: React.Dispatch<React.SetStateAction<SoapDraft>>;
+  template: ChartTemplate | null;
+  structuredDraft: Record<string, unknown>;
+  setStructuredDraft: React.Dispatch<React.SetStateAction<Record<string, unknown>>>;
   isAmending: boolean;
   amendmentReason: string;
   setAmendmentReason: (s: string) => void;
@@ -393,7 +438,8 @@ interface ChartEditorProps {
 }
 
 function ChartEditor({
-  draft, setDraft, isAmending, amendmentReason, setAmendmentReason,
+  draft, setDraft, template, structuredDraft, setStructuredDraft,
+  isAmending, amendmentReason, setAmendmentReason,
   saving, saveError, onCancel, onSaveDraft, onSaveAndSign,
 }: ChartEditorProps) {
   return (
@@ -418,8 +464,19 @@ function ChartEditor({
         </div>
       )}
 
+      {template && (
+        <TemplateFieldsBlock
+          template={template}
+          structuredDraft={structuredDraft}
+          setStructuredDraft={setStructuredDraft}
+        />
+      )}
+
       <div>
-        <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Chief Complaint</label>
+        <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">
+          Chief Complaint
+          {template && <span className="ml-2 text-[10px] font-normal text-slate-400 normal-case">canonical narrative — also captured in template above</span>}
+        </label>
         <input
           className="w-full border rounded-lg px-3 py-2 text-sm"
           value={draft.chiefComplaint}
@@ -629,6 +686,218 @@ function ChartEditor({
       </div>
     </div>
   );
+}
+
+// ─── Template-driven authoring block ───────────────────────────────────
+// Renders the active template's fields grouped by section, persisting
+// values into structured_data on the encounter. Falls back to a sane
+// rendering when a field type isn't recognized so a typo'd template
+// definition doesn't crash the editor.
+function TemplateFieldsBlock({
+  template,
+  structuredDraft,
+  setStructuredDraft,
+}: {
+  template: ChartTemplate;
+  structuredDraft: Record<string, unknown>;
+  setStructuredDraft: React.Dispatch<React.SetStateAction<Record<string, unknown>>>;
+}) {
+  // Group fields by section, preserving the order they appear in the
+  // template definition (sections shown in first-appearance order).
+  const sections = useMemo(() => {
+    const order: string[] = [];
+    const map = new Map<string, ChartTemplateField[]>();
+    for (const f of template.fields) {
+      const sec = f.section || "General";
+      if (!map.has(sec)) {
+        map.set(sec, []);
+        order.push(sec);
+      }
+      map.get(sec)!.push(f);
+    }
+    return order.map((s) => ({ name: s, fields: map.get(s)! }));
+  }, [template.fields]);
+
+  const setVal = (id: string, value: unknown) => {
+    setStructuredDraft((d) => ({ ...d, [id]: value }));
+  };
+
+  return (
+    <div className="rounded-lg border border-indigo-100 bg-indigo-50/30 p-4 space-y-4">
+      <div className="flex items-baseline justify-between gap-2 border-b border-indigo-100 pb-2">
+        <div>
+          <div className="text-xs font-semibold uppercase tracking-wide text-indigo-700">{template.name}</div>
+          {template.description && <div className="text-xs text-slate-500 mt-0.5">{template.description}</div>}
+        </div>
+        <span className="text-[10px] uppercase font-semibold tracking-wide text-indigo-500">Template</span>
+      </div>
+      {sections.map((section) => (
+        <div key={section.name} className="space-y-2">
+          <div className="text-[11px] font-semibold uppercase text-slate-500">{section.name}</div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {section.fields.map((field) => (
+              <TemplateFieldInput
+                key={field.id}
+                field={field}
+                value={structuredDraft[field.id]}
+                onChange={(v) => setVal(field.id, v)}
+              />
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function TemplateFieldInput({
+  field, value, onChange,
+}: {
+  field: ChartTemplateField;
+  value: unknown;
+  onChange: (v: unknown) => void;
+}) {
+  const labelEl = (
+    <label className="block text-xs font-medium text-slate-700 mb-1">
+      {field.label}
+      {field.required && <span className="text-red-500 ml-1">*</span>}
+      {field.unit && <span className="text-slate-400 font-normal ml-1">({field.unit})</span>}
+    </label>
+  );
+  const wrapWide = field.type === "textarea" ? "sm:col-span-2" : "";
+
+  switch (field.type) {
+    case "textarea":
+      return (
+        <div className={wrapWide}>
+          {labelEl}
+          <textarea
+            rows={3}
+            className="w-full border rounded-lg px-3 py-2 text-sm bg-white"
+            value={(value as string) ?? ""}
+            onChange={(e) => onChange(e.target.value)}
+          />
+        </div>
+      );
+    case "text":
+      return (
+        <div>
+          {labelEl}
+          <input
+            type="text"
+            className="w-full border rounded-lg px-3 py-2 text-sm bg-white"
+            value={(value as string) ?? ""}
+            onChange={(e) => onChange(e.target.value)}
+          />
+        </div>
+      );
+    case "number":
+      return (
+        <div>
+          {labelEl}
+          <input
+            type="number"
+            step="0.1"
+            className="w-full border rounded-lg px-3 py-2 text-sm bg-white"
+            value={(value as string | number) ?? ""}
+            onChange={(e) => onChange(e.target.value)}
+          />
+          {field.referenceRange && (field.referenceRange.min !== undefined || field.referenceRange.max !== undefined) && (
+            <div className="text-[10px] text-slate-400 mt-0.5">
+              Reference: {field.referenceRange.min ?? "—"} to {field.referenceRange.max ?? "—"}
+            </div>
+          )}
+        </div>
+      );
+    case "select":
+    case "radio":
+      return (
+        <div>
+          {labelEl}
+          <select
+            className="w-full border rounded-lg px-3 py-2 text-sm bg-white"
+            value={(value as string) ?? ""}
+            onChange={(e) => onChange(e.target.value)}
+          >
+            <option value="">— select —</option>
+            {(field.options ?? []).map((opt) => (
+              <option key={opt} value={opt}>{opt}</option>
+            ))}
+          </select>
+        </div>
+      );
+    case "checkbox":
+      return (
+        <div className="flex items-center gap-2 pt-5">
+          <input
+            type="checkbox"
+            id={`tpl-${field.id}`}
+            checked={!!value}
+            onChange={(e) => onChange(e.target.checked)}
+            className="rounded border-slate-300"
+          />
+          <label htmlFor={`tpl-${field.id}`} className="text-sm text-slate-700">
+            {field.label}
+            {field.required && <span className="text-red-500 ml-1">*</span>}
+          </label>
+        </div>
+      );
+    case "checkbox_group": {
+      const arr: string[] = Array.isArray(value) ? (value as string[]) : [];
+      return (
+        <div className={wrapWide}>
+          {labelEl}
+          <div className="flex flex-wrap gap-x-4 gap-y-1.5">
+            {(field.options ?? []).map((opt) => (
+              <label key={opt} className="inline-flex items-center gap-1.5 text-sm text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={arr.includes(opt)}
+                  onChange={(e) => onChange(e.target.checked ? [...arr, opt] : arr.filter((x) => x !== opt))}
+                  className="rounded border-slate-300"
+                />
+                {opt}
+              </label>
+            ))}
+          </div>
+        </div>
+      );
+    }
+    case "date":
+      return (
+        <div>
+          {labelEl}
+          <input
+            type="date"
+            className="w-full border rounded-lg px-3 py-2 text-sm bg-white"
+            value={(value as string) ?? ""}
+            onChange={(e) => onChange(e.target.value)}
+          />
+        </div>
+      );
+    case "vitals":
+      // Template-defined vitals fall through to the dedicated vitals
+      // widget already in the editor below — render a placeholder
+      // pointing the user there so we don't duplicate inputs.
+      return (
+        <div className={wrapWide}>
+          {labelEl}
+          <div className="text-xs text-slate-500 italic">Use the Vitals widget below.</div>
+        </div>
+      );
+    default:
+      return (
+        <div>
+          {labelEl}
+          <input
+            type="text"
+            className="w-full border rounded-lg px-3 py-2 text-sm bg-white"
+            value={(value as string) ?? ""}
+            onChange={(e) => onChange(e.target.value)}
+          />
+        </div>
+      );
+  }
 }
 
 function DiagnosisAdder({ onAdd }: { onAdd: (code: string, description: string) => void }) {

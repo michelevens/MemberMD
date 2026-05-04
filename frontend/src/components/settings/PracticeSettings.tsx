@@ -38,6 +38,7 @@ import { PaymentSetup } from "./PaymentSetup";
 import { BrandedWidgets } from "./BrandedWidgets";
 import { AgreementEditor } from "./AgreementEditor";
 import { EntitlementCatalogPanel } from "./EntitlementCatalogPanel";
+import { ChartTemplatesPanel } from "./ChartTemplatesPanel";
 import { PlatformSubscriptionSection } from "./PlatformSubscriptionSection";
 import { WebhooksPanel } from "./WebhooksPanel";
 import { FacilitiesPanel } from "./FacilitiesPanel";
@@ -79,6 +80,7 @@ type PracticeTab =
   | "membership"
   | "payments"
   | "clinical"
+  | "chart_templates"
   | "entitlements"
   | "agreements"
   | "notifications"
@@ -121,6 +123,7 @@ const TAB_CONFIG: { id: PracticeTab; label: string; icon: React.ElementType }[] 
   { id: "membership", label: "Membership", icon: CreditCard },
   { id: "payments", label: "Payments", icon: Wallet },
   { id: "clinical", label: "Clinical Config", icon: Stethoscope },
+  { id: "chart_templates", label: "Chart Templates", icon: FileText },
   { id: "entitlements", label: "Entitlements", icon: Award },
   { id: "agreements", label: "Agreements", icon: FileText },
   { id: "notifications", label: "Notifications", icon: Bell },
@@ -2126,6 +2129,7 @@ export function PracticeSettings({ initialTab }: { initialTab?: string }) {
       case "membership": return renderMembership();
       case "payments": return <PaymentSetup />;
       case "clinical": return renderClinical();
+      case "chart_templates": return <ChartTemplatesPanel />;
       case "entitlements": return <EntitlementCatalogPanel />;
       case "agreements": return <AgreementEditor />;
       case "notifications": return renderNotifications();

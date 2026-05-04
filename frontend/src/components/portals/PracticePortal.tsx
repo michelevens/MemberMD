@@ -7,7 +7,7 @@ import { useNavigate, useLocation } from "react-router-dom";
 import { ProviderDetailPage } from "./ProviderDetailPage";
 import { EncounterDetailPage } from "./EncounterDetailPage";
 import { useAuth } from "../../contexts/AuthContext";
-import { dashboardService, membershipPlanService, messageService, patientService, appointmentService, encounterService, prescriptionService, invoiceService, programService, telehealthService, screeningService, couponService, providerService, paymentService, notificationService, apiFetch, billingEnhancedService, documentService, onboardingService, staffService } from "../../lib/api";
+import { dashboardService, membershipPlanService, messageService, patientService, appointmentService, encounterService, prescriptionService, invoiceService, programService, telehealthService, screeningService, couponService, providerService, paymentService, notificationService, apiFetch, billingEnhancedService, documentService, onboardingService, staffService, chartTemplateService } from "../../lib/api";
 import { formatDob } from "../../lib/format";
 import { PortalShell, type NavSection as ShellNavSection, type PortalColor } from "../shared/PortalShell";
 import { MobileSheet } from "../shared/MobileSheet";
@@ -871,9 +871,96 @@ export function PracticePortal() {
   // both the form state and the submit path now.)
 
   // ─── New Encounter Modal ────────────────────────────────────────────
+  // Field shape mirrors what the Tebra/Kareo "New Encounter" dialog
+  // captures up-front, minus the insurance-billing ceremony we don't
+  // need yet:
+  //   - appointmentId: pick the appointment first, patient/type/POS
+  //     auto-populate from it
+  //   - templateId: which chart template the editor will render
+  //   - placeOfService: CMS POS code (defaulted from encounter_type
+  //     but overridable)
   const [showNewEncounter, setShowNewEncounter] = useState(false);
-  const [encounterForm, setEncounterForm] = useState({ patientId: "", encounterType: "follow_up", programId: "", encounterDate: new Date().toISOString().split("T")[0] });
+  const [encounterForm, setEncounterForm] = useState<{
+    appointmentId: string;
+    patientId: string;
+    encounterType: string;
+    programId: string;
+    encounterDate: string;
+    templateId: string;
+    placeOfService: string;
+  }>({
+    appointmentId: "",
+    patientId: "",
+    encounterType: "follow_up",
+    programId: "",
+    encounterDate: new Date().toISOString().split("T")[0],
+    templateId: "",
+    placeOfService: "11",
+  });
+  // Cached chart templates fetched once when the modal opens — populates
+  // the picker. Service templates (tenant_id null) + practice forks.
+  const [chartTemplates, setChartTemplates] = useState<import("../../lib/api").ChartTemplate[]>([]);
   const [encounterLoading, setEncounterLoading] = useState(false);
+
+  // Load templates once on the first open. Cheap query (8 rows on a
+  // fresh practice) and the list only changes when an admin edits
+  // Settings → Chart Templates, so a per-session cache is safe.
+  useEffect(() => {
+    if (!showNewEncounter || chartTemplates.length > 0) return;
+    chartTemplateService.list().then((res) => {
+      if (res.data) setChartTemplates(res.data);
+    });
+  }, [showNewEncounter, chartTemplates.length]);
+
+  // Map encounter_type → CMS Place of Service code. CMS treats
+  // telehealth-from-home (10) and telehealth-from-clinic (02)
+  // differently, but we default to 10 (most common DPC pattern).
+  const defaultPosForType = (t: string): string => {
+    switch (t) {
+      case "telehealth": return "10";
+      case "phone": return "02";
+      case "office_visit":
+      case "follow_up":
+      case "annual_wellness":
+      case "procedure":
+      case "urgent":
+      default:
+        return "11";
+    }
+  };
+
+  // Pick the most appropriate default template for an encounter type.
+  // Prefers practice-forked over system, then matches by visit_type.
+  const pickDefaultTemplateId = (
+    type: string,
+    templates: import("../../lib/api").ChartTemplate[],
+  ): string => {
+    if (templates.length === 0) return "";
+    const visitMap: Record<string, string> = {
+      annual_wellness: "wellness",
+      procedure: "procedure",
+      urgent: "acute",
+      office_visit: "followup",
+      follow_up: "followup",
+      telehealth: "followup",
+      phone: "followup",
+    };
+    const wantedVisit = visitMap[type] ?? "followup";
+
+    // Telehealth gets its dedicated template if present.
+    if (type === "telehealth") {
+      const tele = templates.find((t) => t.name === "Telehealth Visit");
+      if (tele) return tele.id;
+    }
+
+    const byVisit = templates.filter((t) => t.visitType === wantedVisit);
+    if (byVisit.length > 0) {
+      // Prefer practice-forked over system.
+      const forked = byVisit.find((t) => !t.isSystem);
+      return (forked ?? byVisit[0]).id;
+    }
+    return templates[0]?.id ?? "";
+  };
 
   // ─── New Prescription Modal ─────────────────────────────────────────
   const [showNewPrescription, setShowNewPrescription] = useState(false);
@@ -1886,21 +1973,25 @@ export function PracticePortal() {
     try {
       const res = await encounterService.create({
         patientId: encounterForm.patientId,
-        // Backend requires both. providerId comes from the practice's
-        // first provider (single-provider DPC default); encounterType
-        // mirrors the form, falling back to follow_up to match the
-        // validator's enum. Cast because the local Encounter type
-        // doesn't yet model encounterType.
         providerId: defaultProviderId,
         encounterType: encounterForm.encounterType || "follow_up",
         encounterDate: encounterForm.encounterDate,
         status: "in_progress",
+        // New: link the appointment + chosen template + POS so the
+        // detail-page editor opens with the right surface populated.
+        ...(encounterForm.appointmentId ? { appointmentId: encounterForm.appointmentId } : {}),
+        ...(encounterForm.templateId ? { templateId: encounterForm.templateId } : {}),
+        ...(encounterForm.placeOfService ? { placeOfService: encounterForm.placeOfService } : {}),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } as any);
       if (res.data && (res.data as { id?: string }).id) {
         setShowNewEncounter(false);
         const newId = (res.data as { id: string }).id;
-        setEncounterForm({ patientId: "", encounterType: "follow_up", programId: "", encounterDate: new Date().toISOString().split("T")[0] });
+        setEncounterForm({
+          appointmentId: "", patientId: "", encounterType: "follow_up",
+          programId: "", encounterDate: new Date().toISOString().split("T")[0],
+          templateId: "", placeOfService: "11",
+        });
         await loadPracticeData();
         // Hand off to the detail page in edit mode — that's now the
         // single surface for all chart authoring.
@@ -10445,28 +10536,105 @@ export function PracticePortal() {
       )}
 
       {/* ─── New Encounter Modal ─────────────────────────────────────────── */}
-      {showNewEncounter && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: "rgba(0,0,0,0.5)" }}>
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden">
-            <div className="px-6 py-4 border-b border-slate-100">
-              <h3 className="text-base font-semibold text-slate-900">New encounter</h3>
-              <p className="text-sm text-slate-500 mt-0.5">Create a clinical encounter to document a visit.</p>
+      {/* Tebra-style "pick the appointment first" flow — patient, encounter
+          type, and POS all derive from the chosen appointment. The provider
+          can override any field. Template auto-picks from encounter type
+          (Telehealth → Telehealth Visit, etc.) but is also overridable. */}
+      {showNewEncounter && (() => {
+        // Filter appointments: same tenant, recent (last 14d) or upcoming
+        // 7d, not already linked to a signed encounter. Limited to 50 for
+        // dropdown sanity. The list is small in practice.
+        const now = Date.now();
+        const day = 24 * 3600 * 1000;
+        const apptCandidates = (appointments || [])
+          .filter((a: { id: string; scheduledAt?: string; scheduled_at?: string; status?: string }) => {
+            const when = a.scheduledAt ?? a.scheduled_at;
+            if (!when) return false;
+            const t = new Date(when).getTime();
+            return t > now - 14 * day && t < now + 7 * day && a.status !== "cancelled";
+          })
+          .slice(0, 50);
+        const patientList = apiPatients || (isDemoMode ? MOCK_PATIENTS : []);
+        return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: "rgba(0,0,0,0.5)" }}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden max-h-[90vh] flex flex-col">
+            <div className="px-6 py-4 border-b border-slate-100 flex-shrink-0">
+              <h3 className="text-base font-semibold text-slate-900">New Encounter</h3>
+              <p className="text-sm text-slate-500 mt-0.5">Pick an appointment to auto-fill, or set the fields manually.</p>
             </div>
-            <div className="p-6 space-y-4">
+
+            <div className="p-6 space-y-4 overflow-y-auto">
+              {/* Appointment picker — first per Tebra/Kareo pattern */}
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Appointment <span className="text-xs font-normal text-slate-400">(optional — auto-fills patient + type)</span></label>
+                <select
+                  className="w-full border rounded-lg px-3 py-2 text-sm"
+                  value={encounterForm.appointmentId}
+                  onChange={(e) => {
+                    const apptId = e.target.value;
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    const apt: any = apptCandidates.find((a) => a.id === apptId);
+                    if (!apt) {
+                      setEncounterForm((f) => ({ ...f, appointmentId: "" }));
+                      return;
+                    }
+                    const isTele = !!(apt.isTelehealth ?? apt.is_telehealth);
+                    const inferredType = isTele ? "telehealth" : "follow_up";
+                    setEncounterForm((f) => ({
+                      ...f,
+                      appointmentId: apptId,
+                      patientId: apt.patientId ?? apt.patient_id ?? f.patientId,
+                      encounterType: inferredType,
+                      placeOfService: defaultPosForType(inferredType),
+                      // Auto-pick template from the inferred type if the
+                      // user hasn't manually chosen one already.
+                      templateId: f.templateId || pickDefaultTemplateId(inferredType, chartTemplates),
+                      encounterDate: (apt.scheduledAt ?? apt.scheduled_at ?? f.encounterDate).slice(0, 10),
+                    }));
+                  }}
+                >
+                  <option value="">— No appointment / manual entry —</option>
+                  {apptCandidates.map((a: { id: string; scheduledAt?: string; scheduled_at?: string; patient?: { firstName?: string; lastName?: string }; isTelehealth?: boolean; is_telehealth?: boolean }) => {
+                    const when = a.scheduledAt ?? a.scheduled_at;
+                    const whenStr = when ? new Date(when).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "";
+                    const ptName = a.patient ? `${a.patient.firstName ?? ""} ${a.patient.lastName ?? ""}`.trim() : "";
+                    const isTele = a.isTelehealth ?? a.is_telehealth;
+                    return (
+                      <option key={a.id} value={a.id}>
+                        {whenStr}{ptName ? ` — ${ptName}` : ""}{isTele ? " (telehealth)" : ""}
+                      </option>
+                    );
+                  })}
+                </select>
+              </div>
+
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Patient *</label>
                 <select className="w-full border rounded-lg px-3 py-2 text-sm" value={encounterForm.patientId} onChange={e => setEncounterForm(f => ({ ...f, patientId: e.target.value }))}>
                   <option value="">Select patient...</option>
-                  {(apiPatients || (isDemoMode ? MOCK_PATIENTS : [])).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                  {patientList.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
                 </select>
               </div>
+
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Encounter Type</label>
-                  {/* Values must match StoreEncounterRequest::rules() enum:
-                      office_visit, telehealth, phone, urgent, follow_up,
-                      annual_wellness, procedure. */}
-                  <select className="w-full border rounded-lg px-3 py-2 text-sm" value={encounterForm.encounterType} onChange={e => setEncounterForm(f => ({ ...f, encounterType: e.target.value }))}>
+                  <select
+                    className="w-full border rounded-lg px-3 py-2 text-sm"
+                    value={encounterForm.encounterType}
+                    onChange={(e) => {
+                      const newType = e.target.value;
+                      setEncounterForm((f) => ({
+                        ...f,
+                        encounterType: newType,
+                        // Re-derive POS + template default whenever the
+                        // type changes — keeps everything in sync without
+                        // surprising the user mid-edit.
+                        placeOfService: defaultPosForType(newType),
+                        templateId: pickDefaultTemplateId(newType, chartTemplates),
+                      }));
+                    }}
+                  >
                     <option value="office_visit">Office Visit</option>
                     <option value="follow_up">Follow-Up</option>
                     <option value="telehealth">Telehealth</option>
@@ -10481,6 +10649,46 @@ export function PracticePortal() {
                   <input type="date" className="w-full border rounded-lg px-3 py-2 text-sm" value={encounterForm.encounterDate} onChange={e => setEncounterForm(f => ({ ...f, encounterDate: e.target.value }))} />
                 </div>
               </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">
+                    Chart Template <span className="text-xs font-normal text-slate-400">(controls the editor sections)</span>
+                  </label>
+                  <select
+                    className="w-full border rounded-lg px-3 py-2 text-sm"
+                    value={encounterForm.templateId}
+                    onChange={e => setEncounterForm(f => ({ ...f, templateId: e.target.value }))}
+                  >
+                    <option value="">— No template (free-form SOAP) —</option>
+                    {chartTemplates.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.name}{t.isSystem ? "" : " (custom)"}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Place of Service</label>
+                  <select
+                    className="w-full border rounded-lg px-3 py-2 text-sm"
+                    value={encounterForm.placeOfService}
+                    onChange={e => setEncounterForm(f => ({ ...f, placeOfService: e.target.value }))}
+                  >
+                    <option value="11">11 — Office</option>
+                    <option value="10">10 — Telehealth (patient home)</option>
+                    <option value="02">02 — Telehealth (provider site)</option>
+                    <option value="12">12 — Patient's home</option>
+                    <option value="21">21 — Inpatient hospital</option>
+                    <option value="22">22 — Outpatient hospital</option>
+                    <option value="23">23 — Emergency room</option>
+                    <option value="31">31 — Skilled nursing facility</option>
+                    <option value="50">50 — FQHC</option>
+                    <option value="71">71 — Public health clinic</option>
+                  </select>
+                </div>
+              </div>
+
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Program</label>
                 <select className="w-full border rounded-lg px-3 py-2 text-sm" value={encounterForm.programId} onChange={e => setEncounterForm(f => ({ ...f, programId: e.target.value }))}>
@@ -10499,7 +10707,8 @@ export function PracticePortal() {
                 )}
               </div>
             </div>
-            <div className="px-6 pb-6 flex items-center justify-end gap-3">
+
+            <div className="px-6 py-4 border-t border-slate-100 flex items-center justify-end gap-3 flex-shrink-0">
               <button className="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100 transition-colors" onClick={() => setShowNewEncounter(false)}>Cancel</button>
               <button
                 className="px-6 py-2 rounded-lg text-sm font-medium text-white transition-colors"
@@ -10507,12 +10716,13 @@ export function PracticePortal() {
                 onClick={handleCreateEncounter}
                 disabled={encounterLoading}
               >
-                {encounterLoading ? "Creating..." : "Create Encounter"}
+                {encounterLoading ? "Creating..." : "Create & Open Chart"}
               </button>
             </div>
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {/* ─── New Prescription Modal ──────────────────────────────────────── */}
       {showNewPrescription && (

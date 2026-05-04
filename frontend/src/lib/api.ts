@@ -1120,6 +1120,66 @@ export const encounterService = {
   },
 };
 
+// ─── Chart Templates ────────────────────────────────────────────────────────
+// Server returns:
+//   GET /chart-templates -> ChartTemplate[]
+//   POST /chart-templates -> ChartTemplate
+//   POST /chart-templates/{id}/clone -> ChartTemplate
+// Field shape: { id, label, type, options[], required, section, unit?,
+//                reference_range?: { min?, max? } }
+// Type values: text, textarea, number, select, checkbox, checkbox_group,
+//              radio, date, vitals.
+export interface ChartTemplateField {
+  id: string;
+  label: string;
+  type: "text" | "textarea" | "number" | "select" | "checkbox" | "checkbox_group" | "radio" | "date" | "vitals";
+  options?: string[] | null;
+  required: boolean;
+  section: string;
+  unit?: string | null;
+  referenceRange?: { min?: number; max?: number } | null;
+}
+
+export interface ChartTemplate {
+  id: string;
+  tenantId: string | null;
+  name: string;
+  description?: string | null;
+  visitType?: string | null;
+  fields: ChartTemplateField[];
+  isActive: boolean;
+  isSystem: boolean;
+  sortOrder: number;
+}
+
+export const chartTemplateService = {
+  list: async (visitType?: string): Promise<ApiResponse<ChartTemplate[]>> => {
+    if (useMockData()) return { data: [] };
+    const query = visitType ? `?visit_type=${encodeURIComponent(visitType)}` : "";
+    return apiFetch<ChartTemplate[]>(`/chart-templates${query}`);
+  },
+  get: async (id: string): Promise<ApiResponse<ChartTemplate>> => {
+    if (useMockData()) return { data: {} as ChartTemplate };
+    return apiFetch<ChartTemplate>(`/chart-templates/${id}`);
+  },
+  create: async (data: Partial<ChartTemplate>): Promise<ApiResponse<ChartTemplate>> => {
+    if (useMockData()) return mockCreate<ChartTemplate>(data);
+    return apiFetch<ChartTemplate>("/chart-templates", { method: "POST", body: JSON.stringify(data) });
+  },
+  update: async (id: string, data: Partial<ChartTemplate>): Promise<ApiResponse<ChartTemplate>> => {
+    if (useMockData()) return mockUpdate<ChartTemplate>(data);
+    return apiFetch<ChartTemplate>(`/chart-templates/${id}`, { method: "PUT", body: JSON.stringify(data) });
+  },
+  clone: async (id: string): Promise<ApiResponse<ChartTemplate>> => {
+    if (useMockData()) return { data: {} as ChartTemplate };
+    return apiFetch<ChartTemplate>(`/chart-templates/${id}/clone`, { method: "POST" });
+  },
+  deactivate: async (id: string): Promise<ApiResponse<{ message: string }>> => {
+    if (useMockData()) return { data: { message: "ok" } };
+    return apiFetch<{ message: string }>(`/chart-templates/${id}`, { method: "DELETE" });
+  },
+};
+
 // ─── Prescriptions ──────────────────────────────────────────────────────────
 
 export const prescriptionService = {
