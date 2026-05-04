@@ -6,7 +6,7 @@
 // Drag-drop powered by react-dnd. The component wraps its content in a
 // DndProvider so callers don't have to.
 
-import { useState, useCallback, useEffect, useMemo } from "react";
+import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { DndProvider, useDrag, useDrop } from "react-dnd";
 import { HTML5Backend } from "react-dnd-html5-backend";
 import {
@@ -771,6 +771,22 @@ function CalendarViewInner({ onAppointmentClick, onBookNew, onReschedule }: Cale
   // confirmation (confirmedAt === null AND not cancelled / completed).
   // Wired to the "N awaiting approval" badge in the toolbar.
   const [filterPending, setFilterPending] = useState(false);
+  // Drag-to-resize state — held in a ref because the pointermove
+  // handler runs at a much higher rate than React's state update
+  // cadence; we only commit to state on snap or release.
+  const resizeRef = useRef<{
+    id: string;
+    startY: number;
+    pixelsPerMinute: number;
+    originalDuration: number;
+    currentDuration: number;
+  } | null>(null);
+  // The "preview" duration (snapped to 15-min) shown DURING a drag —
+  // committed to state so the block visibly grows/shrinks as the
+  // user drags. Cleared on pointer-up.
+  const [resizingPreview, setResizingPreview] = useState<{
+    id: string; durationMinutes: number;
+  } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [reschedFailed, setReschedFailed] = useState<string | null>(null);
@@ -1027,6 +1043,75 @@ function CalendarViewInner({ onAppointmentClick, onBookNew, onReschedule }: Cale
     setCtxMenu({ appointment: apt, x: e.clientX, y: e.clientY });
   }
 
+  // ─── Drag-to-resize ───────────────────────────────────────────────────
+  // Started by pointer-down on the small handle at the bottom of an
+  // appointment block. We capture the starting Y, the "px per minute"
+  // ratio derived from the day grid height, and the original duration.
+  // pointermove updates the preview duration in 15-min snaps; pointerup
+  // commits via PUT /appointments/{id} with the new duration_minutes.
+  function startResize(apt: CalendarAppointment, e: React.PointerEvent<HTMLDivElement>) {
+    e.preventDefault();
+    e.stopPropagation();
+    // Walk up to find the day-column element so we can read its
+    // pixel height (covers 13 hours = 13 * 60 minutes).
+    let el: HTMLElement | null = e.currentTarget.parentElement;
+    while (el && !el.dataset.daygrid) el = el.parentElement;
+    const gridHeight = el?.clientHeight ?? 650;
+    const pxPerMinute = gridHeight / (13 * 60);
+    resizeRef.current = {
+      id: apt.id,
+      startY: e.clientY,
+      pixelsPerMinute: pxPerMinute,
+      originalDuration: apt.durationMinutes,
+      currentDuration: apt.durationMinutes,
+    };
+    setResizingPreview({ id: apt.id, durationMinutes: apt.durationMinutes });
+
+    const onMove = (ev: PointerEvent) => {
+      const r = resizeRef.current;
+      if (!r) return;
+      const deltaPx = ev.clientY - r.startY;
+      const deltaMin = deltaPx / r.pixelsPerMinute;
+      // Snap to 15-min increments; min 15, max 480.
+      let next = Math.round((r.originalDuration + deltaMin) / 15) * 15;
+      next = Math.max(15, Math.min(480, next));
+      r.currentDuration = next; // <- ref tracks the live value
+      setResizingPreview({ id: r.id, durationMinutes: next });
+    };
+    const onUp = async () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      const r = resizeRef.current;
+      resizeRef.current = null;
+      if (!r) return;
+      const finalDuration = r.currentDuration;
+      if (finalDuration === r.originalDuration) {
+        setResizingPreview(null);
+        return;
+      }
+      // Optimistic update on the appointment.
+      setAppointments((prev) => prev.map((a) =>
+        a.id === r.id ? { ...a, durationMinutes: finalDuration } : a
+      ));
+      setResizingPreview(null);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const res = await apiFetch<any>(`/appointments/${r.id}`, {
+        method: "PUT",
+        body: JSON.stringify({ duration_minutes: finalDuration }),
+      });
+      if (res.error) {
+        // Roll back on conflict or validation fail.
+        setAppointments((prev) => prev.map((a) =>
+          a.id === r.id ? { ...a, durationMinutes: r.originalDuration } : a
+        ));
+        setReschedFailed(res.error);
+        window.setTimeout(() => setReschedFailed(null), 5000);
+      }
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  }
+
   // ─── Navigation ────────────────────────────────────────────────────────────
 
   function navigate(dir: -1 | 1) {
@@ -1158,9 +1243,15 @@ function CalendarViewInner({ onAppointmentClick, onBookNew, onReschedule }: Cale
   // ─── Appointment Block (status-colored) ────────────────────────────────────
 
   function renderAppointmentBlock(apt: CalendarAppointment, slim = false) {
+    // Render with the live drag-preview duration if this block is
+    // actively being resized; otherwise its committed duration.
+    const previewDuration = resizingPreview?.id === apt.id
+      ? resizingPreview.durationMinutes
+      : apt.durationMinutes;
     const topPercent = ((apt.startHour * 60 + apt.startMinute - 7 * 60) / (13 * 60)) * 100;
-    const heightPercent = (apt.durationMinutes / (13 * 60)) * 100;
+    const heightPercent = (previewDuration / (13 * 60)) * 100;
     const status = getStatusStyle(apt.status);
+    const canResize = isDraggable(apt.status); // same eligibility as drag-move
 
     return (
       <DraggableBlock
@@ -1176,7 +1267,9 @@ function CalendarViewInner({ onAppointmentClick, onBookNew, onReschedule }: Cale
             height: `${Math.max(heightPercent, 3)}%`,
             backgroundColor: status.bg,
             borderLeft: `3px solid ${apt.color}`,
-            boxShadow: `0 1px 2px rgba(0,0,0,0.05)`,
+            boxShadow: resizingPreview?.id === apt.id
+              ? `0 0 0 2px ${C.teal500}`
+              : `0 1px 2px rgba(0,0,0,0.05)`,
           }}
         >
           <div className="p-1.5 h-full flex flex-col">
@@ -1208,8 +1301,30 @@ function CalendarViewInner({ onAppointmentClick, onBookNew, onReschedule }: Cale
               ) : (
                 <Building2 className="w-3 h-3" style={{ color: status.text, opacity: 0.7 }} />
               )}
+              {resizingPreview?.id === apt.id && (
+                <span className="text-[10px] font-semibold ml-auto" style={{ color: status.text }}>
+                  {previewDuration}m
+                </span>
+              )}
             </div>
           </div>
+          {/* Resize handle — bottom edge. Pointer-down captures and
+              starts the drag-resize flow. Stop-propagation so the
+              block's onClick / drag don't also fire. */}
+          {canResize && (
+            <div
+              onPointerDown={(e) => startResize(apt, e)}
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                position: "absolute",
+                bottom: 0, left: 0, right: 0,
+                height: 6,
+                cursor: "ns-resize",
+                touchAction: "none",
+              }}
+              title="Drag to resize duration"
+            />
+          )}
         </div>
       </DraggableBlock>
     );
@@ -1239,7 +1354,7 @@ function CalendarViewInner({ onAppointmentClick, onBookNew, onReschedule }: Cale
             </div>
           ))}
 
-          <div className="absolute left-16 right-0 top-0 bottom-0">
+          <div data-daygrid="day" className="absolute left-16 right-0 top-0 bottom-0">
             {/* Per-15-min slot grid as the clickable + droppable background. */}
             <div className="absolute inset-0 flex flex-col">
               {Array.from({ length: SLOTS_PER_DAY }).map((_, i) => {
@@ -1328,6 +1443,7 @@ function CalendarViewInner({ onAppointmentClick, onBookNew, onReschedule }: Cale
               return (
                 <div
                   key={day.toISOString()}
+                  data-daygrid="week"
                   className="flex-1 relative"
                   style={{ borderLeft: `1px solid ${C.slate100}` }}
                 >
