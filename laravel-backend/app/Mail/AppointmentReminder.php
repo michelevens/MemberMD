@@ -2,12 +2,16 @@
 
 namespace App\Mail;
 
+use App\Mail\Concerns\ResolvesAppointmentVideoLink;
+use App\Models\Appointment;
 use Illuminate\Mail\Mailable;
 use Illuminate\Mail\Mailables\Content;
 use Illuminate\Mail\Mailables\Envelope;
 
 class AppointmentReminder extends Mailable
 {
+    use ResolvesAppointmentVideoLink;
+
     public function __construct(
         public readonly object $appointment,
         public readonly object $patient,
@@ -23,8 +27,16 @@ class AppointmentReminder extends Mailable
 
     public function content(): Content
     {
+        $videoLink = $this->appointment instanceof Appointment
+            ? $this->resolveVideoLink($this->appointment)
+            : null;
+
         return new Content(
             view: 'emails.appointment-reminder',
+            with: [
+                'videoLink' => $videoLink,
+                'isTelehealth' => (bool) ($this->appointment->is_telehealth ?? false),
+            ],
         );
     }
 }

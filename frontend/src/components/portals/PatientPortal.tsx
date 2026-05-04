@@ -739,6 +739,28 @@ export function PatientPortal() {
     navigate(`/telehealth/${res.data.sessionId}`);
   }, [navigate]);
 
+  // Deep-link from email: /#/appointments?join={appointmentId} should
+  // auto-open the telehealth room. Only fires once per page load —
+  // we strip the param after consuming it so a refresh doesn't loop.
+  // Patient lands on /#/login first if not authed; the auth flow
+  // preserves the hash on success, so the param is still there when
+  // they reach the appointments tab.
+  useEffect(() => {
+    const hash = window.location.hash || "";
+    const qIdx = hash.indexOf("?");
+    if (qIdx === -1) return;
+    const params = new URLSearchParams(hash.slice(qIdx + 1));
+    const joinId = params.get("join");
+    if (!joinId) return;
+    // Drop the param so a refresh / back-button doesn't re-trigger.
+    params.delete("join");
+    const newQuery = params.toString();
+    const newHash = hash.slice(0, qIdx) + (newQuery ? `?${newQuery}` : "");
+    window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}${newHash}`);
+    void openTelehealth(joinId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // ─── API Data State ──────────────────────────────────────────────────────
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [apiPatient, setApiPatient] = useState<any>(null);

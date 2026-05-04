@@ -9,7 +9,10 @@ Reminder: Your appointment is tomorrow at {{ \Carbon\Carbon::parse($appointment-
 @section('content')
 @php
     $scheduledAt = \Carbon\Carbon::parse($appointment->scheduled_at);
-    $isTelehealth = ($appointment->type ?? '') === 'telehealth' || !empty($appointment->video_link);
+    // $isTelehealth + $videoLink come from the Mailable's `with`.
+    // Fallback for any legacy invocation that doesn't pass them.
+    $isTelehealth = $isTelehealth ?? (bool) ($appointment->is_telehealth ?? false);
+    $videoLink = $videoLink ?? null;
 @endphp
 
 <h1 style="margin: 0 0 8px; font-size: 24px; font-weight: 700; color: #102a43; line-height: 1.3;">
@@ -72,11 +75,24 @@ Reminder: Your appointment is tomorrow at {{ \Carbon\Carbon::parse($appointment-
 </table>
 
 <!-- Telehealth join button or location -->
-@if($isTelehealth && !empty($appointment->video_link))
-<table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin-bottom: 24px;">
+@if($isTelehealth && !empty($videoLink))
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin-bottom: 12px;">
     <tr>
         <td align="center">
-            @include('emails.partials.button', ['url' => $appointment->video_link, 'text' => 'Join Video Session'])
+            @include('emails.partials.button', ['url' => $videoLink, 'text' => 'Join Video Visit'])
+        </td>
+    </tr>
+</table>
+<p style="margin: 0 0 24px; font-size: 12px; color: #6b7280; line-height: 1.5; text-align: center;">
+    Join a few minutes early to test your camera and microphone.
+</p>
+@elseif($isTelehealth)
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin-bottom: 24px; background-color: #fef9e7; border-radius: 8px; border: 1px solid #fde68a;">
+    <tr>
+        <td style="padding: 14px 20px;">
+            <p style="margin: 0; font-size: 14px; color: #92400e; line-height: 1.5;">
+                This is a telehealth visit. Log in to your patient portal to join.
+            </p>
         </td>
     </tr>
 </table>
@@ -106,7 +122,7 @@ Reminder: Your appointment is tomorrow at {{ \Carbon\Carbon::parse($appointment-
 </table>
 
 <!-- Manage button (for non-telehealth or as secondary) -->
-@if(!$isTelehealth || empty($appointment->video_link))
+@if(!$isTelehealth || empty($videoLink))
 <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin-bottom: 8px;">
     <tr>
         <td align="center">

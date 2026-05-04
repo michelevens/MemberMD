@@ -9,7 +9,10 @@ Your appointment on {{ \Carbon\Carbon::parse($appointment->scheduled_at)->format
 @section('content')
 @php
     $scheduledAt = \Carbon\Carbon::parse($appointment->scheduled_at);
-    $isTelehealth = ($appointment->type ?? '') === 'telehealth' || !empty($appointment->video_link);
+    // $isTelehealth + $videoLink come from the Mailable's `with` array.
+    // Fallback for legacy callers that don't pass them.
+    $isTelehealth = $isTelehealth ?? (bool) ($appointment->is_telehealth ?? false);
+    $videoLink = $videoLink ?? null;
 @endphp
 
 <h1 style="margin: 0 0 8px; font-size: 24px; font-weight: 700; color: #102a43; line-height: 1.3;">
@@ -72,12 +75,41 @@ Your appointment on {{ \Carbon\Carbon::parse($appointment->scheduled_at)->format
 </table>
 
 <!-- Telehealth or Location -->
-@if($isTelehealth && !empty($appointment->video_link))
-<table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin-bottom: 24px; background-color: #eef9ff; border-radius: 8px; border: 1px solid #bae6fd;">
+@if($isTelehealth && !empty($videoLink))
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin-bottom: 20px; background-color: #f0faf6; border-radius: 12px; border: 2px solid #27ab83;">
     <tr>
-        <td style="padding: 16px 20px;">
-            <p style="margin: 0 0 8px; font-size: 14px; font-weight: 600; color: #0369a1;">Join your session here:</p>
-            <a href="{{ $appointment->video_link }}" style="font-size: 14px; color: #27ab83; text-decoration: none; word-break: break-all;">{{ $appointment->video_link }}</a>
+        <td style="padding: 18px 22px;">
+            <p style="margin: 0 0 6px; font-size: 13px; font-weight: 600; color: #27ab83; text-transform: uppercase; letter-spacing: 0.5px;">
+                Join the video visit
+            </p>
+            <p style="margin: 0 0 14px; font-size: 14px; color: #4a5568; line-height: 1.5;">
+                Tap the button below at appointment time. We recommend joining a few minutes early to test your camera and microphone.
+            </p>
+            <table role="presentation" cellspacing="0" cellpadding="0" border="0">
+                <tr>
+                    <td>
+                        <a href="{{ $videoLink }}" style="display: inline-block; padding: 12px 28px; background-color: #27ab83; color: #ffffff; font-size: 15px; font-weight: 600; text-decoration: none; border-radius: 8px;">
+                            Join video visit
+                        </a>
+                    </td>
+                </tr>
+            </table>
+            <p style="margin: 14px 0 0; font-size: 12px; color: #6b7280; line-height: 1.5; word-break: break-all;">
+                Or paste this link in your browser: <a href="{{ $videoLink }}" style="color: #27ab83;">{{ $videoLink }}</a>
+            </p>
+        </td>
+    </tr>
+</table>
+@elseif($isTelehealth)
+{{-- Telehealth appt but link couldn't be resolved (provider missing /
+    config issue). Tell the patient they'll receive a link or to log
+    in — better than rendering nothing. --}}
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin-bottom: 20px; background-color: #fef9e7; border-radius: 8px; border: 1px solid #fde68a;">
+    <tr>
+        <td style="padding: 14px 20px;">
+            <p style="margin: 0; font-size: 14px; color: #92400e; line-height: 1.5;">
+                This is a telehealth visit. Log in to your patient portal at appointment time to join from your appointments tab.
+            </p>
         </td>
     </tr>
 </table>
@@ -97,7 +129,7 @@ Your appointment on {{ \Carbon\Carbon::parse($appointment->scheduled_at)->format
     $calTitle = urlencode(($appointment->appointment_type ?? 'Appointment') . ' — ' . ($practice->name ?? 'MemberMD'));
     $calStart = $scheduledAt->format('Ymd\THis');
     $calEnd = $scheduledAt->copy()->addMinutes($appointment->duration_minutes ?? 30)->format('Ymd\THis');
-    $calLocation = urlencode($isTelehealth ? ($appointment->video_link ?? 'Telehealth') : ($appointment->location ?? $practice->address ?? ''));
+    $calLocation = urlencode($isTelehealth ? ($videoLink ?? 'Telehealth') : ($appointment->location ?? $practice->address ?? ''));
     $googleCalUrl = "https://calendar.google.com/calendar/event?action=TEMPLATE&text={$calTitle}&dates={$calStart}/{$calEnd}&location={$calLocation}";
 @endphp
 
