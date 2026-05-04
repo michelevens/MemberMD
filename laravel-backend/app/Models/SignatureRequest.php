@@ -24,12 +24,19 @@ class SignatureRequest extends Model
         'requested_by_user_id', 'public_token', 'status',
         'message', 'expires_at', 'reminded_at',
         'consent_signature_id', 'signed_at',
+        'link_opened_at', 'viewed_at',
+        'email_id', 'email_delivered_at', 'email_opened_at', 'email_clicked_at',
     ];
 
     protected $casts = [
         'expires_at' => 'datetime',
         'reminded_at' => 'datetime',
         'signed_at' => 'datetime',
+        'link_opened_at' => 'datetime',
+        'viewed_at' => 'datetime',
+        'email_delivered_at' => 'datetime',
+        'email_opened_at' => 'datetime',
+        'email_clicked_at' => 'datetime',
     ];
 
     protected static function boot(): void

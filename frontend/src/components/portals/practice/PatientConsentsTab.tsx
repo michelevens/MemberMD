@@ -6,7 +6,7 @@
 // the resulting ConsentSignature shows up in this same list.
 
 import { useCallback, useEffect, useState } from "react";
-import { Shield, Download, Eye, Send, Loader2, X, Clock, RotateCcw, XCircle } from "lucide-react";
+import { Shield, Download, Eye, Send, Loader2, X, Clock, RotateCcw, XCircle, ChevronDown, ChevronRight, Ban } from "lucide-react";
 import { consentService, signatureRequestService, type SignatureRequestRow } from "../../../lib/api";
 import { AgreementBody } from "../../shared/AgreementBody";
 import type { ConsentTemplate } from "../../../types";
@@ -16,7 +16,19 @@ interface SignatureRow {
   template_id: string;
   signed_at: string;
   template_version?: number | null;
+  template_content_hash?: string | null;
   ip_address?: string | null;
+  signed_country?: string | null;
+  signed_region?: string | null;
+  signed_city?: string | null;
+  signed_timezone?: string | null;
+  signed_tz_offset_minutes?: number | null;
+  device_type?: string | null;
+  browser_name?: string | null;
+  browser_version?: string | null;
+  os_name?: string | null;
+  revoked_at?: string | null;
+  revoked_reason?: string | null;
   template?: {
     id: string;
     name: string;
@@ -50,6 +62,8 @@ export function PatientConsentsTab({
   const [previewContent, setPreviewContent] = useState<string | null>(null);
   const [requestModalOpen, setRequestModalOpen] = useState(false);
   const [requestActionId, setRequestActionId] = useState<string | null>(null);
+  const [expandedAuditId, setExpandedAuditId] = useState<string | null>(null);
+  const [revokingId, setRevokingId] = useState<string | null>(null);
 
   // Refetch both lists. Called on mount, after a request is sent,
   // and after cancel/resend so the admin sees fresh state without a
@@ -101,6 +115,20 @@ export function PatientConsentsTab({
       return;
     }
     toast({ message: "Reminder email sent.", type: "success" });
+    void reload();
+  };
+
+  const revokeSignature = async (id: string) => {
+    const reason = window.prompt("Revoke this consent — reason for the audit log:")?.trim();
+    if (!reason) return;
+    setRevokingId(id);
+    const res = await consentService.revokeSignature(id, reason);
+    setRevokingId(null);
+    if (res.error) {
+      toast({ message: res.error, type: "error" });
+      return;
+    }
+    toast({ message: "Consent revoked.", type: "success" });
     void reload();
   };
 
@@ -214,51 +242,118 @@ export function PatientConsentsTab({
           {signatures.map((sig) => {
             const tName = sig.template?.name ?? "Agreement";
             const tVersion = sig.template_version ?? sig.template?.version ?? "—";
+            const revoked = !!sig.revoked_at;
+            const expanded = expandedAuditId === sig.id;
+            const geo = [sig.signed_city, sig.signed_region, sig.signed_country].filter(Boolean).join(", ");
+            const browser = [sig.browser_name, sig.browser_version].filter(Boolean).join(" ");
+            const device = [sig.device_type, sig.os_name].filter(Boolean).join(" · ");
             return (
-              <div key={sig.id} className="flex items-center gap-3 p-4">
-                <div
-                  className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0"
-                  style={{ backgroundColor: "#ecf9ec" }}
-                >
-                  <Shield className="w-4 h-4" style={{ color: "#2f8132" }} />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <p className="text-sm font-medium text-slate-700 truncate">{tName}</p>
-                    <span className="text-xs px-2 py-0.5 rounded bg-slate-100 text-slate-500">
-                      v{tVersion}
-                    </span>
-                    <span
-                      className="text-xs px-2 py-0.5 rounded font-semibold"
-                      style={{ backgroundColor: "#ecf9ec", color: "#2f8132" }}
-                    >
-                      Signed
-                    </span>
+              <div key={sig.id}>
+                <div className="flex items-center gap-3 p-4">
+                  <div
+                    className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0"
+                    style={{ backgroundColor: revoked ? "#fef2f2" : "#ecf9ec" }}
+                  >
+                    <Shield className="w-4 h-4" style={{ color: revoked ? "#b91c1c" : "#2f8132" }} />
                   </div>
-                  <p className="text-xs text-slate-400 mt-0.5">
-                    {formatDate(sig.signed_at)}
-                    {sig.ip_address ? ` · IP ${sig.ip_address}` : ""}
-                  </p>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className={`text-sm font-medium truncate ${revoked ? "text-slate-500 line-through" : "text-slate-700"}`}>
+                        {tName}
+                      </p>
+                      <span className="text-xs px-2 py-0.5 rounded bg-slate-100 text-slate-500">
+                        v{tVersion}
+                      </span>
+                      {revoked ? (
+                        <span
+                          className="text-xs px-2 py-0.5 rounded font-semibold"
+                          style={{ backgroundColor: "#fee2e2", color: "#b91c1c" }}
+                        >
+                          Revoked
+                        </span>
+                      ) : (
+                        <span
+                          className="text-xs px-2 py-0.5 rounded font-semibold"
+                          style={{ backgroundColor: "#ecf9ec", color: "#2f8132" }}
+                        >
+                          Signed
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      {formatDate(sig.signed_at)}
+                      {sig.ip_address ? ` · IP ${sig.ip_address}` : ""}
+                      {geo ? ` · ${geo}` : ""}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() => setExpandedAuditId(expanded ? null : sig.id)}
+                      className="p-2 rounded-lg hover:bg-slate-100 transition-colors"
+                      title={expanded ? "Hide audit details" : "Show audit details"}
+                    >
+                      {expanded
+                        ? <ChevronDown className="w-4 h-4 text-slate-500" />
+                        : <ChevronRight className="w-4 h-4 text-slate-500" />}
+                    </button>
+                    <button
+                      onClick={() => openPreview(sig)}
+                      className="p-2 rounded-lg hover:bg-slate-100 transition-colors"
+                      title="View"
+                    >
+                      <Eye className="w-4 h-4 text-slate-500" />
+                    </button>
+                    <button
+                      onClick={() => downloadPdf(sig)}
+                      disabled={downloadingId === sig.id}
+                      className="p-2 rounded-lg hover:bg-slate-100 transition-colors disabled:opacity-50"
+                      title="Download PDF"
+                    >
+                      {downloadingId === sig.id
+                        ? <Loader2 className="w-4 h-4 animate-spin text-slate-500" />
+                        : <Download className="w-4 h-4 text-slate-500" />}
+                    </button>
+                    {!hideRequestButton && !revoked && (
+                      <button
+                        onClick={() => revokeSignature(sig.id)}
+                        disabled={revokingId === sig.id}
+                        className="p-2 rounded-lg hover:bg-red-50 transition-colors disabled:opacity-50"
+                        title="Revoke consent"
+                      >
+                        {revokingId === sig.id
+                          ? <Loader2 className="w-4 h-4 animate-spin text-red-500" />
+                          : <Ban className="w-4 h-4 text-red-500" />}
+                      </button>
+                    )}
+                  </div>
                 </div>
-                <div className="flex items-center gap-1">
-                  <button
-                    onClick={() => openPreview(sig)}
-                    className="p-2 rounded-lg hover:bg-slate-100 transition-colors"
-                    title="View"
-                  >
-                    <Eye className="w-4 h-4 text-slate-500" />
-                  </button>
-                  <button
-                    onClick={() => downloadPdf(sig)}
-                    disabled={downloadingId === sig.id}
-                    className="p-2 rounded-lg hover:bg-slate-100 transition-colors disabled:opacity-50"
-                    title="Download PDF"
-                  >
-                    {downloadingId === sig.id
-                      ? <Loader2 className="w-4 h-4 animate-spin text-slate-500" />
-                      : <Download className="w-4 h-4 text-slate-500" />}
-                  </button>
-                </div>
+                {expanded && (
+                  <div className="px-4 pb-4 pt-0 -mt-2">
+                    <dl className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-1.5 text-xs bg-slate-50 rounded-lg p-3 border border-slate-200">
+                      <AuditField label="Signed at (UTC)" value={new Date(sig.signed_at).toISOString()} />
+                      <AuditField
+                        label="Patient timezone"
+                        value={sig.signed_timezone
+                          ? `${sig.signed_timezone}${sig.signed_tz_offset_minutes != null ? ` (${formatOffset(sig.signed_tz_offset_minutes)})` : ""}`
+                          : null}
+                      />
+                      <AuditField label="IP address" value={sig.ip_address ?? null} />
+                      <AuditField label="Location (IP-derived)" value={geo || null} />
+                      <AuditField label="Device" value={device || null} />
+                      <AuditField label="Browser" value={browser || null} />
+                      <AuditField
+                        label="Content hash (SHA-256)"
+                        value={sig.template_content_hash ? sig.template_content_hash.slice(0, 16) + "…" : null}
+                      />
+                      {revoked && (
+                        <>
+                          <AuditField label="Revoked at" value={formatDate(sig.revoked_at!)} />
+                          <AuditField label="Revoked reason" value={sig.revoked_reason ?? null} className="col-span-2 sm:col-span-3" />
+                        </>
+                      )}
+                    </dl>
+                  </div>
+                )}
               </div>
             );
           })}
@@ -503,4 +598,21 @@ function formatDate(d?: string | null): string {
   } catch {
     return d;
   }
+}
+
+function formatOffset(minutes: number): string {
+  const sign = minutes >= 0 ? "+" : "-";
+  const abs = Math.abs(minutes);
+  const h = Math.floor(abs / 60).toString().padStart(2, "0");
+  const m = (abs % 60).toString().padStart(2, "0");
+  return `UTC${sign}${h}:${m}`;
+}
+
+function AuditField({ label, value, className = "" }: { label: string; value: string | null; className?: string }) {
+  return (
+    <div className={className}>
+      <dt className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">{label}</dt>
+      <dd className="text-xs text-slate-700 mt-0.5 break-words">{value ?? <span className="text-slate-300">—</span>}</dd>
+    </div>
+  );
 }

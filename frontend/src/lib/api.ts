@@ -1404,6 +1404,15 @@ export const consentService = {
     if (useMockData()) return mockCreate<ConsentSignature>(data);
     return apiFetch<ConsentSignature>("/consent-signatures", { method: "POST", body: JSON.stringify(data) });
   },
+  /** Admin-only — revokes a previously-signed consent. The signature row stays
+   *  but is marked revoked so the audit trail reflects the active window. */
+  revokeSignature: async (id: string, reason: string): Promise<ApiResponse<ConsentSignature>> => {
+    if (useMockData()) return { data: {} as ConsentSignature };
+    return apiFetch<ConsentSignature>(`/consent-signatures/${id}/revoke`, {
+      method: "POST",
+      body: JSON.stringify({ reason }),
+    });
+  },
 };
 
 // ─── Signature Requests (admin → patient via email) ──────────────────────────

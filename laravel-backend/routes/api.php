@@ -116,6 +116,12 @@ Route::prefix('external')->middleware('throttle:60,1')->group(function () {
     // email link without auth and signs.
     Route::get('/signature-requests/{token}', [\App\Http\Controllers\Api\SignatureRequestController::class, 'publicShow']);
     Route::post('/signature-requests/{token}/sign', [\App\Http\Controllers\Api\SignatureRequestController::class, 'publicSign'])->middleware('throttle:10,1');
+    Route::post('/signature-requests/{token}/viewed', [\App\Http\Controllers\Api\SignatureRequestController::class, 'publicMarkViewed'])->middleware('throttle:30,1');
+});
+
+// ===== Resend webhook (public, shared-secret) =====
+Route::prefix('webhooks/resend')->middleware('throttle:300,1')->group(function () {
+    Route::post('/', [\App\Http\Controllers\Api\ResendWebhookController::class, 'handle']);
 });
 
 // ===== Help Center (public, no auth) =====
@@ -566,6 +572,7 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
     Route::get('consent-signatures', [\App\Http\Controllers\Api\ConsentSignatureController::class, 'index']);
     Route::get('consent-signatures/{id}', [\App\Http\Controllers\Api\ConsentSignatureController::class, 'show']);
     Route::get('consent-signatures/{id}/pdf', [\App\Http\Controllers\Api\ConsentSignatureController::class, 'downloadPdf']);
+    Route::post('consent-signatures/{id}/revoke', [\App\Http\Controllers\Api\SignatureRequestController::class, 'revoke']);
     Route::get('memberships/{id}/agreement-pdf', [\App\Http\Controllers\Api\ConsentSignatureController::class, 'membershipAgreementPdf']);
 
     // ===== Appointment Enhancements =====

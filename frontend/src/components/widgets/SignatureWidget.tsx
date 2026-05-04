@@ -85,6 +85,19 @@ export function SignatureWidget() {
   async function handleSubmit() {
     if (!token || !signature || state.kind !== "ready") return;
     setState({ kind: "submitting", payload: state.payload });
+    // Capture the patient's local time context. Server stores
+    // signed_at in UTC; this row tells reviewers whether 11:47 PM
+    // was the patient's evening or someone else's middle-of-night.
+    let timezone: string | null = null;
+    let tzOffsetMinutes: number | null = null;
+    try {
+      timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || null;
+      // getTimezoneOffset returns minutes WEST of UTC (so EST is +300).
+      // We negate to get the conventional offset (EST = -300).
+      tzOffsetMinutes = -new Date().getTimezoneOffset();
+    } catch {
+      /* fail-soft — server validates these as nullable */
+    }
     try {
       const res = await fetch(`${API_BASE_URL}/external/signature-requests/${token}/sign`, {
         method: "POST",
@@ -92,6 +105,8 @@ export function SignatureWidget() {
         body: JSON.stringify({
           signature_data: signature.data,
           signature_type: signature.type,
+          timezone,
+          tz_offset_minutes: tzOffsetMinutes,
         }),
       });
       const json = await res.json().catch(() => ({}));
@@ -159,6 +174,24 @@ function SignForm({ payload, submitting, signature, onSignature, onSubmit }: {
   onSubmit: () => void;
 }) {
   const fullName = [payload.patient.first_name, payload.patient.last_name].filter(Boolean).join(" ").trim();
+  const { token } = useParams<{ token: string }>();
+  const [hasMarkedViewed, setHasMarkedViewed] = useState(false);
+
+  // Fire the /viewed ping the first time the patient scrolls within
+  // ~30px of the bottom of the agreement body. Single-shot — we
+  // only care about the first time they reached the end. Strongest
+  // defense against the "I never read it" claim in an audit.
+  const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    if (hasMarkedViewed || !token) return;
+    const el = e.currentTarget;
+    if (el.scrollHeight - el.scrollTop - el.clientHeight < 30) {
+      setHasMarkedViewed(true);
+      void fetch(`${API_BASE_URL}/external/signature-requests/${token}/viewed`, {
+        method: "POST",
+        headers: { Accept: "application/json" },
+      }).catch(() => { /* fail-soft — audit row, not user-visible */ });
+    }
+  };
   return (
     <>
       {/* Header */}
@@ -186,7 +219,10 @@ function SignForm({ payload, submitting, signature, onSignature, onSubmit }: {
 
       {/* Document body */}
       <div className="px-6 py-5">
-        <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 max-h-72 overflow-y-auto whitespace-pre-line text-sm text-slate-700 leading-relaxed">
+        <div
+          onScroll={handleScroll}
+          className="rounded-lg border border-slate-200 bg-slate-50 p-4 max-h-72 overflow-y-auto whitespace-pre-line text-sm text-slate-700 leading-relaxed"
+        >
           {payload.template.content}
         </div>
       </div>

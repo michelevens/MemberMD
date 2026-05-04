@@ -10,6 +10,7 @@ use App\Models\Patient;
 use App\Models\PatientMembership;
 use App\Models\Practice;
 use App\Models\SignatureRequest;
+use App\Services\AuditEnrichmentService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -194,6 +195,12 @@ class SignatureRequestController extends Controller
             ], 410);
         }
 
+        // Stamp first-open time. We deliberately don't update on every
+        // load so the timestamp reflects the patient's first interaction.
+        if ($req->link_opened_at === null) {
+            $req->update(['link_opened_at' => now()]);
+        }
+
         $practice = Practice::find($req->tenant_id);
         return response()->json([
             'data' => [
@@ -212,12 +219,17 @@ class SignatureRequestController extends Controller
         ]);
     }
 
-    public function publicSign(Request $request, string $token): JsonResponse
+    public function publicSign(Request $request, string $token, AuditEnrichmentService $enricher): JsonResponse
     {
         $data = $request->validate([
             'signature_data' => 'required|string|max:200000',
             // 'drawn' (canvas dataURL) or 'typed' (typed full name).
             'signature_type' => 'required|string|in:drawn,typed',
+            // Audit context captured client-side. All optional and
+            // bounded — we never trust these for auth, only for the
+            // audit trail.
+            'timezone' => 'sometimes|nullable|string|max:64',
+            'tz_offset_minutes' => 'sometimes|nullable|integer|min:-840|max:840',
         ]);
 
         $req = SignatureRequest::where('public_token', $token)
@@ -234,19 +246,37 @@ class SignatureRequestController extends Controller
         $template = $req->template;
         if (!$template) return response()->json(['message' => 'Template missing.'], 422);
 
-        // Snapshot the template version so future template edits don't
-        // retroactively change what the patient signed.
+        // Hash the rendered content the patient saw, so future edits
+        // can't retroactively rewrite the agreement. Stored alongside
+        // template_version (which is just a counter).
+        $contentHash = hash('sha256', (string) $template->content);
+
+        // Server-side enrichment — fail-soft on any error.
+        $ua = (string) $request->userAgent();
+        $parsed = $enricher->parseUserAgent($ua);
+        $geo = $enricher->geolocate($request->ip());
+
         $signature = ConsentSignature::create([
             'tenant_id' => $req->tenant_id,
             'patient_id' => $req->patient_id,
             'template_id' => $template->id,
             'template_version' => (string) ($template->versionInt() ?? '1'),
+            'template_content_hash' => $contentHash,
             'membership_id' => $req->membership_id,
             'signature_type' => $data['signature_type'],
             'signature_data' => $data['signature_data'],
             'signed_at' => now(),
+            'signed_timezone' => $data['timezone'] ?? null,
+            'signed_tz_offset_minutes' => $data['tz_offset_minutes'] ?? null,
             'ip_address' => $request->ip(),
-            'user_agent' => substr((string) $request->userAgent(), 0, 255),
+            'signed_country' => $geo['country'],
+            'signed_region' => $geo['region'],
+            'signed_city' => $geo['city'],
+            'user_agent' => substr($ua, 0, 255),
+            'device_type' => $parsed['device_type'],
+            'browser_name' => $parsed['browser_name'],
+            'browser_version' => $parsed['browser_version'],
+            'os_name' => $parsed['os_name'],
         ]);
 
         $req->update([
@@ -281,6 +311,64 @@ class SignatureRequestController extends Controller
         ]);
     }
 
+    /**
+     * POST /external/signature-requests/{token}/viewed
+     *
+     * Called by the SignatureWidget when the patient scrolls the
+     * agreement body to the bottom. Stamps viewed_at on first hit;
+     * subsequent calls are no-ops. Strongest defense against the
+     * "I never read it" claim.
+     */
+    public function publicMarkViewed(string $token): JsonResponse
+    {
+        $req = SignatureRequest::where('public_token', $token)->first();
+        if (!$req) return response()->json(['message' => 'Link not found.'], 404);
+        if (!$req->isPending()) {
+            return response()->json(['message' => 'No longer active.'], 410);
+        }
+        if ($req->viewed_at === null) {
+            $req->update(['viewed_at' => now()]);
+        }
+        return response()->json(['data' => ['viewed_at' => $req->viewed_at]]);
+    }
+
+    /**
+     * POST /consent-signatures/{id}/revoke
+     *
+     * Admin-only — marks a signed consent as revoked. We don't delete
+     * (audit trail must show consent was active from signed_at to
+     * revoked_at). Only the signed-and-not-yet-revoked rows are
+     * eligible to flip.
+     */
+    public function revoke(Request $request, string $id): JsonResponse
+    {
+        $user = $request->user();
+        abort_if(!in_array($user->role, ['practice_admin', 'staff']), 403);
+
+        $data = $request->validate([
+            'reason' => 'required|string|max:1000',
+        ]);
+
+        $sig = ConsentSignature::where('tenant_id', $user->tenant_id)->findOrFail($id);
+        if ($sig->revoked_at !== null) {
+            return response()->json([
+                'message' => 'This consent has already been revoked.',
+                'revoked_at' => $sig->revoked_at,
+            ], 422);
+        }
+
+        $sig->update([
+            'revoked_at' => now(),
+            'revoked_reason' => $data['reason'],
+            'revoked_by_user_id' => $user->id,
+        ]);
+
+        return response()->json([
+            'data' => $sig->fresh(),
+            'message' => 'Consent revoked. The patient will see this on their consents list.',
+        ]);
+    }
+
     // ─── Helpers ─────────────────────────────────────────────────────────
 
     private function dispatchEmail(SignatureRequest $req): void
@@ -294,18 +382,63 @@ class SignatureRequestController extends Controller
             $appUrl = (string) config('app.frontend_url', config('app.url', 'https://app.membermd.io'));
             $signUrl = rtrim($appUrl, '/') . '/#/sign/' . $req->public_token;
 
-            Mail::to($patient->email)->send(new SignatureRequestEmail(
+            $sent = Mail::to($patient->email)->send(new SignatureRequestEmail(
                 practice: $practice,
                 patient: $patient,
                 template: $template,
                 signUrl: $signUrl,
                 personalNote: $req->message,
             ));
+
+            // Resend's transport stamps the message id on the
+            // SentMessage. Persist it so the webhook can match
+            // delivery/open/click events back to this row.
+            try {
+                $emailId = $this->extractResendId($sent);
+                if ($emailId !== null) {
+                    $req->update(['email_id' => $emailId]);
+                }
+            } catch (Throwable $e) {
+                // Non-fatal — the email was still sent, we just lose
+                // the delivery-proof linkage for this send.
+                Log::info('Could not extract Resend email id', [
+                    'request_id' => $req->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
         } catch (Throwable $e) {
             Log::warning('Signature request email failed', [
                 'request_id' => $req->id,
                 'error' => $e->getMessage(),
             ]);
         }
+    }
+
+    private function extractResendId(mixed $sent): ?string
+    {
+        // Mail::send() returns a SentMessage in modern Laravel
+        // (or null on certain transports). The Symfony message has
+        // an "X-Resend-Email-ID" or similar header set by the
+        // resend-laravel transport.
+        if (!$sent) return null;
+        $sym = method_exists($sent, 'getSymfonySentMessage')
+            ? $sent->getSymfonySentMessage()
+            : null;
+        if (!$sym) return null;
+        $headers = $sym->getOriginalMessage()?->getHeaders();
+        if (!$headers) return null;
+        foreach (['x-resend-email-id', 'resend-email-id', 'x-message-id'] as $hk) {
+            if ($headers->has($hk)) {
+                $v = $headers->get($hk)?->getBodyAsString();
+                if ($v) return trim($v);
+            }
+        }
+        // Fallback to the Resend-issued message-id which the transport
+        // typically writes to the "Message-ID" header.
+        if ($headers->has('Message-ID')) {
+            $v = $headers->get('Message-ID')?->getBodyAsString();
+            if ($v) return trim($v, " \t<>");
+        }
+        return null;
     }
 }
