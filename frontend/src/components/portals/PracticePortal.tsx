@@ -2600,10 +2600,30 @@ export function PracticePortal() {
 
   const appointments = useMemo(() => apiAppointments || (isDemoMode ? MOCK_APPOINTMENTS : []), [apiAppointments]);
 
-  const telehealthAppointments = useMemo(
+  // All telehealth appointments (any date). Used by the Telehealth tab's
+  // upcoming/recent lists.
+  const telehealthAppointmentsAll = useMemo(
     () => appointments.filter((a: typeof MOCK_APPOINTMENTS[0]) => a.isTelehealth),
     [appointments]
   );
+
+  // Today-only telehealth — feeds the dashboard's "Today's telehealth
+  // sessions" widget. Compares against the local date so a 7am visit
+  // shows up under today, not yesterday/tomorrow depending on TZ.
+  const telehealthAppointments = useMemo(() => {
+    const todayStr = new Date().toISOString().slice(0, 10);
+    return telehealthAppointmentsAll.filter((a: { scheduledAt?: string; scheduled_at?: string; date?: string }) => {
+      const raw = a.scheduledAt ?? a.scheduled_at ?? a.date ?? "";
+      // Demo MOCK_APPOINTMENTS use a friendly date string ("Today",
+      // "Tomorrow", etc.). Treat anything that ISO-parses successfully
+      // as a real datetime; anything else (mock label) gets passed
+      // through so the demo still paints.
+      if (!raw) return true;
+      const parsed = new Date(raw);
+      if (isNaN(parsed.getTime())) return true;
+      return parsed.toISOString().slice(0, 10) === todayStr;
+    });
+  }, [telehealthAppointmentsAll]);
 
   // Documentation pending = completed appointments whose encounter is
   // missing or unsigned. Backend eager-loads `encounter` on /appointments
@@ -6805,11 +6825,34 @@ export function PracticePortal() {
                         </button>
                       )}
                       <button
-                        onClick={() => {
-                          if (telehealthMode === "builtin" && apt.sessionId) {
+                        onClick={async () => {
+                          // External-URL mode: just open the configured link.
+                          if (telehealthMode !== "builtin") {
+                            if (externalUrl) {
+                              window.open(externalUrl, "_blank", "noopener,noreferrer");
+                            } else {
+                              setToast({ message: "Set your external video URL in Telehealth settings first.", type: "error" });
+                            }
+                            return;
+                          }
+                          // Built-in mode: ensure a session exists for the
+                          // appointment (creates if missing, returns existing
+                          // if present), then navigate. apt.sessionId may be
+                          // present from a prior open or absent on the first
+                          // click — openForAppointment handles both.
+                          if (apt.sessionId) {
                             navigate(`/telehealth/${apt.sessionId}`);
-                          } else if (externalUrl) {
-                            window.open(externalUrl, "_blank", "noopener,noreferrer");
+                            return;
+                          }
+                          if (!apt.id) {
+                            setToast({ message: "Cannot start — appointment id is missing.", type: "error" });
+                            return;
+                          }
+                          const res = await telehealthService.openForAppointment(apt.id);
+                          if (res.data?.sessionId) {
+                            navigate(`/telehealth/${res.data.sessionId}`);
+                          } else {
+                            setToast({ message: res.error || "Failed to start video session.", type: "error" });
                           }
                         }}
                         className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-white transition-colors"
