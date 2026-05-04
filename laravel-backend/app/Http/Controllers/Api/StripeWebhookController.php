@@ -977,6 +977,8 @@ class StripeWebhookController extends Controller
                     signatureData: (string) ($consentPayload['signature_data'] ?? ''),
                     ip: $pending->signed_ip,
                     userAgent: $pending->signed_user_agent,
+                    timezone: $consentPayload['timezone'] ?? null,
+                    tzOffsetMinutes: isset($consentPayload['tz_offset_minutes']) ? (int) $consentPayload['tz_offset_minutes'] : null,
                 );
             } catch (\Throwable $e) {
                 Log::warning('Consent replay failed after Checkout conversion', [

@@ -139,6 +139,11 @@ class ExternalController extends Controller
             'emergency_contact_phone' => 'required|string|max:30',
             'consents' => 'required|array|min:1',
             'signature_data' => 'required|string',
+            // Optional audit context — IANA timezone + offset minutes.
+            // Captured client-side so reviewers can tell whether 11:47 PM
+            // was the patient's evening or someone else's middle of night.
+            'timezone' => 'sometimes|nullable|string|max:64',
+            'tz_offset_minutes' => 'sometimes|nullable|integer|min:-840|max:840',
         ]);
 
         // Validate plan belongs to the tenant BEFORE any writes — otherwise
@@ -267,6 +272,8 @@ class ExternalController extends Controller
                 'consent_payload' => [
                     'types' => array_values((array) $validated['consents']),
                     'signature_data' => (string) $validated['signature_data'],
+                    'timezone' => $validated['timezone'] ?? null,
+                    'tz_offset_minutes' => isset($validated['tz_offset_minutes']) ? (int) $validated['tz_offset_minutes'] : null,
                 ],
                 'signed_ip' => $request->ip(),
                 'signed_user_agent' => substr((string) $request->userAgent(), 0, 255),
@@ -377,6 +384,8 @@ class ExternalController extends Controller
             signatureData: (string) $validated['signature_data'],
             ip: $request->ip(),
             userAgent: substr((string) $request->userAgent(), 0, 255),
+            timezone: $validated['timezone'] ?? null,
+            tzOffsetMinutes: isset($validated['tz_offset_minutes']) ? (int) $validated['tz_offset_minutes'] : null,
         );
 
         $stripeWarning = null;
@@ -434,6 +443,11 @@ class ExternalController extends Controller
      * don't retroactively rewrite what the patient agreed to. Called from
      * the manual enrollment path and from the webhook handler when a
      * Checkout-deferred enrollment converts.
+     *
+     * Audit enrichment (content hash, geo, parsed UA, timezone) mirrors
+     * what SignatureRequestController::publicSign captures so HIPAA /
+     * Treatment / Membership signatures from the enrollment widget show
+     * the same audit detail as ones from the e-signature link flow.
      */
     public static function writeConsentSignatures(
         Practice $practice,
@@ -443,6 +457,8 @@ class ExternalController extends Controller
         string $signatureData,
         ?string $ip,
         ?string $userAgent,
+        ?string $timezone = null,
+        ?int $tzOffsetMinutes = null,
     ): void {
         $templates = ConsentTemplate::whereIn('type', $consentTypes)
             ->where('is_active', true)
@@ -452,6 +468,10 @@ class ExternalController extends Controller
             })
             ->get()
             ->keyBy('type');
+
+        $enricher = app(\App\Services\AuditEnrichmentService::class);
+        $parsed = $enricher->parseUserAgent($userAgent);
+        $geo = $enricher->geolocate($ip);
 
         foreach ($consentTypes as $type) {
             $template = $templates->get($type);
@@ -463,12 +483,22 @@ class ExternalController extends Controller
                 'patient_id' => $patient->id,
                 'template_id' => $template->id,
                 'template_version' => $template->version,
+                'template_content_hash' => hash('sha256', (string) $template->content),
                 'membership_id' => $membership->id,
                 'signature_type' => 'typed',
                 'signature_data' => $signatureData,
                 'signed_at' => now(),
+                'signed_timezone' => $timezone,
+                'signed_tz_offset_minutes' => $tzOffsetMinutes,
                 'ip_address' => $ip,
+                'signed_country' => $geo['country'],
+                'signed_region' => $geo['region'],
+                'signed_city' => $geo['city'],
                 'user_agent' => $userAgent,
+                'device_type' => $parsed['device_type'],
+                'browser_name' => $parsed['browser_name'],
+                'browser_version' => $parsed['browser_version'],
+                'os_name' => $parsed['os_name'],
             ]);
         }
     }

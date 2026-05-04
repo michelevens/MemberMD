@@ -467,6 +467,12 @@ export function EnrollmentWidget() {
       emergency_contact_phone: form.emergencyContactPhone,
       consents,
       signature_data: form.signatureData,
+      // Audit context — patient's local time at sign time. Server
+      // stores signed_at in UTC; this lets reviewers tell whether
+      // 11:47 PM was the patient's evening or someone else's
+      // middle of the night.
+      timezone: (() => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || null; } catch { return null; } })(),
+      tz_offset_minutes: (() => { try { return -new Date().getTimezoneOffset(); } catch { return null; } })(),
       // Honeypot
       website_url: form.websiteUrl,
     };

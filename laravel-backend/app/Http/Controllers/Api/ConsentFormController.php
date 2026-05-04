@@ -108,6 +108,8 @@ class ConsentFormController extends Controller
             'template_id' => 'required|uuid|exists:consent_form_templates,id',
             'signature_data' => 'required|string',
             'signature_method' => ['sometimes', Rule::in(['typed', 'drawn'])],
+            'timezone' => 'sometimes|nullable|string|max:64',
+            'tz_offset_minutes' => 'sometimes|nullable|integer|min:-840|max:840',
         ]);
 
         // Determine patient_id from authenticated user
@@ -122,16 +124,33 @@ class ConsentFormController extends Controller
             $signatureImageUrl = $validated['signature_data'];
         }
 
+        // Audit enrichment — same as the e-signature link flow.
+        $enricher = app(\App\Services\AuditEnrichmentService::class);
+        $ua = (string) $request->userAgent();
+        $parsed = $enricher->parseUserAgent($ua);
+        $geo = $enricher->geolocate($request->ip());
+        $template = \App\Models\ConsentTemplate::find($validated['template_id']);
+
         $consent = ConsentSignature::create([
             'tenant_id' => $user->tenant_id,
             'patient_id' => $patient->id,
             'template_id' => $validated['template_id'],
+            'template_content_hash' => $template ? hash('sha256', (string) $template->content) : null,
             'signature_type' => $signatureMethod,
             'signature_data' => $validated['signature_data'],
             'signature_image_url' => $signatureImageUrl,
             'signed_at' => now(),
+            'signed_timezone' => $validated['timezone'] ?? null,
+            'signed_tz_offset_minutes' => isset($validated['tz_offset_minutes']) ? (int) $validated['tz_offset_minutes'] : null,
             'ip_address' => $request->ip(),
-            'user_agent' => $request->userAgent(),
+            'signed_country' => $geo['country'],
+            'signed_region' => $geo['region'],
+            'signed_city' => $geo['city'],
+            'user_agent' => substr($ua, 0, 255),
+            'device_type' => $parsed['device_type'],
+            'browser_name' => $parsed['browser_name'],
+            'browser_version' => $parsed['browser_version'],
+            'os_name' => $parsed['os_name'],
         ]);
 
         return response()->json(['data' => $consent->load('template')], 201);

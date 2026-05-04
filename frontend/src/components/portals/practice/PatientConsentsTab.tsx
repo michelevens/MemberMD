@@ -329,6 +329,16 @@ export function PatientConsentsTab({
                 </div>
                 {expanded && (
                   <div className="px-4 pb-4 pt-0 -mt-2">
+                    {/* Legacy banner: rows signed before the audit-enrichment
+                        rollout (2026-05-04) have no timezone/geo/UA data.
+                        signed_at + ip_address are still authoritative. */}
+                    {!sig.signed_timezone && !sig.template_content_hash && !sig.device_type && (
+                      <div className="mb-2 px-3 py-2 rounded-md text-[11px] text-slate-500 bg-amber-50 border border-amber-200">
+                        Signed before the richer audit columns rolled out (2026-05-04).
+                        Only signed_at + IP were captured for this row. New signatures
+                        capture timezone, geo, content hash, and parsed UA.
+                      </div>
+                    )}
                     <dl className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-1.5 text-xs bg-slate-50 rounded-lg p-3 border border-slate-200">
                       <AuditField label="Signed at (UTC)" value={safeIsoString(sig.signed_at)} />
                       <AuditField
