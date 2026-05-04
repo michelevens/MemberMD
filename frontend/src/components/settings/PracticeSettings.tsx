@@ -781,7 +781,7 @@ export function PracticeSettings({ initialTab }: { initialTab?: string }) {
   // save. Templates are loaded once on mount; "add new" still uses local
   // state since the full content authoring flow is a separate surface.
   const [documentTemplates, setDocumentTemplates] = useState<
-    Array<{ id?: string; name: string; autoRequest: boolean; type?: string }>
+    Array<{ id?: string; name: string; autoRequest: boolean; type?: string; isPlatform?: boolean }>
   >([]);
   const [docTemplatesDirty, setDocTemplatesDirty] = useState<Record<string, boolean>>({});
 
@@ -791,16 +791,44 @@ export function PracticeSettings({ initialTab }: { initialTab?: string }) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const res = await apiFetch<any>("/consent-templates");
       if (cancelled || res.error || !res.data) return;
+      // The endpoint returns { data: { tenant: [...], platformAvailableToFork: [...] } }
+      // (snake-case key on the wire, camel after apiFetch's transform).
+      // We surface BOTH lists: tenant-owned templates first (auto_request
+      // toggleable), then platform templates flagged with isPlatform=true
+      // so the UI can show them as fork-able.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const items: any[] = Array.isArray(res.data) ? res.data : (res.data as any).data ?? [];
-      setDocumentTemplates(items
-        .filter((t) => t.isActive !== false && t.is_active !== false)
-        .map((t) => ({
-          id: t.id,
-          name: t.name,
-          autoRequest: !!(t.autoRequest ?? t.auto_request),
-          type: t.type,
-        })));
+      const raw = res.data as any;
+      const tenantList: unknown[] = Array.isArray(raw)
+        ? raw
+        : Array.isArray(raw?.tenant)
+          ? raw.tenant
+          : Array.isArray(raw?.data?.tenant)
+            ? raw.data.tenant
+            : Array.isArray(raw?.data)
+              ? raw.data
+              : [];
+      const platformList: unknown[] = Array.isArray(raw?.platformAvailableToFork)
+        ? raw.platformAvailableToFork
+        : Array.isArray(raw?.platform_available_to_fork)
+          ? raw.platform_available_to_fork
+          : Array.isArray(raw?.data?.platformAvailableToFork)
+            ? raw.data.platformAvailableToFork
+            : [];
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const mapTpl = (t: any, isPlatform: boolean) => ({
+        id: t.id,
+        name: t.name,
+        autoRequest: !!(t.autoRequest ?? t.auto_request),
+        type: t.type,
+        isPlatform,
+      });
+      const merged = [
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        ...(tenantList as any[]).filter((t) => t.isActive !== false && t.is_active !== false).map((t) => mapTpl(t, false)),
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        ...(platformList as any[]).map((t) => mapTpl(t, true)),
+      ];
+      setDocumentTemplates(merged);
     })();
     return () => { cancelled = true; };
   }, []);
@@ -1998,6 +2026,14 @@ export function PracticeSettings({ initialTab }: { initialTab?: string }) {
                 <div className="flex items-center gap-2.5">
                   <FileText className="w-4 h-4" style={{ color: C.slate400 }} />
                   <span className="text-sm" style={{ color: C.navy900 }}>{doc.name}</span>
+                  {doc.isPlatform && (
+                    <span
+                      className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wider"
+                      style={{ backgroundColor: C.slate100, color: C.slate500 }}
+                    >
+                      Platform default
+                    </span>
+                  )}
                 </div>
                 <div className="flex items-center gap-3">
                   <label className="flex items-center gap-1.5 text-xs cursor-pointer" style={{ color: C.slate500 }}>
