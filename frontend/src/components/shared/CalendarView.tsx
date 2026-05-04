@@ -151,6 +151,10 @@ function mapAppointment(api: ApiAppointment): CalendarAppointment | null {
 // ─── Time Helpers ────────────────────────────────────────────────────────────
 
 const HOURS = Array.from({ length: 13 }, (_, i) => i + 7); // 7 AM to 7 PM
+const SLOT_MINUTES = 15;
+const SLOTS_PER_HOUR = 60 / SLOT_MINUTES; // 4
+// Day grid is 13 hours × 4 quarter-hour slots = 52 cells.
+const SLOTS_PER_DAY = HOURS.length * SLOTS_PER_HOUR;
 const DRAG_TYPE = "calendar-appointment";
 
 function formatHour(h: number): string {
@@ -208,10 +212,12 @@ function DraggableBlock({
   appointment,
   children,
   onClick,
+  onContextMenu,
 }: {
   appointment: CalendarAppointment;
   children: React.ReactNode;
   onClick?: () => void;
+  onContextMenu?: (e: React.MouseEvent) => void;
 }) {
   const draggable = isDraggable(appointment.status);
   const [{ isDragging }, drag] = useDrag(
@@ -229,7 +235,14 @@ function DraggableBlock({
       ref={(node) => {
         if (node) drag(node);
       }}
-      onClick={onClick}
+      onClick={(e) => {
+        // Stop propagation so the click doesn't also fire on the
+        // underlying empty time-slot's onClick (which would open
+        // quick-create at the same time).
+        e.stopPropagation();
+        onClick?.();
+      }}
+      onContextMenu={onContextMenu}
       style={{
         opacity: isDragging ? 0.4 : 1,
         cursor: draggable ? "grab" : "pointer",
@@ -280,6 +293,468 @@ function DropDay({
   );
 }
 
+// ─── Drop slot — per 15-minute cell. ────────────────────────────────
+// Empty time slots are clickable (opens quick-create) AND droppable
+// (drag an appointment block onto a different time, not just day).
+// Renders a small Plus icon on hover. EnnHealth pattern, ported.
+function DropTimeSlot({
+  date,
+  hour,
+  minute,
+  onDrop,
+  onClick,
+}: {
+  date: Date;
+  hour: number;
+  minute: number;
+  onDrop: (item: DragItem, date: Date, hour: number, minute: number) => void;
+  onClick: (date: Date, hour: number, minute: number) => void;
+}) {
+  const [{ isOver, canDrop }, drop] = useDrop(
+    () => ({
+      accept: DRAG_TYPE,
+      drop: (item: DragItem) => onDrop(item, date, hour, minute),
+      canDrop: (item: DragItem) => {
+        // Block dropping on the slot the block is already in.
+        if (!isSameDay(item.originalDate, date)) return true;
+        return item.originalDate.getHours() !== hour
+          || item.originalDate.getMinutes() !== minute;
+      },
+      collect: (monitor) => ({
+        isOver: monitor.isOver({ shallow: true }),
+        canDrop: monitor.canDrop(),
+      }),
+    }),
+    [date, hour, minute, onDrop]
+  );
+
+  const isOnTheHour = minute === 0;
+  return (
+    <div
+      ref={(node) => { if (node) drop(node); }}
+      onClick={() => onClick(date, hour, minute)}
+      title={`Click to create at ${formatTime(hour, minute)}`}
+      style={{
+        flex: 1,
+        borderTop: isOnTheHour
+          ? `1px solid ${C.slate200}`
+          : `1px dashed ${C.slate100}`,
+        backgroundColor: isOver && canDrop ? "rgba(39, 171, 131, 0.12)" : "transparent",
+        cursor: "pointer",
+        position: "relative",
+      }}
+      className="group"
+    >
+      {/* Hover plus indicator — appears only over empty cells. */}
+      <div
+        className="absolute opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"
+        style={{ top: 1, right: 2, fontSize: 11, color: C.slate400 }}
+      >
+        +
+      </div>
+    </div>
+  );
+}
+
+// ─── Context-menu item — small helper to keep the menu JSX tidy. ────────
+function CtxMenuItem({
+  children, onClick, danger = false,
+}: { children: React.ReactNode; onClick: () => void; danger?: boolean }) {
+  return (
+    <button
+      onClick={onClick}
+      className="w-full text-left px-3 py-1.5 text-xs rounded transition-colors hover:bg-slate-100"
+      style={{
+        color: danger ? "#dc2626" : "#243b53",
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+// ─── Quick-create dialog ────────────────────────────────────────────────
+// Opened when the user clicks an empty time slot. Minimal form:
+// patient + provider + duration. Type is optional (the patient picks
+// reason later in their portal). Posts to /appointments and closes.
+function QuickCreateDialog({
+  slot,
+  onClose,
+  onCreated,
+}: {
+  slot: { date: Date; hour: number; minute: number };
+  onClose: () => void;
+  onCreated: () => void;
+}) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [patients, setPatients] = useState<any[]>([]);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [providers, setProviders] = useState<any[]>([]);
+  const [patientId, setPatientId] = useState<string>("");
+  const [providerId, setProviderId] = useState<string>("");
+  const [duration, setDuration] = useState<number>(30);
+  const [isTelehealth, setIsTelehealth] = useState(false);
+  const [notes, setNotes] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const [pRes, prRes] = await Promise.all([
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        apiFetch<any>("/patients?per_page=200"),
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        apiFetch<any>("/providers"),
+      ]);
+      if (cancelled) return;
+      // Patients are paginated; providers are a flat list.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const pList: any[] = Array.isArray(pRes.data)
+        ? pRes.data
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        : Array.isArray((pRes.data as any)?.data)
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          ? (pRes.data as any).data
+          : [];
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const prList: any[] = Array.isArray(prRes.data)
+        ? prRes.data
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        : Array.isArray((prRes.data as any)?.data)
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          ? (prRes.data as any).data
+          : [];
+      setPatients(pList);
+      setProviders(prList);
+      // Auto-select the only provider when there's just one.
+      if (prList.length === 1) setProviderId(prList[0].id);
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  async function submit() {
+    if (!patientId || !providerId) {
+      setError("Pick a patient and a provider.");
+      return;
+    }
+    setSubmitting(true);
+    setError(null);
+    const dt = new Date(
+      slot.date.getFullYear(), slot.date.getMonth(), slot.date.getDate(),
+      slot.hour, slot.minute, 0, 0,
+    );
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const res = await apiFetch<any>("/appointments", {
+      method: "POST",
+      body: JSON.stringify({
+        patient_id: patientId,
+        provider_id: providerId,
+        scheduled_at: dt.toISOString(),
+        duration_minutes: duration,
+        is_telehealth: isTelehealth,
+        notes: notes.trim() || null,
+      }),
+    });
+    setSubmitting(false);
+    if (res.error) {
+      setError(res.error);
+      return;
+    }
+    onCreated();
+  }
+
+  const patientName = (p: { firstName?: string; first_name?: string; lastName?: string; last_name?: string }) => {
+    const f = p.firstName ?? p.first_name ?? "";
+    const l = p.lastName ?? p.last_name ?? "";
+    return `${f} ${l}`.trim() || "Unnamed";
+  };
+  const providerName = (p: { user?: { firstName?: string; first_name?: string; lastName?: string; last_name?: string; name?: string } | null; firstName?: string; first_name?: string; lastName?: string; last_name?: string }) => {
+    const u = p.user;
+    if (u?.name) return u.name;
+    const f = u?.firstName ?? u?.first_name ?? p.firstName ?? p.first_name ?? "";
+    const l = u?.lastName ?? u?.last_name ?? p.lastName ?? p.last_name ?? "";
+    return `${f} ${l}`.trim() || "Provider";
+  };
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: "fixed", inset: 0,
+        backgroundColor: "rgba(15, 23, 42, 0.55)",
+        backdropFilter: "blur(4px)",
+        zIndex: 50, display: "flex", alignItems: "center", justifyContent: "center",
+        padding: "16px",
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          backgroundColor: "#ffffff",
+          borderRadius: "12px",
+          maxWidth: "480px",
+          width: "100%",
+          boxShadow: "0 20px 50px rgba(0,0,0,0.25)",
+        }}
+      >
+        <div style={{ padding: "16px 18px", borderBottom: "1px solid #e2e8f0" }}>
+          <p className="text-xs uppercase tracking-wider font-semibold mb-1" style={{ color: "#94a3b8" }}>
+            New appointment
+          </p>
+          <h3 className="text-base font-semibold" style={{ color: "#243b53" }}>
+            {slot.date.toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" })}
+            {" · "}
+            {formatTime(slot.hour, slot.minute)}
+          </h3>
+        </div>
+        <div style={{ padding: "14px 18px", display: "flex", flexDirection: "column", gap: 10 }}>
+          <div>
+            <label className="block text-xs font-medium mb-1" style={{ color: "#475569" }}>Patient</label>
+            <select
+              value={patientId}
+              onChange={(e) => setPatientId(e.target.value)}
+              className="w-full px-3 py-2 rounded-lg border text-sm"
+              style={{ borderColor: "#e2e8f0" }}
+            >
+              <option value="">Select patient…</option>
+              {patients.map((p) => (
+                <option key={p.id} value={p.id}>{patientName(p)}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-medium mb-1" style={{ color: "#475569" }}>Provider</label>
+            <select
+              value={providerId}
+              onChange={(e) => setProviderId(e.target.value)}
+              className="w-full px-3 py-2 rounded-lg border text-sm"
+              style={{ borderColor: "#e2e8f0" }}
+            >
+              <option value="">Select provider…</option>
+              {providers.map((p) => (
+                <option key={p.id} value={p.id}>{providerName(p)}</option>
+              ))}
+            </select>
+          </div>
+          <div className="flex gap-2">
+            <div style={{ flex: 1 }}>
+              <label className="block text-xs font-medium mb-1" style={{ color: "#475569" }}>Duration</label>
+              <select
+                value={duration}
+                onChange={(e) => setDuration(parseInt(e.target.value, 10))}
+                className="w-full px-3 py-2 rounded-lg border text-sm"
+                style={{ borderColor: "#e2e8f0" }}
+              >
+                {[15, 20, 30, 45, 60, 75, 90].map((m) => (
+                  <option key={m} value={m}>{m} min</option>
+                ))}
+              </select>
+            </div>
+            <div style={{ flex: 1, display: "flex", alignItems: "flex-end" }}>
+              <label className="flex items-center gap-2 text-sm cursor-pointer pb-2" style={{ color: "#475569" }}>
+                <input
+                  type="checkbox"
+                  checked={isTelehealth}
+                  onChange={(e) => setIsTelehealth(e.target.checked)}
+                />
+                Telehealth
+              </label>
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs font-medium mb-1" style={{ color: "#475569" }}>Notes <span style={{ color: "#94a3b8" }}>(optional)</span></label>
+            <textarea
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              rows={2}
+              className="w-full px-3 py-2 rounded-lg border text-sm resize-none"
+              style={{ borderColor: "#e2e8f0" }}
+            />
+          </div>
+          {error && (
+            <div className="text-xs px-3 py-2 rounded-lg" style={{ backgroundColor: "#fef2f2", color: "#b91c1c" }}>{error}</div>
+          )}
+        </div>
+        <div style={{ padding: "12px 18px", borderTop: "1px solid #e2e8f0", display: "flex", justifyContent: "flex-end", gap: 8 }}>
+          <button
+            onClick={onClose}
+            className="px-3 py-2 text-sm font-medium rounded-lg hover:bg-slate-100"
+            style={{ color: "#475569" }}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={submit}
+            disabled={submitting}
+            className="px-4 py-2 text-sm font-semibold rounded-lg text-white disabled:opacity-50"
+            style={{ backgroundColor: "#27ab83" }}
+          >
+            {submitting ? "Creating…" : "Create"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Edit dialog ────────────────────────────────────────────────────────
+// Opened from the right-click context menu's "Edit" item. Lets the
+// admin tweak date / time / duration / notes without going through
+// the multi-step booking widget. Uses PUT /appointments/{id} (the
+// generic update — reschedule endpoint is reserved for time-only
+// changes that fire emails, which the admin may not always want
+// when correcting a typo).
+function EditAppointmentDialog({
+  appointment,
+  onClose,
+  onSaved,
+}: {
+  appointment: CalendarAppointment;
+  onClose: () => void;
+  onSaved: (a: CalendarAppointment) => void;
+}) {
+  const fmtDate = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  const fmtTime = (h: number, m: number) => `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+  const [date, setDate] = useState(fmtDate(appointment.date));
+  const [time, setTime] = useState(fmtTime(appointment.startHour, appointment.startMinute));
+  const [duration, setDuration] = useState(appointment.durationMinutes);
+  const [isTelehealth, setIsTelehealth] = useState(appointment.isTeleHealth);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function save() {
+    setSubmitting(true);
+    setError(null);
+    const [h, m] = time.split(":").map(Number);
+    const [y, mo, d] = date.split("-").map(Number);
+    const dt = new Date(y, (mo ?? 1) - 1, d ?? 1, h ?? 0, m ?? 0, 0, 0);
+    if (isNaN(dt.getTime())) {
+      setSubmitting(false);
+      setError("Invalid date or time.");
+      return;
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const res = await apiFetch<any>(`/appointments/${appointment.id}`, {
+      method: "PUT",
+      body: JSON.stringify({
+        scheduled_at: dt.toISOString(),
+        duration_minutes: duration,
+        is_telehealth: isTelehealth,
+      }),
+    });
+    setSubmitting(false);
+    if (res.error) {
+      setError(res.error);
+      return;
+    }
+    onSaved({
+      ...appointment,
+      date: dt,
+      startHour: dt.getHours(),
+      startMinute: dt.getMinutes(),
+      durationMinutes: duration,
+      isTeleHealth: isTelehealth,
+    });
+  }
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: "fixed", inset: 0,
+        backgroundColor: "rgba(15, 23, 42, 0.55)",
+        backdropFilter: "blur(4px)",
+        zIndex: 50, display: "flex", alignItems: "center", justifyContent: "center",
+        padding: "16px",
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          backgroundColor: "#ffffff",
+          borderRadius: "12px",
+          maxWidth: "440px",
+          width: "100%",
+          boxShadow: "0 20px 50px rgba(0,0,0,0.25)",
+        }}
+      >
+        <div style={{ padding: "16px 18px", borderBottom: "1px solid #e2e8f0" }}>
+          <p className="text-xs uppercase tracking-wider font-semibold mb-1" style={{ color: "#94a3b8" }}>Edit appointment</p>
+          <h3 className="text-base font-semibold" style={{ color: "#243b53" }}>{appointment.patientName}</h3>
+          <p className="text-sm mt-0.5" style={{ color: "#64748b" }}>{appointment.typeName} · {appointment.providerName}</p>
+        </div>
+        <div style={{ padding: "14px 18px", display: "flex", flexDirection: "column", gap: 10 }}>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="block text-xs font-medium mb-1" style={{ color: "#475569" }}>Date</label>
+              <input
+                type="date"
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+                className="w-full px-3 py-2 rounded-lg border text-sm"
+                style={{ borderColor: "#e2e8f0" }}
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium mb-1" style={{ color: "#475569" }}>Time</label>
+              <input
+                type="time"
+                value={time}
+                onChange={(e) => setTime(e.target.value)}
+                className="w-full px-3 py-2 rounded-lg border text-sm"
+                style={{ borderColor: "#e2e8f0" }}
+              />
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs font-medium mb-1" style={{ color: "#475569" }}>Duration</label>
+            <select
+              value={duration}
+              onChange={(e) => setDuration(parseInt(e.target.value, 10))}
+              className="w-full px-3 py-2 rounded-lg border text-sm"
+              style={{ borderColor: "#e2e8f0" }}
+            >
+              {[15, 20, 30, 45, 60, 75, 90].map((m) => (
+                <option key={m} value={m}>{m} min</option>
+              ))}
+            </select>
+          </div>
+          <label className="flex items-center gap-2 text-sm cursor-pointer" style={{ color: "#475569" }}>
+            <input
+              type="checkbox"
+              checked={isTelehealth}
+              onChange={(e) => setIsTelehealth(e.target.checked)}
+            />
+            Telehealth visit
+          </label>
+          {error && (
+            <div className="text-xs px-3 py-2 rounded-lg" style={{ backgroundColor: "#fef2f2", color: "#b91c1c" }}>{error}</div>
+          )}
+        </div>
+        <div style={{ padding: "12px 18px", borderTop: "1px solid #e2e8f0", display: "flex", justifyContent: "flex-end", gap: 8 }}>
+          <button
+            onClick={onClose}
+            className="px-3 py-2 text-sm font-medium rounded-lg hover:bg-slate-100"
+            style={{ color: "#475569" }}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={save}
+            disabled={submitting}
+            className="px-4 py-2 text-sm font-semibold rounded-lg text-white disabled:opacity-50"
+            style={{ backgroundColor: "#27ab83" }}
+          >
+            {submitting ? "Saving…" : "Save"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Component ───────────────────────────────────────────────────────────────
 
 function CalendarViewInner({ onAppointmentClick, onBookNew, onReschedule }: CalendarViewProps) {
@@ -290,6 +765,7 @@ function CalendarViewInner({ onAppointmentClick, onBookNew, onReschedule }: Cale
   const [error, setError] = useState<string | null>(null);
   const [reschedFailed, setReschedFailed] = useState<string | null>(null);
   const [detailFor, setDetailFor] = useState<CalendarAppointment | null>(null);
+  const [editFor, setEditFor] = useState<CalendarAppointment | null>(null);
   const [detailBusy, setDetailBusy] = useState(false);
   const [detailMsg, setDetailMsg] = useState<string | null>(null);
 
@@ -418,70 +894,71 @@ function CalendarViewInner({ onAppointmentClick, onBookNew, onReschedule }: Cale
     return { from: fmt(start), to: fmt(end) };
   }, [currentDate, viewMode]);
 
-  // ─── Fetch appointments whenever the visible range changes ────────────────
-  useEffect(() => {
-    let cancelled = false;
+  // ─── Fetch appointments — exposed as `reload` so post-create /
+  //     post-edit handlers can refresh without remounting.
+  const reload = useCallback(async () => {
     setLoading(true);
     setError(null);
-    (async () => {
-      // Pull a generous page size so a busy week doesn't get truncated.
-      // Backend caps via per_page validation.
-      const qs = new URLSearchParams({
-        date_from: range.from,
-        date_to: range.to,
-        per_page: "200",
-      });
+    const qs = new URLSearchParams({
+      date_from: range.from,
+      date_to: range.to,
+      per_page: "200",
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const res = await apiFetch<any>(`/appointments?${qs.toString()}`);
+    setLoading(false);
+    if (res.error) {
+      setError(res.error);
+      setAppointments([]);
+      return;
+    }
+    const raw = res.data;
+    const items: ApiAppointment[] = Array.isArray(raw)
+      ? raw
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const res = await apiFetch<any>(`/appointments?${qs.toString()}`);
-      if (cancelled) return;
-      setLoading(false);
-      if (res.error) {
-        setError(res.error);
-        setAppointments([]);
-        return;
-      }
-      // Index returns { data: { current_page, data: [...], ... } } via
-      // Laravel's paginator. Some envs return a flat array; tolerate both.
-      const raw = res.data;
-      const items: ApiAppointment[] = Array.isArray(raw)
-        ? raw
+      : Array.isArray((raw as any)?.data)
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        : Array.isArray((raw as any)?.data)
+        ? (raw as any).data
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        : Array.isArray((raw as any)?.data?.data)
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          ? (raw as any).data
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          : Array.isArray((raw as any)?.data?.data)
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            ? (raw as any).data.data
-            : [];
-      setAppointments(items.map(mapAppointment).filter((a): a is CalendarAppointment => a !== null));
-    })();
-    return () => { cancelled = true; };
+          ? (raw as any).data.data
+          : [];
+    setAppointments(items.map(mapAppointment).filter((a): a is CalendarAppointment => a !== null));
   }, [range.from, range.to]);
 
+  useEffect(() => { void reload(); }, [reload]);
+
   // ─── Reschedule Handler ────────────────────────────────────────────────────
-  // Optimistic local update + API PATCH. On failure we roll back and
-  // surface the server's validation error (e.g. "time slot conflicts
-  // with existing appointment"). Same date but different time isn't
-  // possible via drag-drop today (drop targets are days, not time
-  // slots) — only the day shifts; the time-of-day stays.
+  // Optimistic local update + API PATCH to /reschedule. On failure we roll
+  // back and surface the server's validation error.
+  //
+  // Accepts optional hour+minute — when provided (drop on a per-15-min
+  // slot), the appointment moves to that exact time. When omitted (legacy
+  // drop-on-day target), keeps the original time-of-day.
   const handleDrop = useCallback(
-    (item: DragItem, newDate: Date) => {
+    (item: DragItem, newDate: Date, newHour?: number, newMinute?: number) => {
       const original = appointments.find((a) => a.id === item.id);
       if (!original) return;
       const newDateTime = new Date(
         newDate.getFullYear(), newDate.getMonth(), newDate.getDate(),
-        original.startHour, original.startMinute,
+        newHour ?? original.startHour, newMinute ?? original.startMinute,
       );
 
       // Optimistic update.
       setAppointments((prev) =>
-        prev.map((a) => (a.id === item.id ? { ...a, date: newDateTime } : a))
+        prev.map((a) =>
+          a.id === item.id
+            ? {
+                ...a,
+                date: newDateTime,
+                startHour: newDateTime.getHours(),
+                startMinute: newDateTime.getMinutes(),
+              }
+            : a
+        )
       );
 
-      // Backend wants ISO datetime. PATCH to /appointments/{id}/reschedule
-      // (the existing endpoint that re-checks availability + sends an
-      // email + appends an audit note).
       (async () => {
         const isoLocal = newDateTime.toISOString();
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -492,17 +969,53 @@ function CalendarViewInner({ onAppointmentClick, onBookNew, onReschedule }: Cale
         if (res.error) {
           // Roll back.
           setAppointments((prev) =>
-            prev.map((a) => (a.id === item.id ? { ...a, date: original.date } : a))
+            prev.map((a) => (a.id === item.id ? { ...a, date: original.date, startHour: original.startHour, startMinute: original.startMinute } : a))
           );
           setReschedFailed(res.error);
           window.setTimeout(() => setReschedFailed(null), 5000);
         }
       })();
 
-      onReschedule?.(item.id, newDate);
+      onReschedule?.(item.id, newDateTime);
     },
     [appointments, onReschedule]
   );
+
+  // ─── Quick-create dialog state — fires when user clicks an empty slot.
+  const [quickCreate, setQuickCreate] = useState<{
+    date: Date; hour: number; minute: number;
+  } | null>(null);
+  const handleSlotClick = useCallback((date: Date, hour: number, minute: number) => {
+    setQuickCreate({ date, hour, minute });
+  }, []);
+
+  // ─── Right-click context menu state ──────────────────────────────────────
+  // Custom inline menu (no shadcn dependency). Positioned at click coords.
+  const [ctxMenu, setCtxMenu] = useState<{
+    appointment: CalendarAppointment;
+    x: number;
+    y: number;
+  } | null>(null);
+  // Dismiss on any click outside or Escape.
+  useEffect(() => {
+    if (!ctxMenu) return;
+    const close = () => setCtxMenu(null);
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") close(); };
+    window.addEventListener("click", close);
+    window.addEventListener("contextmenu", close);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("click", close);
+      window.removeEventListener("contextmenu", close);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [ctxMenu]);
+
+  function openContextMenu(apt: CalendarAppointment, e: React.MouseEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    setCtxMenu({ appointment: apt, x: e.clientX, y: e.clientY });
+  }
 
   // ─── Navigation ────────────────────────────────────────────────────────────
 
@@ -560,6 +1073,7 @@ function CalendarViewInner({ onAppointmentClick, onBookNew, onReschedule }: Cale
         key={apt.id}
         appointment={apt}
         onClick={() => handleAppointmentClick(apt.id)}
+        onContextMenu={(e) => openContextMenu(apt, e)}
       >
         <div
           className="absolute left-1 right-1 rounded-lg overflow-hidden text-left transition-all hover:opacity-90 z-10"
@@ -632,19 +1146,34 @@ function CalendarViewInner({ onAppointmentClick, onBookNew, onReschedule }: Cale
           ))}
 
           <div className="absolute left-16 right-0 top-0 bottom-0">
-            <DropDay date={currentDate} onDrop={handleDrop}>
-              {dayAppts.map((apt) => renderAppointmentBlock(apt))}
-
-              {isSameDay(currentDate, now) && timeIndicatorTop >= 0 && timeIndicatorTop <= 100 && (
-                <div
-                  className="absolute left-0 right-0 z-20 flex items-center"
-                  style={{ top: `${timeIndicatorTop}%` }}
-                >
-                  <div className="w-2 h-2 rounded-full" style={{ backgroundColor: C.red500 }} />
-                  <div className="flex-1 h-px" style={{ backgroundColor: C.red500 }} />
-                </div>
-              )}
-            </DropDay>
+            {/* Per-15-min slot grid as the clickable + droppable background. */}
+            <div className="absolute inset-0 flex flex-col">
+              {Array.from({ length: SLOTS_PER_DAY }).map((_, i) => {
+                const hour = HOURS[Math.floor(i / SLOTS_PER_HOUR)];
+                const minute = (i % SLOTS_PER_HOUR) * SLOT_MINUTES;
+                return (
+                  <DropTimeSlot
+                    key={i}
+                    date={currentDate}
+                    hour={hour}
+                    minute={minute}
+                    onDrop={handleDrop}
+                    onClick={handleSlotClick}
+                  />
+                );
+              })}
+            </div>
+            {/* Foreground: appointment blocks + current-time indicator. */}
+            {dayAppts.map((apt) => renderAppointmentBlock(apt))}
+            {isSameDay(currentDate, now) && timeIndicatorTop >= 0 && timeIndicatorTop <= 100 && (
+              <div
+                className="absolute left-0 right-0 z-20 flex items-center pointer-events-none"
+                style={{ top: `${timeIndicatorTop}%` }}
+              >
+                <div className="w-2 h-2 rounded-full" style={{ backgroundColor: C.red500 }} />
+                <div className="flex-1 h-px" style={{ backgroundColor: C.red500 }} />
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -708,9 +1237,27 @@ function CalendarViewInner({ onAppointmentClick, onBookNew, onReschedule }: Cale
                   className="flex-1 relative"
                   style={{ borderLeft: `1px solid ${C.slate100}` }}
                 >
-                  <DropDay date={day} onDrop={handleDrop}>
-                    {dayAppts.map((apt) => renderAppointmentBlock(apt, true))}
-                  </DropDay>
+                  {/* Background grid: 52 per-15-min slots. Each is
+                      clickable (open quick-create) AND droppable
+                      (target for drag-reschedule). */}
+                  <div className="absolute inset-0 flex flex-col">
+                    {Array.from({ length: SLOTS_PER_DAY }).map((_, i) => {
+                      const hour = HOURS[Math.floor(i / SLOTS_PER_HOUR)];
+                      const minute = (i % SLOTS_PER_HOUR) * SLOT_MINUTES;
+                      return (
+                        <DropTimeSlot
+                          key={i}
+                          date={day}
+                          hour={hour}
+                          minute={minute}
+                          onDrop={handleDrop}
+                          onClick={handleSlotClick}
+                        />
+                      );
+                    })}
+                  </div>
+                  {/* Foreground: appointment blocks. */}
+                  {dayAppts.map((apt) => renderAppointmentBlock(apt, true))}
                 </div>
               );
             })}
@@ -1047,6 +1594,97 @@ function CalendarViewInner({ onAppointmentClick, onBookNew, onReschedule }: Cale
           </span>
         </div>
       </div>
+
+      {/* Right-click context menu — fixed-position, dismissed on
+          click-outside / Escape (wired via the useEffect above). */}
+      {ctxMenu && (
+        <div
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            position: "fixed",
+            top: ctxMenu.y,
+            left: ctxMenu.x,
+            zIndex: 60,
+            backgroundColor: C.white,
+            border: `1px solid ${C.slate200}`,
+            borderRadius: "8px",
+            boxShadow: "0 10px 25px rgba(0,0,0,0.15)",
+            minWidth: "200px",
+            padding: "4px",
+          }}
+        >
+          <div style={{ padding: "6px 10px 4px", borderBottom: `1px solid ${C.slate100}` }}>
+            <p className="text-xs font-semibold truncate" style={{ color: C.navy800 }}>
+              {ctxMenu.appointment.patientName}
+            </p>
+            <p className="text-[10px]" style={{ color: C.slate400 }}>
+              {ctxMenu.appointment.date.toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+              {" · "}
+              {formatTime(ctxMenu.appointment.startHour, ctxMenu.appointment.startMinute)}
+            </p>
+          </div>
+          <CtxMenuItem
+            onClick={() => { setEditFor(ctxMenu.appointment); setCtxMenu(null); }}
+          >
+            Edit
+          </CtxMenuItem>
+          {ctxMenu.appointment.isTeleHealth && (
+            <CtxMenuItem
+              onClick={() => { joinTelehealth(ctxMenu.appointment.id); setCtxMenu(null); }}
+            >
+              Join video
+            </CtxMenuItem>
+          )}
+          {!ctxMenu.appointment.confirmedAt && (
+            <CtxMenuItem
+              onClick={() => { approveAppointment(ctxMenu.appointment.id); setCtxMenu(null); }}
+            >
+              Approve
+            </CtxMenuItem>
+          )}
+          {!["completed", "cancelled", "no_show"].includes(ctxMenu.appointment.status) && (
+            <CtxMenuItem
+              onClick={() => { markComplete(ctxMenu.appointment.id); setCtxMenu(null); }}
+            >
+              Mark complete
+            </CtxMenuItem>
+          )}
+          <div style={{ borderTop: `1px solid ${C.slate100}`, marginTop: 4, paddingTop: 4 }}>
+            <CtxMenuItem
+              danger
+              onClick={() => { cancelAppointment(ctxMenu.appointment.id); setCtxMenu(null); }}
+            >
+              Cancel
+            </CtxMenuItem>
+          </div>
+        </div>
+      )}
+
+      {/* Quick-create dialog — opens when user clicks an empty slot. */}
+      {quickCreate && (
+        <QuickCreateDialog
+          slot={quickCreate}
+          onClose={() => setQuickCreate(null)}
+          onCreated={() => {
+            setQuickCreate(null);
+            // Refetch by toggling a key — reuse the existing range
+            // useEffect by mutating currentDate to itself.
+            void reload();
+          }}
+        />
+      )}
+
+      {/* Edit dialog — date / time / duration / notes. */}
+      {editFor && (
+        <EditAppointmentDialog
+          appointment={editFor}
+          onClose={() => setEditFor(null)}
+          onSaved={(updated) => {
+            setAppointments((prev) => prev.map((a) => (a.id === updated.id ? updated : a)));
+            setEditFor(null);
+          }}
+        />
+      )}
 
       {/* Built-in appointment detail modal — host can suppress by
           returning true from onAppointmentClick. */}
