@@ -2064,14 +2064,16 @@ export function PracticePortal() {
         setRosterPaymentLinkLoading(false);
         return;
       }
+      // apiFetch transforms camelCase → snake_case before sending, so we
+      // can author body keys in camelCase consistently across handlers.
       const body: Record<string, unknown> = {
-        patient_id: rosterPlanDialog.patientId,
-        plan_id: rosterSelectedPlanId,
-        billing_frequency: "monthly",
+        patientId: rosterPlanDialog.patientId,
+        planId: rosterSelectedPlanId,
+        billingFrequency: "monthly",
       };
       if (rosterWaiveEnrollmentFee) {
-        body.waive_enrollment_fee = true;
-        body.waiver_reason = rosterWaiverReason.trim();
+        body.waiveEnrollmentFee = true;
+        body.waiverReason = rosterWaiverReason.trim();
       }
       const res = await apiFetch("/memberships/payment-link", {
         method: "POST",

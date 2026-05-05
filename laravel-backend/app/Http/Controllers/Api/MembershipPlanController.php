@@ -68,6 +68,13 @@ class MembershipPlanController extends Controller
             'badge_text' => 'nullable|string|max:30',
             'monthly_price' => 'required|numeric|min:0',
             'annual_price' => 'nullable|numeric|min:0',
+            // One-time fees billed alongside the first month at sign-up.
+            // enrollment_fee covers the comprehensive intake / registration;
+            // intake_fee is a separate concept some practices use for the
+            // initial evaluation specifically. Both nullable — most plans
+            // have neither.
+            'enrollment_fee' => 'nullable|numeric|min:0|max:10000',
+            'intake_fee' => 'nullable|numeric|min:0|max:10000',
             // visits_per_month: positive int = limit, 0 = no visits (rare),
             // -1 = unlimited (concierge). Optional because the minimal
             // "Create Plan" modal in the practice portal doesn't surface
@@ -124,6 +131,8 @@ class MembershipPlanController extends Controller
             'badge_text' => 'nullable|string|max:30',
             'monthly_price' => 'sometimes|numeric|min:0',
             'annual_price' => 'nullable|numeric|min:0',
+            'enrollment_fee' => 'nullable|numeric|min:0|max:10000',
+            'intake_fee' => 'nullable|numeric|min:0|max:10000',
             'visits_per_month' => 'sometimes|integer|min:0',
             'telehealth_included' => 'sometimes|boolean',
             'messaging_included' => 'sometimes|boolean',
