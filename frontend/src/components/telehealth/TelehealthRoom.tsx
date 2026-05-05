@@ -92,6 +92,11 @@ export function TelehealthRoom() {
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
   const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
   const sessionStartRef = useRef<Date | null>(null);
+  // Pending remote tracks — captured in TrackSubscribed and attached
+  // by an effect once the <video> element is mounted. Necessary
+  // because TrackSubscribed can fire before the active-phase render
+  // has flushed, leaving remoteVideoRef.current null.
+  const pendingRemoteTracksRef = useRef<RemoteTrack[]>([]);
 
   // Active-call state — exposed for UI bindings.
   const [isCamOn, setIsCamOn] = useState(true);
@@ -271,6 +276,17 @@ export function TelehealthRoom() {
       .on(RoomEvent.Connected, () => {
         sessionStartRef.current = new Date();
         setPhase({ kind: "active" });
+        // If the other participant was already in the room when we
+        // joined, ParticipantConnected won't fire for them — that
+        // event only fires for arrivals AFTER us. Seed remoteJoined
+        // from the current remoteParticipants snapshot so we don't
+        // get stuck on "Waiting for the other participant."
+        const existing = Array.from(room.remoteParticipants.values());
+        if (existing.length > 0) {
+          const p = existing[0];
+          setRemoteJoined(true);
+          setRemoteName(p.name || p.identity || "Participant");
+        }
         // Kick off mic/cam publishing using the same devices the
         // tech-check stream was using.
         void room.localParticipant.setMicrophoneEnabled(true);
@@ -298,15 +314,24 @@ export function TelehealthRoom() {
         appendSystem(`${p.name || p.identity} left`);
       })
       .on(RoomEvent.TrackSubscribed, (track: RemoteTrack, _pub: RemoteTrackPublication, p: RemoteParticipant) => {
-        if (track.kind === Track.Kind.Video && remoteVideoRef.current) {
-          track.attach(remoteVideoRef.current);
-          setRemoteName(p.name || p.identity || "Participant");
-        } else if (track.kind === Track.Kind.Audio && remoteVideoRef.current) {
+        // Belt-and-suspenders for already-present participants: if the
+        // Connected handler somehow missed them (race with the
+        // remoteParticipants snapshot), the first track we subscribe
+        // to is also a definitive "they're here" signal.
+        setRemoteJoined(true);
+        setRemoteName(p.name || p.identity || "Participant");
+        // The <video> may not be in the DOM yet because the active
+        // phase render hasn't flushed. Always queue first; the effect
+        // that watches phase + remoteJoined will drain the queue once
+        // the ref is populated.
+        pendingRemoteTracksRef.current.push(track);
+        if (remoteVideoRef.current) {
           track.attach(remoteVideoRef.current);
         }
       })
       .on(RoomEvent.TrackUnsubscribed, (track: RemoteTrack) => {
         track.detach();
+        pendingRemoteTracksRef.current = pendingRemoteTracksRef.current.filter(t => t !== track);
       })
       .on(RoomEvent.LocalTrackPublished, (pub: LocalTrackPublication) => {
         if (pub.kind === Track.Kind.Video && pub.track && localVideoRef.current) {
@@ -366,6 +391,18 @@ export function TelehealthRoom() {
     }, 1000);
     return () => window.clearInterval(id);
   }, [phase.kind]);
+
+  // ─── 5a. Drain pending remote tracks once the video element is in DOM ──
+  // TrackSubscribed can fire before the active-phase render has flushed, so
+  // queued tracks need to be attached as soon as the element exists.
+  useEffect(() => {
+    if (phase.kind !== "active") return;
+    if (!remoteVideoRef.current) return;
+    if (pendingRemoteTracksRef.current.length === 0) return;
+    const el = remoteVideoRef.current;
+    pendingRemoteTracksRef.current.forEach((t) => t.attach(el));
+    pendingRemoteTracksRef.current = [];
+  }, [phase.kind, remoteJoined]);
 
   // Reset unread chat count when the panel opens.
   useEffect(() => { if (chatOpen) setUnreadChat(0); }, [chatOpen]);
@@ -460,9 +497,14 @@ export function TelehealthRoom() {
   }
 
   // tech-check + connecting + active share the room frame.
+  // Lock to viewport height + clip overflow so the page can't grow
+  // taller than the viewport. Without this, the body's large video
+  // panel + bottom toolbar + waiting overlay can collectively exceed
+  // 100vh and produce a scrollbar — the room must always render as
+  // a stable, fit-to-screen surface.
   return (
-    <div style={{ minHeight: "100vh", backgroundColor: C.navy900, color: C.white, display: "flex", flexDirection: "column" }}>
-      <div style={{ padding: "12px 18px", borderBottom: `1px solid ${C.navy700}`, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+    <div style={{ height: "100vh", maxHeight: "100vh", overflow: "hidden", backgroundColor: C.navy900, color: C.white, display: "flex", flexDirection: "column" }}>
+      <div style={{ padding: "12px 18px", borderBottom: `1px solid ${C.navy700}`, display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
         <div className="flex items-center gap-3">
           <div className="w-2 h-2 rounded-full" style={{ backgroundColor: phase.kind === "active" ? C.green500 : C.amber500 }} />
           <span className="text-sm font-semibold">
@@ -623,7 +665,7 @@ export function TelehealthRoom() {
       </div>
 
       {phase.kind === "active" && (
-        <div style={{ padding: "14px 18px", borderTop: `1px solid ${C.navy700}`, display: "flex", justifyContent: "center", gap: 10 }}>
+        <div style={{ padding: "14px 18px", borderTop: `1px solid ${C.navy700}`, display: "flex", justifyContent: "center", gap: 10, flexShrink: 0 }}>
           <ToolbarButton
             label={isMicOn ? "Mute" : "Unmute"}
             icon={isMicOn ? Mic : MicOff}

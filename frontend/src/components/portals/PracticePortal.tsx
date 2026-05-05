@@ -1645,6 +1645,23 @@ export function PracticePortal() {
 
   useEffect(() => { loadPracticeData(); }, [loadPracticeData]);
 
+  // Refetch when the tab regains focus / becomes visible again. This is
+  // what keeps the dashboard fresh after the provider returns from a
+  // telehealth session — without this, the "Today's schedule" widget
+  // still shows the just-completed visit with a stale "Start video"
+  // CTA until a manual refresh.
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === "visible") loadPracticeData();
+    };
+    window.addEventListener("focus", onVisible);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.removeEventListener("focus", onVisible);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [loadPracticeData]);
+
   // ─── Per-patient detail fetches ──────────────────────────────────────
   // When a patient is opened in the detail drawer, fan out to each
   // sub-tab's scoped endpoint in parallel and store the results.
@@ -2907,7 +2924,12 @@ export function PracticePortal() {
         if (!raw) return false;
         const parsed = new Date(raw);
         if (isNaN(parsed.getTime())) return false;
-        return parsed.toISOString().slice(0, 10) === todayStr && a.status !== "cancelled";
+        if (parsed.toISOString().slice(0, 10) !== todayStr) return false;
+        // Drop cancelled and completed — Today's schedule is a list of
+        // appointments still actionable. Once a telehealth call ends,
+        // the backend flips status to "completed"; the row would
+        // otherwise linger here with a stale "Start video" CTA.
+        return a.status !== "cancelled" && a.status !== "completed" && a.status !== "no_show";
       })
       .sort((a: any, b: any) => new Date(a.scheduledAt).getTime() - new Date(b.scheduledAt).getTime());
 

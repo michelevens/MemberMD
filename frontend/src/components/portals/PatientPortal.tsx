@@ -1072,6 +1072,22 @@ export function PatientPortal() {
 
   useEffect(() => { loadPatientData(); }, [loadPatientData]);
 
+  // Refetch on focus / visibility — same rationale as PracticePortal:
+  // after the patient finishes a telehealth session and returns here,
+  // the past-appointments list needs to refresh so the just-ended visit
+  // moves from Upcoming to Past.
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === "visible") loadPatientData();
+    };
+    window.addEventListener("focus", onVisible);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.removeEventListener("focus", onVisible);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [loadPatientData]);
+
   // Fetch available plans + any pending payment links the patient has.
   // Surfaces both on the dashboard when there's no active membership so
   // a fresh patient (e.g. Jerry, who got a payment link from the practice
