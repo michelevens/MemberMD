@@ -94,6 +94,11 @@ interface MockAppointmentType {
   isTeleHealth: boolean;
   requiresMembership: boolean;
   color: string;
+  // Sprint 1 required-docs gate. Optional; when present the booking
+  // widget runs a pre-flight against the patient's existing
+  // signed consents + completed screenings on type select.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  requiredDocuments?: any[] | null;
 }
 
 const MOCK_TYPES: Record<string, MockAppointmentType[]> = {
@@ -179,6 +184,20 @@ export function AppointmentBookingWidget({
   );
   const [selectedProvider, setSelectedProvider] = useState<MockProvider | null>(null);
   const [selectedType, setSelectedType] = useState<MockAppointmentType | null>(null);
+  // Required-documents pre-flight (Sprint 1, 2026-05-05). When the
+  // patient picks an appointment type that has required_documents
+  // configured, we run a pre-flight against the patient's existing
+  // signed consents + completed screenings. Missing items either
+  // block booking (must complete before continuing) or warn-only.
+  const [preflightLoading, setPreflightLoading] = useState(false);
+  const [preflightItems, setPreflightItems] = useState<Array<{
+    kind: "consent_template" | "screening_template";
+    id: string;
+    name: string;
+    blocksBooking: boolean;
+    isSatisfied: boolean;
+  }>>([]);
+  const [preflightBlocks, setPreflightBlocks] = useState(false);
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [selectedTime, setSelectedTime] = useState<string | null>(null);
   // When a real (API-mode) slot is picked we also stash the underlying
@@ -313,6 +332,7 @@ export function AppointmentBookingWidget({
           isTeleHealth: !!(t.isTelehealth ?? t.is_telehealth),
           requiresMembership: !!(t.requiresMembership ?? t.requires_membership),
           color: t.color || "#27ab83",
+          requiredDocuments: t.requiredDocuments ?? t.required_documents ?? null,
         }));
         setApiTypes(mapped);
       } catch (e) {
@@ -1089,17 +1109,109 @@ export function AppointmentBookingWidget({
                   No appointment types configured. Contact the practice.
                 </div>
               )}
+              {/* Pre-flight banner — shows when the selected type has
+                  required documents and at least one isn't satisfied.
+                  Lives above the type list so it's the first thing the
+                  patient sees after picking a gated type. */}
+              {selectedType && preflightItems.length > 0 && (
+                <div
+                  className="rounded-xl border-2 p-4"
+                  style={{
+                    borderColor: preflightBlocks ? C.amber600 : C.slate200,
+                    backgroundColor: preflightBlocks ? C.amber50 : C.slate50,
+                  }}
+                >
+                  <p className="text-sm font-semibold mb-2" style={{ color: preflightBlocks ? C.amber600 : C.navy800 }}>
+                    {preflightBlocks
+                      ? "Please complete these before booking"
+                      : "Recommended before your visit"}
+                  </p>
+                  <div className="space-y-2">
+                    {preflightItems.map((item) => {
+                      const url = item.kind === "consent_template"
+                        ? `#/sign/${item.id}`
+                        : `#/patient/screenings?template=${item.id}`;
+                      return (
+                        <div key={item.id} className="flex items-center justify-between gap-3 text-sm">
+                          <div className="flex items-center gap-2 flex-1 min-w-0">
+                            {item.isSatisfied ? (
+                              <span style={{ color: C.green500 }}>✓</span>
+                            ) : (
+                              <span style={{ color: preflightBlocks ? C.amber600 : C.slate400 }}>○</span>
+                            )}
+                            <span style={{ color: C.navy800 }} className="truncate">{item.name}</span>
+                            {item.kind === "consent_template" ? (
+                              <span className="text-xs px-1.5 py-0.5 rounded" style={{ backgroundColor: C.slate100, color: C.slate500 }}>Consent</span>
+                            ) : (
+                              <span className="text-xs px-1.5 py-0.5 rounded" style={{ backgroundColor: C.slate100, color: C.slate500 }}>Screening</span>
+                            )}
+                          </div>
+                          {!item.isSatisfied && (
+                            <a
+                              href={url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-xs font-medium px-3 py-1 rounded"
+                              style={{ backgroundColor: C.teal500, color: C.white }}
+                            >
+                              Complete →
+                            </a>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {preflightBlocks && (
+                    <p className="text-xs mt-3" style={{ color: C.slate500 }}>
+                      Once everything's done, come back and re-select this visit type to continue.
+                    </p>
+                  )}
+                </div>
+              )}
+
               {typesForSelectedProvider.map((type) => {
                 const selected = selectedType?.id === type.id;
+                const isLoading = preflightLoading && selected;
                 return (
                   <button
                     key={type.id}
-                    onClick={() => {
+                    disabled={preflightLoading}
+                    onClick={async () => {
                       setSelectedType(type);
                       // Reset the format override so the next type's
                       // default (is_telehealth) takes effect on the
                       // review screen until the booker chooses again.
                       setFormatOverride(null);
+
+                      // Required-documents pre-flight. Only runs when
+                      // the type has required_documents AND we have a
+                      // patient context. Patient-self-booking always
+                      // does; staff booking has patientId from props.
+                      const reqDocs = (type as MockAppointmentType & { requiredDocuments?: unknown[] })
+                        .requiredDocuments;
+                      if (Array.isArray(reqDocs) && reqDocs.length > 0 && patientId) {
+                        setPreflightLoading(true);
+                        const res = await appointmentService.preflightType(type.id, patientId);
+                        setPreflightLoading(false);
+                        if (res.data) {
+                          setPreflightItems(res.data.items.map((it) => ({
+                            kind: it.kind,
+                            id: it.id,
+                            name: it.name,
+                            blocksBooking: it.blocksBooking,
+                            isSatisfied: it.isSatisfied,
+                          })));
+                          setPreflightBlocks(res.data.blocksBooking);
+                          if (res.data.blocksBooking) {
+                            // Stay on step 2 — the banner above the type
+                            // list already surfaces what's missing.
+                            return;
+                          }
+                        }
+                      } else {
+                        setPreflightItems([]);
+                        setPreflightBlocks(false);
+                      }
                       setStep(3);
                     }}
                     className="w-full flex items-center gap-4 p-4 rounded-xl text-left transition-all"
@@ -1120,6 +1232,9 @@ export function AppointmentBookingWidget({
                         <span className="inline-flex items-center gap-1 text-xs" style={{ color: C.slate500 }}>
                           <Clock className="w-3 h-3" /> {type.durationMinutes} min
                         </span>
+                        {isLoading && (
+                          <span className="text-xs" style={{ color: C.slate400 }}>checking…</span>
+                        )}
                         {type.isTeleHealth && (
                           <span
                             className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full"
@@ -1365,7 +1480,19 @@ export function AppointmentBookingWidget({
                   </div>
                   <div>
                     <p className="text-xs" style={{ color: C.slate400 }}>Time</p>
-                    <p className="text-sm font-medium" style={{ color: C.navy800 }}>{selectedTime}</p>
+                    <p className="text-sm font-medium" style={{ color: C.navy800 }}>
+                      {selectedTime} <span className="text-xs font-normal" style={{ color: C.slate400 }}>({patientTz})</span>
+                    </p>
+                    {/* Cross-tz mismatch — surface the provider's clock too
+                        so the patient sees both anchors before confirming.
+                        Only renders when zones differ; same patient + same
+                        provider tz collapses cleanly. */}
+                    {showDualTz && selectedSlotInstant && (
+                      <p className="text-xs mt-0.5" style={{ color: C.slate500 }}>
+                        Provider sees: {selectedSlotInstant.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit", hour12: true, timeZone: providerTz })}
+                        <span style={{ color: C.slate400 }}> ({providerTz})</span>
+                      </p>
+                    )}
                   </div>
                 </div>
                 {/* Format toggle — defaults to the appointment_type's
@@ -1587,6 +1714,14 @@ export function AppointmentBookingWidget({
                 {selectedType.name} with {selectedProvider.name}
                 <br />
                 {selectedDate.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })} at {selectedTime}
+                {showDualTz && selectedSlotInstant && (
+                  <>
+                    <br />
+                    <span className="text-xs">
+                      ({patientTz}) · Provider sees: {selectedSlotInstant.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit", hour12: true, timeZone: providerTz })} ({providerTz})
+                    </span>
+                  </>
+                )}
               </p>
 
               {/* Calendar Links */}

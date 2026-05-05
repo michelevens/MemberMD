@@ -462,6 +462,20 @@ export type AppointmentStatus =
   | "canceled"
   | "no_show";
 
+/**
+ * One required-document spec on an appointment type. Sprint 1 of the
+ * required-documents work — when set, the booking widget runs a
+ * pre-flight check before letting the patient pick a slot.
+ */
+export interface RequiredDocumentSpec {
+  kind: "consent_template" | "screening_template";
+  id: string;
+  /** Days a satisfied item stays valid; null = signed-once-ever. */
+  freshnessDays?: number | null;
+  /** Whether missing/stale this item BLOCKS booking (vs warn-only). */
+  blocksBooking?: boolean;
+}
+
 export interface AppointmentType {
   id: string;
   practiceId: string;
@@ -473,6 +487,8 @@ export interface AppointmentType {
   isTeleHealth: boolean;
   isActive: boolean;
   sortOrder: number;
+  /** Per-visit-type required-documents gate. Null/empty = no gate. */
+  requiredDocuments?: RequiredDocumentSpec[] | null;
   createdAt: string;
   updatedAt: string;
 }

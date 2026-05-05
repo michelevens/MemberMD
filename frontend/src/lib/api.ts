@@ -1181,6 +1181,34 @@ export const appointmentService = {
     if (useMockData()) return mockUpdate<AppointmentType>(data);
     return apiFetch<AppointmentType>(`/appointment-types/${id}`, { method: "PUT", body: JSON.stringify(data) });
   },
+  deleteType: async (id: string): Promise<ApiResponse<{ message: string }>> => {
+    if (useMockData()) return { data: { message: "ok" } };
+    return apiFetch<{ message: string }>(`/appointment-types/${id}`, { method: "DELETE" });
+  },
+  /**
+   * Pre-flight check for the required-documents gate. Pass the type id
+   * + patient id; returns which required items the patient already
+   * has and which are missing. Booking widget calls this when the
+   * patient picks a visit type and surfaces a Step 0 to collect
+   * anything missing before the calendar.
+   */
+  preflightType: async (typeId: string, patientId: string): Promise<ApiResponse<{
+    blocksBooking: boolean;
+    items: Array<{
+      kind: "consent_template" | "screening_template";
+      id: string;
+      name: string;
+      blocksBooking: boolean;
+      freshnessDays: number | null;
+      isSatisfied: boolean;
+      satisfiedAt: string | null;
+      expiresAt: string | null;
+    }>;
+  }>> => {
+    if (useMockData()) return { data: { blocksBooking: false, items: [] } };
+    const q = new URLSearchParams({ patient_id: patientId });
+    return apiFetch(`/appointment-types/${typeId}/preflight?${q.toString()}`);
+  },
   availableSlots: async (providerId: string, date: string, duration: number): Promise<ApiResponse<AvailableSlot[]>> => {
     if (useMockData()) {
       return { data: [
