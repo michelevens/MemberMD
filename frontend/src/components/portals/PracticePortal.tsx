@@ -6,6 +6,7 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { ProviderDetailPage } from "./ProviderDetailPage";
 import { EncounterDetailPage } from "./EncounterDetailPage";
+import { PatientBillingTab } from "./PatientBillingTab";
 import { useAuth } from "../../contexts/AuthContext";
 import { dashboardService, membershipPlanService, messageService, patientService, appointmentService, encounterService, prescriptionService, invoiceService, programService, telehealthService, screeningService, couponService, providerService, paymentService, notificationService, apiFetch, billingEnhancedService, documentService, onboardingService, staffService, chartTemplateService } from "../../lib/api";
 import { formatDob } from "../../lib/format";
@@ -1316,13 +1317,13 @@ export function PracticePortal() {
   const [_ptApiDocuments, setPtApiDocuments] = useState<any[]>([]);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [_ptApiMessages, setPtApiMessages] = useState<any[]>([]);
-  // Pending enrollments awaiting Stripe Checkout completion. Surfaced
-  // on the Billing tab so admins can see "payment in progress" rows
-  // and reconcile when the webhook never arrived.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const [ptPendingEnrollments, setPtPendingEnrollments] = useState<any[]>([]);
-  const [ptReconcileLoading, setPtReconcileLoading] = useState<string | null>(null);
-  const [ptSyncInvoicesLoading, setPtSyncInvoicesLoading] = useState(false);
+  // Pending enrollments awaiting Stripe Checkout completion. Loaded
+  // by the per-patient data fetch; consumed by PatientBillingTab via
+  // its own fetches. Read-side intentionally unused here — kept so
+  // the loader can keep population the array if a future surface
+  // wants to reuse it on the patient detail header.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars
+  const [_ptPendingEnrollments, setPtPendingEnrollments] = useState<any[]>([]);
 
   // ─── Roster Cancel Membership Dialog ───────────────────────────────────
   const [rosterCancelDialog, setRosterCancelDialog] = useState<{ patientId: string; patientName: string; membershipId: string } | null>(null);
@@ -1695,85 +1696,6 @@ export function PracticePortal() {
     })();
     return () => { cancelled = true; };
   }, [selectedPatient?.id]);
-
-  // Reconcile a pending enrollment against Stripe — used when the
-  // checkout.session.completed webhook never arrived but the patient
-  // actually paid. The backend re-fetches the session live and converts.
-  const handleReconcilePending = useCallback(async (pendingId: string) => {
-    setPtReconcileLoading(pendingId);
-    try {
-      // apiFetch unwraps the top-level "data" envelope from the response —
-      // so what comes back as res.data is the inner object the backend put
-      // under "data" (camelCased): { reconciled, paymentStatus, sessionStatus, ... }.
-      const res = await apiFetch<{
-        reconciled?: boolean;
-        paymentStatus?: string | null;
-        sessionStatus?: string | null;
-      }>(`/memberships/pending/${pendingId}/reconcile`, { method: "POST" });
-
-      if (res.error) {
-        setToast({ message: res.error, type: "error" });
-      } else {
-        const reconciled = res.data?.reconciled;
-        if (reconciled) {
-          setToast({ message: "Membership reconciled successfully.", type: "success" });
-          loadPracticeData();
-          setPtPendingEnrollments((prev) => prev.filter((p) => p.id !== pendingId));
-        } else {
-          // Surface Stripe's actual payment status so the admin can tell
-          // the difference between "patient never paid" (unpaid) and
-          // "session expired before they got there" (expired).
-          const ps = res.data?.paymentStatus || "unknown";
-          setToast({
-            message: `Stripe says payment_status="${ps}" — patient hasn't completed checkout yet. If they did pay, check that this is the right Stripe Connect account.`,
-            type: "error",
-          });
-        }
-      }
-    } catch {
-      setToast({ message: "Reconcile failed.", type: "error" });
-    }
-    setPtReconcileLoading(null);
-  }, [loadPracticeData, setToast]);
-
-  // Pull invoice + payment rows live from Stripe for the patient's
-  // active membership. Used when invoice.paid webhooks weren't delivered
-  // — the local Invoice table stays empty until we sync.
-  const handleSyncInvoicesFromStripe = useCallback(async (membershipId: string, patientId: string) => {
-    setPtSyncInvoicesLoading(true);
-    try {
-      const res = await apiFetch<{
-        invoicesSeen?: number;
-        invoicesCreated?: number;
-        paymentsCreated?: number;
-      }>(`/memberships/${membershipId}/sync-invoices`, { method: "POST" });
-
-      if (res.error) {
-        setToast({ message: res.error, type: "error" });
-      } else {
-        const seen = res.data?.invoicesSeen ?? 0;
-        const created = res.data?.invoicesCreated ?? 0;
-        setToast({
-          message: seen === 0
-            ? "Stripe returned no invoices for this subscription yet — first payment hasn't landed."
-            : `Synced ${seen} invoice${seen === 1 ? "" : "s"} from Stripe (${created} new).`,
-          type: "success",
-        });
-        if (created > 0) {
-          // Refresh the patient's invoice list so the new rows show up.
-          try {
-            const inv = await invoiceService.list({ patient_id: patientId });
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const list = Array.isArray(inv.data) ? inv.data : ((inv.data as any)?.data || []);
-            setPtApiInvoices(list);
-          } catch { /* non-fatal */ }
-        }
-      }
-    } catch {
-      setToast({ message: "Sync failed.", type: "error" });
-    }
-    setPtSyncInvoicesLoading(false);
-  }, [setToast]);
 
   // ─── Fetch Entitlement Types ─────────────────────────────────────────
   const fetchEntitlementTypes = useCallback(async () => {
@@ -3923,30 +3845,6 @@ export function PracticePortal() {
         ],
       } : { upcoming: [], past: [] };
 
-    // Mock invoices for this patient
-    // Patient invoices — real API rows from the per-patient slot, with
-    // demo fallback so the billing card still feels populated for sales
-    // walkthroughs of fresh tenants.
-    type PtInvoice = { id: string; date: string; amount: number; status: "paid" | "open" | "pending" | "void" | "overdue"; description: string };
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const mockPtInvoices: PtInvoice[] = (_ptApiInvoices as any[]).length > 0
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      ? (_ptApiInvoices as any[]).map((iv: any) => ({
-          id: iv.invoiceNumber || iv.invoice_number || iv.id,
-          date: (iv.issuedAt || iv.issued_at || iv.createdAt || iv.created_at)
-            ? new Date(iv.issuedAt || iv.issued_at || iv.createdAt || iv.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
-            : "",
-          amount: Number(iv.totalAmount ?? iv.total_amount ?? iv.amount ?? 0),
-          status: (iv.status === "paid" ? "paid" : iv.status === "pending" ? "pending" : iv.status === "void" ? "void" : iv.status === "overdue" ? "overdue" : "open") as PtInvoice["status"],
-          description: iv.description || iv.lineItems?.[0]?.description || iv.line_items?.[0]?.description || "",
-        }))
-      : isDemoMode ? [
-        { id: "INV-1050", date: "Mar 15, 2026", amount: 199.00, status: "paid" as const, description: "Complete Plan — March 2026" },
-        { id: "INV-1038", date: "Feb 15, 2026", amount: 199.00, status: "paid" as const, description: "Complete Plan — February 2026" },
-        { id: "INV-1025", date: "Jan 15, 2026", amount: 199.00, status: "paid" as const, description: "Complete Plan — January 2026" },
-        { id: "INV-1045", date: "Mar 10, 2026", amount: 15.00, status: "open" as const, description: "Lab Results Review" },
-      ] : [];
-
     // Mock documents
     type PtDoc = { id: string; name: string; type: string; date: string; status: string };
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -5196,232 +5094,39 @@ export function PracticePortal() {
           </div>
         )}
 
-        {/* Billing */}
+        {/* Billing — Stripe-dashboard parity (insights, subscription
+            with kebab actions, payments with per-row kebab, all five
+            new dialogs). Lives in PatientBillingTab.tsx so this file
+            doesn't keep growing. */}
         {patientDetailTab === "billing" && (
-          <div className="space-y-6">
-            {/* Membership Card — renders real data, no demo fallback. */}
-            <div className="glass rounded-xl p-6">
-              <h3 className="font-semibold text-slate-800 mb-4">Membership</h3>
-              {pt.plan && pt.plan !== "No Plan" && pt.membershipId ? (
-                <div className="flex flex-col sm:flex-row items-start gap-4">
-                  <div
-                    className="rounded-xl p-5 flex-1"
-                    style={{ background: "linear-gradient(135deg, #334e68, #243b53)" }}
-                  >
-                    <p className="text-white text-sm opacity-80">Current Plan</p>
-                    <p className="text-white text-xl font-bold mt-1">{pt.plan}</p>
-                    {pt.planPrice ? (
-                      <p className="text-white text-lg font-semibold mt-2">
-                        ${Number(pt.planPrice).toLocaleString()}/mo
-                      </p>
-                    ) : null}
-                    {pt.memberId ? (
-                      <p className="text-white text-xs opacity-70 mt-2 font-mono">
-                        Member ID: {pt.memberId}
-                      </p>
-                    ) : null}
-                    {pt.memberSince ? (
-                      <p className="text-white text-xs opacity-70">
-                        Member since {formatDob(pt.memberSince)}
-                      </p>
-                    ) : null}
-                  </div>
-                  <div className="flex flex-col gap-2">
-                    <button
-                      className="px-4 py-2 rounded-md text-sm font-medium border transition-colors"
-                      style={{ borderColor: "#635bff", color: "#635bff" }}
-                      onClick={() => {
-                        if (!pt.membershipId) return;
-                        setRosterPlanDialog({
-                          patientId: pt.id,
-                          patientName: pt.name,
-                          membershipId: pt.membershipId,
-                          mode: "change",
-                        });
-                        fetchRosterPlans();
-                        setRosterSelectedPlanId(null);
-                      }}
-                    >
-                      Change Plan
-                    </button>
-                    <button
-                      className="px-4 py-2 rounded-md text-sm font-medium border border-slate-200 text-slate-500 hover:bg-slate-50 transition-colors"
-                      onClick={() => setToast({ message: "Payment method updates coming soon — patients can update directly from their portal.", type: "success" })}
-                    >
-                      Update Payment
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <div className="rounded-xl border border-dashed border-slate-300 p-6 text-center">
-                  <CreditCard className="w-8 h-8 mx-auto mb-2 text-slate-300" />
-                  <p className="text-sm font-medium text-slate-700 mb-1">No active membership</p>
-                  <p className="text-xs text-slate-500 mb-4">
-                    {pt.name} hasn't enrolled in a plan yet.
-                  </p>
-                  <button
-                    className="px-4 py-2 rounded-md text-sm font-medium text-white"
-                    style={{ backgroundColor: "#635bff" }}
-                    onClick={() => {
-                      setRosterPlanDialog({
-                        patientId: pt.id,
-                        patientName: pt.name,
-                        mode: "enroll",
-                      });
-                      fetchRosterPlans();
-                      setRosterSelectedPlanId(null);
-                    }}
-                  >
-                    Enroll in plan
-                  </button>
-                </div>
-              )}
-
-              {/* Pending enrollments — payment in progress / never claimed.
-                  Surfaces the case where a patient paid via Stripe Checkout but
-                  the checkout.session.completed webhook never reached us.
-                  "Reconcile from Stripe" pulls the live session and converts. */}
-              {ptPendingEnrollments.filter((p) => p.status === "pending").length > 0 && (
-                <div className="mt-4 space-y-3">
-                  {ptPendingEnrollments.filter((p) => p.status === "pending").map((pending) => {
-                    const planName = pending.plan?.name || pending.planName || "Unknown plan";
-                    const ageHours = pending.created_at
-                      ? Math.floor((Date.now() - new Date(pending.created_at).getTime()) / 3_600_000)
-                      : null;
-                    const expired = pending.expires_at && new Date(pending.expires_at) < new Date();
-                    return (
-                      <div
-                        key={pending.id}
-                        className="rounded-xl border p-4"
-                        style={{ borderColor: "#fde68a", backgroundColor: "#fffbeb" }}
-                      >
-                        <div className="flex items-start justify-between gap-4">
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-semibold text-amber-900">
-                              Payment in progress — {planName}
-                            </p>
-                            <p className="text-xs text-amber-800 mt-1 leading-relaxed">
-                              {expired
-                                ? "Stripe Checkout session expired. The patient may have paid before expiry — reconcile to check."
-                                : "Patient was sent to Stripe Checkout but we haven't received payment confirmation yet. If they paid, click Reconcile to pull the live session from Stripe and create the membership."}
-                            </p>
-                            <div className="mt-2 text-xs text-amber-700" style={{ fontSize: "11px" }}>
-                              {ageHours !== null && <>Created {ageHours}h ago · </>}
-                              Session: {pending.stripe_checkout_session_id?.slice(0, 18) || "—"}…
-                            </div>
-                          </div>
-                          <div className="flex flex-col gap-2 shrink-0">
-                            <button
-                              onClick={() => handleReconcilePending(pending.id)}
-                              disabled={ptReconcileLoading === pending.id}
-                              className="px-3 py-1.5 rounded-md text-xs font-medium text-white transition-colors disabled:opacity-50"
-                              style={{ backgroundColor: "#d97706" }}
-                            >
-                              {ptReconcileLoading === pending.id ? "Reconciling..." : "Reconcile from Stripe"}
-                            </button>
-                            {pending.checkout_url && !expired && (
-                              <a
-                                href={pending.checkout_url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="px-3 py-1.5 rounded-md text-xs font-medium border text-center transition-colors"
-                                style={{ borderColor: "#d97706", color: "#92400e" }}
-                              >
-                                Open link
-                              </a>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-
-            {/* Invoice History */}
-            <div className="glass rounded-xl overflow-hidden">
-              <div className="p-4 border-b border-slate-100 flex items-center justify-between gap-3">
-                <h3 className="font-semibold text-slate-800">Invoice History</h3>
-                {pt.membershipId ? (
-                  <button
-                    onClick={() => handleSyncInvoicesFromStripe(pt.membershipId as string, pt.id)}
-                    disabled={ptSyncInvoicesLoading}
-                    className="px-3 py-1.5 rounded-md text-xs font-medium border transition-colors disabled:opacity-50"
-                    style={{ borderColor: "#635bff", color: "#635bff" }}
-                    title="Pull invoices live from Stripe — useful when invoice.paid webhooks didn't deliver."
-                  >
-                    {ptSyncInvoicesLoading ? "Syncing..." : "Sync from Stripe"}
-                  </button>
-                ) : null}
-              </div>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr style={{ backgroundColor: "rgba(16,42,67,0.03)" }}>
-                      <th className="text-left px-4 py-3 font-medium text-slate-500">Invoice #</th>
-                      <th className="text-left px-4 py-3 font-medium text-slate-500">Date</th>
-                      <th className="text-left px-4 py-3 font-medium text-slate-500">Amount</th>
-                      <th className="text-left px-4 py-3 font-medium text-slate-500">Status</th>
-                      <th className="text-left px-4 py-3 font-medium text-slate-500 hidden md:table-cell">Description</th>
-                      <th className="text-left px-4 py-3 font-medium text-slate-500">PDF</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {mockPtInvoices.length === 0 ? (
-                      <tr>
-                        <td colSpan={6} className="px-4 py-10 text-center text-sm text-slate-400">
-                          No invoices yet for this patient.
-                        </td>
-                      </tr>
-                    ) : (
-                      mockPtInvoices.map((inv) => (
-                        <tr key={inv.id} className="border-t border-slate-100 hover:bg-slate-50 transition-colors">
-                          <td className="px-4 py-3 font-mono text-sm font-medium text-slate-700">{inv.id}</td>
-                          <td className="px-4 py-3 text-slate-500">{inv.date}</td>
-                          <td className="px-4 py-3 font-medium text-slate-800">${Number(inv.amount ?? 0).toFixed(2)}</td>
-                          <td className="px-4 py-3"><StatusBadge status={inv.status} /></td>
-                          <td className="px-4 py-3 text-slate-500 hidden md:table-cell">{inv.description}</td>
-                          <td className="px-4 py-3">
-                            <button
-                              className="p-1 rounded hover:bg-slate-100 text-slate-400 transition-colors"
-                              onClick={() => setToast({ message: "Invoice PDF download coming soon.", type: "success" })}
-                            >
-                              <Download className="w-4 h-4" />
-                            </button>
-                          </td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
-            {/* Payment Methods */}
-            <div className="glass rounded-xl p-6">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="font-semibold text-slate-800">Payment Methods</h3>
-                <button
-                  className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium text-white transition-colors"
-                  style={{ backgroundColor: "#635bff" }}
-                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#147d64")}
-                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "#27ab83")}
-                  onClick={() => setToast({ message: "Payment method management coming soon.", type: "success" })}
-                >
-                  <Plus className="w-3.5 h-3.5" /> Add Payment Method
-                </button>
-              </div>
-              <div className="flex items-center gap-4 p-4 rounded-lg border border-slate-200">
-                <CreditCard className="w-8 h-8 text-slate-400" />
-                <div className="flex-1">
-                  <p className="text-sm font-medium text-slate-700">Visa ending in 4242</p>
-                  <p className="text-xs text-slate-400">Expires 08/2028</p>
-                </div>
-                <span className="px-2 py-0.5 rounded-full text-xs font-medium" style={{ backgroundColor: "#e6f7f2", color: "#147d64" }}>Default</span>
-              </div>
-            </div>
-          </div>
+          <PatientBillingTab
+            patientId={pt.id}
+            patientName={pt.name}
+            membershipId={pt.membershipId ?? null}
+            planName={pt.plan && pt.plan !== "No Plan" ? pt.plan : null}
+            planPrice={pt.planPrice ?? null}
+            memberSince={pt.memberSince ?? null}
+            onChangePlan={pt.membershipId ? () => {
+              setRosterPlanDialog({
+                patientId: pt.id,
+                patientName: pt.name,
+                membershipId: pt.membershipId as string,
+                mode: "change",
+              });
+              fetchRosterPlans();
+              setRosterSelectedPlanId(null);
+            } : undefined}
+            onEnroll={() => {
+              setRosterPlanDialog({
+                patientId: pt.id,
+                patientName: pt.name,
+                mode: "enroll",
+              });
+              fetchRosterPlans();
+              setRosterSelectedPlanId(null);
+            }}
+            setToast={setToast}
+          />
         )}
 
         {/* Vitals — ported from EnnHealth's vitals tab; data source not yet wired. */}

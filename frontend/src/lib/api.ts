@@ -964,6 +964,123 @@ export const membershipService = {
       body: JSON.stringify(body),
     });
   },
+
+  // ─── Stripe-dashboard parity (2026-05-05) ─────────────────────────
+  // Each method below mirrors a Stripe customer-page action so the
+  // practice admin can do everything from MemberMD without bouncing
+  // into Stripe directly.
+
+  /** Create + send a Stripe-hosted Billing Portal link via email/SMS. */
+  sendBillingPortalLink: async (
+    id: string,
+    body: { channels: Array<"email" | "sms">; note?: string },
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ): Promise<ApiResponse<{ portalUrl: string; deliveredVia: string[] }>> => {
+    if (useMockData()) return { data: { portalUrl: "", deliveredVia: ["email"] } };
+    return apiFetch(`/memberships/${id}/billing-portal-link`, { method: "POST", body: JSON.stringify(body) });
+  },
+
+  /** Pause Stripe collection without cancelling the subscription. */
+  pauseCollection: async (
+    id: string,
+    body?: { behavior?: "keep_as_draft" | "mark_uncollectible" | "void"; resumeAt?: string },
+  ): Promise<ApiResponse<PatientMembership>> => {
+    if (useMockData()) return mockUpdate<PatientMembership>({ id });
+    return apiFetch(`/memberships/${id}/pause-collection`, { method: "POST", body: JSON.stringify(body || {}) });
+  },
+
+  /** Resume previously-paused Stripe collection. */
+  resumeCollection: async (id: string): Promise<ApiResponse<PatientMembership>> => {
+    if (useMockData()) return mockUpdate<PatientMembership>({ id });
+    return apiFetch(`/memberships/${id}/resume-collection`, { method: "POST", body: "{}" });
+  },
+
+  /** Refund a single PaymentIntent (per-payment kebab action). */
+  refundSinglePayment: async (
+    id: string,
+    body: { paymentIntent: string; amountCents?: number; reason?: "requested_by_customer" | "duplicate" | "fraudulent" },
+  ): Promise<ApiResponse<{ id: string; amount: number; status: string }>> => {
+    if (useMockData()) return { data: { id: "re_mock", amount: 0, status: "succeeded" } };
+    return apiFetch(`/memberships/${id}/refund-payment`, { method: "POST", body: JSON.stringify(body) });
+  },
+
+  /** Re-send a Stripe-hosted receipt for a past payment. */
+  sendReceipt: async (
+    id: string,
+    body: { paymentIntent: string },
+  ): Promise<ApiResponse<{ membershipId: string }>> => {
+    if (useMockData()) return { data: { membershipId: id } };
+    return apiFetch(`/memberships/${id}/send-receipt`, { method: "POST", body: JSON.stringify(body) });
+  },
+
+  /** Read-only preview of the next Stripe invoice for this subscription. */
+  upcomingInvoice: async (id: string): Promise<ApiResponse<{
+    amountDue: number;
+    currency: string;
+    periodStart: string | null;
+    periodEnd: string | null;
+    nextPaymentAttempt: string | null;
+  } | null>> => {
+    if (useMockData()) return { data: null };
+    return apiFetch(`/memberships/${id}/upcoming-invoice`);
+  },
+
+  /** Admin cancel with the full Stripe-style decision matrix:
+   *   - immediately | end-of-period | custom date
+   *   - optional refund of the last paid invoice (immediate cancels only)
+   */
+  adminCancel: async (
+    id: string,
+    body: {
+      reason: "moved" | "cost" | "dissatisfied" | "switching_provider" | "other";
+      reasonNotes?: string;
+      retentionDeclined?: "pause" | "downgrade" | "contact";
+      immediately?: boolean;
+      cancelAt?: string; // ISO datetime (custom-date cancel)
+      refundLastPayment?: boolean;
+      refundAmountCents?: number;
+    },
+  ): Promise<ApiResponse<PatientMembership>> => {
+    if (useMockData()) return mockUpdate<PatientMembership>({ id, status: "canceled" });
+    return apiFetch(`/memberships/${id}/cancel`, { method: "POST", body: JSON.stringify(body) });
+  },
+};
+
+// ─── Per-patient billing settings + insights ──────────────────────────
+// Mirrors Stripe's customer-page "Insights" panel + "Billing emails"
+// override. Keyed off patient_id; works alongside membershipService for
+// the membership-keyed actions.
+export const patientBillingService = {
+  getInsights: async (patientId: string): Promise<ApiResponse<{
+    spent: number;
+    mrr: number;
+    billingFrequency: string | null;
+    memberSince: string | null;
+    billingEmail: string | null;
+    billingEmailOverride: string | null;
+  }>> => {
+    if (useMockData()) {
+      return {
+        data: {
+          spent: 0, mrr: 0, billingFrequency: null, memberSince: null,
+          billingEmail: null, billingEmailOverride: null,
+        },
+      };
+    }
+    return apiFetch(`/patients/${patientId}/billing-insights`);
+  },
+  setBillingEmail: async (
+    patientId: string,
+    billingEmail: string | null,
+  ): Promise<ApiResponse<{ billingEmailOverride: string | null; billingEmail: string | null }>> => {
+    if (useMockData()) {
+      return { data: { billingEmailOverride: billingEmail, billingEmail: billingEmail ?? "" } };
+    }
+    return apiFetch(`/patients/${patientId}/billing-email`, {
+      method: "PUT",
+      body: JSON.stringify({ billingEmail: billingEmail ?? "" }),
+    });
+  },
 };
 
 /**
