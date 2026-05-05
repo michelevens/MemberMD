@@ -550,6 +550,7 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
     Route::get('/providers/{id}/panel', [ProviderController::class, 'panelPatients']);
     Route::post('/providers/{id}/panel/assign', [ProviderController::class, 'assignPatient']);
     Route::delete('/providers/{id}/panel/{patientId}', [ProviderController::class, 'unassignPatient']);
+    Route::get('/providers/{id}/programs', [ProviderController::class, 'programs']);
     Route::post('/providers', [ProviderController::class, 'store'])->middleware('plan.cap:providers');
     Route::apiResource('providers', ProviderController::class)->except(['destroy', 'store']);
 

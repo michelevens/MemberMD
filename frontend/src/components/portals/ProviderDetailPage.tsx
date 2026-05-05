@@ -8,7 +8,7 @@ import {
   ArrowLeft, User as UserIcon, Calendar, Users as UsersIcon, Clock, Award,
   Settings as SettingsIcon, Loader2, Search, Save, Video, Mail, Hash,
   CheckCircle2, AlertTriangle, Copy, RefreshCw, ShieldCheck, Plus,
-  Trash2, Pencil, FileCheck2, X as XIcon, Upload,
+  Trash2, Pencil, FileCheck2, X as XIcon, Upload, Layers,
 } from "lucide-react";
 import { providerService, calendarService, credentialService } from "../../lib/api";
 import type { ProviderCredentialDTO } from "../../lib/api";
@@ -23,7 +23,7 @@ const US_STATES = [
 
 const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
-type TabKey = "overview" | "profile" | "schedule" | "panel" | "appointments" | "licensing" | "credentials" | "settings";
+type TabKey = "overview" | "profile" | "schedule" | "panel" | "appointments" | "programs" | "licensing" | "credentials" | "settings";
 
 const TABS: { key: TabKey; label: string; icon: typeof UserIcon }[] = [
   { key: "overview", label: "Overview", icon: UserIcon },
@@ -31,6 +31,7 @@ const TABS: { key: TabKey; label: string; icon: typeof UserIcon }[] = [
   { key: "schedule", label: "Schedule", icon: Calendar },
   { key: "panel", label: "Panel", icon: UsersIcon },
   { key: "appointments", label: "Appointments", icon: Clock },
+  { key: "programs", label: "Programs", icon: Layers },
   { key: "licensing", label: "Licensing", icon: Award },
   { key: "credentials", label: "Credentials", icon: ShieldCheck },
   { key: "settings", label: "Settings", icon: SettingsIcon },
@@ -246,6 +247,7 @@ export function ProviderDetailPage({ providerId, embedded = false, onBack, mode 
         {activeTab === "schedule" && <ScheduleTab providerId={provider.id} setToast={setToast} />}
         {activeTab === "panel" && <PanelTab providerId={provider.id} />}
         {activeTab === "appointments" && <AppointmentsTab providerId={provider.id} />}
+        {activeTab === "programs" && <ProgramsTab providerId={provider.id} />}
         {activeTab === "licensing" && <LicensingTab provider={provider} onSaved={loadProvider} setToast={setToast} />}
         {activeTab === "credentials" && <CredentialsTab provider={provider} setToast={setToast} mode={mode} />}
         {activeTab === "settings" && <SettingsTab provider={provider} onSaved={loadProvider} setToast={setToast} mode={mode} />}
@@ -991,6 +993,172 @@ function AppointmentsTab({ providerId }: { providerId: string }) {
           })}
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── Programs Tab ───────────────────────────────────────────────────────────
+// Lists programs this provider participates in (via the program_providers
+// pivot). Surfaces panel_capacity + role + active flag from the pivot, plus
+// the live count of active enrollments on each program so admins/providers
+// can see "you handle X of Y enrollees."
+//
+// Read-only for now — assignments are managed from the Program detail page.
+// Same component renders in both admin mode (viewing any provider) and self
+// mode (provider viewing their own profile); the backend handles auth.
+
+interface ProgramRow {
+  id: string;
+  name: string;
+  code: string | null;
+  description: string | null;
+  is_active: boolean;
+  color: string | null;
+  active_enrollment_count: number;
+  panel_capacity: number | null;
+  role: string | null;
+  is_provider_active: boolean;
+  joined_at: string | null;
+}
+
+function ProgramsTab({ providerId }: { providerId: string }) {
+  const [rows, setRows] = useState<ProgramRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      const res = await providerService.getPrograms(providerId);
+      if (cancelled) return;
+      if (res.error) {
+        setError(res.error);
+      } else {
+        setRows(Array.isArray(res.data) ? res.data : []);
+        setError(null);
+      }
+      setLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, [providerId]);
+
+  if (loading) {
+    return <div className="flex justify-center py-16"><Loader2 className="w-6 h-6 animate-spin text-teal-500" /></div>;
+  }
+
+  if (error) {
+    return (
+      <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-sm text-red-700 flex items-start gap-2">
+        <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+        <div>{error}</div>
+      </div>
+    );
+  }
+
+  if (rows.length === 0) {
+    return (
+      <div className="bg-white rounded-xl border border-slate-200 p-12 text-center">
+        <Layers className="w-10 h-10 mx-auto text-slate-300 mb-3" />
+        <h3 className="text-base font-semibold text-slate-900 mb-1">No programs yet</h3>
+        <p className="text-sm text-slate-500">
+          This provider isn't assigned to any programs. Add them from the Program detail page.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-baseline justify-between">
+        <h2 className="text-lg font-semibold text-slate-900">Programs</h2>
+        <span className="text-xs text-slate-500">{rows.length} program{rows.length === 1 ? "" : "s"}</span>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {rows.map((p) => {
+          const capacityPct =
+            p.panel_capacity && p.panel_capacity > 0
+              ? Math.min(100, Math.round((p.active_enrollment_count / p.panel_capacity) * 100))
+              : null;
+          return (
+            <div
+              key={p.id}
+              className="bg-white rounded-xl border border-slate-200 p-5 flex flex-col gap-3"
+            >
+              <div className="flex items-start gap-3">
+                <div
+                  className="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0"
+                  style={{ backgroundColor: p.color || "#0d9488", color: "white" }}
+                >
+                  <Layers className="w-5 h-5" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-sm font-semibold text-slate-900 truncate">{p.name}</h3>
+                    {p.code && (
+                      <span className="text-xs text-slate-500 font-mono">{p.code}</span>
+                    )}
+                  </div>
+                  {p.description && (
+                    <p className="text-xs text-slate-500 mt-1 line-clamp-2">{p.description}</p>
+                  )}
+                </div>
+                <div className="flex flex-col items-end gap-1">
+                  {!p.is_active && (
+                    <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 bg-slate-100 px-2 py-0.5 rounded">
+                      Inactive
+                    </span>
+                  )}
+                  {p.is_active && !p.is_provider_active && (
+                    <span className="text-[10px] font-semibold uppercase tracking-wide text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded">
+                      Paused
+                    </span>
+                  )}
+                  {p.is_active && p.is_provider_active && (
+                    <span className="text-[10px] font-semibold uppercase tracking-wide text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded">
+                      Active
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-3 pt-3 border-t border-slate-100">
+                <div>
+                  <div className="text-[10px] uppercase tracking-wide text-slate-500">Role</div>
+                  <div className="text-sm font-medium text-slate-900 capitalize">
+                    {p.role || "—"}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-[10px] uppercase tracking-wide text-slate-500">Enrolled</div>
+                  <div className="text-sm font-medium text-slate-900">
+                    {p.active_enrollment_count}
+                    {p.panel_capacity != null && (
+                      <span className="text-xs text-slate-500"> / {p.panel_capacity}</span>
+                    )}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-[10px] uppercase tracking-wide text-slate-500">Capacity</div>
+                  <div className="text-sm font-medium text-slate-900">
+                    {capacityPct != null ? `${capacityPct}%` : "—"}
+                  </div>
+                </div>
+              </div>
+
+              {capacityPct != null && (
+                <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-teal-500 rounded-full"
+                    style={{ width: `${capacityPct}%` }}
+                  />
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }

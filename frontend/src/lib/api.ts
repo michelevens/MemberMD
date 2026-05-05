@@ -648,6 +648,24 @@ export const providerService = {
     if (useMockData()) return { data: null };
     return apiFetch(`/providers/${id}/panel/${patientId}`, { method: "DELETE" });
   },
+  // Programs this provider participates in. Drives the Provider detail
+  // "Programs" tab (admin viewing any provider, or provider viewing self).
+  getPrograms: async (id: string): Promise<ApiResponse<Array<{
+    id: string;
+    name: string;
+    code: string | null;
+    description: string | null;
+    is_active: boolean;
+    color: string | null;
+    active_enrollment_count: number;
+    panel_capacity: number | null;
+    role: string | null;
+    is_provider_active: boolean;
+    joined_at: string | null;
+  }>>> => {
+    if (useMockData()) return { data: [] };
+    return apiFetch(`/providers/${id}/programs`);
+  },
 };
 
 // ─── Provider Credentials ───────────────────────────────────────────────────

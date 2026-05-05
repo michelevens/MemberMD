@@ -458,4 +458,67 @@ class ProviderController extends Controller
             'message' => 'Patient removed from provider panel.',
         ]);
     }
+
+    /**
+     * GET /providers/{id}/programs
+     * Programs this provider participates in. Pulled from the
+     * program_providers pivot. Includes the role + panel_capacity
+     * + is_active flags from the pivot, plus a count of patients
+     * currently enrolled in the program (regardless of provider) so
+     * the UI can show "you handle 12 of 87 enrollees on this program".
+     *
+     * Visible to: practice_admin viewing any provider, OR provider
+     * viewing themselves (self-mode of the detail page).
+     */
+    public function programs(Request $request, string $id): JsonResponse
+    {
+        $user = $request->user();
+
+        $provider = Provider::where('tenant_id', $user->tenant_id)->findOrFail($id);
+
+        // Self-mode auth: a provider can read their own programs row;
+        // an admin can read anyone's. Patients/staff get 403.
+        if ($user->role === 'provider' && $provider->user_id !== $user->id) {
+            abort(403, 'Providers can only view their own programs.');
+        }
+        if (!in_array($user->role, ['practice_admin', 'superadmin', 'provider'], true)) {
+            abort(403);
+        }
+
+        $rows = $provider->programs()
+            ->where('programs.tenant_id', $user->tenant_id)
+            ->withCount(['enrollments as active_enrollment_count' => function ($q) {
+                $q->where('status', 'active');
+            }])
+            ->orderBy('programs.name')
+            ->get([
+                'programs.id',
+                'programs.tenant_id',
+                'programs.name',
+                'programs.code',
+                'programs.description',
+                'programs.is_active',
+                'programs.color',
+            ]);
+
+        // Reshape so the pivot fields read at the top level — easier
+        // for the frontend to consume than `pivot.panel_capacity`.
+        $payload = $rows->map(function ($p) {
+            return [
+                'id' => $p->id,
+                'name' => $p->name,
+                'code' => $p->code,
+                'description' => $p->description,
+                'is_active' => (bool) $p->is_active,
+                'color' => $p->color,
+                'active_enrollment_count' => (int) ($p->active_enrollment_count ?? 0),
+                'panel_capacity' => $p->pivot->panel_capacity ?? null,
+                'role' => $p->pivot->role ?? null,
+                'is_provider_active' => (bool) ($p->pivot->is_active ?? true),
+                'joined_at' => $p->pivot->created_at,
+            ];
+        });
+
+        return response()->json(['data' => $payload]);
+    }
 }
