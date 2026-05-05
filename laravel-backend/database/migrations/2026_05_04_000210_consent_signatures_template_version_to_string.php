@@ -21,12 +21,24 @@ return new class extends Migration {
             return;
         }
 
+        // SQLite (test suite) has no ALTER COLUMN. The column already
+        // accepts string values via Laravel's Eloquent layer, and the
+        // base create migration could be patched to use string() if
+        // needed for fresh test schemas. Skipping is safe.
+        if (Schema::getConnection()->getDriverName() !== 'pgsql') {
+            return;
+        }
+
         DB::statement('ALTER TABLE consent_signatures ALTER COLUMN template_version TYPE TEXT USING template_version::text');
     }
 
     public function down(): void
     {
         if (!Schema::hasColumn('consent_signatures', 'template_version')) {
+            return;
+        }
+
+        if (Schema::getConnection()->getDriverName() !== 'pgsql') {
             return;
         }
 

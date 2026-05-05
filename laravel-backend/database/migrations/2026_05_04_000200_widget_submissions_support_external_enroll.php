@@ -18,7 +18,25 @@ use Illuminate\Support\Facades\Schema;
 return new class extends Migration {
     public function up(): void
     {
-        // Drop existing FK on widget_config_id, alter to nullable, re-add FK
+        // Drop existing FK on widget_config_id, alter to nullable, re-add FK.
+        // SQLite (used by the test suite) doesn't support ALTER COLUMN at
+        // all — and it also has no concept of dropForeign because FKs are
+        // table-scoped. Skip the whole alteration on non-pgsql; the base
+        // create migration sets a sensible default and tests build a fresh
+        // schema each run, so the looser shape is harmless there.
+        if (Schema::getConnection()->getDriverName() !== 'pgsql') {
+            // Still need to add pending_enrollment_id on every driver — that
+            // part is portable and downstream code reads it.
+            Schema::table('widget_submissions', function (Blueprint $table) {
+                if (!Schema::hasColumn('widget_submissions', 'pending_enrollment_id')) {
+                    $table->foreignUuid('pending_enrollment_id')->nullable()
+                        ->constrained('pending_enrollments')->nullOnDelete();
+                    $table->index(['tenant_id', 'pending_enrollment_id']);
+                }
+            });
+            return;
+        }
+
         Schema::table('widget_submissions', function (Blueprint $table) {
             $table->dropForeign(['widget_config_id']);
         });

@@ -1,7 +1,10 @@
 <?php
 
 use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
 
 /**
  * Snapshot enrollment-fee state on each PatientMembership.
@@ -29,8 +32,9 @@ use Illuminate\Support\Facades\DB;
  *   enrollment_fee_waived_by_user_id
  *     Who clicked the waive button. FK to users.
  *
- * Same Postgres-friendly shape as the other 2026_05_04 migrations:
- * autocommit per statement, IF NOT EXISTS, no transaction cascade.
+ * Driver shape: Postgres uses raw SQL with IF NOT EXISTS for
+ * partial-re-run resilience; SQLite (test suite) uses the portable
+ * Schema builder with hasColumn() guards.
  */
 return new class extends Migration {
     public $withinTransaction = false;
@@ -46,56 +50,91 @@ return new class extends Migration {
             if (!$benign) {
                 throw $e;
             }
-            \Log::info("membership_enrollment_fee_snapshot: {$label} skipped — {$msg}");
+            Log::info("membership_enrollment_fee_snapshot: {$label} skipped — {$msg}");
         }
     }
 
     public function up(): void
     {
-        $this->safeStatement(
-            'ALTER TABLE patient_memberships ADD COLUMN IF NOT EXISTS locked_enrollment_fee numeric(8,2)',
-            'col locked_enrollment_fee'
-        );
-        $this->safeStatement(
-            'ALTER TABLE patient_memberships ADD COLUMN IF NOT EXISTS enrollment_fee_waived_at timestamp',
-            'col enrollment_fee_waived_at'
-        );
-        $this->safeStatement(
-            'ALTER TABLE patient_memberships ADD COLUMN IF NOT EXISTS enrollment_fee_waived_reason text',
-            'col enrollment_fee_waived_reason'
-        );
-        $this->safeStatement(
-            'ALTER TABLE patient_memberships ADD COLUMN IF NOT EXISTS enrollment_fee_waived_by_user_id uuid',
-            'col enrollment_fee_waived_by_user_id'
-        );
-
-        // FK as a separate statement. Postgres has no native ADD CONSTRAINT
-        // IF NOT EXISTS, so we check the catalog first.
-        $fk = DB::selectOne(
-            "SELECT 1 AS ok FROM pg_constraint WHERE conname = 'patient_memberships_enrollment_fee_waived_by_user_id_foreign'"
-        );
-        if (!$fk) {
+        if (Schema::getConnection()->getDriverName() === 'pgsql') {
             $this->safeStatement(
-                'ALTER TABLE patient_memberships ADD CONSTRAINT patient_memberships_enrollment_fee_waived_by_user_id_foreign '
-                . 'FOREIGN KEY (enrollment_fee_waived_by_user_id) REFERENCES users(id) ON DELETE SET NULL',
-                'fk enrollment_fee_waived_by_user_id'
+                'ALTER TABLE patient_memberships ADD COLUMN IF NOT EXISTS locked_enrollment_fee numeric(8,2)',
+                'col locked_enrollment_fee'
             );
+            $this->safeStatement(
+                'ALTER TABLE patient_memberships ADD COLUMN IF NOT EXISTS enrollment_fee_waived_at timestamp',
+                'col enrollment_fee_waived_at'
+            );
+            $this->safeStatement(
+                'ALTER TABLE patient_memberships ADD COLUMN IF NOT EXISTS enrollment_fee_waived_reason text',
+                'col enrollment_fee_waived_reason'
+            );
+            $this->safeStatement(
+                'ALTER TABLE patient_memberships ADD COLUMN IF NOT EXISTS enrollment_fee_waived_by_user_id uuid',
+                'col enrollment_fee_waived_by_user_id'
+            );
+
+            // FK as a separate statement. Postgres has no native ADD CONSTRAINT
+            // IF NOT EXISTS, so we check the catalog first.
+            $fk = DB::selectOne(
+                "SELECT 1 AS ok FROM pg_constraint WHERE conname = 'patient_memberships_enrollment_fee_waived_by_user_id_foreign'"
+            );
+            if (!$fk) {
+                $this->safeStatement(
+                    'ALTER TABLE patient_memberships ADD CONSTRAINT patient_memberships_enrollment_fee_waived_by_user_id_foreign '
+                    . 'FOREIGN KEY (enrollment_fee_waived_by_user_id) REFERENCES users(id) ON DELETE SET NULL',
+                    'fk enrollment_fee_waived_by_user_id'
+                );
+            }
+            return;
         }
+
+        Schema::table('patient_memberships', function (Blueprint $table) {
+            if (!Schema::hasColumn('patient_memberships', 'locked_enrollment_fee')) {
+                $table->decimal('locked_enrollment_fee', 8, 2)->nullable();
+            }
+            if (!Schema::hasColumn('patient_memberships', 'enrollment_fee_waived_at')) {
+                $table->timestamp('enrollment_fee_waived_at')->nullable();
+            }
+            if (!Schema::hasColumn('patient_memberships', 'enrollment_fee_waived_reason')) {
+                $table->text('enrollment_fee_waived_reason')->nullable();
+            }
+            if (!Schema::hasColumn('patient_memberships', 'enrollment_fee_waived_by_user_id')) {
+                $table->foreignUuid('enrollment_fee_waived_by_user_id')->nullable()
+                    ->constrained('users')->nullOnDelete();
+            }
+        });
     }
 
     public function down(): void
     {
-        $this->safeStatement(
-            'ALTER TABLE patient_memberships DROP CONSTRAINT IF EXISTS patient_memberships_enrollment_fee_waived_by_user_id_foreign',
-            'drop fk waiver_by_user'
-        );
-        foreach ([
-            'enrollment_fee_waived_by_user_id',
-            'enrollment_fee_waived_reason',
-            'enrollment_fee_waived_at',
-            'locked_enrollment_fee',
-        ] as $col) {
-            $this->safeStatement("ALTER TABLE patient_memberships DROP COLUMN IF EXISTS {$col}", "drop col {$col}");
+        if (Schema::getConnection()->getDriverName() === 'pgsql') {
+            $this->safeStatement(
+                'ALTER TABLE patient_memberships DROP CONSTRAINT IF EXISTS patient_memberships_enrollment_fee_waived_by_user_id_foreign',
+                'drop fk waiver_by_user'
+            );
+            foreach ([
+                'enrollment_fee_waived_by_user_id',
+                'enrollment_fee_waived_reason',
+                'enrollment_fee_waived_at',
+                'locked_enrollment_fee',
+            ] as $col) {
+                $this->safeStatement("ALTER TABLE patient_memberships DROP COLUMN IF EXISTS {$col}", "drop col {$col}");
+            }
+            return;
         }
+
+        Schema::table('patient_memberships', function (Blueprint $table) {
+            foreach ([
+                'enrollment_fee_waived_by_user_id',
+                'enrollment_fee_waived_reason',
+                'enrollment_fee_waived_at',
+                'locked_enrollment_fee',
+            ] as $col) {
+                if (Schema::hasColumn('patient_memberships', $col)) {
+                    $table->dropColumn($col);
+                }
+            }
+        });
     }
 };

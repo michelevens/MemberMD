@@ -343,4 +343,200 @@ class MembershipControllerTest extends TestCase
 
         $this->assertNotNull($response2->json('data.cancelled_at'));
     }
+
+    // ── Enrollment fee + waiver flow ─────────────────────────────────
+    //
+    // These cover the Founding Member / one-time intake fee work shipped
+    // 2026-05-04. Stripe charging is end-of-pipeline and validated
+    // separately on the live Stripe test environment; here we focus on:
+    //   1. plan.enrollment_fee survives create + update via the API
+    //     (validator gap that nearly shipped — caught in trace QA)
+    //   2. PatientMembership snapshots locked_enrollment_fee at sign-up
+    //   3. Waiver flag stamps waived_at + reason + by_user_id, even when
+    //     the plan's enrollment_fee changes after the fact
+
+    public function test_plan_create_persists_enrollment_fee(): void
+    {
+        $practice = $this->createPractice();
+        $admin = $this->createUser($practice, 'practice_admin');
+
+        $response = $this->actingAsUser($admin)
+            ->postJson('/api/membership-plans', [
+                'name' => 'Essential',
+                'monthly_price' => 99.00,
+                'annual_price' => 990.00,
+                'enrollment_fee' => 349.00,
+            ]);
+
+        $response->assertCreated()
+            ->assertJsonPath('data.name', 'Essential')
+            ->assertJsonPath('data.monthly_price', '99.00')
+            ->assertJsonPath('data.enrollment_fee', '349.00');
+
+        $this->assertDatabaseHas('membership_plans', [
+            'tenant_id' => $practice->id,
+            'name' => 'Essential',
+            'enrollment_fee' => 349.00,
+        ]);
+    }
+
+    public function test_plan_update_persists_enrollment_fee(): void
+    {
+        $practice = $this->createPractice();
+        $admin = $this->createUser($practice, 'practice_admin');
+        // Schema default is 0 (no fee). Updating to a real amount tests
+        // that the route accepts the field (it didn't pre-fix).
+        $plan = $this->createPlan($practice);
+
+        $response = $this->actingAsUser($admin)
+            ->putJson("/api/membership-plans/{$plan->id}", [
+                'enrollment_fee' => 499.00,
+            ]);
+
+        $response->assertOk()
+            ->assertJsonPath('data.enrollment_fee', '499.00');
+
+        $this->assertDatabaseHas('membership_plans', [
+            'id' => $plan->id,
+            'enrollment_fee' => 499.00,
+        ]);
+    }
+
+    public function test_membership_snapshots_locked_enrollment_fee_at_signup(): void
+    {
+        $practice = $this->createPractice();
+        $admin = $this->createUser($practice, 'practice_admin');
+        $patient = $this->createPatient($practice);
+        $plan = $this->createPlan($practice, ['enrollment_fee' => 349.00]);
+
+        $response = $this->actingAsUser($admin)
+            ->postJson('/api/memberships', [
+                'patient_id' => $patient->id,
+                'plan_id' => $plan->id,
+                'billing_frequency' => 'monthly',
+            ]);
+
+        $response->assertCreated();
+        $membershipId = $response->json('data.id');
+
+        // Snapshot captured the plan's enrollment_fee at sign-up.
+        $this->assertDatabaseHas('patient_memberships', [
+            'id' => $membershipId,
+            'locked_enrollment_fee' => 349.00,
+            'enrollment_fee_waived_at' => null,
+            'enrollment_fee_waived_reason' => null,
+        ]);
+    }
+
+    public function test_membership_snapshots_null_when_plan_has_no_fee(): void
+    {
+        $practice = $this->createPractice();
+        $admin = $this->createUser($practice, 'practice_admin');
+        $patient = $this->createPatient($practice);
+        // Default plan has enrollment_fee = 0. Service treats 0 as "no
+        // fee" and stamps locked_enrollment_fee as null on the snapshot.
+        $plan = $this->createPlan($practice);
+
+        $response = $this->actingAsUser($admin)
+            ->postJson('/api/memberships', [
+                'patient_id' => $patient->id,
+                'plan_id' => $plan->id,
+                'billing_frequency' => 'monthly',
+            ]);
+
+        $response->assertCreated();
+        $membershipId = $response->json('data.id');
+
+        $this->assertDatabaseHas('patient_memberships', [
+            'id' => $membershipId,
+            'locked_enrollment_fee' => null,
+        ]);
+    }
+
+    public function test_waiver_stamps_audit_fields_at_signup(): void
+    {
+        $practice = $this->createPractice();
+        $admin = $this->createUser($practice, 'practice_admin');
+        $patient = $this->createPatient($practice);
+        $plan = $this->createPlan($practice, ['enrollment_fee' => 349.00]);
+
+        $response = $this->actingAsUser($admin)
+            ->postJson('/api/memberships', [
+                'patient_id' => $patient->id,
+                'plan_id' => $plan->id,
+                'billing_frequency' => 'monthly',
+                'waive_enrollment_fee' => true,
+                'waiver_reason' => 'Founding member — enrolled before launch',
+            ]);
+
+        $response->assertCreated();
+        $membershipId = $response->json('data.id');
+
+        // Snapshot still captures the would-have-been amount, plus the
+        // full audit triple. waived_at is a timestamp; verify NOT null
+        // separately since assertDatabaseHas can't match "any timestamp".
+        $this->assertDatabaseHas('patient_memberships', [
+            'id' => $membershipId,
+            'locked_enrollment_fee' => 349.00,
+            'enrollment_fee_waived_reason' => 'Founding member — enrolled before launch',
+            'enrollment_fee_waived_by_user_id' => $admin->id,
+        ]);
+        $membership = PatientMembership::find($membershipId);
+        $this->assertNotNull($membership->enrollment_fee_waived_at);
+    }
+
+    public function test_waiver_without_reason_is_rejected(): void
+    {
+        $practice = $this->createPractice();
+        $admin = $this->createUser($practice, 'practice_admin');
+        $patient = $this->createPatient($practice);
+        $plan = $this->createPlan($practice, ['enrollment_fee' => 349.00]);
+
+        $response = $this->actingAsUser($admin)
+            ->postJson('/api/memberships', [
+                'patient_id' => $patient->id,
+                'plan_id' => $plan->id,
+                'billing_frequency' => 'monthly',
+                'waive_enrollment_fee' => true,
+                // waiver_reason missing — required_if rule fires
+            ]);
+
+        $response->assertStatus(422)
+            ->assertJsonValidationErrors('waiver_reason');
+    }
+
+    public function test_waiver_on_plan_with_no_fee_is_a_no_op(): void
+    {
+        // Edge: admin checks waive on a plan that has no enrollment_fee
+        // configured. The Founding-member panel only renders in the UI
+        // when fee > 0, but the API has no equivalent guard — so we
+        // verify the service correctly leaves the audit fields null
+        // because there's no fee to waive.
+        $practice = $this->createPractice();
+        $admin = $this->createUser($practice, 'practice_admin');
+        $patient = $this->createPatient($practice);
+        // Default plan has enrollment_fee = 0 → treated as "no fee".
+        $plan = $this->createPlan($practice);
+
+        $response = $this->actingAsUser($admin)
+            ->postJson('/api/memberships', [
+                'patient_id' => $patient->id,
+                'plan_id' => $plan->id,
+                'billing_frequency' => 'monthly',
+                'waive_enrollment_fee' => true,
+                'waiver_reason' => 'Founding member',
+            ]);
+
+        $response->assertCreated();
+        $membershipId = $response->json('data.id');
+
+        // No fee to waive → no audit stamps.
+        $this->assertDatabaseHas('patient_memberships', [
+            'id' => $membershipId,
+            'locked_enrollment_fee' => null,
+            'enrollment_fee_waived_at' => null,
+            'enrollment_fee_waived_reason' => null,
+            'enrollment_fee_waived_by_user_id' => null,
+        ]);
+    }
 }

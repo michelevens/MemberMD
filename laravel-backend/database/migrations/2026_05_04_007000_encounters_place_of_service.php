@@ -1,7 +1,9 @@
 <?php
 
 use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 /**
  * Add CMS Place of Service code to encounters.
@@ -21,29 +23,47 @@ use Illuminate\Support\Facades\DB;
  *   22  On-campus outpatient hospital
  *   23  Emergency room
  *
- * Same Postgres-friendly shape as the billing-grade migration —
- * autocommit per statement, IF NOT EXISTS guard, no transaction
- * cascade on failure.
+ * Driver shape: Postgres uses raw SQL with IF NOT EXISTS for
+ * partial-re-run resilience; SQLite (test suite) uses the portable
+ * Schema builder with hasColumn() guards.
  */
 return new class extends Migration {
     public $withinTransaction = false;
 
     public function up(): void
     {
-        try {
-            DB::statement('ALTER TABLE encounters ADD COLUMN IF NOT EXISTS place_of_service varchar(4)');
-        } catch (\Throwable $e) {
-            $msg = $e->getMessage();
-            if (!str_contains($msg, 'already exists') && !str_contains($msg, 'duplicate')) {
-                throw $e;
+        if (Schema::getConnection()->getDriverName() === 'pgsql') {
+            try {
+                DB::statement('ALTER TABLE encounters ADD COLUMN IF NOT EXISTS place_of_service varchar(4)');
+            } catch (\Throwable $e) {
+                $msg = $e->getMessage();
+                if (!str_contains($msg, 'already exists') && !str_contains($msg, 'duplicate')) {
+                    throw $e;
+                }
             }
+            return;
         }
+
+        Schema::table('encounters', function (Blueprint $table) {
+            if (!Schema::hasColumn('encounters', 'place_of_service')) {
+                $table->string('place_of_service', 4)->nullable();
+            }
+        });
     }
 
     public function down(): void
     {
-        try {
-            DB::statement('ALTER TABLE encounters DROP COLUMN IF EXISTS place_of_service');
-        } catch (\Throwable) { /* fine */ }
+        if (Schema::getConnection()->getDriverName() === 'pgsql') {
+            try {
+                DB::statement('ALTER TABLE encounters DROP COLUMN IF EXISTS place_of_service');
+            } catch (\Throwable) { /* fine */ }
+            return;
+        }
+
+        Schema::table('encounters', function (Blueprint $table) {
+            if (Schema::hasColumn('encounters', 'place_of_service')) {
+                $table->dropColumn('place_of_service');
+            }
+        });
     }
 };
