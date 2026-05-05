@@ -7,6 +7,19 @@ Your appointment has been moved to a new time.
 @endsection
 
 @section('content')
+@php
+    // Resolve recipient tz the same way the other appointment mails do.
+    // Note we apply it to BOTH the new time and the old (line-through)
+    // so they're directly comparable in the patient's local clock.
+    $tz = ($appointment->patient_timezone ?? null)
+        ?? (isset($patient) ? ($patient->timezone ?? null) : null)
+        ?? (isset($practice) ? ($practice->timezone ?? null) : null)
+        ?? 'UTC';
+    $scheduledAt = \Carbon\Carbon::parse($appointment->scheduled_at)->setTimezone($tz);
+    $oldScheduledAtTz = $oldScheduledAt
+        ? \Carbon\Carbon::parse($oldScheduledAt)->setTimezone($tz)
+        : null;
+@endphp
 <h1 style="margin: 0 0 8px; font-size: 24px; font-weight: 700; color: #102a43; line-height: 1.3;">
     Your appointment has been rescheduled
 </h1>
@@ -21,7 +34,7 @@ Your appointment has been moved to a new time.
         <td style="padding: 18px 20px;">
             <p style="margin: 0 0 6px; font-size: 12px; color: #047857; font-weight: 600; letter-spacing: 0.5px; text-transform: uppercase;">New time</p>
             <p style="margin: 0; font-size: 16px; color: #064e3b; font-weight: 600;">
-                {{ \Carbon\Carbon::parse($appointment->scheduled_at)->format('l, F j, Y \a\t g:i A') }}
+                {{ $scheduledAt->format('l, F j, Y \a\t g:i A') }} {{ $scheduledAt->format('T') }}
             </p>
         </td>
     </tr>
@@ -32,7 +45,7 @@ Your appointment has been moved to a new time.
     <tr>
         <td style="padding: 12px 20px; background-color: #f9fafb; border-radius: 8px; border: 1px solid #e5e7eb;">
             <p style="margin: 0; font-size: 13px; color: #6b7280;">
-                <span style="text-decoration: line-through;">Was: {{ \Carbon\Carbon::parse($oldScheduledAt)->format('l, F j, Y \a\t g:i A') }}</span>
+                <span style="text-decoration: line-through;">Was: {{ $oldScheduledAtTz?->format('l, F j, Y \a\t g:i A') }} {{ $oldScheduledAtTz?->format('T') }}</span>
             </p>
         </td>
     </tr>

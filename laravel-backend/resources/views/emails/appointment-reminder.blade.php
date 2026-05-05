@@ -2,18 +2,26 @@
 
 @section('header_subtitle', 'Appointment Reminder')
 
-@section('preheader')
-Reminder: Your appointment is tomorrow at {{ \Carbon\Carbon::parse($appointment->scheduled_at)->format('g:i A') }}.
-@endsection
-
-@section('content')
 @php
-    $scheduledAt = \Carbon\Carbon::parse($appointment->scheduled_at);
+    // Resolve recipient tz: appointment.patient_timezone (captured at
+    // booking) → patient.timezone → practice.timezone → UTC.
+    // Without this, "12:30 PM EDT" emails out as "4:30 PM" UTC.
+    $tz = $appointment->patient_timezone
+        ?? ($patient->timezone ?? null)
+        ?? (isset($practice) ? ($practice->timezone ?? null) : null)
+        ?? 'UTC';
+    $scheduledAt = \Carbon\Carbon::parse($appointment->scheduled_at)->setTimezone($tz);
     // $isTelehealth + $videoLink come from the Mailable's `with`.
     // Fallback for any legacy invocation that doesn't pass them.
     $isTelehealth = $isTelehealth ?? (bool) ($appointment->is_telehealth ?? false);
     $videoLink = $videoLink ?? null;
 @endphp
+
+@section('preheader')
+Reminder: Your appointment is tomorrow at {{ $scheduledAt->format('g:i A') }} {{ $scheduledAt->format('T') }}.
+@endsection
+
+@section('content')
 
 <h1 style="margin: 0 0 8px; font-size: 24px; font-weight: 700; color: #102a43; line-height: 1.3;">
     Your Appointment is Tomorrow
@@ -28,7 +36,7 @@ Reminder: Your appointment is tomorrow at {{ \Carbon\Carbon::parse($appointment-
     <tr>
         <td style="background-color: #fffbeb; padding: 16px 24px; border-bottom: 1px solid #fde68a;">
             <span style="font-size: 13px; font-weight: 600; color: #d97706; text-transform: uppercase; letter-spacing: 0.5px;">
-                Tomorrow &mdash; {{ $scheduledAt->format('g:i A') }}
+                Tomorrow &mdash; {{ $scheduledAt->format('g:i A') }} {{ $scheduledAt->format('T') }}
             </span>
         </td>
     </tr>
@@ -44,7 +52,7 @@ Reminder: Your appointment is tomorrow at {{ \Carbon\Carbon::parse($appointment-
                 <tr>
                     <td style="padding: 6px 0;">
                         <span style="font-size: 13px; color: #6b7280;">Time</span><br>
-                        <span style="font-size: 16px; font-weight: 600; color: #102a43;">{{ $scheduledAt->format('g:i A') }}</span>
+                        <span style="font-size: 16px; font-weight: 600; color: #102a43;">{{ $scheduledAt->format('g:i A') }} {{ $scheduledAt->format('T') }}</span>
                     </td>
                 </tr>
                 <tr>

@@ -2,18 +2,32 @@
 
 @section('header_subtitle', 'Appointment Confirmed')
 
-@section('preheader')
-Your appointment on {{ \Carbon\Carbon::parse($appointment->scheduled_at)->format('M j, Y') }} has been confirmed.
-@endsection
-
-@section('content')
 @php
-    $scheduledAt = \Carbon\Carbon::parse($appointment->scheduled_at);
+    // Resolve the right tz for THIS recipient, in priority:
+    //   1. The appointment's captured patient_timezone (set at book time
+    //      from the patient's browser — most accurate to the moment they
+    //      meant)
+    //   2. The patient profile's timezone (filled at intake)
+    //   3. The practice's timezone (last resort)
+    //   4. UTC (don't crash, but visibly wrong — log via mailer)
+    // Without this, the column reads come back UTC and "12:30 PM EDT"
+    // emails out as "4:30 PM" — exactly the bug a patient just reported.
+    $tz = $appointment->patient_timezone
+        ?? ($patient->timezone ?? null)
+        ?? (isset($practice) ? ($practice->timezone ?? null) : null)
+        ?? 'UTC';
+    $scheduledAt = \Carbon\Carbon::parse($appointment->scheduled_at)->setTimezone($tz);
     // $isTelehealth + $videoLink come from the Mailable's `with` array.
     // Fallback for legacy callers that don't pass them.
     $isTelehealth = $isTelehealth ?? (bool) ($appointment->is_telehealth ?? false);
     $videoLink = $videoLink ?? null;
 @endphp
+
+@section('preheader')
+Your appointment on {{ $scheduledAt->format('M j, Y') }} has been confirmed.
+@endsection
+
+@section('content')
 
 <h1 style="margin: 0 0 8px; font-size: 24px; font-weight: 700; color: #102a43; line-height: 1.3;">
     Appointment Confirmed
@@ -44,7 +58,7 @@ Your appointment on {{ \Carbon\Carbon::parse($appointment->scheduled_at)->format
                 <tr>
                     <td style="padding: 6px 0;">
                         <span style="font-size: 13px; color: #6b7280;">Time</span><br>
-                        <span style="font-size: 16px; font-weight: 600; color: #102a43;">{{ $scheduledAt->format('g:i A') }}</span>
+                        <span style="font-size: 16px; font-weight: 600; color: #102a43;">{{ $scheduledAt->format('g:i A') }} {{ $scheduledAt->format('T') }}</span>
                     </td>
                 </tr>
                 <tr>
