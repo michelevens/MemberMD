@@ -747,6 +747,15 @@ export function AppointmentBookingWidget({
 
     // Backend StoreAppointmentRequest requires patientId. Earlier
     // versions of this widget omitted it and got a generic 422.
+    //
+    // Field name note: backend column is `is_telehealth` (one word).
+    // apiFetch's camelToSnake transformer converts each capital
+    // letter to `_<lower>`, so `isTeleHealth` (capital H mid-word)
+    // becomes `is_tele_health` — three words — which the validator
+    // strips silently, so the appointment ends up with the default
+    // `is_telehealth=false`. Send the camel-2-words form so the
+    // transform lands on the right column. Bug caught when a patient
+    // picked Telehealth and got an in-office row instead.
     const res = await appointmentService.create({
       patientId,
       providerId: selectedProvider.id,
@@ -754,8 +763,9 @@ export function AppointmentBookingWidget({
       scheduledAt: scheduled.toISOString(),
       durationMinutes: selectedType.durationMinutes,
       chiefComplaint: chief,
-      isTeleHealth: effectiveIsTelehealth,
-    } as Partial<Appointment>);
+      isTelehealth: effectiveIsTelehealth,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any);
 
     if (res.error || !res.data) {
       setBooking(false);

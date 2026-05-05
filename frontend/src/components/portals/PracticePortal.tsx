@@ -10929,34 +10929,72 @@ export function PracticePortal() {
           can override any field. Template auto-picks from encounter type
           (Telehealth → Telehealth Visit, etc.) but is also overridable. */}
       {showNewEncounter && (() => {
-        // Filter appointments: same tenant, recent (last 14d) or upcoming
-        // 7d, not already linked to a signed encounter. Limited to 50 for
-        // dropdown sanity. The list is small in practice.
+        // Recent / upcoming window for the appointment dropdown. Loose
+        // window = -14d / +7d so admins can chart late or back-date a
+        // visit, but tight enough that the dropdown stays scannable.
         const now = Date.now();
         const day = 24 * 3600 * 1000;
-        const apptCandidates = (appointments || [])
+        const apptCandidatesAll = (appointments || [])
           .filter((a: { id: string; scheduledAt?: string; scheduled_at?: string; status?: string }) => {
             const when = a.scheduledAt ?? a.scheduled_at;
             if (!when) return false;
             const t = new Date(when).getTime();
             return t > now - 14 * day && t < now + 7 * day && a.status !== "cancelled";
-          })
-          .slice(0, 50);
+          });
+        // Patient-first flow: the appointment dropdown is gated on a
+        // selected patient and only shows that patient's appointments.
+        // Without this, an admin charting Jane could accidentally pick
+        // Bob's slot from the same provider's day. Cap at 50 once
+        // filtered for dropdown sanity.
+        const apptCandidates = encounterForm.patientId
+          ? apptCandidatesAll
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              .filter((a: any) => (a.patientId ?? a.patient_id) === encounterForm.patientId)
+              .slice(0, 50)
+          : [];
         const patientList = apiPatients || (isDemoMode ? MOCK_PATIENTS : []);
         return (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: "rgba(0,0,0,0.5)" }}>
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden max-h-[90vh] flex flex-col">
             <div className="px-6 py-4 border-b border-slate-100 flex-shrink-0">
               <h3 className="text-base font-semibold text-slate-900">New Encounter</h3>
-              <p className="text-sm text-slate-500 mt-0.5">Pick an appointment to auto-fill, or set the fields manually.</p>
+              <p className="text-sm text-slate-500 mt-0.5">Pick the patient, then optionally link an appointment to auto-fill the rest.</p>
             </div>
 
             <div className="p-6 space-y-4 overflow-y-auto">
-              {/* Appointment picker — first per Tebra/Kareo pattern */}
+              {/* Patient first — the appointment picker below is gated
+                  on this so admins never link an encounter to the wrong
+                  patient's appointment. */}
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Appointment <span className="text-xs font-normal text-slate-400">(optional — auto-fills patient + type)</span></label>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Patient *</label>
                 <select
                   className="w-full border rounded-lg px-3 py-2 text-sm"
+                  value={encounterForm.patientId}
+                  onChange={(e) => {
+                    const newPatientId = e.target.value;
+                    // Clear the linked appointment whenever the patient
+                    // changes — the previous selection is by definition
+                    // for someone else now.
+                    setEncounterForm((f) => ({
+                      ...f,
+                      patientId: newPatientId,
+                      appointmentId: f.patientId === newPatientId ? f.appointmentId : "",
+                    }));
+                  }}
+                >
+                  <option value="">Select patient...</option>
+                  {patientList.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
+              </div>
+
+              {/* Appointment — now scoped to the selected patient. */}
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">
+                  Appointment <span className="text-xs font-normal text-slate-400">(optional — auto-fills type + date)</span>
+                </label>
+                <select
+                  className="w-full border rounded-lg px-3 py-2 text-sm disabled:bg-slate-50 disabled:text-slate-400"
+                  disabled={!encounterForm.patientId}
                   value={encounterForm.appointmentId}
                   onChange={(e) => {
                     const apptId = e.target.value;
@@ -10971,36 +11009,32 @@ export function PracticePortal() {
                     setEncounterForm((f) => ({
                       ...f,
                       appointmentId: apptId,
+                      // Patient is already locked above — just confirm.
                       patientId: apt.patientId ?? apt.patient_id ?? f.patientId,
                       encounterType: inferredType,
                       placeOfService: defaultPosForType(inferredType),
-                      // Auto-pick template from the inferred type if the
-                      // user hasn't manually chosen one already.
                       templateId: f.templateId || pickDefaultTemplateId(inferredType, chartTemplates),
                       encounterDate: (apt.scheduledAt ?? apt.scheduled_at ?? f.encounterDate).slice(0, 10),
                     }));
                   }}
                 >
-                  <option value="">— No appointment / manual entry —</option>
-                  {apptCandidates.map((a: { id: string; scheduledAt?: string; scheduled_at?: string; patient?: { firstName?: string; lastName?: string }; isTelehealth?: boolean; is_telehealth?: boolean }) => {
+                  <option value="">
+                    {!encounterForm.patientId
+                      ? "— Pick a patient first —"
+                      : apptCandidates.length === 0
+                        ? "— No recent appointments for this patient —"
+                        : "— No appointment / manual entry —"}
+                  </option>
+                  {apptCandidates.map((a: { id: string; scheduledAt?: string; scheduled_at?: string; isTelehealth?: boolean; is_telehealth?: boolean }) => {
                     const when = a.scheduledAt ?? a.scheduled_at;
                     const whenStr = when ? new Date(when).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "";
-                    const ptName = a.patient ? `${a.patient.firstName ?? ""} ${a.patient.lastName ?? ""}`.trim() : "";
                     const isTele = a.isTelehealth ?? a.is_telehealth;
                     return (
                       <option key={a.id} value={a.id}>
-                        {whenStr}{ptName ? ` — ${ptName}` : ""}{isTele ? " (telehealth)" : ""}
+                        {whenStr}{isTele ? " (telehealth)" : ""}
                       </option>
                     );
                   })}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Patient *</label>
-                <select className="w-full border rounded-lg px-3 py-2 text-sm" value={encounterForm.patientId} onChange={e => setEncounterForm(f => ({ ...f, patientId: e.target.value }))}>
-                  <option value="">Select patient...</option>
-                  {patientList.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
                 </select>
               </div>
 
