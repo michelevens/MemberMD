@@ -39,6 +39,10 @@ class Patient extends Model
         'date_of_birth', 'gender', 'pronouns',
         'phone', 'phone_blind_index',
         'email', 'email_blind_index',
+        // Billing routing — receipts, card-update prompts, payment-link
+        // emails go here when set. Falls back to email when null. Does
+        // not change clinical/portal email.
+        'billing_email_override',
         'address', 'city', 'state', 'zip',
         'preferred_language', 'marital_status', 'employment_status',
         'ssn_encrypted',
@@ -97,6 +101,21 @@ class Patient extends Model
     protected $hidden = [
         'ssn_encrypted', 'medicaid_number_encrypted', 'medicare_number_encrypted',
     ];
+
+    /**
+     * Where billing emails should be sent. Falls back to the primary
+     * patient email when no override is set. Used by every code path
+     * that sends a receipt, payment-link email, or card-update
+     * prompt — keep clinical and billing communication separable.
+     */
+    public function billingEmail(): ?string
+    {
+        $override = $this->billing_email_override;
+        if (is_string($override) && trim($override) !== '') {
+            return trim($override);
+        }
+        return $this->email;
+    }
 
     public function user(): BelongsTo { return $this->belongsTo(User::class); }
     public function primaryProvider(): BelongsTo { return $this->belongsTo(Provider::class, 'primary_provider_id'); }

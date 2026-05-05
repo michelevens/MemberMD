@@ -372,6 +372,20 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
     // Pull invoice + payment rows live from Stripe for a membership's
     // subscription. Used when invoice.paid webhooks weren't delivered.
     Route::post('/memberships/{id}/sync-invoices', [MembershipController::class, 'syncInvoicesFromStripe']);
+
+    // Stripe-dashboard parity (2026-05-05). Each route mirrors an
+    // action the practice admin would otherwise take in Stripe.
+    Route::post('/memberships/{id}/billing-portal-link', [MembershipController::class, 'sendBillingPortalLink']);
+    Route::post('/memberships/{id}/pause-collection', [MembershipController::class, 'pauseCollection']);
+    Route::post('/memberships/{id}/resume-collection', [MembershipController::class, 'resumeCollection']);
+    Route::post('/memberships/{id}/refund-payment', [MembershipController::class, 'refundSinglePayment']);
+    Route::post('/memberships/{id}/send-receipt', [MembershipController::class, 'sendReceipt']);
+    Route::get('/memberships/{id}/upcoming-invoice', [MembershipController::class, 'upcomingInvoice']);
+
+    // Per-patient billing settings + insights.
+    Route::get('/patients/{id}/billing-insights', [MembershipController::class, 'billingInsights']);
+    Route::put('/patients/{id}/billing-email', [MembershipController::class, 'updateBillingEmail']);
+
     Route::apiResource('memberships', MembershipController::class)->except(['destroy']);
 
     // Patient self-service: list the caller's own active program

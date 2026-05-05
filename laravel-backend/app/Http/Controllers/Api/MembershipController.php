@@ -946,27 +946,99 @@ class MembershipController extends Controller
             'reason_notes' => 'nullable|string|max:500',
             'retention_offered' => 'nullable|boolean',
             'retention_declined' => 'nullable|string|in:pause,downgrade,contact',
+            // Three-decision cancel: immediately | end-of-period (default)
+            // | custom date. Mirrors Stripe's cancel dialog.
             'immediately' => 'nullable|boolean',
+            'cancel_at' => 'nullable|date|after:now',
+            // Optional refund of the most recent paid invoice. Captured
+            // from the cancel dialog when the admin checks "refund last
+            // payment". Stripe applies it as a refund on the underlying
+            // PaymentIntent.
+            'refund_last_payment' => 'nullable|boolean',
+            'refund_amount_cents' => 'nullable|integer|min:1',
         ]);
 
         $immediately = (bool) ($validated['immediately'] ?? false);
+        $cancelAt = isset($validated['cancel_at']) ? new \DateTime($validated['cancel_at']) : null;
 
-        $this->cancelStripeSubscription($membership, $immediately);
+        // Validation guard: immediately + cancel_at are mutually exclusive.
+        // immediately wins; ignore cancel_at silently to keep the API
+        // forgiving for clients that might send both.
+        if ($immediately) {
+            $cancelAt = null;
+        }
+
+        $this->cancelStripeSubscription($membership, $immediately, $cancelAt);
+
+        // Optional refund of the last paid invoice. Only attempted when
+        // the admin explicitly opted in, AND the cancel is immediate
+        // (refunding while the subscription continues to bill makes
+        // little sense — keep the surface clean).
+        $refundResult = null;
+        if (!empty($validated['refund_last_payment']) && $immediately) {
+            $refundResult = $this->refundLastInvoiceForMembership(
+                $membership,
+                $validated['refund_amount_cents'] ?? null,
+            );
+        }
+
         // Routed through the state machine so an illegal transition (e.g.
         // cancelling an already-cancelled membership) is caught and the
         // dependents cascade fires automatically.
         $this->states->transition(
             $membership,
             'cancelled',
-            $this->buildCancelExtras($validated, $immediately),
+            $this->buildCancelExtras($validated, $immediately, $cancelAt),
         );
 
-        return response()->json([
+        return response()->json(array_filter([
             'data' => $membership->fresh()->load(['patient', 'plan']),
             'message' => $immediately
                 ? 'Membership cancelled immediately.'
-                : 'Membership will end at the current period close.',
-        ]);
+                : ($cancelAt
+                    ? 'Cancel scheduled for ' . $cancelAt->format('M j, Y') . '.'
+                    : 'Membership will end at the current period close.'),
+            'refund' => $refundResult,
+        ]));
+    }
+
+    /**
+     * Helper for the immediate-cancel + refund path. Pulls the last paid
+     * Invoice for this membership, refunds the linked PaymentIntent, and
+     * stamps the local Invoice as refunded. Returns a small summary
+     * dict for the response, or null on no-op.
+     */
+    private function refundLastInvoiceForMembership(PatientMembership $membership, ?int $amountCents): ?array
+    {
+        $lastPaid = \App\Models\Invoice::where('tenant_id', $membership->tenant_id)
+            ->where('membership_id', $membership->id)
+            ->where('status', 'paid')
+            ->orderByDesc('created_at')
+            ->first();
+
+        if (!$lastPaid || empty($lastPaid->payment_intent_id)) {
+            return null;
+        }
+
+        $practice = Practice::findOrFail($membership->tenant_id);
+
+        try {
+            $result = $this->subscriptions->refundPaymentIntent(
+                $practice,
+                $lastPaid->payment_intent_id,
+                $amountCents,
+                'requested_by_customer',
+            );
+            $lastPaid->update(['status' => 'refunded']);
+            return $result;
+        } catch (\Throwable $e) {
+            Log::warning('Refund-last-payment on cancel failed', [
+                'membership_id' => $membership->id,
+                'invoice_id' => $lastPaid->id,
+                'error' => $e->getMessage(),
+            ]);
+            return null;
+        }
     }
 
     /**
@@ -1092,13 +1164,13 @@ class MembershipController extends Controller
         ]);
     }
 
-    private function cancelStripeSubscription(PatientMembership $membership, bool $immediately): void
+    private function cancelStripeSubscription(PatientMembership $membership, bool $immediately, ?\DateTimeInterface $cancelAt = null): void
     {
         if (empty($membership->stripe_subscription_id)) {
             return;
         }
         try {
-            $this->subscriptions->cancelSubscription($membership, $immediately);
+            $this->subscriptions->cancelSubscription($membership, $immediately, $cancelAt);
         } catch (\Throwable $e) {
             // Don't block local cancel on Stripe failure — webhook will
             // eventually reconcile if it succeeds asynchronously, and admins
@@ -1111,7 +1183,7 @@ class MembershipController extends Controller
     }
 
     /** Extras (everything but `status`) that accompany a cancel transition. */
-    private function buildCancelExtras(array $validated, bool $immediately): array
+    private function buildCancelExtras(array $validated, bool $immediately, ?\DateTimeInterface $cancelAt = null): array
     {
         $reasonText = $validated['reason'];
         if (!empty($validated['reason_notes'])) {
@@ -1121,12 +1193,19 @@ class MembershipController extends Controller
             $reasonText .= ' [declined retention: ' . $validated['retention_declined'] . ']';
         }
 
+        // expires_at semantics:
+        //   immediate cancel       → now (membership ends today)
+        //   end-of-period cancel   → null (use current_period_end)
+        //   custom-date cancel     → the supplied timestamp
+        $expiresAt = $immediately ? now() : ($cancelAt ?? null);
+
         return [
             'cancelled_at' => now(),
             'cancel_reason' => $reasonText,
             // For end-of-period cancels we keep current_period_end as the
             // effective termination date. For immediate, expires_at = now.
-            'expires_at' => $immediately ? now() : null,
+            // For custom-date cancels, expires_at carries the future date.
+            'expires_at' => $expiresAt,
         ];
     }
 
@@ -1701,5 +1780,393 @@ class MembershipController extends Controller
             'message' => 'Family member removed.',
             'stripe_warning' => $stripeWarning,
         ]));
+    }
+
+    // ─── Stripe-dashboard parity (2026-05-05) ──────────────────────────
+    //
+    // Six endpoints that mirror the actions the practice admin would
+    // otherwise take in Stripe directly. Each one is per-patient or
+    // per-membership; tenant scope enforced by tenant_id lookup.
+
+    /**
+     * POST /memberships/{id}/billing-portal-link
+     * Creates a Stripe-hosted Billing Portal session for the patient
+     * tied to this membership and delivers it via email, SMS, or both.
+     * Body: { channels: ["email","sms"], note?: string }
+     *
+     * The patient lands on Stripe's portal where they can swap the card,
+     * view invoices, update billing address — without us building any of
+     * those surfaces. Closes the #1 churn cause: expired/declined cards.
+     */
+    public function sendBillingPortalLink(Request $request, string $id): JsonResponse
+    {
+        $user = $request->user();
+        abort_if(!in_array($user->role, ['practice_admin', 'staff']), 403);
+
+        $membership = PatientMembership::where('tenant_id', $user->tenant_id)
+            ->with(['patient', 'plan'])
+            ->findOrFail($id);
+
+        $validated = $request->validate([
+            'channels' => 'required|array|min:1',
+            'channels.*' => 'string|in:email,sms',
+            'note' => 'nullable|string|max:500',
+        ]);
+
+        $patient = $membership->patient;
+        $practice = Practice::findOrFail($user->tenant_id);
+
+        if (!$practice->canAcceptPayments()) {
+            return response()->json([
+                'message' => 'Stripe is not configured for this practice yet.',
+            ], 422);
+        }
+
+        $appUrl = (string) config('app.frontend_url', config('app.url'));
+        $returnUrl = rtrim($appUrl, '/') . '/#/patient/billing';
+
+        try {
+            $portalUrl = $this->subscriptions->createBillingPortalSession(
+                $practice,
+                $patient,
+                $returnUrl,
+            );
+        } catch (\RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        $deliveredVia = [];
+        $note = $validated['note'] ?? null;
+
+        if (in_array('email', $validated['channels'], true)) {
+            $billingEmail = $patient->billingEmail();
+            if (empty($billingEmail)) {
+                return response()->json([
+                    'message' => 'Patient has no email on file. Add one before sending the link.',
+                ], 422);
+            }
+            try {
+                \App\Services\MailDispatcher::send(
+                    $billingEmail,
+                    new \App\Mail\BillingPortalLink(
+                        patient: $patient,
+                        practice: $practice,
+                        portalUrl: $portalUrl,
+                        personalNote: $note,
+                    ),
+                    'billing-portal-link',
+                );
+                $deliveredVia[] = 'email';
+            } catch (\Throwable $e) {
+                Log::warning('Billing portal link email failed', [
+                    'membership_id' => $membership->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
+        if (in_array('sms', $validated['channels'], true)) {
+            $phone = $patient->phone;
+            if (empty($phone)) {
+                return response()->json([
+                    'message' => 'Patient has no phone number on file. Add one before sending via SMS.',
+                ], 422);
+            }
+            try {
+                $sms = app(\App\Services\TwilioSmsService::class);
+                $body = "{$practice->name}: update your card on file → {$portalUrl}";
+                $sms->sendSms($phone, $body, $practice->id);
+                $deliveredVia[] = 'sms';
+            } catch (\Throwable $e) {
+                Log::warning('Billing portal link SMS failed', [
+                    'membership_id' => $membership->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
+        if (empty($deliveredVia)) {
+            return response()->json([
+                'message' => 'Could not deliver the link via any of the requested channels.',
+            ], 422);
+        }
+
+        return response()->json([
+            'data' => ['portal_url' => $portalUrl, 'delivered_via' => $deliveredVia],
+            'message' => 'Card-update link sent via ' . implode(' + ', $deliveredVia) . '.',
+        ]);
+    }
+
+    /**
+     * POST /memberships/{id}/pause-collection
+     * Stripe-side pause: keep the subscription active but stop charging
+     * until resumed. Distinct from membership.pause (which transitions
+     * the local membership state machine to paused). Use this for
+     * grace periods where we want to keep the subscription alive but
+     * skip the next charge.
+     */
+    public function pauseCollection(Request $request, string $id): JsonResponse
+    {
+        $user = $request->user();
+        abort_if(!in_array($user->role, ['practice_admin', 'staff']), 403);
+
+        $membership = PatientMembership::where('tenant_id', $user->tenant_id)->findOrFail($id);
+
+        $validated = $request->validate([
+            'behavior' => 'sometimes|string|in:keep_as_draft,mark_uncollectible,void',
+            'resume_at' => 'nullable|date|after:now',
+        ]);
+
+        $practice = Practice::findOrFail($user->tenant_id);
+
+        try {
+            $this->subscriptions->pauseSubscriptionCollection(
+                $practice,
+                $membership,
+                $validated['behavior'] ?? 'keep_as_draft',
+                isset($validated['resume_at']) ? new \DateTime($validated['resume_at']) : null,
+            );
+        } catch (\RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        return response()->json([
+            'data' => $membership->fresh(),
+            'message' => 'Stripe collection paused on this subscription.',
+        ]);
+    }
+
+    /**
+     * POST /memberships/{id}/resume-collection
+     * Reverse of pauseCollection.
+     */
+    public function resumeCollection(Request $request, string $id): JsonResponse
+    {
+        $user = $request->user();
+        abort_if(!in_array($user->role, ['practice_admin', 'staff']), 403);
+
+        $membership = PatientMembership::where('tenant_id', $user->tenant_id)->findOrFail($id);
+
+        $practice = Practice::findOrFail($user->tenant_id);
+
+        try {
+            $this->subscriptions->resumeSubscriptionCollection($practice, $membership);
+        } catch (\RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        return response()->json([
+            'data' => $membership->fresh(),
+            'message' => 'Stripe collection resumed.',
+        ]);
+    }
+
+    /**
+     * POST /memberships/{id}/refund-payment
+     * Refund a single payment_intent (a Stripe charge tied to one
+     * invoice). Body: { payment_intent: "pi_…", amount?: 4900, reason? }
+     * amount in cents; null = full refund.
+     */
+    public function refundSinglePayment(Request $request, string $id): JsonResponse
+    {
+        $user = $request->user();
+        abort_if(!in_array($user->role, ['practice_admin', 'staff']), 403);
+
+        $membership = PatientMembership::where('tenant_id', $user->tenant_id)->findOrFail($id);
+
+        $validated = $request->validate([
+            'payment_intent' => 'required|string|max:200',
+            'amount_cents' => 'nullable|integer|min:1',
+            'reason' => 'nullable|string|in:requested_by_customer,duplicate,fraudulent',
+        ]);
+
+        $practice = Practice::findOrFail($user->tenant_id);
+
+        try {
+            $result = $this->subscriptions->refundPaymentIntent(
+                $practice,
+                $validated['payment_intent'],
+                $validated['amount_cents'] ?? null,
+                $validated['reason'] ?? 'requested_by_customer',
+            );
+        } catch (\RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        // best-effort: stamp local Invoice as refunded if we can match
+        try {
+            \App\Models\Invoice::where('tenant_id', $practice->id)
+                ->where('membership_id', $membership->id)
+                ->where('payment_intent_id', $validated['payment_intent'])
+                ->update(['status' => 'refunded']);
+        } catch (\Throwable) {}
+
+        return response()->json([
+            'data' => $result,
+            'message' => "Refunded \${$result['amount']}.",
+        ]);
+    }
+
+    /**
+     * POST /memberships/{id}/send-receipt
+     * Body: { payment_intent: "pi_…" }
+     * Asks Stripe to (re-)email the receipt for that payment.
+     */
+    public function sendReceipt(Request $request, string $id): JsonResponse
+    {
+        $user = $request->user();
+        abort_if(!in_array($user->role, ['practice_admin', 'staff']), 403);
+
+        $membership = PatientMembership::where('tenant_id', $user->tenant_id)->findOrFail($id);
+
+        $validated = $request->validate([
+            'payment_intent' => 'required|string|max:200',
+        ]);
+
+        $practice = Practice::findOrFail($user->tenant_id);
+
+        try {
+            $this->subscriptions->sendPaymentReceipt($practice, $validated['payment_intent']);
+        } catch (\RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        return response()->json([
+            'data' => ['membership_id' => $membership->id],
+            'message' => 'Receipt sent.',
+        ]);
+    }
+
+    /**
+     * GET /memberships/{id}/upcoming-invoice
+     * Read-only preview of what Stripe will charge on the next billing
+     * cycle. Returns null when there's no upcoming invoice (e.g.
+     * cancelled subscription).
+     */
+    public function upcomingInvoice(Request $request, string $id): JsonResponse
+    {
+        $user = $request->user();
+        abort_if(!in_array($user->role, ['practice_admin', 'staff', 'patient']), 403);
+
+        $membership = PatientMembership::where('tenant_id', $user->tenant_id)->findOrFail($id);
+
+        // Patient role: only their own membership.
+        if ($user->role === 'patient' && $membership->patient->user_id !== $user->id) {
+            abort(403);
+        }
+
+        $practice = Practice::findOrFail($user->tenant_id);
+
+        try {
+            $upcoming = $this->subscriptions->retrieveUpcomingInvoice($practice, $membership);
+        } catch (\RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        return response()->json(['data' => $upcoming]);
+    }
+
+    /**
+     * GET /patients/{id}/billing-insights
+     * Aggregates LTV (sum of all paid invoices) + current MRR for a
+     * single patient. Mirrors the "Insights" panel on Stripe's customer
+     * page. Sourced from local Invoice table — no Stripe round-trip.
+     */
+    public function billingInsights(Request $request, string $patientId): JsonResponse
+    {
+        $user = $request->user();
+        abort_if(!in_array($user->role, ['practice_admin', 'staff']), 403);
+
+        $patient = Patient::where('tenant_id', $user->tenant_id)->findOrFail($patientId);
+
+        // Spent: sum of paid invoices for this patient.
+        $spent = \App\Models\Invoice::where('tenant_id', $user->tenant_id)
+            ->where('patient_id', $patient->id)
+            ->where('status', 'paid')
+            ->sum('total_amount');
+
+        // MRR: current monthly_price of any active membership.
+        $activeMembership = PatientMembership::where('tenant_id', $user->tenant_id)
+            ->where('patient_id', $patient->id)
+            ->where('status', 'active')
+            ->with('plan')
+            ->first();
+
+        $mrr = 0.0;
+        $billingFrequency = null;
+        if ($activeMembership) {
+            $billingFrequency = $activeMembership->billing_frequency;
+            // Use locked price first (snapshotted at signup), fall back to
+            // plan's current price for any orphan locks.
+            $price = $activeMembership->billing_frequency === 'annual'
+                ? ($activeMembership->locked_annual_price ?? $activeMembership->plan?->annual_price ?? 0)
+                : ($activeMembership->locked_monthly_price ?? $activeMembership->plan?->monthly_price ?? 0);
+            // Normalize annual to monthly for the MRR calc.
+            $mrr = $activeMembership->billing_frequency === 'annual' ? ((float) $price / 12) : (float) $price;
+        }
+
+        // Member-since: earliest membership start (or null).
+        $memberSince = PatientMembership::where('tenant_id', $user->tenant_id)
+            ->where('patient_id', $patient->id)
+            ->orderBy('started_at')
+            ->value('started_at');
+
+        return response()->json([
+            'data' => [
+                'spent' => (float) $spent,
+                'mrr' => round($mrr, 2),
+                'billing_frequency' => $billingFrequency,
+                'member_since' => $memberSince,
+                'billing_email' => $patient->billingEmail(),
+                'billing_email_override' => $patient->billing_email_override,
+            ],
+        ]);
+    }
+
+    /**
+     * PUT /patients/{id}/billing-email
+     * Set or clear the per-patient billing-email override. When set,
+     * Stripe customer's email gets updated to match so receipts go
+     * to the right address; clearing reverts to patient.email.
+     */
+    public function updateBillingEmail(Request $request, string $patientId): JsonResponse
+    {
+        $user = $request->user();
+        abort_if(!in_array($user->role, ['practice_admin', 'staff']), 403);
+
+        $patient = Patient::where('tenant_id', $user->tenant_id)->findOrFail($patientId);
+
+        $validated = $request->validate([
+            // Empty string clears the override; valid email sets it.
+            'billing_email' => 'nullable|email|max:255',
+        ]);
+
+        $newOverride = !empty($validated['billing_email']) ? $validated['billing_email'] : null;
+        $patient->update(['billing_email_override' => $newOverride]);
+
+        // Push to Stripe Customer too. Effective email = override or fallback.
+        $effectiveEmail = $patient->billingEmail();
+        if (!empty($effectiveEmail) && $patient->stripe_customer_id) {
+            $practice = Practice::findOrFail($user->tenant_id);
+            try {
+                $this->subscriptions->updateCustomerBillingEmail($practice, $patient, $effectiveEmail);
+            } catch (\Throwable $e) {
+                // Log but don't fail — local override is still useful.
+                Log::warning('Stripe billing email update failed', [
+                    'patient_id' => $patient->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
+        return response()->json([
+            'data' => [
+                'billing_email_override' => $newOverride,
+                'billing_email' => $effectiveEmail,
+            ],
+            'message' => $newOverride
+                ? 'Billing email override saved.'
+                : 'Billing email override cleared.',
+        ]);
     }
 }

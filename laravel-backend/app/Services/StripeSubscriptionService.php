@@ -209,12 +209,24 @@ class StripeSubscriptionService
     }
 
     /**
-     * Cancel a Stripe Subscription. Defaults to cancel_at_period_end so the
-     * patient keeps coverage they paid for; pass immediately=true for hard cuts
-     * (e.g., fraud, comp removal).
+     * Cancel a Stripe Subscription. Three modes, mirroring Stripe's own
+     * cancel-subscription dialog:
+     *
+     *   immediately=true        Hard cut today (fraud, comp removal).
+     *   immediately=false +
+     *     cancelAt=null         Cancel at end of current period (default
+     *                           — patient keeps coverage they paid for).
+     *   immediately=false +
+     *     cancelAt=<timestamp>  Schedule a cancel for a specific future
+     *                           date (Stripe's "On a custom date" option).
+     *
+     * cancelAt is silently ignored when immediately=true.
      */
-    public function cancelSubscription(PatientMembership $membership, bool $immediately = false): void
-    {
+    public function cancelSubscription(
+        PatientMembership $membership,
+        bool $immediately = false,
+        ?\DateTimeInterface $cancelAt = null,
+    ): void {
         if (empty($membership->stripe_subscription_id)) {
             return; // local-only membership; nothing to cancel on Stripe side
         }
@@ -226,6 +238,16 @@ class StripeSubscriptionService
                 $this->stripe()->subscriptions->cancel(
                     $membership->stripe_subscription_id,
                     [],
+                    ['stripe_account' => $practice->stripe_account_id],
+                );
+            } elseif ($cancelAt !== null) {
+                // Custom-date cancel — Stripe schedules the cancellation
+                // for the supplied timestamp. cancel_at supersedes
+                // cancel_at_period_end if both are set, so we send only
+                // one of the two.
+                $this->stripe()->subscriptions->update(
+                    $membership->stripe_subscription_id,
+                    ['cancel_at' => $cancelAt->getTimestamp()],
                     ['stripe_account' => $practice->stripe_account_id],
                 );
             } else {
@@ -245,8 +267,13 @@ class StripeSubscriptionService
             ]);
         }
 
-        $this->audit($practice, $membership, $immediately ? 'subscription_cancelled_immediately' : 'subscription_cancelled_at_period_end', [
+        $auditAction = $immediately
+            ? 'subscription_cancelled_immediately'
+            : ($cancelAt !== null ? 'subscription_cancel_scheduled' : 'subscription_cancelled_at_period_end');
+
+        $this->audit($practice, $membership, $auditAction, [
             'stripe_subscription_id' => $membership->stripe_subscription_id,
+            'cancel_at' => $cancelAt?->format(\DateTime::ATOM),
         ]);
     }
 
@@ -1020,6 +1047,285 @@ class StripeSubscriptionService
                 'membership_id' => $membership->id,
                 'error' => $e->getMessage(),
             ]);
+        }
+    }
+
+    // ─── Stripe-dashboard parity helpers (2026-05-05) ──────────────────
+    //
+    // Each method mirrors a Stripe customer-page action so the practice
+    // admin can do everything from MemberMD's Billing tab without
+    // bouncing into Stripe directly.
+
+    /**
+     * Create a Stripe Billing Portal session for the patient. The portal
+     * is Stripe-hosted and lets the patient swap their card, view
+     * invoices, and cancel — without us needing to build any of those
+     * surfaces. Returns the URL; caller emails or SMS-es it.
+     *
+     * Why short-lived: portal sessions auto-expire (default 5 min from
+     * Stripe). The patient must use it within the window. We don't
+     * persist these — generate fresh on each "send link" click.
+     */
+    public function createBillingPortalSession(
+        Practice $practice,
+        Patient $patient,
+        string $returnUrl,
+    ): string {
+        $this->assertPracticeReady($practice);
+
+        // Patient must already have a Stripe customer record. If not,
+        // we can't open a portal session — they have nothing to manage.
+        $customerId = $patient->stripe_customer_id ?: $this->ensureCustomer($practice, $patient);
+
+        try {
+            $session = $this->stripe()->billingPortal->sessions->create(
+                [
+                    'customer' => $customerId,
+                    'return_url' => $returnUrl,
+                ],
+                ['stripe_account' => $practice->stripe_account_id],
+            );
+        } catch (ApiErrorException $e) {
+            throw new RuntimeException("Failed to create billing portal session: {$e->getMessage()}", 0, $e);
+        }
+
+        return $session->url;
+    }
+
+    /**
+     * Pause billing collection on a subscription without cancelling it.
+     * Distinct from membership.pause — the membership stays active in
+     * MemberMD; only Stripe stops attempting to charge until we resume.
+     *
+     * behavior values mirror Stripe's:
+     *   keep_as_draft  invoices created but not finalized (most common)
+     *   mark_uncollectible    finalized but treated as bad debt
+     *   void           voided immediately (rare)
+     *
+     * Default keep_as_draft handles the typical "patient on a hardship
+     * grace period — don't charge, don't lose the subscription".
+     */
+    public function pauseSubscriptionCollection(
+        Practice $practice,
+        PatientMembership $membership,
+        string $behavior = 'keep_as_draft',
+        ?\DateTimeInterface $resumeAt = null,
+    ): void {
+        $this->assertPracticeReady($practice);
+
+        if (empty($membership->stripe_subscription_id)) {
+            throw new RuntimeException('Membership has no Stripe subscription to pause.');
+        }
+        if (!in_array($behavior, ['keep_as_draft', 'mark_uncollectible', 'void'], true)) {
+            throw new RuntimeException("Invalid pause behavior: {$behavior}");
+        }
+
+        $params = ['behavior' => $behavior];
+        if ($resumeAt !== null) {
+            $params['resumes_at'] = $resumeAt->getTimestamp();
+        }
+
+        try {
+            $this->stripe()->subscriptions->update(
+                $membership->stripe_subscription_id,
+                ['pause_collection' => $params],
+                ['stripe_account' => $practice->stripe_account_id],
+            );
+        } catch (ApiErrorException $e) {
+            throw new RuntimeException("Failed to pause subscription: {$e->getMessage()}", 0, $e);
+        }
+
+        $this->auditEvent($membership, 'pause_collection', [
+            'behavior' => $behavior,
+            'resumes_at' => $resumeAt?->format(\DateTime::ATOM),
+        ]);
+    }
+
+    /**
+     * Resume previously-paused subscription collection. Setting
+     * pause_collection to null tells Stripe to start charging again
+     * on the next invoice cycle.
+     */
+    public function resumeSubscriptionCollection(
+        Practice $practice,
+        PatientMembership $membership,
+    ): void {
+        $this->assertPracticeReady($practice);
+
+        if (empty($membership->stripe_subscription_id)) {
+            throw new RuntimeException('Membership has no Stripe subscription to resume.');
+        }
+
+        try {
+            $this->stripe()->subscriptions->update(
+                $membership->stripe_subscription_id,
+                ['pause_collection' => ''],
+                ['stripe_account' => $practice->stripe_account_id],
+            );
+        } catch (ApiErrorException $e) {
+            throw new RuntimeException("Failed to resume subscription: {$e->getMessage()}", 0, $e);
+        }
+
+        $this->auditEvent($membership, 'resume_collection', []);
+    }
+
+    /**
+     * Refund a single PaymentIntent (Stripe charge) by id. Distinct from
+     * the subscription-level refund-on-cancel flow — this lets the
+     * admin refund any individual past payment without touching the
+     * subscription.
+     *
+     * amountCents = null refunds the full charge; supply for partial.
+     */
+    public function refundPaymentIntent(
+        Practice $practice,
+        string $paymentIntentId,
+        ?int $amountCents = null,
+        string $reason = 'requested_by_customer',
+    ): array {
+        $this->assertPracticeReady($practice);
+
+        $params = [
+            'payment_intent' => $paymentIntentId,
+            'reason' => $reason,
+            'metadata' => [
+                'tenant_id' => $practice->id,
+                'platform' => 'membermd',
+                'flow' => 'admin_per_payment_refund',
+            ],
+        ];
+        if ($amountCents !== null && $amountCents > 0) {
+            $params['amount'] = $amountCents;
+        }
+
+        try {
+            $refund = $this->stripe()->refunds->create(
+                $params,
+                ['stripe_account' => $practice->stripe_account_id],
+            );
+        } catch (ApiErrorException $e) {
+            throw new RuntimeException("Refund failed: {$e->getMessage()}", 0, $e);
+        }
+
+        return [
+            'id' => $refund->id,
+            'amount' => ($refund->amount ?? 0) / 100,
+            'status' => $refund->status,
+        ];
+    }
+
+    /**
+     * Resend a Stripe-hosted receipt for an existing payment. Stripe
+     * generates the receipt + emails it to the customer's
+     * address-on-file (which we keep aligned with billingEmail()).
+     */
+    public function sendPaymentReceipt(
+        Practice $practice,
+        string $paymentIntentId,
+    ): void {
+        $this->assertPracticeReady($practice);
+
+        try {
+            // Re-send by setting receipt_email to the customer's address
+            // on the underlying Charge. Stripe queues a fresh receipt.
+            $intent = $this->stripe()->paymentIntents->retrieve(
+                $paymentIntentId,
+                ['expand' => ['latest_charge']],
+                ['stripe_account' => $practice->stripe_account_id],
+            );
+            $chargeId = is_object($intent->latest_charge) ? $intent->latest_charge->id : $intent->latest_charge;
+            if (!$chargeId) {
+                throw new RuntimeException('No charge associated with this payment.');
+            }
+            $this->stripe()->charges->update(
+                $chargeId,
+                ['receipt_email' => $intent->receipt_email ?? null],
+                ['stripe_account' => $practice->stripe_account_id],
+            );
+        } catch (ApiErrorException $e) {
+            throw new RuntimeException("Failed to send receipt: {$e->getMessage()}", 0, $e);
+        }
+    }
+
+    /**
+     * Fetch the upcoming invoice for a subscription — what Stripe will
+     * charge on the next billing cycle. Read-only preview; doesn't
+     * commit anything. Useful for the "Next charge: $X on YYYY-MM-DD"
+     * panel on the patient billing tab.
+     */
+    public function retrieveUpcomingInvoice(
+        Practice $practice,
+        PatientMembership $membership,
+    ): ?array {
+        $this->assertPracticeReady($practice);
+
+        if (empty($membership->stripe_subscription_id)) {
+            return null;
+        }
+
+        try {
+            // Different Stripe SDK versions expose this method with
+            // different names. Use the documented createPreview path
+            // (Stripe API 2024-09+) but fall back to the legacy upcoming
+            // method when the installed SDK is older.
+            if (method_exists($this->stripe()->invoices, 'createPreview')) {
+                $invoice = $this->stripe()->invoices->createPreview(
+                    ['subscription' => $membership->stripe_subscription_id],
+                    ['stripe_account' => $practice->stripe_account_id],
+                );
+            } else {
+                /** @phpstan-ignore-next-line legacy SDK fallback */
+                $invoice = $this->stripe()->invoices->upcoming(
+                    ['subscription' => $membership->stripe_subscription_id],
+                    ['stripe_account' => $practice->stripe_account_id],
+                );
+            }
+        } catch (ApiErrorException $e) {
+            // No upcoming invoice (e.g. cancelled subscription) is a
+            // normal not-found, not an error. Return null.
+            if ($e->getStripeCode() === 'invoice_upcoming_none') {
+                return null;
+            }
+            throw new RuntimeException("Failed to fetch upcoming invoice: {$e->getMessage()}", 0, $e);
+        }
+
+        return [
+            'amount_due' => ($invoice->amount_due ?? 0) / 100,
+            'currency' => strtoupper($invoice->currency ?? 'USD'),
+            'period_start' => $invoice->period_start ? date('c', $invoice->period_start) : null,
+            'period_end' => $invoice->period_end ? date('c', $invoice->period_end) : null,
+            'next_payment_attempt' => $invoice->next_payment_attempt ? date('c', $invoice->next_payment_attempt) : null,
+        ];
+    }
+
+    /**
+     * Update the Stripe Customer's email address (where receipts +
+     * dunning emails go). Used by the per-patient billing-email
+     * override workflow.
+     */
+    public function updateCustomerBillingEmail(
+        Practice $practice,
+        Patient $patient,
+        string $newEmail,
+    ): void {
+        $this->assertPracticeReady($practice);
+
+        $customerId = $patient->stripe_customer_id;
+        if (empty($customerId)) {
+            // No Stripe customer yet — nothing to update remotely.
+            // The local override still applies via Patient::billingEmail()
+            // for any non-Stripe receipt path.
+            return;
+        }
+
+        try {
+            $this->stripe()->customers->update(
+                $customerId,
+                ['email' => $newEmail],
+                ['stripe_account' => $practice->stripe_account_id],
+            );
+        } catch (ApiErrorException $e) {
+            throw new RuntimeException("Failed to update Stripe customer email: {$e->getMessage()}", 0, $e);
         }
     }
 }
