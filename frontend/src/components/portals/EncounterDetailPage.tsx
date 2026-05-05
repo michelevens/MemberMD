@@ -435,11 +435,15 @@ export function EncounterDetailPage({ encounterId, onBack, onSaved }: EncounterD
 
       {/* Patient summary strip — clinical context the provider needs at
           the top of every chart. Pulled from patient_summary on the
-          detail endpoint (DOB, allergies, active meds, last visit). */}
-      {!isEditing && encounter.patient_summary && (
+          detail endpoint (DOB, allergies, active meds, last visit).
+          apiFetch transforms snake_case → camelCase, so the backend's
+          `patient_summary` arrives here as `patientSummary`. Also
+          coalesce keys inside the strip so it's defensive against the
+          raw shape if the transform ever changes. */}
+      {!isEditing && (encounter.patientSummary || encounter.patient_summary) && (
         <PatientSummaryStrip
           patientName={patientName}
-          summary={encounter.patient_summary}
+          summary={encounter.patientSummary ?? encounter.patient_summary}
         />
       )}
 
@@ -1068,15 +1072,24 @@ function ageFromDob(dob?: string | null): number | null {
   return years >= 0 && years < 150 ? years : null;
 }
 
+// apiFetch transforms snake_case → camelCase on the way in, but we
+// also accept the raw shape to stay defensive (and to make this
+// component reusable from places that bypass apiFetch).
 interface PatientSummaryShape {
-  date_of_birth: string | null;
-  allergies: unknown[];
-  active_prescription_count: number;
-  last_visit_date: string | null;
+  dateOfBirth?: string | null;
+  date_of_birth?: string | null;
+  allergies?: unknown[];
+  activePrescriptionCount?: number;
+  active_prescription_count?: number;
+  lastVisitDate?: string | null;
+  last_visit_date?: string | null;
 }
 
 function PatientSummaryStrip({ patientName, summary }: { patientName: string; summary: PatientSummaryShape }) {
-  const age = ageFromDob(summary.date_of_birth);
+  const dob = summary.dateOfBirth ?? summary.date_of_birth ?? null;
+  const activeRx = summary.activePrescriptionCount ?? summary.active_prescription_count ?? 0;
+  const lastVisitRaw = summary.lastVisitDate ?? summary.last_visit_date ?? null;
+  const age = ageFromDob(dob);
   const allergyList = Array.isArray(summary.allergies) ? summary.allergies : [];
   const allergyLabels = allergyList
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1086,8 +1099,8 @@ function PatientSummaryStrip({ patientName, summary }: { patientName: string; su
     })
     .filter((s): s is string => typeof s === "string" && s.trim() !== "");
   const hasAllergies = allergyLabels.length > 0;
-  const lastVisit = summary.last_visit_date
-    ? new Date(summary.last_visit_date).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })
+  const lastVisit = lastVisitRaw
+    ? new Date(lastVisitRaw).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })
     : null;
 
   return (
@@ -1100,13 +1113,13 @@ function PatientSummaryStrip({ patientName, summary }: { patientName: string; su
       </div>
 
       {/* Age + DOB */}
-      {(age !== null || summary.date_of_birth) && (
+      {(age !== null || dob) && (
         <div className="flex items-center gap-1.5 text-slate-600">
           <Cake className="w-3.5 h-3.5 text-slate-400" />
           {age !== null && <span className="font-medium">{age} y</span>}
-          {summary.date_of_birth && (
+          {dob && (
             <span className="text-xs text-slate-400">
-              ({new Date(summary.date_of_birth).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })})
+              ({new Date(dob).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })})
             </span>
           )}
         </div>
@@ -1129,8 +1142,8 @@ function PatientSummaryStrip({ patientName, summary }: { patientName: string; su
       {/* Active prescriptions */}
       <div className="flex items-center gap-1.5 text-slate-600">
         <Pill className="w-3.5 h-3.5 text-slate-400" />
-        <span className="font-medium">{summary.active_prescription_count}</span>
-        <span className="text-slate-500">active med{summary.active_prescription_count === 1 ? "" : "s"}</span>
+        <span className="font-medium">{activeRx}</span>
+        <span className="text-slate-500">active med{activeRx === 1 ? "" : "s"}</span>
       </div>
 
       {/* Last visit */}
@@ -1169,14 +1182,15 @@ function ScreeningsCard({ responses }: { responses: any[] }) {
         {responses.map((r) => {
           const tplName = r.template?.name ?? r.template?.code ?? "Screening";
           const sev = r.severity ?? null;
+          const adminAt = r.administeredAt ?? r.administered_at ?? null;
           const { bg, color } = severityColor(sev);
           return (
             <div key={r.id} className="flex items-center justify-between gap-3 border-b border-slate-100 pb-2 last:border-0 last:pb-0">
               <div className="min-w-0">
                 <div className="text-sm font-medium text-slate-800 truncate">{tplName}</div>
-                {r.administered_at && (
+                {adminAt && (
                   <div className="text-[11px] text-slate-500">
-                    {new Date(r.administered_at).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}
+                    {new Date(adminAt).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}
                   </div>
                 )}
               </div>
@@ -1206,7 +1220,12 @@ function ScreeningsCard({ responses }: { responses: any[] }) {
 function TelehealthSessionCard({ session }: { session: any }) {
   if (!session) return null;
   const fmt = (s?: string | null) => s ? new Date(s).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" }) : "—";
-  const minutes = session.duration_seconds ? Math.max(1, Math.round(session.duration_seconds / 60)) : null;
+  const startedAt = session.startedAt ?? session.started_at ?? null;
+  const endedAt = session.endedAt ?? session.ended_at ?? null;
+  const admittedAt = session.admittedAt ?? session.admitted_at ?? null;
+  const durationSeconds = session.durationSeconds ?? session.duration_seconds ?? null;
+  const isExternal = session.isExternal ?? session.is_external ?? false;
+  const minutes = durationSeconds ? Math.max(1, Math.round(durationSeconds / 60)) : null;
   return (
     <div className="glass rounded-xl p-5">
       <h3 className="font-semibold text-slate-800 mb-3 flex items-center gap-2">
@@ -1214,15 +1233,15 @@ function TelehealthSessionCard({ session }: { session: any }) {
       </h3>
       <dl className="space-y-2 text-sm">
         <div className="flex justify-between"><dt className="text-slate-500">Status</dt><dd className="font-medium text-slate-800 capitalize">{session.status ?? "—"}</dd></div>
-        <div className="flex justify-between"><dt className="text-slate-500">Started</dt><dd className="font-medium text-slate-800 text-xs">{fmt(session.started_at)}</dd></div>
-        <div className="flex justify-between"><dt className="text-slate-500">Ended</dt><dd className="font-medium text-slate-800 text-xs">{fmt(session.ended_at)}</dd></div>
+        <div className="flex justify-between"><dt className="text-slate-500">Started</dt><dd className="font-medium text-slate-800 text-xs">{fmt(startedAt)}</dd></div>
+        <div className="flex justify-between"><dt className="text-slate-500">Ended</dt><dd className="font-medium text-slate-800 text-xs">{fmt(endedAt)}</dd></div>
         {minutes !== null && (
           <div className="flex justify-between"><dt className="text-slate-500">Duration</dt><dd className="font-semibold text-slate-900">{minutes} min</dd></div>
         )}
-        {session.admitted_at && (
-          <div className="flex justify-between"><dt className="text-slate-500">Admitted</dt><dd className="font-medium text-slate-800 text-xs">{fmt(session.admitted_at)}</dd></div>
+        {admittedAt && (
+          <div className="flex justify-between"><dt className="text-slate-500">Admitted</dt><dd className="font-medium text-slate-800 text-xs">{fmt(admittedAt)}</dd></div>
         )}
-        {session.is_external && (
+        {isExternal && (
           <div className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1">
             BYOV (external link) — no in-app metrics captured.
           </div>
@@ -1250,11 +1269,11 @@ function ChartTab({ encounter }: { encounter: any }) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const rx: any[] = Array.isArray(encounter.prescriptions) ? encounter.prescriptions : [];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const screenings: any[] = Array.isArray(encounter.screening_responses)
-    ? encounter.screening_responses
-    : Array.isArray(encounter.screeningResponses) ? encounter.screeningResponses : [];
-  const telehealthSession = encounter.appointment?.telehealth_session
-    ?? encounter.appointment?.telehealthSession
+  const screenings: any[] = Array.isArray(encounter.screeningResponses)
+    ? encounter.screeningResponses
+    : Array.isArray(encounter.screening_responses) ? encounter.screening_responses : [];
+  const telehealthSession = encounter.appointment?.telehealthSession
+    ?? encounter.appointment?.telehealth_session
     ?? null;
   const isFullyEmpty = !hasAnyChartContent(encounter) && rx.length === 0 && screenings.length === 0;
 
