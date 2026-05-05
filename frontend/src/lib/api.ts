@@ -2387,6 +2387,9 @@ export const programService = {
 // LabOrderController commit ae3010c... actually d6bd33a → tier 2),
 // so no patient_id filter needed when role=patient.
 
+// Lab orders backed by /lab-orders. Encounter detail uses create() to
+// add new orders inline; index() is filtered by encounter_id from the
+// caller.
 export const labService = {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   list: async (params?: Record<string, string>): Promise<ApiResponse<any>> => {
@@ -2394,6 +2397,36 @@ export const labService = {
     const query = params ? "?" + new URLSearchParams(params).toString() : "";
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return apiFetch<any>(`/lab-orders${query}`);
+  },
+  // Used by the encounter detail "Order labs" mini-form. Backend
+  // requires patient_id, provider_id, panels[{code,name}], priority.
+  // encounter_id is optional but always sent from this UI so the
+  // order shows up under the encounter.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  create: async (data: Record<string, unknown>): Promise<ApiResponse<any>> => {
+    if (useMockData()) return { data: { id: "mock-lab", ...data } };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return apiFetch<any>("/lab-orders", { method: "POST", body: JSON.stringify(data) });
+  },
+};
+
+// Referrals backed by /referrals. Same pattern as labs — encounter
+// detail page surfaces existing referrals + offers an inline "New
+// referral" form. Referrals are HIPAA-sensitive (referred-to PHI),
+// always tenant-scoped server-side.
+export const referralService = {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  list: async (params?: Record<string, string>): Promise<ApiResponse<any>> => {
+    if (useMockData()) return { data: [] };
+    const query = params ? "?" + new URLSearchParams(params).toString() : "";
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return apiFetch<any>(`/referrals${query}`);
+  },
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  create: async (data: Record<string, unknown>): Promise<ApiResponse<any>> => {
+    if (useMockData()) return { data: { id: "mock-ref", ...data } };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return apiFetch<any>("/referrals", { method: "POST", body: JSON.stringify(data) });
   },
 };
 

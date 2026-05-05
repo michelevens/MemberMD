@@ -4,9 +4,9 @@ import {
   ArrowLeft, FileText, DollarSign, Activity, ClipboardList,
   Calendar, User, ShieldAlert, CheckCircle2, AlertCircle, Pill,
   Pencil, X, Save, Sparkles, Lock, Brain, Video as VideoIcon,
-  Cake, AlertTriangle, History,
+  Cake, AlertTriangle, History, FlaskConical, Send, Plus,
 } from "lucide-react";
-import { encounterService, chartTemplateService } from "../../lib/api";
+import { encounterService, chartTemplateService, labService, referralService } from "../../lib/api";
 import type { ChartTemplate, ChartTemplateField } from "../../lib/api";
 
 interface EncounterDetailPageProps {
@@ -490,7 +490,7 @@ export function EncounterDetailPage({ encounterId, onBack, onSaved }: EncounterD
         />
       ) : (
         <>
-          {activeTab === "chart" && <ChartTab encounter={encounter} />}
+          {activeTab === "chart" && <ChartTab encounter={encounter} onReload={reload} />}
           {activeTab === "billing" && <BillingTab encounter={encounter} />}
           {activeTab === "appointment" && <AppointmentTab encounter={encounter} />}
           {activeTab === "audit" && <AuditTab logs={auditLogs} />}
@@ -1251,10 +1251,371 @@ function TelehealthSessionCard({ session }: { session: any }) {
   );
 }
 
+// ─── Phase 2: Lab Orders + Referrals (encounter-scoped) ────────────────
+
+// LabOrdersCard — list orders attached to this encounter + inline
+// "Order labs" form. Submits to POST /lab-orders with encounter_id +
+// patient_id + provider_id pre-filled. Closes the form on success and
+// asks the parent to reload so the new row shows up.
+//
+// Status badge colors are kept in lockstep with the backend's status
+// enum (draft / sent / resulted / cancelled).
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function LabOrdersCard({ orders, encounterId, patientId, providerId, isSigned, onChanged }: { orders: any[]; encounterId: string; patientId: string | null; providerId: string | null; isSigned: boolean; onChanged: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [panelCode, setPanelCode] = useState("");
+  const [panelName, setPanelName] = useState("");
+  const [priority, setPriority] = useState<"routine" | "urgent" | "stat">("routine");
+  const [fasting, setFasting] = useState(false);
+  const [instructions, setInstructions] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const statusBadge = (status: string): { bg: string; color: string } => {
+    if (status === "resulted") return { bg: "#dcfce7", color: "#166534" };
+    if (status === "sent") return { bg: "#dbeafe", color: "#1e40af" };
+    if (status === "cancelled") return { bg: "#fee2e2", color: "#991b1b" };
+    return { bg: "#fef3c7", color: "#92400e" }; // draft
+  };
+
+  const submit = async () => {
+    if (!patientId || !providerId) {
+      setErr("Patient or provider missing on this encounter.");
+      return;
+    }
+    if (!panelName.trim()) {
+      setErr("Enter a panel name (e.g., CBC, CMP, TSH).");
+      return;
+    }
+    setSaving(true);
+    setErr(null);
+    const res = await labService.create({
+      patient_id: patientId,
+      provider_id: providerId,
+      encounter_id: encounterId,
+      priority,
+      fasting_required: fasting,
+      panels: [{ code: panelCode.trim() || panelName.trim().toUpperCase().replace(/\s+/g, "_"), name: panelName.trim() }],
+      special_instructions: instructions.trim() || undefined,
+    });
+    setSaving(false);
+    if (res.error) {
+      setErr(res.error);
+      return;
+    }
+    setPanelCode("");
+    setPanelName("");
+    setPriority("routine");
+    setFasting(false);
+    setInstructions("");
+    setOpen(false);
+    onChanged();
+  };
+
+  return (
+    <div className="glass rounded-xl p-5">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="font-semibold text-slate-800 flex items-center gap-2">
+          <FlaskConical className="w-4 h-4 text-cyan-600" /> Lab Orders
+        </h3>
+        {!open && !isSigned && (
+          <button
+            onClick={() => setOpen(true)}
+            className="inline-flex items-center gap-1 text-xs font-medium text-indigo-700 hover:text-indigo-900"
+          >
+            <Plus className="w-3.5 h-3.5" /> Order labs
+          </button>
+        )}
+      </div>
+
+      {orders.length === 0 && !open && (
+        <div className="text-sm text-slate-400 italic">No labs ordered for this visit.</div>
+      )}
+
+      {orders.length > 0 && (
+        <div className="space-y-2 mb-3">
+          {orders.map((o) => {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const panels: any[] = Array.isArray(o.panels) ? o.panels : [];
+            const panelLabel = panels.map((p) => p.name ?? p.code).filter(Boolean).join(", ") || "—";
+            const sb = statusBadge(o.status ?? "draft");
+            return (
+              <div key={o.id} className="flex items-start justify-between gap-3 border-b border-slate-100 pb-2 last:border-0 last:pb-0">
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm font-medium text-slate-800 truncate">{panelLabel}</div>
+                  <div className="text-[11px] text-slate-500 flex items-center gap-2">
+                    <span className="capitalize">{o.priority ?? "routine"}</span>
+                    {o.fastingRequired && <span className="text-amber-700">Fasting</span>}
+                    {o.orderedAt && <span>{new Date(o.orderedAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</span>}
+                  </div>
+                </div>
+                <span
+                  className="text-[10px] uppercase font-semibold tracking-wide px-2 py-0.5 rounded flex-shrink-0"
+                  style={{ backgroundColor: sb.bg, color: sb.color }}
+                >
+                  {o.status ?? "draft"}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {open && (
+        <div className="border border-slate-200 rounded-lg p-3 bg-slate-50/50 space-y-3">
+          {err && <div className="text-xs text-red-700 bg-red-50 border border-red-200 rounded px-2 py-1">{err}</div>}
+          <div className="grid grid-cols-3 gap-2">
+            <div className="col-span-2">
+              <label className="block text-[10px] uppercase font-semibold text-slate-500 mb-1">Panel name *</label>
+              <input
+                value={panelName}
+                onChange={(e) => setPanelName(e.target.value)}
+                placeholder="CBC w/ Diff"
+                className="w-full border rounded px-2 py-1.5 text-sm"
+              />
+            </div>
+            <div>
+              <label className="block text-[10px] uppercase font-semibold text-slate-500 mb-1">Code</label>
+              <input
+                value={panelCode}
+                onChange={(e) => setPanelCode(e.target.value)}
+                placeholder="CBC"
+                className="w-full border rounded px-2 py-1.5 text-sm font-mono"
+              />
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <select
+              value={priority}
+              onChange={(e) => setPriority(e.target.value as "routine" | "urgent" | "stat")}
+              className="border rounded px-2 py-1.5 text-sm"
+            >
+              <option value="routine">Routine</option>
+              <option value="urgent">Urgent</option>
+              <option value="stat">STAT</option>
+            </select>
+            <label className="flex items-center gap-1.5 text-xs text-slate-700">
+              <input type="checkbox" checked={fasting} onChange={(e) => setFasting(e.target.checked)} />
+              Fasting required
+            </label>
+          </div>
+          <textarea
+            value={instructions}
+            onChange={(e) => setInstructions(e.target.value)}
+            placeholder="Special instructions (optional)"
+            rows={2}
+            className="w-full border rounded px-2 py-1.5 text-sm"
+          />
+          <div className="flex justify-end gap-2">
+            <button
+              onClick={() => { setOpen(false); setErr(null); }}
+              className="px-3 py-1.5 rounded text-xs font-medium text-slate-600 hover:bg-slate-100"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={submit}
+              disabled={saving}
+              className="inline-flex items-center gap-1 px-3 py-1.5 rounded text-xs font-semibold text-white disabled:opacity-50"
+              style={{ backgroundColor: "#0891b2" }}
+            >
+              <Save className="w-3 h-3" /> {saving ? "Saving…" : "Save order"}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ReferralsCard — same shape as labs. Encounter-scoped referrals list +
+// inline "New referral" form. Submits to POST /referrals.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function ReferralsCard({ referrals, encounterId, patientId, providerUserId, isSigned, onChanged }: { referrals: any[]; encounterId: string; patientId: string | null; providerUserId: string | null; isSigned: boolean; onChanged: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [referredTo, setReferredTo] = useState("");
+  const [specialty, setSpecialty] = useState("");
+  const [urgency, setUrgency] = useState<"routine" | "urgent" | "emergent">("routine");
+  const [reason, setReason] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const urgencyBadge = (u: string): { bg: string; color: string } => {
+    if (u === "emergent") return { bg: "#fee2e2", color: "#991b1b" };
+    if (u === "urgent") return { bg: "#fef3c7", color: "#92400e" };
+    return { bg: "#dbeafe", color: "#1e40af" };
+  };
+  const statusBadge = (s: string): { bg: string; color: string } => {
+    if (s === "completed") return { bg: "#dcfce7", color: "#166534" };
+    if (s === "sent" || s === "acknowledged" || s === "scheduled") return { bg: "#dbeafe", color: "#1e40af" };
+    if (s === "cancelled") return { bg: "#fee2e2", color: "#991b1b" };
+    return { bg: "#fef3c7", color: "#92400e" };
+  };
+
+  const submit = async () => {
+    if (!patientId || !providerUserId) {
+      setErr("Patient or referring provider missing on this encounter.");
+      return;
+    }
+    if (!referredTo.trim()) {
+      setErr("Enter who you're referring to.");
+      return;
+    }
+    if (!reason.trim()) {
+      setErr("Enter a reason for referral.");
+      return;
+    }
+    setSaving(true);
+    setErr(null);
+    const res = await referralService.create({
+      patient_id: patientId,
+      // Backend expects referring_provider_id to be a USER id, not
+      // a Provider model id — encounter.provider.user.id.
+      referring_provider_id: providerUserId,
+      encounter_id: encounterId,
+      referred_to_name: referredTo.trim(),
+      referred_to_specialty: specialty.trim() || undefined,
+      urgency,
+      reason: reason.trim(),
+    });
+    setSaving(false);
+    if (res.error) {
+      setErr(res.error);
+      return;
+    }
+    setReferredTo("");
+    setSpecialty("");
+    setUrgency("routine");
+    setReason("");
+    setOpen(false);
+    onChanged();
+  };
+
+  return (
+    <div className="glass rounded-xl p-5">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="font-semibold text-slate-800 flex items-center gap-2">
+          <Send className="w-4 h-4 text-purple-600" /> Referrals
+        </h3>
+        {!open && !isSigned && (
+          <button
+            onClick={() => setOpen(true)}
+            className="inline-flex items-center gap-1 text-xs font-medium text-indigo-700 hover:text-indigo-900"
+          >
+            <Plus className="w-3.5 h-3.5" /> New referral
+          </button>
+        )}
+      </div>
+
+      {referrals.length === 0 && !open && (
+        <div className="text-sm text-slate-400 italic">No referrals from this visit.</div>
+      )}
+
+      {referrals.length > 0 && (
+        <div className="space-y-2 mb-3">
+          {referrals.map((r) => {
+            const ub = urgencyBadge(r.urgency ?? "routine");
+            const sb = statusBadge(r.status ?? "draft");
+            return (
+              <div key={r.id} className="flex items-start justify-between gap-3 border-b border-slate-100 pb-2 last:border-0 last:pb-0">
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm font-medium text-slate-800 truncate">{r.referredToName ?? "—"}</div>
+                  <div className="text-[11px] text-slate-500 flex items-center gap-2">
+                    {r.referredToSpecialty && <span>{r.referredToSpecialty}</span>}
+                    {r.sentAt && <span>{new Date(r.sentAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</span>}
+                  </div>
+                </div>
+                <div className="flex items-center gap-1 flex-shrink-0">
+                  <span
+                    className="text-[10px] uppercase font-semibold tracking-wide px-2 py-0.5 rounded"
+                    style={{ backgroundColor: ub.bg, color: ub.color }}
+                  >
+                    {r.urgency ?? "routine"}
+                  </span>
+                  <span
+                    className="text-[10px] uppercase font-semibold tracking-wide px-2 py-0.5 rounded"
+                    style={{ backgroundColor: sb.bg, color: sb.color }}
+                  >
+                    {r.status ?? "draft"}
+                  </span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {open && (
+        <div className="border border-slate-200 rounded-lg p-3 bg-slate-50/50 space-y-3">
+          {err && <div className="text-xs text-red-700 bg-red-50 border border-red-200 rounded px-2 py-1">{err}</div>}
+          <div>
+            <label className="block text-[10px] uppercase font-semibold text-slate-500 mb-1">Referred to *</label>
+            <input
+              value={referredTo}
+              onChange={(e) => setReferredTo(e.target.value)}
+              placeholder="Dr. Smith / ABC Cardiology"
+              className="w-full border rounded px-2 py-1.5 text-sm"
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="block text-[10px] uppercase font-semibold text-slate-500 mb-1">Specialty</label>
+              <input
+                value={specialty}
+                onChange={(e) => setSpecialty(e.target.value)}
+                placeholder="Cardiology"
+                className="w-full border rounded px-2 py-1.5 text-sm"
+              />
+            </div>
+            <div>
+              <label className="block text-[10px] uppercase font-semibold text-slate-500 mb-1">Urgency</label>
+              <select
+                value={urgency}
+                onChange={(e) => setUrgency(e.target.value as "routine" | "urgent" | "emergent")}
+                className="w-full border rounded px-2 py-1.5 text-sm"
+              >
+                <option value="routine">Routine</option>
+                <option value="urgent">Urgent</option>
+                <option value="emergent">Emergent</option>
+              </select>
+            </div>
+          </div>
+          <div>
+            <label className="block text-[10px] uppercase font-semibold text-slate-500 mb-1">Reason *</label>
+            <textarea
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder="Patient reports..."
+              rows={2}
+              className="w-full border rounded px-2 py-1.5 text-sm"
+            />
+          </div>
+          <div className="flex justify-end gap-2">
+            <button
+              onClick={() => { setOpen(false); setErr(null); }}
+              className="px-3 py-1.5 rounded text-xs font-medium text-slate-600 hover:bg-slate-100"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={submit}
+              disabled={saving}
+              className="inline-flex items-center gap-1 px-3 py-1.5 rounded text-xs font-semibold text-white disabled:opacity-50"
+              style={{ backgroundColor: "#7c3aed" }}
+            >
+              <Save className="w-3 h-3" /> {saving ? "Saving…" : "Save referral"}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Read-only tabs (unchanged from prior version) ─────────────────────
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function ChartTab({ encounter }: { encounter: any }) {
+function ChartTab({ encounter, onReload }: { encounter: any; onReload: () => void }) {
   const Section = ({ label, value, color }: { label: string; value?: string | null; color?: string }) => (
     <div>
       <div className="text-xs font-semibold uppercase mb-1" style={{ color: color ?? "#475569" }}>{label}</div>
@@ -1275,7 +1636,21 @@ function ChartTab({ encounter }: { encounter: any }) {
   const telehealthSession = encounter.appointment?.telehealthSession
     ?? encounter.appointment?.telehealth_session
     ?? null;
-  const isFullyEmpty = !hasAnyChartContent(encounter) && rx.length === 0 && screenings.length === 0;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const labOrders: any[] = Array.isArray(encounter.labOrders)
+    ? encounter.labOrders
+    : Array.isArray(encounter.lab_orders) ? encounter.lab_orders : [];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const referrals: any[] = Array.isArray(encounter.referrals) ? encounter.referrals : [];
+  const isFullyEmpty = !hasAnyChartContent(encounter) && rx.length === 0 && screenings.length === 0 && labOrders.length === 0 && referrals.length === 0;
+  // Patient + provider IDs for the inline order/referral forms.
+  // The backend's referral endpoint expects a USER id for the
+  // referring provider, not the Provider model id — pull through
+  // encounter.provider.user.id with a snake_case fallback.
+  const patientId = encounter.patient?.id ?? encounter.patientId ?? encounter.patient_id ?? null;
+  const providerModelId = encounter.provider?.id ?? encounter.providerId ?? encounter.provider_id ?? null;
+  const providerUserId = encounter.provider?.user?.id ?? encounter.provider?.userId ?? encounter.provider?.user_id ?? null;
+  const isSigned = !!encounter.signedAt || encounter.status === "signed";
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
@@ -1322,6 +1697,32 @@ function ChartTab({ encounter }: { encounter: any }) {
               ))}
             </div>
           </div>
+        )}
+
+        {/* Lab orders + referrals. Inline create form on unsigned
+            drafts; read-only list once signed (the cards' isSigned
+            prop hides the "+ Order labs" / "+ New referral" buttons).
+            Both cards self-hide when there are zero items AND the
+            chart is signed — nothing to show or do at that point. */}
+        {(labOrders.length > 0 || !isSigned) && (
+          <LabOrdersCard
+            orders={labOrders}
+            encounterId={encounter.id}
+            patientId={patientId}
+            providerId={providerModelId}
+            isSigned={isSigned}
+            onChanged={onReload}
+          />
+        )}
+        {(referrals.length > 0 || !isSigned) && (
+          <ReferralsCard
+            referrals={referrals}
+            encounterId={encounter.id}
+            patientId={patientId}
+            providerUserId={providerUserId}
+            isSigned={isSigned}
+            onChanged={onReload}
+          />
         )}
 
         {(encounter.followUpInstructions || encounter.followUpWeeks) && (

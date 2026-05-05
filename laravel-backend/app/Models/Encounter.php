@@ -74,6 +74,12 @@ class Encounter extends Model
     public function program(): BelongsTo { return $this->belongsTo(Program::class); }
     public function prescriptions(): HasMany { return $this->hasMany(Prescription::class); }
     public function screeningResponses(): HasMany { return $this->hasMany(ScreeningResponse::class); }
+    // Encounter-scoped lab orders and referrals — both tables carry
+    // an encounter_id FK (see migrations 2026_03_20_400006 and
+    // 2026_03_20_300006) so the chart can surface "ordered during
+    // this visit" without joining through patient.
+    public function labOrders(): HasMany { return $this->hasMany(LabOrder::class); }
+    public function referrals(): HasMany { return $this->hasMany(Referral::class); }
     public function signer(): BelongsTo { return $this->belongsTo(User::class, 'signed_by'); }
     public function cosigner(): BelongsTo { return $this->belongsTo(User::class, 'cosigner_user_id'); }
     public function chartTemplate(): BelongsTo { return $this->belongsTo(ChartTemplate::class, 'template_id'); }

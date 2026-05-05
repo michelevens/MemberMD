@@ -84,6 +84,9 @@ class EncounterController extends Controller
                 // Eager-loaded here so the encounter detail page can show
                 // start/end/duration/admit timestamps without a 2nd round-trip.
                 'appointment.telehealthSession',
+                // Phase 2 — orders placed during this visit. Both have
+                // an encounter_id FK so the eager-load is direct.
+                'labOrders', 'referrals',
             ])
             ->findOrFail($id);
 
