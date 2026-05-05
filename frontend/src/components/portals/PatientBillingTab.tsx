@@ -157,7 +157,7 @@ export function PatientBillingTab({
       </div>
 
       {/* ── Subscriptions section ────────────────────────────────────── */}
-      <div className="glass rounded-xl overflow-hidden">
+      <div className="glass rounded-xl">
         <div className="flex items-center justify-between px-5 py-3 border-b border-slate-100">
           <h3 className="font-semibold text-slate-800">Subscription</h3>
         </div>
@@ -228,7 +228,7 @@ export function PatientBillingTab({
       </div>
 
       {/* ── Payments section ────────────────────────────────────────── */}
-      <div className="glass rounded-xl overflow-hidden">
+      <div className="glass rounded-xl">
         <div className="flex items-center justify-between px-5 py-3 border-b border-slate-100">
           <h3 className="font-semibold text-slate-800">Payments</h3>
           {membershipId && (
@@ -407,7 +407,7 @@ function KebabMenu({
         <MoreHorizontal className="w-4 h-4" />
       </button>
       {open && (
-        <div className="absolute right-0 top-full mt-1 z-20 min-w-[200px] rounded-md shadow-lg bg-white border border-slate-200 py-1">
+        <div className="absolute right-0 top-full mt-1 z-50 min-w-[220px] rounded-md shadow-lg bg-white border border-slate-200 py-1">
           {actions.map((a, i) => {
             const I = a.icon;
             return (
