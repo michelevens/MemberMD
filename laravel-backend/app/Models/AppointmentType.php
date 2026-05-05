@@ -16,6 +16,11 @@ class AppointmentType extends Model
     protected $fillable = [
         'tenant_id', 'name', 'duration_minutes', 'color',
         'is_telehealth', 'requires_plan', 'sort_order', 'is_active',
+        // Per-visit-type required documents. Array of items —
+        // see migration 2026_05_05_000200 for the shape.
+        // Null/empty = no gating; booking proceeds straight to the
+        // calendar (existing behavior).
+        'required_documents',
     ];
 
     protected $casts = [
@@ -24,6 +29,7 @@ class AppointmentType extends Model
         'requires_plan' => 'boolean',
         'sort_order' => 'integer',
         'is_active' => 'boolean',
+        'required_documents' => 'array',
     ];
 
     public function appointments(): HasMany { return $this->hasMany(Appointment::class); }

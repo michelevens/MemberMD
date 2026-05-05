@@ -325,6 +325,12 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
     // (the self-booking widget loads this on step 2 to populate the
     // visit-type picker). Tenant-scoped + active-only in the controller.
     Route::get('/appointment-types', [\App\Http\Controllers\Api\AppointmentTypeController::class, 'index']);
+    Route::post('/appointment-types', [\App\Http\Controllers\Api\AppointmentTypeController::class, 'store']);
+    Route::put('/appointment-types/{id}', [\App\Http\Controllers\Api\AppointmentTypeController::class, 'update']);
+    Route::delete('/appointment-types/{id}', [\App\Http\Controllers\Api\AppointmentTypeController::class, 'destroy']);
+    // Pre-flight for the booking widget — returns required-docs status
+    // for a given (appointment_type, patient) pair.
+    Route::get('/appointment-types/{id}/preflight', [\App\Http\Controllers\Api\AppointmentTypeController::class, 'preflight']);
 
     // ===== Encounters =====
     Route::post('/encounters/{id}/sign', [EncounterController::class, 'sign']);
