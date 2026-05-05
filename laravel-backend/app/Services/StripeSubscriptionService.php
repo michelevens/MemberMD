@@ -593,6 +593,11 @@ class StripeSubscriptionService
         string $pendingEnrollmentId,
         string $successUrl,
         string $cancelUrl,
+        // When true, suppresses the one-time enrollment fee on the
+        // first invoice. Used for Founding Member / comp scenarios
+        // where the admin has waived the registration fee. Default
+        // false so the regular path still charges it.
+        bool $waiveEnrollmentFee = false,
     ): array {
         $this->assertPracticeReady($practice);
 
@@ -644,6 +649,29 @@ class StripeSubscriptionService
                 ],
             ],
         ];
+
+        // One-time enrollment fee (Initial Psychiatric Evaluation, intake
+        // visit, registration fee — practices vary on what they call it).
+        // Only billed when the plan has an enrollment_fee > 0 AND this
+        // particular enrollment isn't being waived. Lives on the SAME
+        // checkout so the patient pays subscription + fee in one flow,
+        // not two separate transactions. add_invoice_items attaches a
+        // one-time line item to the first invoice that the subscription
+        // generates — which Stripe charges immediately along with the
+        // first month's fee.
+        $enrollmentFee = (float) ($plan->enrollment_fee ?? 0);
+        if ($enrollmentFee > 0 && !$waiveEnrollmentFee) {
+            $params['subscription_data']['add_invoice_items'] = [[
+                'price_data' => [
+                    'currency' => 'usd',
+                    'unit_amount' => (int) round($enrollmentFee * 100),
+                    'product_data' => [
+                        'name' => 'Initial enrollment fee — ' . $plan->name,
+                    ],
+                ],
+                'quantity' => 1,
+            ]];
+        }
 
         if ($applicationFeePercent > 0) {
             $params['subscription_data']['application_fee_percent'] = $applicationFeePercent;

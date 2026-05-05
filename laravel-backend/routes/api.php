@@ -265,6 +265,7 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
     Route::post('/practice/onboarding/complete', [PracticeController::class, 'completeOnboarding']);
     Route::put('/practice/branding', [PracticeController::class, 'updateBranding']);
     Route::put('/practice/scheduling', [PracticeController::class, 'updateScheduling']);
+    Route::put('/practice/membership-policy', [PracticeController::class, 'updateMembershipPolicy']);
     Route::post('/practice/logo', [PracticeController::class, 'uploadLogo']);
 
     // Master Data (SuperAdmin)

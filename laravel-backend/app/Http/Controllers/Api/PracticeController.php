@@ -5,11 +5,11 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Practice;
 use App\Models\User;
-use App\Models\PatientMembership;
 use App\Services\PracticeBootstrapService;
 use App\Services\PracticeProvisioningService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
@@ -85,7 +85,7 @@ class PracticeController extends Controller
                 'panel_capacity', 'panel_status', 'status',
             ])
             ->map(function ($prov) {
-                $prov->panel_current = \DB::table('appointments')
+                $prov->panel_current = DB::table('appointments')
                     ->where('provider_id', $prov->id)
                     ->distinct('patient_id')
                     ->count('patient_id');
@@ -93,7 +93,7 @@ class PracticeController extends Controller
             });
 
         // Recent activity — last 20 membership lifecycle events
-        $activity = \DB::table('membership_lifecycle_events')
+        $activity = DB::table('membership_lifecycle_events')
             ->where('tenant_id', $practice->id)
             ->orderByDesc('created_at')
             ->limit(20)
@@ -201,8 +201,10 @@ class PracticeController extends Controller
             'cancel_notice_hours' => 'nullable|integer|min:0|max:168',
             'allow_same_day' => 'sometimes|boolean',
             'late_cancel_fee' => 'nullable|numeric|min:0|max:10000',
+            'late_cancel_window_hours' => 'nullable|integer|min:0|max:168',
             'no_show_fee' => 'nullable|numeric|min:0|max:10000',
             'auto_charge_no_show' => 'sometimes|boolean',
+            'auto_charge_late_cancel' => 'sometimes|boolean',
         ]);
 
         $practice = Practice::findOrFail($user->tenant_id);
@@ -215,6 +217,63 @@ class PracticeController extends Controller
         return response()->json([
             'data' => ['scheduling' => $settings['scheduling']],
             'message' => 'Scheduling settings saved.',
+        ]);
+    }
+
+    /**
+     * Membership policy defaults — windows / day counts that drive
+     * downstream business rules. Stored in practices.settings.membership
+     * so the frontend can read them, the patient agreement template can
+     * interpolate them, and downstream services can branch on them.
+     *
+     * Fields (all integers, all overridable per practice, sensible
+     * defaults seeded by the frontend on first save):
+     *
+     *   cancellation_notice_business_days
+     *     How many business days before the next renewal a cancel
+     *     request must be received to take effect for that period.
+     *     Drives the "AUTO-RENEWAL NOTICE" copy on the public widget
+     *     and the patient portal cancel flow. Default 3.
+     *
+     *   reenrollment_new_patient_days
+     *     If a patient cancels and re-enrolls more than N days later
+     *     they're treated as a new patient — full intake fee + new
+     *     evaluation appointment required. Closes the controlled-
+     *     substance liability gap (prior med regimens not auto-resumed).
+     *     Default 60.
+     *
+     *   relocation_notice_days
+     *     Days within which a patient must notify the practice of a
+     *     permanent relocation to a different state. Drives the
+     *     state-of-residence dashboard alert + patient agreement
+     *     template variable. Default 14.
+     *
+     * Why a separate endpoint vs. piling onto updateScheduling: these
+     * are policy windows (business rules), not scheduling mechanics.
+     * Living under settings.membership keeps the JSON readable + lets
+     * us evolve them independently.
+     */
+    public function updateMembershipPolicy(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        abort_if(!$user->isPracticeAdmin() && !$user->isSuperAdmin(), 403);
+
+        $validated = $request->validate([
+            'cancellation_notice_business_days' => 'nullable|integer|min:0|max:30',
+            'reenrollment_new_patient_days' => 'nullable|integer|min:0|max:365',
+            'relocation_notice_days' => 'nullable|integer|min:0|max:90',
+        ]);
+
+        $practice = Practice::findOrFail($user->tenant_id);
+        $settings = (array) ($practice->settings ?? []);
+        $existing = (array) ($settings['membership'] ?? []);
+        $settings['membership'] = array_merge($existing, $validated);
+
+        $practice->update(['settings' => $settings]);
+
+        return response()->json([
+            'data' => ['membership' => $settings['membership']],
+            'message' => 'Membership policy saved.',
         ]);
     }
 

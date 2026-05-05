@@ -97,6 +97,14 @@ class MembershipEnrollmentService
         // missing-payment-method guardrail, since payment is already in.
         ?string $existingStripeSubscriptionId = null,
         ?string $existingStripeCustomerId = null,
+        // Founding-member / comp pattern — admin can waive the plan's
+        // enrollment_fee at sign-up. When waived, we still snapshot the
+        // would-have-been amount into locked_enrollment_fee so the audit
+        // trail can reconstruct the waiver. Stripe charge for the
+        // enrollment fee is suppressed by the caller (StripeSubscriptionService
+        // checks for waiver before adding the line item).
+        bool $waiveEnrollmentFee = false,
+        ?string $waiverReason = null,
     ): PatientMembership {
         // Single-active-membership invariant. The DB partial unique index
         // (uniq_active_primary_membership) is the hard backstop; this is
@@ -140,6 +148,14 @@ class MembershipEnrollmentService
             ? $now->copy()->addYear()
             : $now->copy()->addMonth();
 
+        // Snapshot the enrollment fee at sign-up. Always captured as the
+        // plan's CURRENT enrollment_fee (or 0 if not configured). When
+        // waived, we still snapshot the amount so reports + audit logs
+        // can answer "how much did we comp?" without reconstructing
+        // history from plan-version edits.
+        $planEnrollmentFee = (float) ($plan->enrollment_fee ?? 0);
+        $lockedEnrollmentFee = $planEnrollmentFee > 0 ? $planEnrollmentFee : null;
+
         $membership = PatientMembership::create([
             'tenant_id' => $practice->id,
             'patient_id' => $patient->id,
@@ -160,6 +176,10 @@ class MembershipEnrollmentService
             'locked_monthly_price' => $plan->monthly_price,
             'locked_annual_price' => $plan->annual_price,
             'locked_plan_version' => $plan->version ?? 1,
+            'locked_enrollment_fee' => $lockedEnrollmentFee,
+            'enrollment_fee_waived_at' => $waiveEnrollmentFee && $lockedEnrollmentFee ? $now : null,
+            'enrollment_fee_waived_reason' => $waiveEnrollmentFee && $lockedEnrollmentFee ? $waiverReason : null,
+            'enrollment_fee_waived_by_user_id' => $waiveEnrollmentFee && $lockedEnrollmentFee ? $sourceUserId : null,
             // If the caller already paid via Checkout, attach the
             // pre-existing Stripe IDs so Stripe is the source of truth
             // for billing and we don't double-create a subscription.

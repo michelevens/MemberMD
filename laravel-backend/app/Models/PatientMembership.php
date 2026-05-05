@@ -25,6 +25,14 @@ class PatientMembership extends Model
         'cancel_reason',
         'current_period_start', 'current_period_end',
         'last_stripe_event_at', 'last_state_change_at',
+        // Enrollment-fee snapshot (2026_05_04_008000 migration). Captures
+        // what the patient was charged at sign-up so future plan price
+        // changes don't rewrite history. Waiver fields support the
+        // Founding Member / comp pattern.
+        'locked_enrollment_fee',
+        'enrollment_fee_waived_at',
+        'enrollment_fee_waived_reason',
+        'enrollment_fee_waived_by_user_id',
     ];
 
     protected static function booted(): void
@@ -89,6 +97,8 @@ class PatientMembership extends Model
         'current_period_end' => 'datetime',
         'last_stripe_event_at' => 'datetime',
         'last_state_change_at' => 'datetime',
+        'locked_enrollment_fee' => 'decimal:2',
+        'enrollment_fee_waived_at' => 'datetime',
     ];
 
     public function patient(): BelongsTo { return $this->belongsTo(Patient::class); }
