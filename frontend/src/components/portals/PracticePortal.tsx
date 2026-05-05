@@ -1342,6 +1342,12 @@ export function PracticePortal() {
   const [rosterPlanActionLoading, setRosterPlanActionLoading] = useState(false);
   const [rosterCompEnabled, setRosterCompEnabled] = useState(false);
   const [rosterCompReason, setRosterCompReason] = useState("");
+  // Founding Member / waiver — separate from `comp`. The patient still
+  // pays the monthly subscription via Stripe; we just suppress the
+  // one-time enrollment fee on the first invoice. Reason captured for
+  // audit + appears on the patient agreement PDF.
+  const [rosterWaiveEnrollmentFee, setRosterWaiveEnrollmentFee] = useState(false);
+  const [rosterWaiverReason, setRosterWaiverReason] = useState("");
   const [rosterPaymentLinkLoading, setRosterPaymentLinkLoading] = useState(false);
 
   // ─── Quick Activity Log Form (patient detail) ─────────────────────────
@@ -2002,6 +2008,11 @@ export function PracticePortal() {
           setRosterPlanActionLoading(false);
           return;
         }
+        if (rosterWaiveEnrollmentFee && !rosterWaiverReason.trim()) {
+          setToast({ message: "Waiver reason is required when waiving the enrollment fee.", type: "error" });
+          setRosterPlanActionLoading(false);
+          return;
+        }
         const body: Record<string, unknown> = {
           patientId: rosterPlanDialog.patientId,
           planId: rosterSelectedPlanId,
@@ -2010,6 +2021,10 @@ export function PracticePortal() {
         if (rosterCompEnabled) {
           body.comp = true;
           body.compReason = rosterCompReason.trim();
+        }
+        if (rosterWaiveEnrollmentFee) {
+          body.waiveEnrollmentFee = true;
+          body.waiverReason = rosterWaiverReason.trim();
         }
         const res = await apiFetch("/memberships", {
           method: "POST",
@@ -2026,6 +2041,8 @@ export function PracticePortal() {
           setRosterSelectedPlanId(null);
           setRosterCompEnabled(false);
           setRosterCompReason("");
+          setRosterWaiveEnrollmentFee(false);
+          setRosterWaiverReason("");
           loadPracticeData();
         }
       }
@@ -2033,7 +2050,7 @@ export function PracticePortal() {
       setToast({ message: rosterPlanDialog.mode === "change" ? "Failed to change plan." : "Failed to enroll patient.", type: "error" });
     }
     setRosterPlanActionLoading(false);
-  }, [rosterPlanDialog, rosterSelectedPlanId, rosterCompEnabled, rosterCompReason, loadPracticeData, setToast]);
+  }, [rosterPlanDialog, rosterSelectedPlanId, rosterCompEnabled, rosterCompReason, rosterWaiveEnrollmentFee, rosterWaiverReason, loadPracticeData, setToast]);
 
   // ─── Send payment link (Stripe Checkout, no card on hand) ─────────────
   // Creates a PendingEnrollment + Stripe Checkout session and emails the
@@ -2042,13 +2059,23 @@ export function PracticePortal() {
     if (!rosterPlanDialog || !rosterSelectedPlanId) return;
     setRosterPaymentLinkLoading(true);
     try {
+      if (rosterWaiveEnrollmentFee && !rosterWaiverReason.trim()) {
+        setToast({ message: "Waiver reason is required when waiving the enrollment fee.", type: "error" });
+        setRosterPaymentLinkLoading(false);
+        return;
+      }
+      const body: Record<string, unknown> = {
+        patient_id: rosterPlanDialog.patientId,
+        plan_id: rosterSelectedPlanId,
+        billing_frequency: "monthly",
+      };
+      if (rosterWaiveEnrollmentFee) {
+        body.waive_enrollment_fee = true;
+        body.waiver_reason = rosterWaiverReason.trim();
+      }
       const res = await apiFetch("/memberships/payment-link", {
         method: "POST",
-        body: JSON.stringify({
-          patient_id: rosterPlanDialog.patientId,
-          plan_id: rosterSelectedPlanId,
-          billing_frequency: "monthly",
-        }),
+        body: JSON.stringify(body),
       });
       if (res.error) {
         setToast({ message: res.error, type: "error" });
@@ -2062,12 +2089,14 @@ export function PracticePortal() {
         setRosterSelectedPlanId(null);
         setRosterCompEnabled(false);
         setRosterCompReason("");
+        setRosterWaiveEnrollmentFee(false);
+        setRosterWaiverReason("");
       }
     } catch {
       setToast({ message: "Failed to send payment link.", type: "error" });
     }
     setRosterPaymentLinkLoading(false);
-  }, [rosterPlanDialog, rosterSelectedPlanId, setToast]);
+  }, [rosterPlanDialog, rosterSelectedPlanId, rosterWaiveEnrollmentFee, rosterWaiverReason, setToast]);
 
   // ─── Quick activity log submit ─────────────────────────────────────────
   const handleQuickActivityLog = useCallback(async (patientId: string) => {
@@ -10446,7 +10475,7 @@ export function PracticePortal() {
               )}
             </div>
             {rosterPlanDialog.mode === "enroll" && (
-              <div className="px-6 pb-2">
+              <div className="px-6 pb-2 space-y-2">
                 <div className="rounded-lg border border-slate-200 px-4 py-3">
                   <label className="flex items-start gap-3 cursor-pointer">
                     <input
@@ -10459,7 +10488,7 @@ export function PracticePortal() {
                     <div className="flex-1">
                       <div className="text-sm font-medium text-slate-800">Comp this membership</div>
                       <div className="text-xs text-slate-500 mt-0.5">
-                        Skip Stripe billing. Used for staff plans, charity care, or beta users. Audit-logged.
+                        Skip Stripe billing entirely. Used for staff plans, charity care, or beta users. Audit-logged.
                       </div>
                     </div>
                   </label>
@@ -10480,6 +10509,55 @@ export function PracticePortal() {
                     </div>
                   )}
                 </div>
+
+                {/* Waiver — separate from comp. The patient still pays the
+                    monthly subscription via Stripe; we just suppress the
+                    one-time enrollment fee on the first invoice. Only
+                    surfaces when the selected plan actually has an
+                    enrollment_fee > 0 (no point waiving zero). */}
+                {(() => {
+                  const selectedPlan = (apiPlans ?? []).find((p) => p.id === rosterSelectedPlanId);
+                  const planFee = (selectedPlan as { enrollmentFee?: number; enrollment_fee?: number } | undefined);
+                  const fee = Number(planFee?.enrollmentFee ?? planFee?.enrollment_fee ?? 0);
+                  if (!(fee > 0) || rosterCompEnabled) return null;
+                  return (
+                    <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
+                      <label className="flex items-start gap-3 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={rosterWaiveEnrollmentFee}
+                          onChange={(e) => setRosterWaiveEnrollmentFee(e.target.checked)}
+                          className="mt-0.5 w-4 h-4 rounded border-amber-300"
+                          style={{ accentColor: "#b45309" }}
+                        />
+                        <div className="flex-1">
+                          <div className="text-sm font-medium text-amber-900">
+                            Waive ${fee} enrollment fee
+                          </div>
+                          <div className="text-xs text-amber-800 mt-0.5">
+                            Founding member or special promotion — patient still pays monthly subscription via Stripe, just no one-time intake fee on the first invoice. Audit-logged.
+                          </div>
+                        </div>
+                      </label>
+                      {rosterWaiveEnrollmentFee && (
+                        <div className="mt-3">
+                          <label className="block text-xs font-medium text-amber-900 mb-1">
+                            Waiver Reason <span style={{ color: "#dc2626" }}>*</span>
+                          </label>
+                          <input
+                            type="text"
+                            value={rosterWaiverReason}
+                            onChange={(e) => setRosterWaiverReason(e.target.value)}
+                            placeholder="e.g. Founding member — enrolled before launch"
+                            maxLength={500}
+                            className="w-full px-3 py-2 text-sm rounded-md border border-amber-300 bg-white focus:outline-none focus:ring-2"
+                            style={{ outlineColor: "#b45309" }}
+                          />
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
             )}
             <div className="px-6 pb-6 flex justify-end gap-3 flex-wrap">
@@ -10489,6 +10567,8 @@ export function PracticePortal() {
                   setRosterSelectedPlanId(null);
                   setRosterCompEnabled(false);
                   setRosterCompReason("");
+                  setRosterWaiveEnrollmentFee(false);
+                  setRosterWaiverReason("");
                 }}
                 className="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100 transition-colors"
               >

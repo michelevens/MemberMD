@@ -97,6 +97,8 @@ class MembershipController extends Controller
                 sourceUserId: $user->id,
                 paymentMethodId: $validated['payment_method_id'] ?? null,
                 source: 'membership.store',
+                waiveEnrollmentFee: (bool) ($validated['waive_enrollment_fee'] ?? false),
+                waiverReason: $validated['waiver_reason'] ?? null,
             );
         } catch (\RuntimeException $e) {
             return response()->json(['message' => $e->getMessage()], 422);
@@ -126,6 +128,8 @@ class MembershipController extends Controller
             'patient_id' => 'required|uuid|exists:patients,id',
             'plan_id' => 'required|uuid|exists:membership_plans,id',
             'billing_frequency' => 'sometimes|string|in:monthly,annual',
+            'waive_enrollment_fee' => 'sometimes|boolean',
+            'waiver_reason' => 'required_if:waive_enrollment_fee,true|nullable|string|max:500',
         ]);
 
         $billingFrequency = $validated['billing_frequency'] ?? 'monthly';
@@ -139,6 +143,8 @@ class MembershipController extends Controller
             planId: $validated['plan_id'],
             billingFrequency: $billingFrequency,
             sendEmail: true,
+            waiveEnrollmentFee: (bool) ($validated['waive_enrollment_fee'] ?? false),
+            waiverReason: $validated['waiver_reason'] ?? null,
         );
     }
 
@@ -196,6 +202,11 @@ class MembershipController extends Controller
         string $planId,
         string $billingFrequency,
         bool $sendEmail,
+        // Founding Member / comp pattern — admin can waive the plan's
+        // enrollment_fee on a payment-link-driven enrollment too. Default
+        // false so existing call sites keep their behavior.
+        bool $waiveEnrollmentFee = false,
+        ?string $waiverReason = null,
     ): JsonResponse {
         if (empty($patient->email)) {
             return response()->json([
@@ -261,6 +272,8 @@ class MembershipController extends Controller
             'status' => PendingEnrollment::STATUS_PENDING,
             'created_by_user_id' => $user->id,
             'expires_at' => now()->addHours(24),
+            'waive_enrollment_fee' => $waiveEnrollmentFee,
+            'waiver_reason' => $waiveEnrollmentFee ? $waiverReason : null,
         ]);
 
         $appUrl = (string) config('app.frontend_url', config('app.url'));
@@ -276,6 +289,7 @@ class MembershipController extends Controller
                 pendingEnrollmentId: $pending->id,
                 successUrl: $successUrl,
                 cancelUrl: $cancelUrl,
+                waiveEnrollmentFee: $waiveEnrollmentFee,
             );
         } catch (\Throwable $e) {
             $pending->delete();

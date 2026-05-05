@@ -31,6 +31,12 @@ class StoreMembershipRequest extends FormRequest
             // enrollment, the membership is created and Stripe sends a hosted
             // invoice email — practice can also send a payment link.
             'payment_method_id' => 'sometimes|string|max:200',
+            // Founding Member / comp pattern — admin can waive the
+            // plan's enrollment_fee at sign-up. Reason is required when
+            // waiving so the audit log + patient agreement can capture
+            // why a founding-member benefit was granted.
+            'waive_enrollment_fee' => 'sometimes|boolean',
+            'waiver_reason' => 'required_if:waive_enrollment_fee,true|nullable|string|max:500',
         ];
     }
 }

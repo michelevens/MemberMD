@@ -22,12 +22,17 @@ class PendingEnrollment extends Model
         'consent_payload', 'signed_ip', 'signed_user_agent',
         'status', 'claimed_membership_id', 'claimed_at',
         'created_by_user_id', 'expires_at',
+        // Founding Member / comp pattern — waiver carried across the
+        // payment-link round trip and applied by the
+        // checkout.session.completed webhook.
+        'waive_enrollment_fee', 'waiver_reason',
     ];
 
     protected $casts = [
         'expires_at' => 'datetime',
         'claimed_at' => 'datetime',
         'consent_payload' => 'array',
+        'waive_enrollment_fee' => 'boolean',
     ];
 
     public function patient(): BelongsTo

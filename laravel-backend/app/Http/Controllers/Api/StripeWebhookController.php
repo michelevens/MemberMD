@@ -921,6 +921,12 @@ class StripeWebhookController extends Controller
                 source: $source,
                 existingStripeSubscriptionId: $session->subscription ?? null,
                 existingStripeCustomerId: $session->customer ?? $pending->stripe_customer_id,
+                // Carry the Founding Member / comp waiver decision
+                // from the pending row through to the membership
+                // snapshot. The Stripe checkout already suppressed
+                // the line item; this captures the audit trail.
+                waiveEnrollmentFee: (bool) ($pending->waive_enrollment_fee ?? false),
+                waiverReason: $pending->waiver_reason,
             );
         } catch (\Throwable $e) {
             Log::error('Failed to convert PendingEnrollment to membership after paid checkout', [
