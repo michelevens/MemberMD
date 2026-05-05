@@ -39,6 +39,7 @@ import { BrandedWidgets } from "./BrandedWidgets";
 import { AgreementEditor } from "./AgreementEditor";
 import { EntitlementCatalogPanel } from "./EntitlementCatalogPanel";
 import { ChartTemplatesPanel } from "./ChartTemplatesPanel";
+import { AppointmentTypesPanel } from "./AppointmentTypesPanel";
 import { PlatformSubscriptionSection } from "./PlatformSubscriptionSection";
 import { WebhooksPanel } from "./WebhooksPanel";
 import { FacilitiesPanel } from "./FacilitiesPanel";
@@ -740,13 +741,10 @@ export function PracticeSettings({ initialTab }: { initialTab?: string }) {
   const [auditRetention, setAuditRetention] = useState("3");
 
   // ─── Clinical Config State (ported from EnnHealth's SystemSettings) ──────
-  // Each section is a list of named items the practice can curate. EnnHealth
-  // stores these in component state and persists nothing — we mirror that
-  // for now and will move to a backend table in a follow-up.
-  const [appointmentTypes, setAppointmentTypes] = useState<string[]>([
-    "Initial Consultation", "Follow-up", "Medication Management",
-    "Therapy Session", "Crisis Intervention",
-  ]);
+  // Each section is a list of named items the practice can curate.
+  // Appointment Types moved to AppointmentTypesPanel (real backend
+  // CRUD + required-docs gate). The remaining lists below still use
+  // local state OR /clinical-settings/{type} as called out per row.
   // The five lists below are now backed by /clinical-settings/{type}.
   // Each list holds full ClinicalListItem rows so we have stable ids
   // for update/delete (chip removes by index would otherwise need a
@@ -1994,14 +1992,11 @@ export function PracticeSettings({ initialTab }: { initialTab?: string }) {
             Appointments
           </h2>
         </div>
-        {renderChipList({
-          title: "Appointment Types",
-          helper: "Visit types providers can choose when scheduling.",
-          items: appointmentTypes,
-          placeholder: "e.g. Annual Physical",
-          onAdd: (v) => setAppointmentTypes([...appointmentTypes, v]),
-          onRemove: (i) => setAppointmentTypes(appointmentTypes.filter((_, idx) => idx !== i)),
-        })}
+        {/* Appointment Types — full CRUD + required-documents gate.
+            Replaces the prior local-state chip list. Required docs
+            here drive the booking-widget pre-flight check. */}
+        <AppointmentTypesPanel setToast={(t) => showToast(t.message)} />
+
         {renderChipList({
           title: "Visit Statuses",
           helper: "Lifecycle states an appointment can move through. Saved to /clinical-settings/visit_statuses.",
