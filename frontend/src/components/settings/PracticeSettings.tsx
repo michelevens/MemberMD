@@ -581,8 +581,10 @@ export function PracticeSettings({ initialTab }: { initialTab?: string }) {
         cancel_notice_hours: noticeMap[cancelNotice] ?? 24,
         allow_same_day: sameDayBooking,
         late_cancel_fee: lateCancelFee,
+        late_cancel_window_hours: lateCancelWindowHours,
         no_show_fee: noShowFee,
         auto_charge_no_show: autoChargeNoShow,
+        auto_charge_late_cancel: autoChargeLateCancel,
       };
       const r = await apiFetch("/practice/scheduling", {
         method: "PUT",
@@ -593,6 +595,25 @@ export function PracticeSettings({ initialTab }: { initialTab?: string }) {
         return;
       }
       showToast("Scheduling settings saved");
+    } else if (activeTab === "membership") {
+      // Membership policy — windows / day counts that drive downstream
+      // business rules (auto-renewal copy, re-enrollment gate, relocation
+      // alerts). Stored under settings.membership; doesn't touch
+      // membership-plan rows.
+      const body = {
+        cancellation_notice_business_days: cancellationNoticeBusinessDays,
+        reenrollment_new_patient_days: reenrollmentNewPatientDays,
+        relocation_notice_days: relocationNoticeDays,
+      };
+      const r = await apiFetch("/practice/membership-policy", {
+        method: "PUT",
+        body: JSON.stringify(body),
+      });
+      if (r.error) {
+        showToast(r.error);
+        return;
+      }
+      showToast("Membership policy saved");
     } else {
       showToast("Settings saved");
     }
@@ -661,8 +682,10 @@ export function PracticeSettings({ initialTab }: { initialTab?: string }) {
   const [requireReason, setRequireReason] = useState(false);
   const [cancelNotice, setCancelNotice] = useState("24h");
   const [lateCancelFee, setLateCancelFee] = useState(50);
+  const [lateCancelWindowHours, setLateCancelWindowHours] = useState(24);
   const [noShowFee, setNoShowFee] = useState(75);
   const [autoChargeNoShow, setAutoChargeNoShow] = useState(false);
+  const [autoChargeLateCancel, setAutoChargeLateCancel] = useState(false);
 
   // ─── Membership State ────────────────────────────────────────────────────
   const [selfEnroll, setSelfEnroll] = useState(true);
@@ -675,6 +698,13 @@ export function PracticeSettings({ initialTab }: { initialTab?: string }) {
   const [suspendAfterFail, setSuspendAfterFail] = useState(true);
   const [daysBeforeSuspend, setDaysBeforeSuspend] = useState(10);
   const [daysBeforeExpire, setDaysBeforeExpire] = useState(30);
+  // ─── Membership Policy State (defaults override) ─────────────────────────
+  // These drive downstream business rules (cancellation copy, re-enrollment
+  // gate, relocation alerts). Defaults are sensible out-of-box; practice
+  // can zero out or tighten any of them.
+  const [cancellationNoticeBusinessDays, setCancellationNoticeBusinessDays] = useState(3);
+  const [reenrollmentNewPatientDays, setReenrollmentNewPatientDays] = useState(60);
+  const [relocationNoticeDays, setRelocationNoticeDays] = useState(14);
   const [hsaReceipts, setHsaReceipts] = useState(true);
   const [npiOnReceipts, setNpiOnReceipts] = useState(true);
   const [taxOnReceipts, setTaxOnReceipts] = useState(true);
@@ -1152,10 +1182,12 @@ export function PracticeSettings({ initialTab }: { initialTab?: string }) {
               onChange={set(setCancelNotice)}
             />
             <NumberInput label="Late Cancellation Fee" value={lateCancelFee} prefix="$" onChange={set(setLateCancelFee)} />
+            <NumberInput label="Late-Cancel Window (hours)" value={lateCancelWindowHours} suffix="h" onChange={set(setLateCancelWindowHours)} />
             <NumberInput label="No-Show Fee" value={noShowFee} prefix="$" onChange={set(setNoShowFee)} />
           </div>
-          <div className="mt-4">
+          <div className="mt-4 space-y-2">
             <ToggleSwitch label="Auto-Charge No-Show Fee" checked={autoChargeNoShow} onChange={set(setAutoChargeNoShow)} />
+            <ToggleSwitch label="Auto-Charge Late-Cancel Fee" checked={autoChargeLateCancel} onChange={set(setAutoChargeLateCancel)} />
           </div>
         </SectionCard>
       </>
@@ -1206,6 +1238,35 @@ export function PracticeSettings({ initialTab }: { initialTab?: string }) {
           <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-4">
             <NumberInput label="Days Before Suspension" value={daysBeforeSuspend} suffix="days" onChange={set(setDaysBeforeSuspend)} />
             <NumberInput label="Days Before Expiration" value={daysBeforeExpire} suffix="days" onChange={set(setDaysBeforeExpire)} />
+          </div>
+        </SectionCard>
+
+        <SectionCard title="Membership Policy">
+          <p className="text-xs text-slate-500 mb-3">
+            Defaults that drive auto-renewal disclosure copy, the re-enrollment gate, and patient relocation alerts. All overridable; zero out any to disable.
+          </p>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <NumberInput
+              label="Cancellation Notice"
+              value={cancellationNoticeBusinessDays}
+              suffix="business days"
+              helper="How far ahead a cancel must be received to skip the next charge."
+              onChange={set(setCancellationNoticeBusinessDays)}
+            />
+            <NumberInput
+              label="Re-Enrollment as New Patient After"
+              value={reenrollmentNewPatientDays}
+              suffix="days"
+              helper="Cancelled patients re-enrolling after this gap pay a new intake fee."
+              onChange={set(setReenrollmentNewPatientDays)}
+            />
+            <NumberInput
+              label="Relocation Notice Required"
+              value={relocationNoticeDays}
+              suffix="days"
+              helper="Days for a patient to notify the practice of a permanent move."
+              onChange={set(setRelocationNoticeDays)}
+            />
           </div>
         </SectionCard>
 

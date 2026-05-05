@@ -62,6 +62,9 @@ interface Plan {
   badgeText?: string;
   monthlyPrice: number;
   annualPrice: number;
+  // One-time charge billed alongside the first month (intake / registration
+  // / setup fee). Null or 0 → no fee. Read from plan.enrollment_fee.
+  enrollmentFee?: number | null;
   visitsPerMonth: number | null;
   telehealthIncluded: boolean;
   messagingIncluded: boolean;
@@ -294,6 +297,7 @@ export function EnrollmentWidget() {
             badgeText: raw.badge_text ? String(raw.badge_text) : undefined,
             monthlyPrice: Number(raw.monthly_price ?? 0),
             annualPrice: Number(raw.annual_price ?? 0),
+            enrollmentFee: raw.enrollment_fee != null ? Number(raw.enrollment_fee) : null,
             visitsPerMonth: raw.visits_per_month != null ? Number(raw.visits_per_month) : null,
             telehealthIncluded: Boolean(raw.telehealth_included),
             messagingIncluded: Boolean(raw.messaging_included),
@@ -709,6 +713,11 @@ export function EnrollmentWidget() {
                     <span className="text-xs" style={{ color: C.slate400 }}>
                       /{form.billingFrequency === "monthly" ? "mo" : "yr"}
                     </span>
+                    {(plan.enrollmentFee ?? 0) > 0 && (
+                      <div className="text-[11px] mt-0.5" style={{ color: C.slate500 }}>
+                        + ${plan.enrollmentFee} one-time
+                      </div>
+                    )}
                   </div>
                 </div>
                 {selected && (() => {
@@ -1069,6 +1078,8 @@ export function EnrollmentWidget() {
       form.billingFrequency === "monthly"
         ? selectedPlan?.monthlyPrice
         : selectedPlan?.annualPrice;
+    const enrollmentFee = selectedPlan?.enrollmentFee ?? 0;
+    const firstChargeTotal = (price ?? 0) + enrollmentFee;
 
     return (
       <div>
@@ -1088,6 +1099,16 @@ export function EnrollmentWidget() {
             <p className="text-xs" style={{ color: C.slate500 }}>
               Billed {form.billingFrequency}
             </p>
+            {enrollmentFee > 0 && (
+              <div className="mt-2 pt-2 border-t border-slate-100 text-xs" style={{ color: C.slate500 }}>
+                <div className="flex justify-between"><span>Subscription</span><span>${price}</span></div>
+                <div className="flex justify-between"><span>One-time enrollment fee</span><span>${enrollmentFee}</span></div>
+                <div className="flex justify-between font-semibold mt-1 pt-1 border-t border-slate-100" style={{ color: C.navy900 }}>
+                  <span>Today's charge</span><span>${firstChargeTotal}</span>
+                </div>
+                <div className="text-[10px] mt-1">After today, you'll be billed ${price}/{form.billingFrequency === "monthly" ? "mo" : "yr"} on a recurring basis.</div>
+              </div>
+            )}
           </ReviewSection>
 
           {/* Personal Info */}
@@ -1133,6 +1154,29 @@ export function EnrollmentWidget() {
               Signed by: {form.signatureData}
             </p>
           </ReviewSection>
+
+          {/* Auto-renewal disclosure — drafted to satisfy the strictest
+              commonly-applicable state automatic-renewal laws (CA BPC
+              § 17602, NY GBL § 527-a, FL FS § 501.165). Renders for every
+              practice; cancellation method copy is generic since the
+              practice's preferred method lives in their settings (and
+              the patient agreement template is the authoritative
+              source). Bold, conspicuous, above the CTA = ARL-clean. */}
+          <div
+            className="rounded-lg border-2 p-4 text-sm"
+            style={{ borderColor: "#fcd34d", backgroundColor: "#fffbeb", color: "#78350f" }}
+          >
+            <p className="font-bold uppercase tracking-wide text-xs mb-2">Automatic Renewal Notice</p>
+            <p className="mb-2">
+              Your <strong>{selectedPlan?.name}</strong> membership is a recurring subscription. After today's charge of
+              {" "}<strong>${firstChargeTotal}</strong>, your payment method will be charged
+              {" "}<strong>${price}</strong> {form.billingFrequency === "monthly" ? "every month on the same day" : "every year on the same day"} until you cancel.
+            </p>
+            <p>
+              You may cancel at any time through your patient portal, by contacting the practice directly, or by replying to any billing email.
+              Cancellations received before your next renewal stop future charges.
+            </p>
+          </div>
         </div>
       </div>
     );

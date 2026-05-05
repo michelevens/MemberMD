@@ -1217,7 +1217,7 @@ export function PracticePortal() {
 
   // ─── Create Plan Modal ─────────────────────────────────────────────
   const [showCreatePlan, setShowCreatePlan] = useState(false);
-  const [createPlanForm, setCreatePlanForm] = useState({ name: "", monthlyPrice: "", annualPrice: "", description: "" });
+  const [createPlanForm, setCreatePlanForm] = useState({ name: "", monthlyPrice: "", annualPrice: "", enrollmentFee: "", description: "" });
   const [createPlanLoading, setCreatePlanLoading] = useState(false);
 
   // ─── Plan Stripe price sync ───────────────────────────────────────
@@ -1239,7 +1239,7 @@ export function PracticePortal() {
 
   // ─── Edit Plan Modal ──────────────────────────────────────────────
   const [showEditPlan, setShowEditPlan] = useState(false);
-  const [editPlanForm, setEditPlanForm] = useState({ id: "", name: "", monthlyPrice: "", annualPrice: "", description: "" });
+  const [editPlanForm, setEditPlanForm] = useState({ id: "", name: "", monthlyPrice: "", annualPrice: "", enrollmentFee: "", description: "" });
   const [editPlanLoading, setEditPlanLoading] = useState(false);
 
   // ─── Plan Entitlements Builder ───────────────────────────────────────
@@ -2293,6 +2293,10 @@ export function PracticePortal() {
         name: createPlanForm.name,
         monthlyPrice: parseFloat(createPlanForm.monthlyPrice) || 0,
         annualPrice: parseFloat(createPlanForm.annualPrice) || 0,
+        // Send enrollmentFee only when set; null means "don't charge",
+        // 0 also means "don't charge" — both treated equivalently by
+        // the Stripe checkout (only > 0 adds the line item).
+        enrollmentFee: createPlanForm.enrollmentFee.trim() === "" ? null : parseFloat(createPlanForm.enrollmentFee) || 0,
         description: createPlanForm.description || undefined,
       });
       if (res.data || !res.error) {
@@ -2304,7 +2308,7 @@ export function PracticePortal() {
         }
         setToast({ message: "Plan created successfully.", type: "success" });
         setShowCreatePlan(false);
-        setCreatePlanForm({ name: "", monthlyPrice: "", annualPrice: "", description: "" });
+        setCreatePlanForm({ name: "", monthlyPrice: "", annualPrice: "", enrollmentFee: "", description: "" });
         setCreatePlanEntitlements([]);
         setShowCreatePlanEntPicker(false);
         loadPracticeData();
@@ -2329,6 +2333,7 @@ export function PracticePortal() {
         name: editPlanForm.name,
         monthlyPrice: parseFloat(editPlanForm.monthlyPrice) || 0,
         annualPrice: parseFloat(editPlanForm.annualPrice) || 0,
+        enrollmentFee: editPlanForm.enrollmentFee.trim() === "" ? null : parseFloat(editPlanForm.enrollmentFee) || 0,
         description: editPlanForm.description || undefined,
       });
       if (res.data || !res.error) {
@@ -5776,6 +5781,7 @@ export function PracticePortal() {
                       name: plan.name,
                       monthlyPrice: String(monthlyPrice),
                       annualPrice: String(annualPrice),
+                      enrollmentFee: plan.enrollmentFee != null ? String(plan.enrollmentFee) : "",
                       description: plan.description ?? "",
                     });
                     fetchEntitlementTypes();
@@ -6643,6 +6649,7 @@ export function PracticePortal() {
                           name: plan.name,
                           monthlyPrice: String(monthlyPrice),
                           annualPrice: String(plan.annualPrice ?? plan.annual_price ?? 0),
+                          enrollmentFee: (plan.enrollmentFee ?? plan.enrollment_fee) != null ? String(plan.enrollmentFee ?? plan.enrollment_fee) : "",
                           description: plan.description ?? "",
                         });
                         fetchEntitlementTypes();
@@ -6714,6 +6721,22 @@ export function PracticePortal() {
                     <label className="block text-sm font-medium text-slate-700 mb-1">Annual Price</label>
                     <input type="number" value={createPlanForm.annualPrice} onChange={(e) => setCreatePlanForm({ ...createPlanForm, annualPrice: e.target.value })} placeholder="1069" className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2" />
                   </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">
+                    Enrollment / Intake Fee <span className="text-xs font-normal text-slate-400">(one-time, billed with first month)</span>
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    placeholder="Leave blank for none"
+                    value={createPlanForm.enrollmentFee}
+                    onChange={(e) => setCreatePlanForm({ ...createPlanForm, enrollmentFee: e.target.value })}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2"
+                  />
+                  <p className="text-xs text-slate-400 mt-1">
+                    Charged once at sign-up (e.g., comprehensive intake / new-patient evaluation).
+                  </p>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Description</label>
@@ -6910,6 +6933,22 @@ export function PracticePortal() {
                     <label className="block text-sm font-medium text-slate-700 mb-1">Annual Price</label>
                     <input type="number" value={editPlanForm.annualPrice} onChange={(e) => setEditPlanForm({ ...editPlanForm, annualPrice: e.target.value })} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2" />
                   </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">
+                    Enrollment / Intake Fee <span className="text-xs font-normal text-slate-400">(one-time, billed with first month)</span>
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    placeholder="Leave blank for none"
+                    value={editPlanForm.enrollmentFee}
+                    onChange={(e) => setEditPlanForm({ ...editPlanForm, enrollmentFee: e.target.value })}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2"
+                  />
+                  <p className="text-xs text-slate-400 mt-1">
+                    Charged once at sign-up (e.g., comprehensive intake / new-patient evaluation). Existing members are not re-billed when this changes.
+                  </p>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Description</label>

@@ -231,6 +231,14 @@ export interface MembershipPlan {
   monthlyPrice: number;
   annualPrice: number | null;
   setupFee: number;
+  // Maps to backend membership_plans.enrollment_fee — one-time charge
+  // billed alongside the first month (intake / registration / setup
+  // fee, depending on practice convention). Null or 0 → no fee.
+  enrollmentFee: number | null;
+  // Maps to backend membership_plans.intake_fee — separate concept
+  // some practices use for the initial evaluation specifically.
+  // Practices that bundle intake into enrollment_fee can leave this null.
+  intakeFee: number | null;
   maxPatients: number | null;
   visitsPerMonth: number | null;
   includesLabs: boolean;
