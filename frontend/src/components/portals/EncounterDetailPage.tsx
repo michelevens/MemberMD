@@ -5,8 +5,13 @@ import {
   Calendar, User, ShieldAlert, CheckCircle2, AlertCircle, Pill,
   Pencil, X, Save, Sparkles, Lock, Brain, Video as VideoIcon,
   Cake, AlertTriangle, History, FlaskConical, Send, Plus,
+  Folder, FileSignature, FileBadge, Download, ExternalLink,
 } from "lucide-react";
-import { encounterService, chartTemplateService, labService, referralService } from "../../lib/api";
+import {
+  encounterService, chartTemplateService, labService, referralService,
+  documentService, consentService, signatureRequestService, screeningService,
+  prescriptionService,
+} from "../../lib/api";
 import type { ChartTemplate, ChartTemplateField } from "../../lib/api";
 
 interface EncounterDetailPageProps {
@@ -15,7 +20,7 @@ interface EncounterDetailPageProps {
   onSaved?: () => void;
 }
 
-type TabId = "chart" | "billing" | "appointment" | "audit";
+type TabId = "chart" | "billing" | "appointment" | "documents" | "audit";
 
 interface SoapDraft {
   chiefComplaint: string;
@@ -454,6 +459,11 @@ export function EncounterDetailPage({ encounterId, onBack, onSaved }: EncounterD
             { id: "chart", label: "Chart", icon: FileText },
             { id: "billing", label: "Billing", icon: DollarSign },
             { id: "appointment", label: "Linked Appointment", icon: Calendar },
+            // Documents is patient-scoped, not encounter-scoped — shows
+            // every document/consent/signature/screening/Rx/lab tied to
+            // this patient across all visits. Labeled inside the tab so
+            // there's no confusion about scope.
+            { id: "documents", label: "Documents", icon: Folder },
             { id: "audit", label: "Audit Trail", icon: Activity },
           ] as Array<{ id: TabId; label: string; icon: typeof FileText }>).map(({ id, label, icon: Icon }) => (
             <button
@@ -493,6 +503,12 @@ export function EncounterDetailPage({ encounterId, onBack, onSaved }: EncounterD
           {activeTab === "chart" && <ChartTab encounter={encounter} onReload={reload} />}
           {activeTab === "billing" && <BillingTab encounter={encounter} />}
           {activeTab === "appointment" && <AppointmentTab encounter={encounter} />}
+          {activeTab === "documents" && (
+            <PatientDocumentsTab
+              patientId={encounter.patient?.id ?? encounter.patientId ?? encounter.patient_id ?? null}
+              patientName={patientName}
+            />
+          )}
           {activeTab === "audit" && <AuditTab logs={auditLogs} />}
         </>
       )}
@@ -1886,6 +1902,315 @@ function AppointmentTab({ encounter }: { encounter: any }) {
         {apt.completedAt && <div><dt className="text-xs text-slate-500 uppercase mb-0.5">Completed at</dt><dd className="font-medium text-slate-800">{formatDateTime(apt.completedAt)}</dd></div>}
         {apt.reasonForVisit && <div className="md:col-span-2"><dt className="text-xs text-slate-500 uppercase mb-0.5">Reason for visit</dt><dd className="text-slate-700">{apt.reasonForVisit}</dd></div>}
       </dl>
+    </div>
+  );
+}
+
+// ─── Documents Tab (patient-scoped, all visits) ────────────────────────
+//
+// Aggregates everything tied to the patient (across visits) into a
+// single chronological list. Five sources, all filtered by patient_id:
+//   • Documents (uploaded files)        — /documents?patient_id=
+//   • Consent signatures                — /consent-signatures?patient_id=
+//   • Pending signature requests        — /signature-requests?patient_id=
+//   • Screening responses (PHQ-9/GAD-7) — /screenings?patient_id=
+//   • Prescriptions written             — /prescriptions?patient_id=
+//
+// We label the tab "Patient documents (all visits)" inside the body
+// so there's no confusion that this is patient-scoped, not encounter-
+// scoped. Lab orders + referrals are deliberately omitted from this
+// tab — the Chart tab already shows encounter-specific orders, and
+// patient-scoped labs/referrals get their own dedicated PatientPortal
+// surfaces. A pure "documents" view = files + signatures + screenings
+// + Rx (the artifacts that have a paper analog).
+
+interface DocRow {
+  id: string;
+  kind: "document" | "consent" | "signature_request" | "screening" | "prescription";
+  title: string;
+  subtitle: string;
+  occurredAt: string | null; // ISO; sortable
+  actionLabel?: string;
+  onAction?: () => void | Promise<void>;
+  badge?: { label: string; bg: string; color: string };
+}
+
+function PatientDocumentsTab({ patientId, patientName }: { patientId: string | null; patientName: string }) {
+  const [rows, setRows] = useState<DocRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!patientId) {
+      setLoading(false);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      setError(null);
+      const params = { patient_id: patientId };
+      // Fan out — we don't fail the whole tab if one source errors.
+      // Each Promise.allSettled slot is mapped independently.
+      const [docsR, consentsR, sigR, scrR, rxR] = await Promise.allSettled([
+        documentService.list(params),
+        consentService.listSignatures({ patient_id: patientId }),
+        signatureRequestService.list({ patient_id: patientId }),
+        screeningService.list(params),
+        prescriptionService.list(params),
+      ]);
+      if (cancelled) return;
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const unwrap = (r: PromiseSettledResult<{ data?: any; error?: string }>): any[] => {
+        if (r.status !== "fulfilled") return [];
+        const d = r.value?.data;
+        if (Array.isArray(d)) return d;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        if (d && typeof d === "object" && Array.isArray((d as any).data)) return (d as any).data;
+        return [];
+      };
+
+      const out: DocRow[] = [];
+
+      // Documents (uploaded files) — primary "document" surface.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      unwrap(docsR).forEach((d: any) => {
+        out.push({
+          id: `doc-${d.id}`,
+          kind: "document",
+          title: d.originalName ?? d.name ?? "Document",
+          subtitle: [d.category, d.mimeType].filter(Boolean).join(" · ") || "File",
+          occurredAt: d.createdAt ?? d.created_at ?? null,
+          actionLabel: "Download",
+          onAction: async () => {
+            const res = await documentService.download(d.id);
+            if (res.data) {
+              const url = URL.createObjectURL(res.data);
+              const a = document.createElement("a");
+              a.href = url;
+              a.download = d.originalName ?? d.name ?? "document";
+              document.body.appendChild(a);
+              a.click();
+              a.remove();
+              URL.revokeObjectURL(url);
+            }
+          },
+        });
+      });
+
+      // Signed consent agreements — link to the bundled PDF.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      unwrap(consentsR).forEach((c: any) => {
+        const tplName = c.template?.name ?? c.templateName ?? "Consent agreement";
+        const isRevoked = !!(c.revokedAt ?? c.revoked_at);
+        out.push({
+          id: `consent-${c.id}`,
+          kind: "consent",
+          title: tplName,
+          subtitle: isRevoked
+            ? `Revoked${c.revokedReason ?? c.revoked_reason ? ` — ${c.revokedReason ?? c.revoked_reason}` : ""}`
+            : `Signed via ${c.signatureType ?? c.signature_type ?? "portal"}`,
+          occurredAt: c.signedAt ?? c.signed_at ?? null,
+          badge: isRevoked
+            ? { label: "Revoked", bg: "#fee2e2", color: "#991b1b" }
+            : { label: "Signed", bg: "#dcfce7", color: "#166534" },
+          actionLabel: "Download PDF",
+          onAction: () => consentService.downloadSignaturePdf(c.id, `${tplName}.pdf`),
+        });
+      });
+
+      // Pending or signed/cancelled signature requests (admin → patient).
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      unwrap(sigR).forEach((s: any) => {
+        const tplName = s.template?.name ?? "Signature request";
+        const status = s.status ?? "pending";
+        const badge = status === "signed"
+          ? { label: "Signed", bg: "#dcfce7", color: "#166534" }
+          : status === "expired" || status === "cancelled"
+            ? { label: status, bg: "#fee2e2", color: "#991b1b" }
+            : { label: "Pending", bg: "#fef3c7", color: "#92400e" };
+        out.push({
+          id: `sigreq-${s.id}`,
+          kind: "signature_request",
+          title: tplName,
+          subtitle: status === "pending"
+            ? `Sent${s.expiresAt || s.expires_at ? `, expires ${new Date(s.expiresAt ?? s.expires_at).toLocaleDateString(undefined, { month: "short", day: "numeric" })}` : ""}`
+            : `Requested ${new Date(s.createdAt ?? s.created_at).toLocaleDateString(undefined, { month: "short", day: "numeric" })}`,
+          occurredAt: s.signedAt ?? s.signed_at ?? s.createdAt ?? s.created_at ?? null,
+          badge,
+        });
+      });
+
+      // Screenings — score + severity already in the row.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      unwrap(scrR).forEach((sc: any) => {
+        const tplName = sc.template?.name ?? sc.template?.code ?? "Screening";
+        const score = sc.score ?? null;
+        const sev = sc.severity ?? null;
+        out.push({
+          id: `screen-${sc.id}`,
+          kind: "screening",
+          title: tplName,
+          subtitle: [
+            score !== null ? `Score ${score}` : null,
+            sev ? sev.replace(/_/g, " ") : null,
+          ].filter(Boolean).join(" · ") || "Completed",
+          occurredAt: sc.administeredAt ?? sc.administered_at ?? sc.createdAt ?? sc.created_at ?? null,
+        });
+      });
+
+      // Prescriptions — most recent first; status badge surfaces
+      // active vs discontinued.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      unwrap(rxR).forEach((p: any) => {
+        const med = p.medicationName ?? p.medication_name ?? p.drugName ?? p.drug_name ?? "Medication";
+        const dose = [p.dosage, p.frequency].filter(Boolean).join(" · ");
+        const status = p.status ?? "active";
+        const badge = status === "active"
+          ? { label: "Active", bg: "#dcfce7", color: "#166534" }
+          : status === "discontinued"
+            ? { label: "D/C", bg: "#fee2e2", color: "#991b1b" }
+            : { label: status, bg: "#f1f5f9", color: "#475569" };
+        out.push({
+          id: `rx-${p.id}`,
+          kind: "prescription",
+          title: med,
+          subtitle: dose || "—",
+          occurredAt: p.prescribedAt ?? p.prescribed_at ?? p.createdAt ?? p.created_at ?? null,
+          badge,
+        });
+      });
+
+      // Sort newest-first. Rows with no timestamp sink to the bottom.
+      out.sort((a, b) => {
+        if (!a.occurredAt && !b.occurredAt) return 0;
+        if (!a.occurredAt) return 1;
+        if (!b.occurredAt) return -1;
+        return new Date(b.occurredAt).getTime() - new Date(a.occurredAt).getTime();
+      });
+
+      setRows(out);
+      setLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, [patientId]);
+
+  if (!patientId) {
+    return (
+      <div className="glass rounded-xl p-8 text-center text-slate-400 text-sm">
+        Patient is missing on this encounter — can't list documents.
+      </div>
+    );
+  }
+
+  if (loading) {
+    return <div className="glass rounded-xl p-8 text-center text-slate-400 text-sm">Loading documents…</div>;
+  }
+
+  if (error) {
+    return <div className="glass rounded-xl p-6 text-sm text-red-700">{error}</div>;
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-baseline justify-between">
+        <div>
+          <h3 className="text-base font-semibold text-slate-900">Patient documents (all visits)</h3>
+          <p className="text-xs text-slate-500 mt-0.5">
+            Files, consents, signature requests, screenings, and prescriptions for {patientName}.
+          </p>
+        </div>
+        <span className="text-xs text-slate-500">{rows.length} item{rows.length === 1 ? "" : "s"}</span>
+      </div>
+
+      {rows.length === 0 ? (
+        <div className="glass rounded-xl p-8 text-center">
+          <Folder className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+          <div className="text-sm text-slate-500">No documents on file for this patient yet.</div>
+        </div>
+      ) : (
+        <div className="glass rounded-xl divide-y divide-slate-100">
+          {rows.map((r) => (
+            <DocumentRow key={r.id} row={r} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DocumentRow({ row }: { row: DocRow }) {
+  const Icon = (() => {
+    switch (row.kind) {
+      case "document": return FileText;
+      case "consent": return FileSignature;
+      case "signature_request": return FileBadge;
+      case "screening": return Brain;
+      case "prescription": return Pill;
+      default: return FileText;
+    }
+  })();
+  const iconColor = (() => {
+    switch (row.kind) {
+      case "document": return "#2563eb";
+      case "consent": return "#0891b2";
+      case "signature_request": return "#d97706";
+      case "screening": return "#6366f1";
+      case "prescription": return "#16a34a";
+      default: return "#64748b";
+    }
+  })();
+  const kindLabel = (() => {
+    switch (row.kind) {
+      case "document": return "File";
+      case "consent": return "Consent";
+      case "signature_request": return "E-sig";
+      case "screening": return "Screening";
+      case "prescription": return "Rx";
+    }
+  })();
+  return (
+    <div className="px-4 py-3 flex items-center gap-3">
+      <div
+        className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0"
+        style={{ backgroundColor: `${iconColor}15` }}
+      >
+        <Icon className="w-4 h-4" style={{ color: iconColor }} />
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] uppercase font-semibold tracking-wide px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">
+            {kindLabel}
+          </span>
+          <div className="text-sm font-medium text-slate-800 truncate">{row.title}</div>
+        </div>
+        <div className="text-xs text-slate-500 truncate">{row.subtitle}</div>
+      </div>
+      <div className="flex items-center gap-2 flex-shrink-0">
+        {row.badge && (
+          <span
+            className="text-[10px] uppercase font-semibold tracking-wide px-2 py-0.5 rounded"
+            style={{ backgroundColor: row.badge.bg, color: row.badge.color }}
+          >
+            {row.badge.label}
+          </span>
+        )}
+        {row.occurredAt && (
+          <span className="text-xs text-slate-500 font-medium hidden sm:inline">
+            {new Date(row.occurredAt).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })}
+          </span>
+        )}
+        {row.actionLabel && row.onAction && (
+          <button
+            onClick={() => { void row.onAction?.(); }}
+            className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium text-indigo-700 hover:bg-indigo-50"
+          >
+            {row.kind === "document" ? <Download className="w-3 h-3" /> : <ExternalLink className="w-3 h-3" />}
+            {row.actionLabel}
+          </button>
+        )}
+      </div>
     </div>
   );
 }
