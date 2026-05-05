@@ -3,7 +3,8 @@ import { useLocation } from "react-router-dom";
 import {
   ArrowLeft, FileText, DollarSign, Activity, ClipboardList,
   Calendar, User, ShieldAlert, CheckCircle2, AlertCircle, Pill,
-  Pencil, X, Save, Sparkles,
+  Pencil, X, Save, Sparkles, Lock, Brain, Video as VideoIcon,
+  Cake, AlertTriangle, History,
 } from "lucide-react";
 import { encounterService, chartTemplateService } from "../../lib/api";
 import type { ChartTemplate, ChartTemplateField } from "../../lib/api";
@@ -203,6 +204,27 @@ export function EncounterDetailPage({ encounterId, onBack, onSaved }: EncounterD
     setStructuredDraft(encounter?.structuredData && typeof encounter.structuredData === "object" ? { ...encounter.structuredData } : {});
   };
 
+  // Sign-from-header path. Used by the Sign & lock button next to
+  // Edit chart in the page header for charts that have already been
+  // saved at least once (status=draft, not currently editing). Skips
+  // the editor-flow because the provider has already saved their
+  // narrative — they just want to lock it.
+  const [signing, setSigning] = useState(false);
+  const handleSignFromHeader = async () => {
+    setSigning(true);
+    const res = await encounterService.sign(encounterId);
+    setSigning(false);
+    if (res.error) {
+      // Reuse saveError surface — it's the only inline error channel
+      // this page currently has, and the user is already trained to
+      // look there.
+      setSaveError(res.error);
+      return;
+    }
+    reload();
+    onSaved?.();
+  };
+
   const handleSave = async (alsoSign: boolean) => {
     if (isAmending && !amendmentReason.trim()) {
       setSaveError("Amendment reason is required when editing a signed chart.");
@@ -357,6 +379,24 @@ export function EncounterDetailPage({ encounterId, onBack, onSaved }: EncounterD
                 Edit chart
               </button>
             )}
+            {/* Sign & lock — promoted to the page header so providers
+                can lock a chart they already edited without re-entering
+                the editor. Only renders for unsigned drafts that have
+                some content; an entirely-empty chart shouldn't be
+                lockable from here (the provider needs to write into it
+                first via Edit chart). */}
+            {!isEditing && !isSigned && hasAnyChartContent(encounter) && (
+              <button
+                onClick={handleSignFromHeader}
+                disabled={signing}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-semibold text-white disabled:opacity-50"
+                style={{ backgroundColor: "#147d64" }}
+                title="Sign and lock this encounter. Cannot be edited after signing — only amended."
+              >
+                <Lock className="w-3.5 h-3.5" />
+                {signing ? "Signing…" : "Sign & lock"}
+              </button>
+            )}
             {!isEditing && isSigned && (
               <button
                 onClick={startAmend}
@@ -379,6 +419,29 @@ export function EncounterDetailPage({ encounterId, onBack, onSaved }: EncounterD
           </div>
         )}
       </div>
+
+      {/* Surface header-sign errors (saveError is also used by the
+          editor; the editor renders its own copy). Only shown when not
+          editing so we don't duplicate. */}
+      {!isEditing && saveError && (
+        <div className="rounded-lg border border-red-300 bg-red-50 p-3 text-sm text-red-800 flex items-start gap-2">
+          <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+          <div className="flex-1">{saveError}</div>
+          <button onClick={() => setSaveError(null)} className="text-red-600 hover:text-red-800">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
+      {/* Patient summary strip — clinical context the provider needs at
+          the top of every chart. Pulled from patient_summary on the
+          detail endpoint (DOB, allergies, active meds, last visit). */}
+      {!isEditing && encounter.patient_summary && (
+        <PatientSummaryStrip
+          patientName={patientName}
+          summary={encounter.patient_summary}
+        />
+      )}
 
       {/* Tabs — hide while editing so the chart form gets full width */}
       {!isEditing && (
@@ -975,6 +1038,200 @@ function CptCustomInput({ existing, onAdd }: { existing: string[]; onAdd: (val: 
   );
 }
 
+// ─── Phase 1: Patient summary + ancillary cards ────────────────────────
+
+// "Has anything been documented?" — drives the header Sign & lock
+// button visibility and the ChartTab empty-state nudge. We only
+// require ONE of these to be present; an empty chart shouldn't be
+// signable.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function hasAnyChartContent(enc: any): boolean {
+  if (!enc) return false;
+  const narrativeFields = [enc.chiefComplaint, enc.subjective, enc.objective, enc.assessment, enc.plan];
+  if (narrativeFields.some((f) => typeof f === "string" && f.trim() !== "")) return true;
+  if (Array.isArray(enc.diagnoses) && enc.diagnoses.length > 0) return true;
+  if (Array.isArray(enc.cptCodes) && enc.cptCodes.length > 0) return true;
+  if (enc.vitals && typeof enc.vitals === "object" && Object.values(enc.vitals).some((v) => (v ?? "").toString().trim() !== "")) return true;
+  if (enc.structuredData && typeof enc.structuredData === "object" && Object.keys(enc.structuredData).length > 0) return true;
+  return false;
+}
+
+// Compute age in whole years from a YYYY-MM-DD birthdate string.
+function ageFromDob(dob?: string | null): number | null {
+  if (!dob) return null;
+  const d = new Date(dob);
+  if (isNaN(d.getTime())) return null;
+  const now = new Date();
+  let years = now.getFullYear() - d.getFullYear();
+  const m = now.getMonth() - d.getMonth();
+  if (m < 0 || (m === 0 && now.getDate() < d.getDate())) years--;
+  return years >= 0 && years < 150 ? years : null;
+}
+
+interface PatientSummaryShape {
+  date_of_birth: string | null;
+  allergies: unknown[];
+  active_prescription_count: number;
+  last_visit_date: string | null;
+}
+
+function PatientSummaryStrip({ patientName, summary }: { patientName: string; summary: PatientSummaryShape }) {
+  const age = ageFromDob(summary.date_of_birth);
+  const allergyList = Array.isArray(summary.allergies) ? summary.allergies : [];
+  const allergyLabels = allergyList
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    .map((a: any) => {
+      if (typeof a === "string") return a;
+      return a?.name ?? a?.allergen ?? a?.label ?? null;
+    })
+    .filter((s): s is string => typeof s === "string" && s.trim() !== "");
+  const hasAllergies = allergyLabels.length > 0;
+  const lastVisit = summary.last_visit_date
+    ? new Date(summary.last_visit_date).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })
+    : null;
+
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white px-5 py-3 flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
+      <div className="flex items-center gap-2 min-w-0">
+        <div className="w-8 h-8 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center font-semibold text-xs flex-shrink-0">
+          {patientName.split(/\s+/).map((p) => p[0]).filter(Boolean).slice(0, 2).join("").toUpperCase() || "?"}
+        </div>
+        <div className="font-semibold text-slate-900 truncate">{patientName}</div>
+      </div>
+
+      {/* Age + DOB */}
+      {(age !== null || summary.date_of_birth) && (
+        <div className="flex items-center gap-1.5 text-slate-600">
+          <Cake className="w-3.5 h-3.5 text-slate-400" />
+          {age !== null && <span className="font-medium">{age} y</span>}
+          {summary.date_of_birth && (
+            <span className="text-xs text-slate-400">
+              ({new Date(summary.date_of_birth).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })})
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* Allergies — prominent red when present */}
+      <div className={`flex items-center gap-1.5 ${hasAllergies ? "text-red-700" : "text-slate-500"}`}>
+        <AlertTriangle className={`w-3.5 h-3.5 ${hasAllergies ? "text-red-500" : "text-slate-400"}`} />
+        {hasAllergies ? (
+          <span className="font-semibold" title={allergyLabels.join(", ")}>
+            {allergyLabels.length === 1
+              ? allergyLabels[0]
+              : `${allergyLabels[0]} +${allergyLabels.length - 1}`}
+          </span>
+        ) : (
+          <span>No known allergies</span>
+        )}
+      </div>
+
+      {/* Active prescriptions */}
+      <div className="flex items-center gap-1.5 text-slate-600">
+        <Pill className="w-3.5 h-3.5 text-slate-400" />
+        <span className="font-medium">{summary.active_prescription_count}</span>
+        <span className="text-slate-500">active med{summary.active_prescription_count === 1 ? "" : "s"}</span>
+      </div>
+
+      {/* Last visit */}
+      {lastVisit && (
+        <div className="flex items-center gap-1.5 text-slate-600">
+          <History className="w-3.5 h-3.5 text-slate-400" />
+          <span className="text-slate-500">Last visit</span>
+          <span className="font-medium">{lastVisit}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// PHQ-9 / GAD-7 / etc. — captured during booking pre-flight or
+// administered in the visit. ScreeningResponse rows are eager-loaded
+// on encounter detail; this surfaces them as a card with score +
+// severity so the provider can see results at a glance.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function ScreeningsCard({ responses }: { responses: any[] }) {
+  if (!responses || responses.length === 0) return null;
+  const severityColor = (sev?: string | null): { bg: string; color: string } => {
+    const s = (sev ?? "").toLowerCase();
+    if (s === "severe" || s === "high") return { bg: "#fee2e2", color: "#991b1b" };
+    if (s === "moderate" || s === "moderately_severe" || s === "mod") return { bg: "#fef3c7", color: "#92400e" };
+    if (s === "mild" || s === "low") return { bg: "#fef9c3", color: "#854d0e" };
+    if (s === "minimal" || s === "none") return { bg: "#dcfce7", color: "#166534" };
+    return { bg: "#f1f5f9", color: "#475569" };
+  };
+  return (
+    <div className="glass rounded-xl p-5">
+      <h3 className="font-semibold text-slate-800 mb-3 flex items-center gap-2">
+        <Brain className="w-4 h-4 text-indigo-600" /> Screenings
+      </h3>
+      <div className="space-y-2">
+        {responses.map((r) => {
+          const tplName = r.template?.name ?? r.template?.code ?? "Screening";
+          const sev = r.severity ?? null;
+          const { bg, color } = severityColor(sev);
+          return (
+            <div key={r.id} className="flex items-center justify-between gap-3 border-b border-slate-100 pb-2 last:border-0 last:pb-0">
+              <div className="min-w-0">
+                <div className="text-sm font-medium text-slate-800 truncate">{tplName}</div>
+                {r.administered_at && (
+                  <div className="text-[11px] text-slate-500">
+                    {new Date(r.administered_at).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}
+                  </div>
+                )}
+              </div>
+              <div className="flex items-center gap-2 flex-shrink-0">
+                {r.score !== null && r.score !== undefined && (
+                  <span className="font-mono text-sm font-bold text-slate-900">{r.score}</span>
+                )}
+                {sev && (
+                  <span className="text-[10px] uppercase font-semibold tracking-wide px-2 py-0.5 rounded" style={{ backgroundColor: bg, color }}>
+                    {sev.replace(/_/g, " ")}
+                  </span>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// Telehealth session card — surfaces TelehealthSession data (start /
+// end / duration / admit timestamps) when the linked appointment was
+// a video visit. Reaches through encounter.appointment.telehealthSession
+// (eager-loaded on detail).
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function TelehealthSessionCard({ session }: { session: any }) {
+  if (!session) return null;
+  const fmt = (s?: string | null) => s ? new Date(s).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" }) : "—";
+  const minutes = session.duration_seconds ? Math.max(1, Math.round(session.duration_seconds / 60)) : null;
+  return (
+    <div className="glass rounded-xl p-5">
+      <h3 className="font-semibold text-slate-800 mb-3 flex items-center gap-2">
+        <VideoIcon className="w-4 h-4 text-emerald-600" /> Telehealth Session
+      </h3>
+      <dl className="space-y-2 text-sm">
+        <div className="flex justify-between"><dt className="text-slate-500">Status</dt><dd className="font-medium text-slate-800 capitalize">{session.status ?? "—"}</dd></div>
+        <div className="flex justify-between"><dt className="text-slate-500">Started</dt><dd className="font-medium text-slate-800 text-xs">{fmt(session.started_at)}</dd></div>
+        <div className="flex justify-between"><dt className="text-slate-500">Ended</dt><dd className="font-medium text-slate-800 text-xs">{fmt(session.ended_at)}</dd></div>
+        {minutes !== null && (
+          <div className="flex justify-between"><dt className="text-slate-500">Duration</dt><dd className="font-semibold text-slate-900">{minutes} min</dd></div>
+        )}
+        {session.admitted_at && (
+          <div className="flex justify-between"><dt className="text-slate-500">Admitted</dt><dd className="font-medium text-slate-800 text-xs">{fmt(session.admitted_at)}</dd></div>
+        )}
+        {session.is_external && (
+          <div className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1">
+            BYOV (external link) — no in-app metrics captured.
+          </div>
+        )}
+      </dl>
+    </div>
+  );
+}
+
 // ─── Read-only tabs (unchanged from prior version) ─────────────────────
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -992,6 +1249,14 @@ function ChartTab({ encounter }: { encounter: any }) {
   const vitalsHasAny = vitals && typeof vitals === "object" && Object.values(vitals).some((v) => (v ?? "").toString().trim() !== "");
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const rx: any[] = Array.isArray(encounter.prescriptions) ? encounter.prescriptions : [];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const screenings: any[] = Array.isArray(encounter.screening_responses)
+    ? encounter.screening_responses
+    : Array.isArray(encounter.screeningResponses) ? encounter.screeningResponses : [];
+  const telehealthSession = encounter.appointment?.telehealth_session
+    ?? encounter.appointment?.telehealthSession
+    ?? null;
+  const isFullyEmpty = !hasAnyChartContent(encounter) && rx.length === 0 && screenings.length === 0;
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
@@ -1087,7 +1352,25 @@ function ChartTab({ encounter }: { encounter: any }) {
             {encounter.cosigner?.name && <div className="flex justify-between"><dt className="text-slate-500">Cosigned by</dt><dd className="font-medium text-slate-800">{encounter.cosigner.name}</dd></div>}
           </dl>
         </div>
+
+        <ScreeningsCard responses={screenings} />
+        <TelehealthSessionCard session={telehealthSession} />
       </div>
+
+      {/* Empty-chart nudge — when there's literally nothing on the chart
+          yet (auto-drafted from a telehealth call but no SOAP / dx /
+          vitals / Rx), show a quick-start instead of a wall of "—
+          not documented —" placeholders. The Edit chart button in the
+          page header is the obvious next step; we just call it out. */}
+      {isFullyEmpty && (
+        <div className="lg:col-span-3 -mt-2 rounded-xl border border-dashed border-indigo-300 bg-indigo-50/50 p-5 flex items-center gap-3">
+          <Sparkles className="w-5 h-5 text-indigo-500 flex-shrink-0" />
+          <div className="text-sm text-indigo-900">
+            <div className="font-semibold">This chart is empty.</div>
+            <div className="text-indigo-800/80">Click <span className="font-semibold">Edit chart</span> at the top right to enter SOAP narrative, vitals, diagnoses, and CPT codes.</div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

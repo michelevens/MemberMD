@@ -80,6 +80,10 @@ class EncounterController extends Controller
                 'prescriptions', 'screeningResponses.template',
                 'signer', 'cosigner',
                 'chartTemplate', 'chartTemplateResponses',
+                // Telehealth session is reached through the appointment.
+                // Eager-loaded here so the encounter detail page can show
+                // start/end/duration/admit timestamps without a 2nd round-trip.
+                'appointment.telehealthSession',
             ])
             ->findOrFail($id);
 
@@ -95,11 +99,47 @@ class EncounterController extends Controller
             ->limit(50)
             ->get();
 
+        // Patient summary helpers — driven from data we already store on
+        // the patient row (allergies/medications JSONB) plus a couple
+        // of cheap aggregate queries. Surfaced under `patient_summary`
+        // so the encounter detail page can render the strip at top
+        // without touching PatientController.
+        $patient = $encounter->patient;
+        $patientSummary = null;
+        if ($patient) {
+            // Most recent encounter for this patient OTHER than the one we're
+            // viewing — drives the "last visit" pill.
+            $lastVisit = Encounter::where('tenant_id', $user->tenant_id)
+                ->where('patient_id', $patient->id)
+                ->where('id', '!=', $encounter->id)
+                ->orderByDesc('encounter_date')
+                ->value('encounter_date');
+
+            // Active prescriptions on the patient (not encounter-scoped).
+            // Used for the "active meds" pill at the top.
+            $activeRxCount = \App\Models\Prescription::where('tenant_id', $user->tenant_id)
+                ->where('patient_id', $patient->id)
+                ->where('status', 'active')
+                ->count();
+
+            // Allergies are stored as encrypted JSON. Each entry shape
+            // varies — we just count and pass through the array.
+            $allergies = is_array($patient->allergies) ? $patient->allergies : [];
+
+            $patientSummary = [
+                'date_of_birth' => $patient->date_of_birth,
+                'allergies' => $allergies,
+                'active_prescription_count' => $activeRxCount,
+                'last_visit_date' => $lastVisit,
+            ];
+        }
+
         // Append audit_logs into the model's array shape so apiFetch's
         // unwrap surfaces it. Resource transformers would be cleaner but
         // we don't have one for Encounter yet.
         $payload = $encounter->toArray();
         $payload['audit_logs'] = $auditLogs->toArray();
+        $payload['patient_summary'] = $patientSummary;
 
         return response()->json(['data' => $payload]);
     }
