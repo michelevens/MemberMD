@@ -39,7 +39,7 @@ class PublicBookingTest extends TestCase
         $practice = Practice::create([
             'name' => 'Public Booking Test',
             'slug' => 'pbt-' . uniqid(),
-            'tenant_code' => 'pbt' . substr(uniqid(), -6),
+            'tenant_code' => substr(uniqid(), -6),
             'email' => 'admin@pbt.com',
             'phone' => '555-0100',
             'subscription_status' => 'active',

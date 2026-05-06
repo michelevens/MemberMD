@@ -41,7 +41,7 @@ class AppointmentCancellationServiceTest extends TestCase
         $practice = Practice::create([
             'name' => 'Cancel Test Practice',
             'slug' => 'cxl-' . uniqid(),
-            'tenant_code' => 'cxl' . substr(uniqid(), -6),
+            'tenant_code' => substr(uniqid(), -6),
             'email' => 'admin@cxl.com',
             'phone' => '555-0100',
             'subscription_status' => 'active',

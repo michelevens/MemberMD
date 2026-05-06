@@ -31,7 +31,7 @@ class AdHocChargeTest extends TestCase
         $practice = Practice::create([
             'name' => 'AdHoc Test Practice',
             'slug' => 'ahc-' . uniqid(),
-            'tenant_code' => 'ahc' . substr(uniqid(), -6),
+            'tenant_code' => substr(uniqid(), -6),
             'email' => 'admin@ahc.com',
             'phone' => '555-0100',
             'subscription_status' => 'active',

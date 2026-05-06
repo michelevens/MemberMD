@@ -36,7 +36,9 @@ class CrossTenantSecurityTest extends TestCase
         return Practice::create([
             'name' => "Practice {$codeSuffix}",
             'slug' => "p-{$codeSuffix}-" . uniqid(),
-            'tenant_code' => 'p' . substr($codeSuffix, 0, 1) . substr(uniqid(), -6),
+            // tenant_code is varchar(6); concatenate suffix + 5 hex chars
+            // to keep both per-test uniqueness AND fit the column.
+            'tenant_code' => substr($codeSuffix, 0, 1) . substr(uniqid(), -5),
             'email' => "admin-{$codeSuffix}@x.com",
             'phone' => '555-0100',
             'subscription_status' => 'active',
