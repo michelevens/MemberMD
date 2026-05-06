@@ -366,9 +366,46 @@ See quarterly checklist above. The drill validates that backups *actually* resto
   setup" below.
 - ✅ **Cross-tenant isolation tests** — CrossTenantSecurityTest covers
   recently shipped endpoints (ad-hoc, booking, external-calendar, cancel).
+- ✅ **Stripe webhook integration test** — StripeWebhookIntegrationTest
+  exercises the full receive→verify→record→dispatch→handler pipeline
+  for cash-pay booking conversion + ad-hoc charge paid + idempotency
+  on replay + signature rejection.
+- ✅ **Public booking widget E2E** — Playwright walks `/#/book/{tenant}`
+  through visit-type pick → date → form, verifying the marketing-iframe
+  conversion path stays alive. Skips cleanly when the demo tenant has
+  no public booking types configured.
 - ❌ **Webhook dead-letter dashboard** — visible only via raw `webhook_deliveries` table query. UI surface deferred.
 - ❌ **Dependency audit on schedule** — currently manual.
 - ❌ **Concurrent booking race tests** — manual; needs Playwright or pcntl-based runner.
+
+### Running the test suites
+
+```bash
+# Backend (PHPUnit) — all 80+ tests including the webhook integration
+cd laravel-backend
+php artisan test
+
+# Single suite (e.g. webhook integration only)
+php artisan test --filter=StripeWebhookIntegrationTest
+
+# Frontend (Vitest) — unit tests
+cd frontend
+npm test
+
+# Frontend (Playwright) — E2E against prod app by default
+cd frontend
+npx playwright test                     # full suite
+npx playwright test e2e/smoke.spec.ts   # portal smoke walker
+npx playwright test e2e/public-booking.spec.ts   # widget walker
+
+# Run E2E against local dev (start `php artisan serve` + `npm run dev` first)
+E2E_BASE_URL=http://localhost:5173 npx playwright test
+```
+
+CI runs PHPUnit on every push (.github/workflows/laravel.yml). Playwright
+is **not** in CI today — the smoke suite hits prod and would create
+flakiness from real-network latency. Run it manually before any release
+that touches portal nav, booking widgets, or auth.
 
 ---
 
