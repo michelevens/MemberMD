@@ -60,7 +60,10 @@ class StripeWebhookIntegrationTest extends TestCase
         $practice = Practice::create([
             'name' => 'Webhook Test Practice',
             'slug' => 'wht-' . uniqid(),
-            'tenant_code' => 'wht' . substr(uniqid(), -6),
+            // tenant_code is varchar(6) per the create migration —
+            // truncate to fit. Six lowercase hex chars give us
+            // 16M unique IDs, plenty for a per-test fixture.
+            'tenant_code' => substr(uniqid(), -6),
             'email' => 'admin@wht.com',
             'phone' => '555-0100',
             'subscription_status' => 'active',
