@@ -64,12 +64,12 @@ const features = [
   {
     icon: Stethoscope,
     title: "Clinical Workflows",
-    description: "Appointments, encounters (SOAP), prescriptions with PDF + eFax, screenings (PHQ-9, GAD-7), and lab orders.",
+    description: "Appointments, SOAP-structured encounter notes, prescriptions with PDF + eFax to pharmacies, validated screenings (PHQ-9, GAD-7, AUDIT-C, PCL-5, and more), and care coordination.",
   },
   {
     icon: Shield,
-    title: "HIPAA Compliance",
-    description: "End-to-end encryption, PHI access logging, audit trails, role-based authorization policies, and consent management.",
+    title: "Built for HIPAA",
+    description: "Encrypted PHI at rest, signed audit trails, role-based authorization, consent capture with version snapshots, and tenant-scoped access — the technical foundation HIPAA workflows require.",
   },
 ];
 
@@ -95,9 +95,13 @@ const steps = [
 ];
 
 const stats = [
-  { icon: Globe, label: "14 Specialties" },
-  { icon: Layers, label: "6 Program Types" },
-  { icon: Shield, label: "HIPAA-Ready" },
+  // Honest stats only — anything aspirational (HIPAA-certified, X
+  // practices live, etc.) should be earned before it's posted. The
+  // specialty catalog ships pre-seeded; program funding-source enum
+  // ships with five values; telehealth is built in via LiveKit.
+  { icon: Globe, label: "100+ Specialties Pre-Configured" },
+  { icon: Layers, label: "5 Funding Models" },
+  { icon: Shield, label: "Encrypted PHI + Audit Trails" },
   { icon: MonitorSmartphone, label: "Telehealth Built-In" },
 ];
 
@@ -168,7 +172,7 @@ export function LandingPage() {
               }}
             >
               <Zap className="w-4 h-4" />
-              DPC &middot; CCM &middot; RPM &middot; Employer Wellness &middot; Grant Programs
+              Direct Primary Care &middot; Behavioral Health &middot; Sponsor &amp; Grant Programs &middot; Employer Wellness
             </div>
             <h1
               className="text-4xl sm:text-5xl lg:text-6xl font-bold tracking-tight mb-6"

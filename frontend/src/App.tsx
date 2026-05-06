@@ -176,6 +176,11 @@ const SignatureWidget = namedLazy(
   "SignatureWidget"
 );
 
+const LandingPage = namedLazy(
+  () => import("./components/LandingPage"),
+  "LandingPage"
+);
+
 
 // ─── Loading Fallback ─────────────────────────────────────────────────────────
 
@@ -204,6 +209,11 @@ function AuthGate() {
     return (
       <Suspense fallback={<LoadingFallback />}>
         <Routes>
+          {/* Public marketing landing — what an unauthenticated visitor
+              hitting app.membermd.io sees first. CTAs go to /register
+              and /login. The bare login form is still reachable at
+              /login for direct sign-in. */}
+          <Route path="/" element={<LandingPage />} />
           <Route path="/login" element={<LoginScreen />} />
           <Route path="/forgot-password" element={<ForgotPasswordScreen />} />
           <Route path="/reset-password" element={<ResetPasswordScreen />} />
@@ -218,7 +228,9 @@ function AuthGate() {
           <Route path="/enrollment/cancelled" element={<EnrollmentCancelledWidget />} />
           <Route path="/intake/:tenantCode" element={<div className="min-h-screen flex items-center justify-center"><p className="text-slate-500">Patient Intake — Coming Soon</p></div>} />
           <Route path="/sign/:token" element={<SignatureWidget />} />
-          <Route path="*" element={<Navigate to="/login" replace />} />
+          {/* Unknown unauth paths fall back to the landing — friendlier
+              than dropping them on a login form they may not need. */}
+          <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Suspense>
     );
