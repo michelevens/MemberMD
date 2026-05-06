@@ -20,7 +20,7 @@ import {
   Plus, Trash2, FileCheck, ClipboardList, Save, X, Loader2, Edit2,
   Video, Building2, Crown,
 } from "lucide-react";
-import { appointmentService, apiFetch } from "../../lib/api";
+import { appointmentService, apiFetch, stripeConnectService } from "../../lib/api";
 import type { AppointmentType, RequiredDocumentSpec } from "../../types";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -37,17 +37,26 @@ export function AppointmentTypesPanel({ setToast }: Props) {
   const [screeningTemplates, setScreeningTemplates] = useState<ScreeningTemplateLite[]>([]);
   const [loading, setLoading] = useState(true);
   const [editingId, setEditingId] = useState<string | "new" | null>(null);
+  // Stripe Connect readiness — gates the cash-pay toggle in the
+  // form. We read it once on mount; if the practice connects Stripe
+  // mid-session, they can refresh the page to clear the gate.
+  const [stripeReady, setStripeReady] = useState<boolean | null>(null);
 
   const reload = async () => {
     setLoading(true);
-    const [typesRes, consentsRes, screeningsRes] = await Promise.all([
+    const [typesRes, consentsRes, screeningsRes, stripeRes] = await Promise.all([
       appointmentService.getTypes(),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       apiFetch<any>("/consent-templates").catch(() => ({ data: [] })),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       apiFetch<any>("/screening-templates").catch(() => ({ data: [] })),
+      // Non-fatal — if status fetch fails (auth, network), assume
+      // not-ready and let the form show the warning. Better to
+      // over-warn than let the practice ship a broken type.
+      stripeConnectService.status().catch(() => ({ data: null })),
     ]);
     if (typesRes.data) setTypes(typesRes.data);
+    setStripeReady(stripeRes.data?.canAcceptPayments ?? false);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const unwrap = (raw: any): any[] => {
       if (Array.isArray(raw)) return raw;
@@ -125,6 +134,7 @@ export function AppointmentTypesPanel({ setToast }: Props) {
           consentTemplates={consentTemplates}
           screeningTemplates={screeningTemplates}
           initial={null}
+          stripeReady={stripeReady}
           onCancel={() => setEditingId(null)}
           onSave={(data) => handleSave(data, "new")}
         />
@@ -145,6 +155,7 @@ export function AppointmentTypesPanel({ setToast }: Props) {
                 consentTemplates={consentTemplates}
                 screeningTemplates={screeningTemplates}
                 initial={t}
+                stripeReady={stripeReady}
                 onCancel={() => setEditingId(null)}
                 onSave={(data) => handleSave(data, t.id)}
               />
@@ -204,11 +215,16 @@ export function AppointmentTypesPanel({ setToast }: Props) {
 // ─── Editor row ───────────────────────────────────────────────────────
 
 function TypeEditor({
-  initial, consentTemplates, screeningTemplates, onCancel, onSave,
+  initial, consentTemplates, screeningTemplates, stripeReady, onCancel, onSave,
 }: {
   initial: AppointmentType | null;
   consentTemplates: ConsentTemplateLite[];
   screeningTemplates: ScreeningTemplateLite[];
+  // null = still loading, true = ready, false = needs setup. Drives
+  // the cash-pay toggle gate. We block the toggle when explicitly
+  // false; null is treated as "still loading, optimistically allow"
+  // so the UI doesn't briefly disable the toggle on every render.
+  stripeReady: boolean | null;
   onCancel: () => void;
   onSave: (data: Partial<AppointmentType>) => void;
 }) {
@@ -371,10 +387,31 @@ function TypeEditor({
           by default; when enabled the booking widget routes the
           visitor through Checkout before confirming the slot. */}
       <div className="border-t border-slate-200 pt-3">
-        <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer mb-2">
+        {/* Stripe Connect gate. Block the toggle when stripeReady is
+            explicitly false (canAcceptPayments=false on the status
+            endpoint). null means we're still loading or the call
+            failed — be optimistic in that case so we don't lock
+            existing users out on a transient network blip. */}
+        {stripeReady === false && !cashPayEnabled && (
+          <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 mb-2 flex items-start gap-2">
+            <span className="text-amber-600 text-sm flex-shrink-0">⚠</span>
+            <div className="text-xs text-amber-900 flex-1">
+              <p className="font-semibold mb-0.5">Stripe Connect setup required</p>
+              <p className="text-amber-800">
+                Connect Stripe in{" "}
+                <a href="#/practice/settings?tab=billing" className="underline font-medium">Settings → Billing</a>{" "}
+                to enable cash-pay visit types. Without an active Connect account, payments can't be processed.
+              </p>
+            </div>
+          </div>
+        )}
+        <label
+          className={`flex items-center gap-2 text-sm cursor-pointer mb-2 ${stripeReady === false && !cashPayEnabled ? "opacity-50 cursor-not-allowed" : "text-slate-700"}`}
+        >
           <input
             type="checkbox"
             checked={cashPayEnabled}
+            disabled={stripeReady === false && !cashPayEnabled}
             onChange={(e) => setCashPayEnabled(e.target.checked)}
             className="rounded border-slate-300"
           />
@@ -402,8 +439,17 @@ function TypeEditor({
               </div>
               <span className="text-xs text-slate-400">USD</span>
             </div>
+            {/* If the practice TURNED OFF Stripe after enabling cash-
+                pay on this type (rare but possible), warn them inline
+                so they don't ship a broken type. */}
+            {stripeReady === false && (
+              <div className="rounded border border-amber-200 bg-amber-50 px-2 py-1.5 text-[11px] text-amber-900">
+                ⚠ Stripe Connect isn't active. Visitors will see "practice not yet set up to accept payments" until you{" "}
+                <a href="#/practice/settings?tab=billing" className="underline font-medium">connect Stripe</a>.
+              </div>
+            )}
             <p className="text-[11px] text-slate-500 leading-relaxed">
-              The price visitors see on the booking widget. Practice's Stripe Connect account must be active to accept payments. No subscription is created — this is a single transaction.
+              The price visitors see on the booking widget. No subscription is created — this is a single transaction.
             </p>
           </div>
         )}
