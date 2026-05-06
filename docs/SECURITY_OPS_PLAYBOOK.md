@@ -357,11 +357,74 @@ See quarterly checklist above. The drill validates that backups *actually* resto
 
 ### NOT automated yet (gaps to close)
 
-- ❌ **Sentry SDK** — flagged in deferred items. Trivial to install (`composer require sentry/sentry-laravel`). Without this, exceptions in production are silent. **HIGH PRIORITY**.
-- ❌ **Cross-tenant isolation tests** — not in CI yet. Will land soon (this playbook's first companion deliverable).
+- ✅ **Sentry SDK** — installed + wired with PII scrubbing + tenant tagging.
+  Activates as soon as you set `SENTRY_LARAVEL_DSN` in Railway. See "Sentry
+  setup" below.
+- ✅ **Cross-tenant isolation tests** — CrossTenantSecurityTest covers
+  recently shipped endpoints (ad-hoc, booking, external-calendar, cancel).
 - ❌ **Webhook dead-letter dashboard** — visible only via raw `webhook_deliveries` table query. UI surface deferred.
 - ❌ **Dependency audit on schedule** — currently manual.
 - ❌ **Concurrent booking race tests** — manual; needs Playwright or pcntl-based runner.
+
+---
+
+## Sentry setup (one-time)
+
+Sentry is installed and wired. To turn it on for production:
+
+### 1. Create the Sentry project (5 min, free)
+
+1. Go to https://sentry.io/signup/ and create an account.
+2. Create a new project: select **Laravel** as the platform.
+3. After creation, Sentry gives you a **DSN** that looks like:
+   `https://xxxxxxxxxxxxxxxxxxxxxx@oXXXXXXX.ingest.sentry.io/YYYYYYY`
+4. Copy that DSN.
+
+### 2. Set the DSN in Railway (2 min)
+
+1. Open Railway → your project → service → **Variables** tab.
+2. Add:
+   - `SENTRY_LARAVEL_DSN` = the DSN you copied
+   - `SENTRY_ENVIRONMENT` = `production`
+   - `SENTRY_RELEASE` = `${{ RAILWAY_GIT_COMMIT_SHA }}` (Railway substitutes
+     the deployed git SHA, so each deploy is a different release in
+     Sentry — useful for "this bug appeared in deploy abc123")
+3. Save. Railway will auto-redeploy. Wait ~90s.
+
+### 3. Verify it's working (2 min)
+
+- After redeploy, trigger a test error from any authenticated tab in the
+  app (e.g. open a non-existent provider URL). Within 10-30 seconds it
+  should appear in your Sentry dashboard.
+- If nothing appears: check Railway logs for `sentry` mentions (the SDK
+  logs initialization issues there).
+
+### What's already wired (you don't have to configure)
+
+- **PII scrubber** (`SentryScrubber.php`): every event passes through a
+  pattern-match scrubber that redacts emails, phones, SSNs, credit-card-
+  shaped numbers, and ISO date strings that look like DOB before send.
+- **Tenant tagging**: every event tagged with `tenant_id` + `role` so a
+  bug in Practice A's flow doesn't get visually mixed with Practice B's
+  in the Sentry UI.
+- **Sensitive field stripping**: any request body field named
+  `first_name` / `last_name` / `email` / `phone` / `dob` / clinical
+  narrative columns / passwords gets replaced with `[redacted]` before
+  send.
+- **SQL bindings hard-disabled**: WHERE-clause parameters routinely
+  contain patient names; we never let Sentry see them. Hard-coded off,
+  not env-driven.
+- **Noise filter**: validation errors, auth failures, model-not-found
+  on tenant-scoped lookups (the deliberate "cross-tenant guess returns
+  404" pattern), and CSRF mismatches don't generate Sentry events.
+
+### Cost
+
+- Free tier: 5,000 events/month. At your current pre-launch volume you'll
+  use < 100/month. Plenty of headroom.
+- If you ever blow through it, lower `SENTRY_SAMPLE_RATE` (currently 1.0
+  = capture everything). 0.5 = capture half. The PHI scrubber still
+  applies.
 
 ---
 

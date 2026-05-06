@@ -15,6 +15,7 @@
         "minishlink/web-push": "^9.0",
         "resend/resend-laravel": "*",
         "sabre/vobject": "^4.5",
+        "sentry/sentry-laravel": "^4.25",
         "stripe/stripe-php": "*"
     },
     "require-dev": {
