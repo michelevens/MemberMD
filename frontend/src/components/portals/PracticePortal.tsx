@@ -11,6 +11,7 @@ import { useAuth } from "../../contexts/AuthContext";
 import { dashboardService, membershipPlanService, messageService, patientService, appointmentService, encounterService, prescriptionService, invoiceService, programService, telehealthService, screeningService, couponService, providerService, paymentService, notificationService, apiFetch, billingEnhancedService, documentService, onboardingService, staffService, chartTemplateService, labService, referralService } from "../../lib/api";
 import { formatDob } from "../../lib/format";
 import { PortalShell, type NavSection as ShellNavSection, type PortalColor } from "../shared/PortalShell";
+import { MobileTodayScreen } from "../practice/MobileTodayScreen";
 import { MobileSheet } from "../shared/MobileSheet";
 import { PhoneField, FaxField, EmailField, NPIField, ZipField, AddressField } from "../shared/fields";
 import { useConfirm } from "../shared/ConfirmDialog";
@@ -10205,6 +10206,20 @@ export function PracticePortal() {
     : auth.user?.role === "superadmin" ? "superadmin"
     : "practice_admin";
 
+  // Phone-sized viewport detection. < 768px (Tailwind md) is the
+  // breakpoint where the desktop sidebar + wide tables stop fitting.
+  // Subscribed via matchMedia so resizing in devtools works in dev.
+  const [isPhone, setIsPhone] = useState<boolean>(() =>
+    typeof window !== "undefined" ? window.matchMedia("(max-width: 767px)").matches : false,
+  );
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const mq = window.matchMedia("(max-width: 767px)");
+    const handler = (e: MediaQueryListEvent) => setIsPhone(e.matches);
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+  }, []);
+
   // Practice Portal now uses the flat Stripe-grade chrome regardless of
   // role. The brand sigil is the Stripe-purple square; nav rows are
   // tighter, badges sit inline. Role-tinted gradients live on in the
@@ -10248,6 +10263,26 @@ export function PracticePortal() {
       icon: it.icon,
     })),
   );
+
+  // Mobile entry point — phone-sized viewports for practice_admin /
+  // provider get a slim "today" triage screen instead of the full
+  // desktop shell. Decision rationale lives in MobileTodayScreen's
+  // header comment. Staff and superadmin still get the desktop layout
+  // (less use for phone triage). Patient portal is a separate route.
+  if (
+    isPhone &&
+    activeTab === "dashboard" &&
+    (portalRole === "practice_admin" || portalRole === "provider")
+  ) {
+    return (
+      <MobileTodayScreen
+        userName={fullName}
+        roleLabel={userSubtitle}
+        onNavigate={(id) => goToTab(id)}
+        onLogout={auth.logout}
+      />
+    );
+  }
 
   return (
     <>
