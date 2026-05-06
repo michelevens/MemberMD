@@ -6717,14 +6717,27 @@ export function PracticePortal() {
         {showStarterPlans && (
           <StarterPlansDialog
             onClose={() => setShowStarterPlans(false)}
-            onForked={(count) => {
+            onForked={(created, skipped) => {
               setShowStarterPlans(false);
-              setToast({
-                message: count > 0
-                  ? `Added ${count} starter plan${count === 1 ? "" : "s"}.`
-                  : "All starter plans already exist — nothing to add.",
-                type: "success",
-              });
+              // Toast composes both counts so the practice knows
+              // exactly what changed:
+              //   N created                  → "Added 2 plans."
+              //   N created + skipped > 0    → "Added 2 plans (1 already existed)."
+              //   created = 0 + skipped > 0  → "All N selected plans already existed."
+              //   created = 0 + skipped = 0  → "Nothing to add." (rare — only when
+              //                                  the selection happened to be empty
+              //                                  arrays the server filtered)
+              let message: string;
+              if (created > 0 && skipped > 0) {
+                message = `Added ${created} starter plan${created === 1 ? "" : "s"} (${skipped} already existed).`;
+              } else if (created > 0) {
+                message = `Added ${created} starter plan${created === 1 ? "" : "s"}.`;
+              } else if (skipped > 0) {
+                message = `All ${skipped} selected plan${skipped === 1 ? "" : "s"} already existed.`;
+              } else {
+                message = "Nothing to add.";
+              }
+              setToast({ message, type: "success" });
               loadPracticeData();
             }}
             setToast={setToast}
@@ -12213,7 +12226,10 @@ function StarterPlansDialog({
   setToast,
 }: {
   onClose: () => void;
-  onForked: (count: number) => void;
+  // Receives both counts so the parent can show a useful toast like
+  // "Added 2 plans (1 already existed)" instead of just the created
+  // count, which silently hides duplicates.
+  onForked: (created: number, skipped: number) => void;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   setToast: (t: { message: string; type: "success" | "error" } | null) => void;
 }) {
@@ -12281,7 +12297,7 @@ function StarterPlansDialog({
       setToast({ message: res.error, type: "error" });
       return;
     }
-    onForked(res.data?.created ?? 0);
+    onForked(res.data?.created ?? 0, res.data?.skipped ?? 0);
   };
 
   const fmtPrice = (cents: number | null): string => {
