@@ -26,3 +26,14 @@ superadmin, practice_admin, provider, staff, patient
 ## Git
 - Branch: main (direct push)
 - Railway auto-deploys from main
+
+## Security & Operations
+- **Source of truth: `docs/SECURITY_OPS_PLAYBOOK.md`**
+- The playbook defines the daily / weekly / monthly / quarterly security cadence,
+  incident response playbooks, BAA tracking, GDPR/CCPA workflows, and the
+  trigger-phrase library Nageley uses to invoke security checks via Claude.
+- When Nageley asks for a "weekly security check," "monthly security audit,"
+  "quarterly deep audit," "GDPR export/deletion," or "breach investigation,"
+  open the playbook first and execute the steps it defines.
+- Update the playbook whenever a new feature changes the security surface
+  (new public endpoint, new PHI field, new external vendor, new payment flow).
