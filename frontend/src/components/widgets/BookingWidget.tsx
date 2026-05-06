@@ -68,13 +68,27 @@ interface AppointmentTypeRow {
   cash_price_cents?: number | null;
   cash_currency?: string | null;
 }
+interface CheapestPlan {
+  id: string;
+  name: string;
+  monthly_price: number | string;
+  annual_price: number | string | null;
+  visits_per_month: number | null;
+  enrollment_fee: number | string | null;
+}
+
 interface OptionsResp {
   data: {
     practice_name: string;
     specialty: string | null;
     timezone: string | null;
+    tenant_code: string;
     providers: ProviderRow[];
     appointment_types: AppointmentTypeRow[];
+    // Cheapest active plan, surfaced so we can show
+    // "or $X/mo with membership" on cash-pay cards. Null when no
+    // cash-pay types or no plans configured.
+    cheapest_plan: CheapestPlan | null;
   };
 }
 interface SlotsResp {
@@ -326,11 +340,12 @@ export function BookingWidget() {
               )}
               {options.appointment_types.map((t) => {
                 const priceLabel = formatPriceLabel(t);
+                const isCash = t.cash_pay_enabled && t.cash_price_cents;
                 return (
                   <button
                     key={t.id}
                     onClick={() => setTypeId(t.id)}
-                    className="w-full flex items-center justify-between px-4 py-3 rounded-lg border text-left transition-colors"
+                    className="w-full flex items-start justify-between px-4 py-3 rounded-lg border text-left transition-colors"
                     style={{
                       borderColor: typeId === t.id ? C.teal500 : C.slate200,
                       backgroundColor: typeId === t.id ? "#f0fdf4" : C.white,
@@ -342,8 +357,34 @@ export function BookingWidget() {
                         <Clock className="w-3 h-3" /> {t.duration_minutes} min
                         {t.is_telehealth && <><Video className="w-3 h-3 ml-1" /> Telehealth</>}
                       </div>
+                      {/* Comparison line — show "or $X/mo with membership"
+                          beneath cash-pay cards when the practice has a
+                          plan configured. Visitors self-evaluate: paying
+                          $300 once vs. $200/mo unlimited turns into a
+                          conversion when the math favors membership. */}
+                      {isCash && options.cheapest_plan && (
+                        <div className="text-[11px] mt-1" style={{ color: C.slate500 }}>
+                          or <span className="font-semibold" style={{ color: C.teal700 }}>{formatMonthlyPrice(options.cheapest_plan)}</span> with{" "}
+                          <a
+                            href={`/#/enroll/${options.tenant_code}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                            className="underline"
+                            style={{ color: C.teal700 }}
+                          >
+                            {options.cheapest_plan.name}
+                          </a>
+                          {options.cheapest_plan.visits_per_month && options.cheapest_plan.visits_per_month > 0 && (
+                            <span className="text-slate-400"> · {options.cheapest_plan.visits_per_month} visits/mo</span>
+                          )}
+                          {(options.cheapest_plan.visits_per_month === -1 || options.cheapest_plan.visits_per_month === null) && (
+                            <span className="text-slate-400"> · unlimited visits</span>
+                          )}
+                        </div>
+                      )}
                     </div>
-                    <div className="flex items-center gap-2 flex-shrink-0">
+                    <div className="flex items-center gap-2 flex-shrink-0 ml-2">
                       {priceLabel && (
                         <span
                           className="text-sm font-semibold px-2 py-0.5 rounded"
@@ -352,7 +393,7 @@ export function BookingWidget() {
                           {priceLabel}
                         </span>
                       )}
-                      {typeId === t.id && <Check className="w-4 h-4" style={{ color: C.teal600 }} />}
+                      {typeId === t.id && <Check className="w-4 h-4 mt-1" style={{ color: C.teal600 }} />}
                     </div>
                   </button>
                 );
@@ -389,6 +430,47 @@ export function BookingWidget() {
               ))}
             </div>
           </div>
+
+          {/* Bottom-of-page membership upsell. Only shown when the
+              practice has both cash-pay types AND a plan to compare
+              against — otherwise it'd be noise. Visitors who pay
+              cash-per-visit a few times have a clear ramp into
+              membership when they see the math here. */}
+          {options.cheapest_plan && options.appointment_types.some(t => t.cash_pay_enabled) && (
+            <div
+              className="rounded-xl p-4 flex items-start gap-3"
+              style={{ backgroundColor: "#f0fdf4", border: `1px solid ${C.teal500}` }}
+            >
+              <div
+                className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0"
+                style={{ backgroundColor: C.teal500, color: C.white }}
+              >
+                <Check className="w-4 h-4" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold" style={{ color: C.navy900 }}>
+                  See the practice often? Save with membership.
+                </p>
+                <p className="text-xs mt-0.5" style={{ color: C.slate600 }}>
+                  {formatMonthlyPrice(options.cheapest_plan)} for {options.cheapest_plan.name}
+                  {options.cheapest_plan.visits_per_month && options.cheapest_plan.visits_per_month > 0
+                    ? ` · ${options.cheapest_plan.visits_per_month} visits/mo`
+                    : (options.cheapest_plan.visits_per_month === -1 || options.cheapest_plan.visits_per_month === null)
+                      ? " · unlimited visits"
+                      : ""}
+                </p>
+              </div>
+              <a
+                href={`/#/enroll/${options.tenant_code}`}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold flex-shrink-0"
+                style={{ backgroundColor: C.white, color: C.teal700, border: `1px solid ${C.teal500}` }}
+            >
+                Join <ChevronRight className="w-3 h-3" />
+              </a>
+            </div>
+          )}
 
           <div className="pt-2 flex justify-end">
             <button
@@ -604,6 +686,19 @@ function FormField({ label, value, onChange, type = "text" }: { label: string; v
       />
     </div>
   );
+}
+
+// Format the cheapest plan's monthly price as "$X/mo". Backend may
+// return monthly_price as a string (Postgres decimal) or number; we
+// coerce.
+function formatMonthlyPrice(p: CheapestPlan): string {
+  const num = typeof p.monthly_price === "string" ? parseFloat(p.monthly_price) : p.monthly_price;
+  if (!Number.isFinite(num)) return `$${p.monthly_price}/mo`;
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: num % 1 === 0 ? 0 : 2,
+  }).format(num) + "/mo";
 }
 
 // Render a price label for the visit-type card. Returns null when

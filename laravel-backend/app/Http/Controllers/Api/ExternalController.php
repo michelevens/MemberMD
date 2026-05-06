@@ -790,13 +790,33 @@ class ExternalController extends Controller
                 'cash_pay_enabled', 'cash_price_cents', 'cash_currency',
             ]);
 
+        // Cheapest active plan summary — drives the "or $X/mo with
+        // membership" comparison line on cash-pay visit-type cards
+        // and the bottom-of-page membership CTA. Only included when
+        // at least one cash-pay type is present (otherwise the
+        // comparison is meaningless — there's no cash price to
+        // compare against).
+        $cheapestPlan = null;
+        $hasCashPayType = $types->contains(fn ($t) => $t->cash_pay_enabled && $t->cash_price_cents);
+        if ($hasCashPayType) {
+            $cheapestPlan = MembershipPlan::where('tenant_id', $practice->id)
+                ->where('is_active', true)
+                ->whereNotNull('monthly_price')
+                ->orderBy('monthly_price')
+                ->first(['id', 'name', 'monthly_price', 'annual_price', 'visits_per_month', 'enrollment_fee']);
+        }
+
         return response()->json([
             'data' => [
                 'practice_name' => $practice->name,
                 'specialty' => $practice->specialty,
                 'timezone' => $practice->timezone,
+                'tenant_code' => $practice->tenant_code,
                 'providers' => $providers,
                 'appointment_types' => $types,
+                // Cheapest plan, or null when no cash-pay types or no
+                // plans configured. Frontend renders nothing when null.
+                'cheapest_plan' => $cheapestPlan,
             ],
         ]);
     }
