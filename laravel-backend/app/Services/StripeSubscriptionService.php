@@ -857,6 +857,45 @@ class StripeSubscriptionService
     }
 
     /**
+     * Force-expire a Stripe Checkout Session before its natural 24h
+     * expiry. Used when the practice cancels an ad-hoc charge — we
+     * want to make sure a patient who finds the email later can't
+     * still pay against a cancelled bill.
+     *
+     * Stripe's `expire` API only works on sessions that haven't
+     * completed yet. Already-paid sessions throw — caller must
+     * check status first.
+     */
+    public function expireCheckoutSession(Practice $practice, string $sessionId): void
+    {
+        $this->assertPracticeReady($practice);
+
+        try {
+            $this->stripe()->checkout->sessions->expire(
+                $sessionId,
+                [],
+                ['stripe_account' => $practice->stripe_account_id],
+            );
+        } catch (ApiErrorException $e) {
+            throw new RuntimeException("Failed to expire Checkout session: {$e->getMessage()}", 0, $e);
+        }
+    }
+
+    /**
+     * Convenience: just the URL of an existing session, fetched live.
+     * Wraps retrieveCheckoutSession to avoid every caller re-implementing
+     * the property pluck.
+     */
+    public function getCheckoutSessionUrl(Practice $practice, string $sessionId): string
+    {
+        $session = $this->retrieveCheckoutSession($practice, $sessionId);
+        if (empty($session->url)) {
+            throw new RuntimeException('Stripe Checkout session has no URL (likely already completed or expired).');
+        }
+        return $session->url;
+    }
+
+    /**
      * Backfill local Invoice + Payment rows for a membership by listing
      * the Stripe subscription's invoices live and mirroring each one.
      *

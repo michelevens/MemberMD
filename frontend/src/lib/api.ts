@@ -1979,6 +1979,72 @@ export const masterDataService = {
   },
 };
 
+// ─── Ad-hoc charges ─────────────────────────────────────────────────────────
+//
+// One-time, non-membership, non-appointment fees the practice bills a
+// patient for (form letters, after-hours calls, records copies, etc.).
+// Same Stripe Checkout primitive cash-pay bookings use; surface lives
+// on the practice side only — patients receive a payment link via email.
+
+export interface AdHocChargeRow {
+  id: string;
+  patient_id: string;
+  description: string;
+  notes: string | null;
+  line_items: Array<{ description: string; amount_cents: number }>;
+  amount_cents: number;
+  currency: string;
+  status: "draft" | "sent" | "paid" | "cancelled" | "expired";
+  sent_at: string | null;
+  paid_at: string | null;
+  cancelled_at: string | null;
+  expires_at: string | null;
+  created_at: string;
+  patient?: { id: string; first_name: string; last_name: string; email: string };
+}
+
+export const adHocChargeService = {
+  list: async (params?: { patient_id?: string; status?: string }): Promise<ApiResponse<AdHocChargeRow[]>> => {
+    if (useMockData()) return { data: [] };
+    const q = params ? "?" + new URLSearchParams(params as Record<string, string>).toString() : "";
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return apiFetch<any>(`/ad-hoc-charges${q}`);
+  },
+  create: async (data: {
+    patientId: string;
+    description: string;
+    lineItems: Array<{ description: string; amountCents: number }>;
+    notes?: string;
+    sendEmail?: boolean;
+  }): Promise<ApiResponse<{ charge: AdHocChargeRow; checkout_url: string }>> => {
+    if (useMockData()) return { data: { charge: {} as AdHocChargeRow, checkout_url: "#" } };
+    return apiFetch(`/ad-hoc-charges`, {
+      method: "POST",
+      body: JSON.stringify({
+        patient_id: data.patientId,
+        description: data.description,
+        // Server expects snake_case; apiFetch only camelCases
+        // RESPONSES, not request bodies. line_items is structured so
+        // we hand-shape it here.
+        line_items: data.lineItems.map((li) => ({
+          description: li.description,
+          amount_cents: li.amountCents,
+        })),
+        notes: data.notes,
+        send_email: data.sendEmail ?? true,
+      }),
+    });
+  },
+  cancel: async (id: string): Promise<ApiResponse<AdHocChargeRow>> => {
+    if (useMockData()) return { data: {} as AdHocChargeRow };
+    return apiFetch<AdHocChargeRow>(`/ad-hoc-charges/${id}/cancel`, { method: "POST" });
+  },
+  resend: async (id: string): Promise<ApiResponse<{ charge: AdHocChargeRow; checkout_url: string }>> => {
+    if (useMockData()) return { data: { charge: {} as AdHocChargeRow, checkout_url: "#" } };
+    return apiFetch(`/ad-hoc-charges/${id}/resend`, { method: "POST" });
+  },
+};
+
 // ─── Coupons ────────────────────────────────────────────────────────────────
 
 export const couponService = {

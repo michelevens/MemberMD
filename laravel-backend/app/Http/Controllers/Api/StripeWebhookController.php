@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\AdHocCharge;
 use App\Models\Appointment;
 use App\Models\AuditLog;
 use App\Models\Invoice;
@@ -852,14 +853,22 @@ class StripeWebhookController extends Controller
         $session = $event->data->object;
         $metadata = $session->metadata ?? null;
 
-        // Branch on metadata to tell enrollment vs cash-pay-booking
-        // checkouts apart. Both fire the same webhook event but each
-        // converts a different pending row into different concrete
-        // records (membership vs appointment).
+        // Branch on metadata to tell the three modes apart. All three
+        // fire the same checkout.session.completed event but they
+        // convert different pending rows into different concrete
+        // records.
         $pendingBookingId = is_object($metadata)
             ? ($metadata->pending_booking_id ?? null)
             : (is_array($metadata) ? ($metadata['pending_booking_id'] ?? null) : null);
 
+        $adHocChargeId = is_object($metadata)
+            ? ($metadata->ad_hoc_charge_id ?? null)
+            : (is_array($metadata) ? ($metadata['ad_hoc_charge_id'] ?? null) : null);
+
+        if ($adHocChargeId) {
+            $this->markAdHocChargePaid($session, $practice);
+            return;
+        }
         if ($pendingBookingId) {
             $this->convertCheckoutSessionToBooking($session, $practice, 'checkout.session.completed');
             return;
@@ -867,6 +876,69 @@ class StripeWebhookController extends Controller
 
         // Existing enrollment path.
         $this->convertCheckoutSession($session, $practice, 'checkout.session.completed');
+    }
+
+    /**
+     * Mark an AdHocCharge paid on successful Checkout. Idempotent —
+     * a webhook retry with the same session lands a no-op once
+     * status is already 'paid'. We don't create a Payment row here
+     * because ad-hoc charges aren't tied to a membership or invoice;
+     * the AdHocCharge row IS the financial record.
+     */
+    private function markAdHocChargePaid(object $session, Practice $practice): void
+    {
+        $metadata = $session->metadata ?? null;
+        $chargeId = is_object($metadata)
+            ? ($metadata->ad_hoc_charge_id ?? null)
+            : (is_array($metadata) ? ($metadata['ad_hoc_charge_id'] ?? null) : null);
+
+        if (empty($chargeId)) return;
+
+        if (($session->payment_status ?? '') !== 'paid') {
+            Log::info('Ad-hoc charge checkout not paid — skipping mark-paid', [
+                'ad_hoc_charge_id' => $chargeId,
+                'payment_status' => $session->payment_status ?? null,
+            ]);
+            return;
+        }
+
+        $charge = AdHocCharge::where('tenant_id', $practice->id)
+            ->where('id', $chargeId)
+            ->first();
+        if (!$charge) return;
+
+        if ($charge->status === AdHocCharge::STATUS_PAID) {
+            return; // already converted
+        }
+
+        $charge->update([
+            'status' => AdHocCharge::STATUS_PAID,
+            'paid_at' => now(),
+            'stripe_payment_intent_id' => $session->payment_intent ?? null,
+        ]);
+
+        // Audit so the practice has a non-repudiable record of the
+        // payment. AdHocCharge already uses Auditable trait but the
+        // status flip happens via webhook (no auth user) so we
+        // explicitly stamp who/what here.
+        try {
+            AuditLog::create([
+                'tenant_id' => $practice->id,
+                'user_id' => null,
+                'action' => 'ad_hoc_charge_paid',
+                'resource' => 'AdHocCharge',
+                'resource_id' => $charge->id,
+                'changes' => [
+                    'amount_cents' => (int) $charge->amount_cents,
+                    'stripe_payment_intent_id' => $session->payment_intent ?? null,
+                ],
+            ]);
+        } catch (Throwable $e) {
+            Log::warning('AuditLog write failed on ad-hoc paid', [
+                'charge_id' => $charge->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
     }
 
     /**

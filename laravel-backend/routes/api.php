@@ -586,6 +586,13 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
     // ===== Coupons =====
     Route::apiResource('coupons', CouponController::class)->except(['show']);
 
+    // ===== Ad-hoc charges (one-time billing outside subscriptions) =====
+    Route::get('/ad-hoc-charges', [\App\Http\Controllers\Api\AdHocChargeController::class, 'index']);
+    Route::post('/ad-hoc-charges', [\App\Http\Controllers\Api\AdHocChargeController::class, 'store']);
+    Route::get('/ad-hoc-charges/{id}', [\App\Http\Controllers\Api\AdHocChargeController::class, 'show']);
+    Route::post('/ad-hoc-charges/{id}/cancel', [\App\Http\Controllers\Api\AdHocChargeController::class, 'cancel']);
+    Route::post('/ad-hoc-charges/{id}/resend', [\App\Http\Controllers\Api\AdHocChargeController::class, 'resend']);
+
     // ===== Notifications =====
     Route::get('/notifications/preferences', [NotificationController::class, 'getPreferences']);
     Route::put('/notifications/preferences', [NotificationController::class, 'updatePreferences']);

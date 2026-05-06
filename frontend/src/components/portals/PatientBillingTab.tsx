@@ -15,9 +15,9 @@ import { useEffect, useRef, useState } from "react";
 import {
   CreditCard, MoreHorizontal, Mail, MessageSquare, RefreshCw,
   PauseCircle, PlayCircle, Receipt, Copy, AlertCircle, Calendar,
-  DollarSign, Clock, ExternalLink, X,
+  DollarSign, Clock, ExternalLink, X, Plus, Trash2, Loader2,
 } from "lucide-react";
-import { membershipService, patientBillingService, apiFetch } from "../../lib/api";
+import { membershipService, patientBillingService, apiFetch, adHocChargeService } from "../../lib/api";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Toast = (msg: { message: string; type: "success" | "error" }) => void;
@@ -74,6 +74,10 @@ export function PatientBillingTab({
   const [showCancel, setShowCancel] = useState(false);
   const [showBillingEmail, setShowBillingEmail] = useState(false);
   const [refundDialog, setRefundDialog] = useState<{ paymentIntent: string; amount: number } | null>(null);
+  // Ad-hoc charge dialog — practice composes line items + sends a
+  // Stripe Checkout link to the patient. Lives next to the
+  // refund/receipt actions in the Payments section header.
+  const [showChargeDialog, setShowChargeDialog] = useState(false);
 
   // ─── Per-row kebab open state (Subscriptions + Payments) ───────────
   const [openKebab, setOpenKebab] = useState<string | null>(null);
@@ -231,23 +235,39 @@ export function PatientBillingTab({
       <div className="glass rounded-xl">
         <div className="flex items-center justify-between px-5 py-3 border-b border-slate-100">
           <h3 className="font-semibold text-slate-800">Payments</h3>
-          {membershipId && (
+          <div className="flex items-center gap-2">
+            {/* Charge for a one-off service — form letter, after-hours
+                call, records copy, etc. Opens a dialog where the
+                practice composes line items + sends a Stripe Checkout
+                link to the patient. Available on every patient (not
+                gated by membership). */}
             <button
               type="button"
-              onClick={async () => {
-                const res = await apiFetch<{ data: { synced?: number } }>(`/memberships/${membershipId}/sync-invoices`, {
-                  method: "POST",
-                  body: "{}",
-                });
-                if (res.error) setToast({ message: res.error, type: "error" });
-                else { setToast({ message: "Synced from Stripe.", type: "success" }); reload(); }
-              }}
-              className="px-3 py-1.5 rounded-md text-xs font-medium border transition-colors"
-              style={{ borderColor: "#635bff", color: "#635bff" }}
+              onClick={() => setShowChargeDialog(true)}
+              className="px-3 py-1.5 rounded-md text-xs font-medium inline-flex items-center gap-1 text-white"
+              style={{ backgroundColor: "#147d64" }}
             >
-              Sync from Stripe
+              <Plus className="w-3 h-3" />
+              Charge for service
             </button>
-          )}
+            {membershipId && (
+              <button
+                type="button"
+                onClick={async () => {
+                  const res = await apiFetch<{ data: { synced?: number } }>(`/memberships/${membershipId}/sync-invoices`, {
+                    method: "POST",
+                    body: "{}",
+                  });
+                  if (res.error) setToast({ message: res.error, type: "error" });
+                  else { setToast({ message: "Synced from Stripe.", type: "success" }); reload(); }
+                }}
+                className="px-3 py-1.5 rounded-md text-xs font-medium border transition-colors"
+                style={{ borderColor: "#635bff", color: "#635bff" }}
+              >
+                Sync from Stripe
+              </button>
+            )}
+          </div>
         </div>
         {invoices.length === 0 ? (
           <div className="px-5 py-8 text-center text-sm text-slate-400">No payments yet.</div>
@@ -353,6 +373,273 @@ export function PatientBillingTab({
           setToast={setToast}
         />
       )}
+      {showChargeDialog && (
+        <AdHocChargeDialog
+          patientId={patientId}
+          patientName={patientName}
+          onClose={() => setShowChargeDialog(false)}
+          onSaved={reload}
+          setToast={setToast}
+        />
+      )}
+    </div>
+  );
+}
+
+// ─── Ad-hoc charge dialog ───────────────────────────────────────────
+//
+// Practice composes line items + sends a Stripe Checkout link to the
+// patient. The link's URL is also returned in the response in case
+// the practice prefers to copy it for SMS / portal-message use.
+//
+// Server totals the line items — never trust client-side totals on a
+// financial document.
+
+function AdHocChargeDialog({
+  patientId, patientName, onClose, onSaved, setToast,
+}: {
+  patientId: string;
+  patientName: string;
+  onClose: () => void;
+  onSaved: () => void;
+  setToast: Toast;
+}) {
+  const [description, setDescription] = useState("");
+  const [items, setItems] = useState<Array<{ description: string; dollars: string }>>([
+    { description: "", dollars: "" },
+  ]);
+  const [notes, setNotes] = useState("");
+  const [sendEmail, setSendEmail] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [result, setResult] = useState<{ checkoutUrl: string; total: number } | null>(null);
+
+  const total = items.reduce((sum, it) => {
+    const v = parseFloat(it.dollars);
+    return sum + (Number.isFinite(v) ? v : 0);
+  }, 0);
+
+  const addItem = () => setItems([...items, { description: "", dollars: "" }]);
+  const removeItem = (i: number) => {
+    if (items.length === 1) return;
+    setItems(items.filter((_, idx) => idx !== i));
+  };
+  const updateItem = (i: number, patch: Partial<{ description: string; dollars: string }>) => {
+    setItems(items.map((it, idx) => idx === i ? { ...it, ...patch } : it));
+  };
+
+  const submit = async () => {
+    if (!description.trim()) {
+      setToast({ message: "Add a description.", type: "error" });
+      return;
+    }
+    const lineItems = items
+      .filter((it) => it.description.trim() && parseFloat(it.dollars) >= 0.50)
+      .map((it) => ({
+        description: it.description.trim(),
+        amountCents: Math.round(parseFloat(it.dollars) * 100),
+      }));
+    if (lineItems.length === 0) {
+      setToast({ message: "Add at least one line item with a description and amount (≥ $0.50).", type: "error" });
+      return;
+    }
+
+    setSubmitting(true);
+    const res = await adHocChargeService.create({
+      patientId,
+      description: description.trim(),
+      lineItems,
+      notes: notes.trim() || undefined,
+      sendEmail,
+    });
+    setSubmitting(false);
+
+    if (res.error) {
+      setToast({ message: res.error, type: "error" });
+      return;
+    }
+
+    const checkoutUrl = res.data?.checkout_url ?? "";
+    const totalCents = res.data?.charge?.amount_cents ?? 0;
+    setResult({ checkoutUrl, total: totalCents / 100 });
+    setToast({
+      message: sendEmail ? `Payment link sent to ${patientName}.` : `Charge created (link not sent).`,
+      type: "success",
+    });
+    onSaved();
+  };
+
+  // Confirmation screen — the create succeeded, show the URL so the
+  // practice can copy/paste if they want to SMS it.
+  if (result) {
+    return (
+      <DialogShell title="Payment link ready" onClose={onClose}>
+        <div className="text-center mb-4">
+          <div className="w-12 h-12 rounded-full mx-auto mb-3 flex items-center justify-center" style={{ backgroundColor: "#dcfce7" }}>
+            <Mail className="w-6 h-6" style={{ color: "#147d64" }} />
+          </div>
+          <p className="text-sm font-semibold text-slate-900">${result.total.toFixed(2)} charge created</p>
+          <p className="text-xs text-slate-500 mt-1">{sendEmail ? "Email sent to" : "Email NOT sent — copy the link below for"} {patientName}.</p>
+        </div>
+        <div className="rounded-md border border-slate-200 bg-slate-50 p-2 flex items-center gap-2">
+          <input
+            readOnly
+            value={result.checkoutUrl}
+            className="flex-1 bg-transparent text-xs font-mono text-slate-700"
+            onClick={(e) => (e.target as HTMLInputElement).select()}
+          />
+          <button
+            type="button"
+            onClick={() => {
+              navigator.clipboard.writeText(result.checkoutUrl);
+              setToast({ message: "Link copied.", type: "success" });
+            }}
+            className="px-2 py-1 rounded text-xs font-medium text-slate-700 hover:bg-white"
+          >
+            <Copy className="w-3 h-3 inline mr-1" /> Copy
+          </button>
+        </div>
+        <div className="mt-4 flex justify-end">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-2 rounded-md text-sm font-medium text-white"
+            style={{ backgroundColor: "#147d64" }}
+          >
+            Done
+          </button>
+        </div>
+      </DialogShell>
+    );
+  }
+
+  return (
+    <DialogShell title={`Charge ${patientName}`} subtitle="One-time payment via Stripe Checkout link" onClose={onClose}>
+      <div className="space-y-3">
+        <div>
+          <label className="block text-xs font-semibold text-slate-600 mb-1">Description *</label>
+          <input
+            type="text"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="FMLA form completion"
+            className="w-full border border-slate-200 rounded-md px-3 py-2 text-sm"
+          />
+        </div>
+
+        <div>
+          <label className="block text-xs font-semibold text-slate-600 mb-1">Line items *</label>
+          <div className="space-y-2">
+            {items.map((it, i) => (
+              <div key={i} className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={it.description}
+                  onChange={(e) => updateItem(i, { description: e.target.value })}
+                  placeholder="Form completion fee"
+                  className="flex-1 border border-slate-200 rounded-md px-2 py-1.5 text-sm"
+                />
+                <div className="flex items-center">
+                  <span className="px-2 py-1.5 border border-r-0 border-slate-200 rounded-l-md bg-slate-50 text-sm text-slate-500">$</span>
+                  <input
+                    type="number"
+                    step="0.50"
+                    min="0.50"
+                    value={it.dollars}
+                    onChange={(e) => updateItem(i, { dollars: e.target.value })}
+                    placeholder="75.00"
+                    className="w-24 border border-slate-200 rounded-r-md px-2 py-1.5 text-sm"
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => removeItem(i)}
+                  disabled={items.length === 1}
+                  className="p-1.5 rounded text-slate-400 hover:text-red-500 disabled:opacity-30"
+                  title="Remove line item"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            ))}
+          </div>
+          <button
+            type="button"
+            onClick={addItem}
+            className="mt-2 text-xs text-indigo-700 inline-flex items-center gap-1 hover:text-indigo-900"
+          >
+            <Plus className="w-3 h-3" /> Add another item
+          </button>
+        </div>
+
+        <div>
+          <label className="block text-xs font-semibold text-slate-600 mb-1">Internal notes (optional)</label>
+          <textarea
+            rows={2}
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            placeholder="Not shown to the patient"
+            className="w-full border border-slate-200 rounded-md px-3 py-2 text-sm"
+          />
+        </div>
+
+        <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={sendEmail}
+            onChange={(e) => setSendEmail(e.target.checked)}
+            className="rounded border-slate-300"
+          />
+          Email the payment link to the patient now
+          <span className="text-xs text-slate-400">(uncheck if you'll send via SMS or portal message)</span>
+        </label>
+
+        <div className="rounded-md p-3 flex justify-between items-center" style={{ backgroundColor: "#f0fdf4" }}>
+          <span className="text-sm font-semibold text-slate-700">Total</span>
+          <span className="text-lg font-bold" style={{ color: "#147d64" }}>${total.toFixed(2)}</span>
+        </div>
+
+        <div className="flex justify-end gap-2 pt-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-2 rounded-md text-sm font-medium text-slate-700 hover:bg-slate-50"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={submit}
+            disabled={submitting || total < 0.50}
+            className="px-4 py-2 rounded-md text-sm font-semibold text-white disabled:opacity-50 inline-flex items-center gap-1.5"
+            style={{ backgroundColor: "#147d64" }}
+          >
+            {submitting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
+            {sendEmail ? "Create & send link" : "Create charge"}
+          </button>
+        </div>
+      </div>
+    </DialogShell>
+  );
+}
+
+// Bare modal shell for the ad-hoc dialog. Mirrors the visual idiom
+// of the existing dialogs in this file without coupling to their
+// component tree.
+function DialogShell({ title, subtitle, onClose, children }: { title: string; subtitle?: string; onClose: () => void; children: React.ReactNode }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
+      <div className="bg-white rounded-xl shadow-xl max-w-lg w-full p-5">
+        <div className="flex items-start justify-between mb-4">
+          <div>
+            <h3 className="text-base font-semibold text-slate-900">{title}</h3>
+            {subtitle && <p className="text-xs text-slate-500 mt-0.5">{subtitle}</p>}
+          </div>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+        {children}
+      </div>
     </div>
   );
 }
