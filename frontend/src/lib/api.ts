@@ -697,6 +697,24 @@ export const providerService = {
     if (useMockData()) return { data: { status: "ok", count: 0, syncedAt: null } };
     return apiFetch(`/providers/${id}/external-calendar/sync`, { method: "POST" });
   },
+  // Imported personal-calendar events. Returns time blocks ONLY (no
+  // event titles) so the practice calendar grid can render them as
+  // gray "busy" blocks alongside patient appointments without
+  // leaking PHI across the practice/provider boundary.
+  getBusyBlocks: async (id: string, dateFrom?: string, dateTo?: string): Promise<ApiResponse<Array<{
+    id: string;
+    starts_at: string;
+    ends_at: string;
+    all_day: boolean;
+    label: string;
+  }>>> => {
+    if (useMockData()) return { data: [] };
+    const qs = new URLSearchParams();
+    if (dateFrom) qs.set("date_from", dateFrom);
+    if (dateTo) qs.set("date_to", dateTo);
+    const q = qs.toString();
+    return apiFetch(`/providers/${id}/busy-blocks${q ? `?${q}` : ""}`);
+  },
 };
 
 // ─── Provider Credentials ───────────────────────────────────────────────────

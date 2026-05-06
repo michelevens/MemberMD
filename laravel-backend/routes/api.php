@@ -563,6 +563,10 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
     Route::get('/providers/{id}/external-calendar', [ProviderController::class, 'externalCalendarStatus']);
     Route::put('/providers/{id}/external-calendar', [ProviderController::class, 'setExternalCalendar']);
     Route::post('/providers/{id}/external-calendar/sync', [ProviderController::class, 'syncExternalCalendar']);
+    // Read-only list of imported busy blocks (personal calendar
+    // events) for rendering on the practice calendar grid alongside
+    // patient appointments. Anyone in the tenant can read.
+    Route::get('/providers/{id}/busy-blocks', [ProviderController::class, 'busyBlocks']);
     Route::post('/providers', [ProviderController::class, 'store'])->middleware('plan.cap:providers');
     Route::apiResource('providers', ProviderController::class)->except(['destroy', 'store']);
 

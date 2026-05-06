@@ -21,7 +21,7 @@ import {
   Loader2,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { apiFetch, telehealthService } from "../../lib/api";
+import { apiFetch, telehealthService, providerService } from "../../lib/api";
 
 // ─── Colors ──────────────────────────────────────────────────────────────────
 
@@ -76,6 +76,7 @@ function getStatusStyle(status: string) {
 interface CalendarAppointment {
   id: string;
   patientName: string;
+  providerId: string | null;
   providerName: string;
   typeName: string;
   date: Date;
@@ -93,6 +94,24 @@ interface CalendarAppointment {
    *  parent (recurrence_rule set) or a child (parent_appointment_id
    *  set). Drives "Skip this week" and "Apply to series" UI. */
   isRecurring?: boolean;
+}
+
+/**
+ * Personal-calendar event imported from the provider's external
+ * iCal feed (Google/Apple/Outlook). Rendered as a gray, non-
+ * clickable block on the calendar grid so the practice can see
+ * when the provider is unavailable. Title is intentionally never
+ * shown — patient-facing surfaces and admins both see "Busy".
+ */
+interface BusyBlock {
+  id: string;
+  providerId: string;
+  providerName: string;
+  date: Date;
+  startHour: number;
+  startMinute: number;
+  durationMinutes: number;
+  allDay: boolean;
 }
 
 type ViewMode = "day" | "week" | "month" | "list";
@@ -142,6 +161,7 @@ function mapAppointment(api: ApiAppointment): CalendarAppointment | null {
   return {
     id: api.id,
     patientName,
+    providerId: api.providerId ?? api.provider_id ?? api.provider?.id ?? null,
     providerName,
     typeName: t?.name ?? "Appointment",
     date: dt,
@@ -873,6 +893,11 @@ function CalendarViewInner({ onAppointmentClick, onBookNew, onReschedule }: Cale
   const [viewMode, setViewMode] = useState<ViewMode>("week");
   const [currentDate, setCurrentDate] = useState(new Date());
   const [appointments, setAppointments] = useState<CalendarAppointment[]>([]);
+  // External busy blocks fetched per provider seen in the appointment
+  // payload. Rendered as gray non-clickable strips alongside real
+  // appointments so admins can see when a provider is unavailable
+  // due to a personal-calendar event.
+  const [busyBlocks, setBusyBlocks] = useState<BusyBlock[]>([]);
   // Toolbar filters — client-side narrow on the already-fetched window.
   // "all" = no filter for that dimension. Provider id "all" leaves the
   // dropdown showing all unique providers in the visible appointments.
@@ -1085,7 +1110,44 @@ function CalendarViewInner({ onAppointmentClick, onBookNew, onReschedule }: Cale
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           ? (raw as any).data.data
           : [];
-    setAppointments(items.map(mapAppointment).filter((a): a is CalendarAppointment => a !== null));
+    const mapped = items.map(mapAppointment).filter((a): a is CalendarAppointment => a !== null);
+    setAppointments(mapped);
+
+    // Pull busy blocks (personal-calendar imports) for every provider
+    // visible in the appointment list. A provider with no personal
+    // calendar configured returns an empty array — no harm. Failures
+    // don't block the appointment grid; we just render zero blocks.
+    const providerIdToName = new Map<string, string>();
+    mapped.forEach((a) => {
+      if (a.providerId) providerIdToName.set(a.providerId, a.providerName);
+    });
+
+    if (providerIdToName.size === 0) {
+      setBusyBlocks([]);
+    } else {
+      const tasks = Array.from(providerIdToName.entries()).map(async ([pid, pname]) => {
+        const r = await providerService.getBusyBlocks(pid, range.from, range.to);
+        if (!r.data) return [] as BusyBlock[];
+        return r.data.map((b): BusyBlock | null => {
+          const start = new Date(b.starts_at);
+          const end = new Date(b.ends_at);
+          if (isNaN(start.getTime()) || isNaN(end.getTime())) return null;
+          const durationMinutes = Math.max(15, Math.round((end.getTime() - start.getTime()) / 60000));
+          return {
+            id: b.id,
+            providerId: pid,
+            providerName: pname,
+            date: start,
+            startHour: start.getHours(),
+            startMinute: start.getMinutes(),
+            durationMinutes,
+            allDay: !!b.all_day,
+          };
+        }).filter((b): b is BusyBlock => b !== null);
+      });
+      const all = (await Promise.all(tasks)).flat();
+      setBusyBlocks(all);
+    }
   }, [range.from, range.to]);
 
   useEffect(() => { void reload(); }, [reload]);
@@ -1351,6 +1413,52 @@ function CalendarViewInner({ onAppointmentClick, onBookNew, onReschedule }: Cale
     return filteredAppointments.filter((a) => isSameDay(a.date, date));
   }
 
+  // Honor the provider filter for busy blocks too — when an admin
+  // filters down to one provider, we only show that provider's
+  // personal-calendar blocks.
+  function getBusyBlocksForDay(date: Date): BusyBlock[] {
+    return busyBlocks.filter((b) => {
+      if (filterProvider !== "all" && b.providerName !== filterProvider) return false;
+      return isSameDay(b.date, date);
+    });
+  }
+
+  // Render a single gray busy block. Same time math as
+  // renderAppointmentBlock so the two render in the same coordinate
+  // system. Non-clickable, no dropdown — these are read-only personal
+  // commitments. Z-index sits BEHIND appointments so that if an
+  // appointment somehow overlaps a busy block (shouldn't happen, but
+  // could during the 15-min sync lag), the appointment wins visually.
+  function renderBusyBlock(b: BusyBlock) {
+    const topPercent = ((b.startHour * 60 + b.startMinute - 7 * 60) / (13 * 60)) * 100;
+    const heightPercent = (b.durationMinutes / (13 * 60)) * 100;
+    // Skip blocks entirely outside the visible 7am-8pm window so we
+    // don't render off-screen / negative-height strips.
+    if (topPercent + heightPercent < 0 || topPercent > 100) return null;
+    return (
+      <div
+        key={b.id}
+        className="absolute left-1 right-1 rounded-md overflow-hidden text-left z-0"
+        style={{
+          top: `${Math.max(topPercent, 0)}%`,
+          height: `${Math.max(heightPercent, 1.5)}%`,
+          backgroundColor: "rgba(100, 116, 139, 0.18)", // slate-500 @ 18% — quiet
+          backgroundImage: "repeating-linear-gradient(135deg, transparent 0 6px, rgba(255,255,255,0.35) 6px 7px)",
+          border: `1px dashed ${C.slate400}`,
+          pointerEvents: "none",
+        }}
+        title={`${b.providerName} — Busy (personal calendar)`}
+      >
+        <div
+          className="px-1.5 py-0.5 text-[10px] font-medium truncate"
+          style={{ color: C.slate600 }}
+        >
+          Busy
+        </div>
+      </div>
+    );
+  }
+
   // ─── Current Time Indicator ───────────────────────────────────────────────
 
   const now = new Date();
@@ -1469,6 +1577,7 @@ function CalendarViewInner({ onAppointmentClick, onBookNew, onReschedule }: Cale
 
   function renderDayView() {
     const dayAppts = getAppointmentsForDay(currentDate);
+    const dayBusy = getBusyBlocksForDay(currentDate);
 
     return (
       <div className="glass rounded-xl overflow-hidden">
@@ -1507,6 +1616,9 @@ function CalendarViewInner({ onAppointmentClick, onBookNew, onReschedule }: Cale
                 );
               })}
             </div>
+            {/* Personal-calendar busy blocks render BEHIND appointments
+                so a (rare) overlap doesn't hide a real appointment. */}
+            {dayBusy.map((b) => renderBusyBlock(b))}
             {/* Foreground: appointment blocks + current-time indicator. */}
             {dayAppts.map((apt) => renderAppointmentBlock(apt))}
             {isSameDay(currentDate, now) && timeIndicatorTop >= 0 && timeIndicatorTop <= 100 && (
@@ -1575,6 +1687,7 @@ function CalendarViewInner({ onAppointmentClick, onBookNew, onReschedule }: Cale
           <div className="absolute left-16 right-0 top-0 bottom-0 flex">
             {weekDays.map((day) => {
               const dayAppts = getAppointmentsForDay(day);
+              const dayBusy = getBusyBlocksForDay(day);
               return (
                 <div
                   key={day.toISOString()}
@@ -1601,6 +1714,9 @@ function CalendarViewInner({ onAppointmentClick, onBookNew, onReschedule }: Cale
                       );
                     })}
                   </div>
+                  {/* Personal-calendar busy blocks render BEHIND
+                      appointments. */}
+                  {dayBusy.map((b) => renderBusyBlock(b))}
                   {/* Foreground: appointment blocks. */}
                   {dayAppts.map((apt) => renderAppointmentBlock(apt, true))}
                 </div>

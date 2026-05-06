@@ -615,6 +615,60 @@ class ProviderController extends Controller
     }
 
     /**
+     * GET /providers/{id}/busy-blocks?date_from=&date_to=
+     *
+     * List external busy blocks (personal calendar imports) for the
+     * given window. Used by the practice calendar grid to render
+     * personal-calendar events as gray "busy" blocks alongside
+     * patient appointments.
+     *
+     * No PHI in the payload — summaries are intentionally omitted
+     * because the calendar grid is shared with practice admins; the
+     * provider's personal event titles shouldn't leak across that
+     * boundary. Just start/end times with a generic "Busy" label.
+     *
+     * Auth: practice_admin / superadmin / staff / provider can read
+     * any provider in their tenant. The data is non-sensitive
+     * (time blocks only); the encrypted URL stays on the provider row.
+     */
+    public function busyBlocks(Request $request, string $id): JsonResponse
+    {
+        $user = $request->user();
+        $provider = Provider::where('tenant_id', $user->tenant_id)->findOrFail($id);
+
+        if (!in_array($user->role, ['superadmin', 'practice_admin', 'provider', 'staff'], true)) {
+            abort(403);
+        }
+
+        $dateFrom = $request->input('date_from');
+        $dateTo = $request->input('date_to');
+
+        $query = $provider->externalBusyBlocks()
+            ->orderBy('starts_at');
+
+        if ($dateFrom) {
+            $query->where('ends_at', '>=', $dateFrom);
+        }
+        if ($dateTo) {
+            // include the whole "to" day
+            $query->where('starts_at', '<=', $dateTo . ' 23:59:59');
+        }
+
+        $blocks = $query->get(['id', 'starts_at', 'ends_at', 'all_day']);
+
+        return response()->json([
+            'data' => $blocks->map(fn ($b) => [
+                'id' => $b->id,
+                'starts_at' => $b->starts_at,
+                'ends_at' => $b->ends_at,
+                'all_day' => $b->all_day,
+                // Generic label only — see method docblock for why.
+                'label' => 'Busy',
+            ]),
+        ]);
+    }
+
+    /**
      * POST /providers/{id}/external-calendar/sync
      *
      * Manual sync trigger. Useful right after pasting a new URL
