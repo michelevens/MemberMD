@@ -1027,6 +1027,23 @@ export function PracticePortal() {
     }
   };
   const [activeTab, setActiveTab] = useState<TabId>("dashboard");
+
+  // URL → activeTab sync. The portal mostly drives navigation via
+  // sidebar clicks (state), but anchor links elsewhere in the app
+  // navigate to /practice/settings (or other deep links). Without
+  // this effect the URL bar updates but the rendered tab doesn't
+  // change. Mapping just the routes that have anchor entry points
+  // — providers/encounters use their own URL-routed detail pages.
+  useEffect(() => {
+    const path = location.pathname;
+    if (path === "/practice/settings") {
+      setActiveTab("practice-settings");
+    } else if (path === "/practice/branding") {
+      setActiveTab("branding");
+    } else if (path === "/practice/messages") {
+      setActiveTab("messages");
+    }
+  }, [location.pathname]);
   const [selectedThread, setSelectedThread] = useState(isDemoMode ? MOCK_THREADS[0].id : "");
   const [searchQuery, setSearchQuery] = useState("");
   // Stripe-style roster: stackable filter chips on top of the existing search.
@@ -10284,8 +10301,15 @@ export function PracticePortal() {
         return renderRecentActivity();
       case "a-la-carte":
         return <ALaCarteTab />;
-      case "practice-settings":
-        return <PracticeSettings />;
+      case "practice-settings": {
+        // Honor ?tab=… in the URL so deep links from elsewhere in the
+        // app (e.g. the "connect Stripe in Settings → Payments" hint
+        // on the appointment type editor) open the right sub-tab.
+        // location.search exposes the post-? query string under
+        // HashRouter just like under BrowserRouter.
+        const tabFromUrl = new URLSearchParams(location.search).get("tab");
+        return <PracticeSettings initialTab={tabFromUrl ?? undefined} />;
+      }
       case "branding":
         return <PracticeSettings initialTab="branding" />;
       default:

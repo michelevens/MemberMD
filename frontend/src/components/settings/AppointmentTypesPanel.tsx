@@ -399,7 +399,7 @@ function TypeEditor({
               <p className="font-semibold mb-0.5">Stripe Connect setup required</p>
               <p className="text-amber-800">
                 Connect Stripe in{" "}
-                <a href="#/practice/settings?tab=billing" className="underline font-medium">Settings → Billing</a>{" "}
+                <a href="#/practice/settings?tab=payments" className="underline font-medium">Settings → Payments</a>{" "}
                 to enable cash-pay visit types. Without an active Connect account, payments can't be processed.
               </p>
             </div>
@@ -445,7 +445,7 @@ function TypeEditor({
             {stripeReady === false && (
               <div className="rounded border border-amber-200 bg-amber-50 px-2 py-1.5 text-[11px] text-amber-900">
                 ⚠ Stripe Connect isn't active. Visitors will see "practice not yet set up to accept payments" until you{" "}
-                <a href="#/practice/settings?tab=billing" className="underline font-medium">connect Stripe</a>.
+                <a href="#/practice/settings?tab=payments" className="underline font-medium">connect Stripe</a>.
               </div>
             )}
             <p className="text-[11px] text-slate-500 leading-relaxed">

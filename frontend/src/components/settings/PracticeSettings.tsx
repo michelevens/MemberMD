@@ -519,6 +519,18 @@ export function PracticeSettings({ initialTab }: { initialTab?: string }) {
   const [activeTab, setActiveTab] = useState<PracticeTab>(resolveTab(initialTab));
   const [hasChanges, setHasChanges] = useState(false);
 
+  // React to initialTab changes after mount. Anchor links from
+  // elsewhere in the app (e.g. cash-pay setup hint → ?tab=payments)
+  // re-render this component with a new initialTab without unmounting,
+  // and useState only honors the initializer on the first render.
+  useEffect(() => {
+    if (initialTab) {
+      const resolved = resolveTab(initialTab);
+      setActiveTab(resolved);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialTab]);
+
   const markChanged = () => { if (!hasChanges) setHasChanges(true); };
 
   const handleSave = async () => {
