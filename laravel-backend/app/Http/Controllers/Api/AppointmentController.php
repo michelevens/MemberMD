@@ -223,6 +223,27 @@ class AppointmentController extends Controller
                     ], 422));
                 }
 
+                // Block over imported personal-calendar events too. The
+                // booking widget already filters these out via
+                // AvailabilityService::getAvailableSlots(), but this
+                // endpoint also serves staff "New Appointment" dialogs
+                // that pick a free-form scheduled_at — without this guard,
+                // staff could double-book over a provider's personal
+                // commitment because they don't see those blocks while
+                // typing a time. No buffer applied (personal commitments
+                // aren't visits).
+                $externalConflict = \App\Models\ExternalBusyBlock::where('provider_id', $validated['provider_id'])
+                    ->where('starts_at', '<', $endTime)
+                    ->where('ends_at', '>', $scheduledAt)
+                    ->exists();
+
+                if ($externalConflict) {
+                    abort(response()->json([
+                        'message' => 'This time conflicts with the provider\'s personal calendar.',
+                        'errors' => ['scheduled_at' => ['Provider has a personal commitment at this time.']],
+                    ], 422));
+                }
+
                 $validated['tenant_id'] = $user->tenant_id;
                 $validated['status'] = 'scheduled';
                 $validated['confirmed_at'] = $isPatientBooking ? null : now();

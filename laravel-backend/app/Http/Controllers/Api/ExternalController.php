@@ -3,8 +3,11 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Mail\AppointmentConfirmation;
 use App\Mail\MembershipActivated;
 use App\Events\MembershipStateChanged;
+use App\Models\Appointment;
+use App\Models\AppointmentType;
 use App\Models\ConsentSignature;
 use App\Models\ConsentTemplate;
 use App\Models\MembershipPlan;
@@ -13,10 +16,14 @@ use App\Models\PatientEntitlement;
 use App\Models\PatientMembership;
 use App\Models\PendingEnrollment;
 use App\Models\Practice;
+use App\Models\Provider;
 use App\Models\User;
+use App\Models\WidgetSubmission;
+use App\Services\AvailabilityService;
 use App\Services\IdempotencyService;
 use App\Services\MembershipEnrollmentService;
 use App\Services\StripeSubscriptionService;
+use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
@@ -713,5 +720,308 @@ class ExternalController extends Controller
                     ->count(),
             ],
         ]);
+    }
+
+    // ─── Public Booking Widget endpoints ────────────────────────────
+    //
+    // Powers the iframe-embeddable booking widget the practice can drop
+    // onto their marketing site. Visitors don't need an account; the
+    // submit endpoint creates a "lead" patient (status active, role
+    // patient) along with a pending appointment that the practice
+    // approves from the intake queue.
+    //
+    // Order of calls from the frontend:
+    //   1) GET /external/booking/{tenantCode}/options       — landing data
+    //   2) GET /external/booking/{tenantCode}/slots         — slot grid
+    //   3) POST /external/booking/{tenantCode}              — submit
+    //
+    // None of these require auth. Slot listing reuses AvailabilityService
+    // so external_busy_blocks (Path A imports) automatically block
+    // visitor-bookable times.
+
+    /**
+     * GET /external/booking/{tenantCode}/options
+     *
+     * Landing payload — practice name, providers accepting new patients,
+     * appointment types flagged is_public. Frontend uses this to
+     * populate the dropdowns on the first screen.
+     */
+    public function bookingOptions(string $tenantCode): JsonResponse
+    {
+        $practice = Practice::where('tenant_code', $tenantCode)
+            ->where('is_active', true)
+            ->first();
+
+        if (!$practice) {
+            return response()->json(['error' => 'Practice not found'], 404);
+        }
+
+        $providers = Provider::where('tenant_id', $practice->id)
+            ->where('accepts_new_patients', true)
+            ->where(function ($q) {
+                $q->whereNull('status')->orWhere('status', '!=', 'inactive');
+            })
+            ->with('user:id,first_name,last_name,name')
+            ->get(['id', 'user_id', 'title', 'credentials', 'specialty', 'bio', 'telehealth_enabled'])
+            ->map(function ($p) {
+                $u = $p->user;
+                $name = trim(($u?->first_name ?? '') . ' ' . ($u?->last_name ?? '')) ?: ($u?->name ?? 'Provider');
+                return [
+                    'id' => $p->id,
+                    'name' => $name,
+                    'title' => $p->title,
+                    'credentials' => $p->credentials,
+                    'specialty' => $p->specialty,
+                    'bio' => $p->bio,
+                    'telehealth_enabled' => (bool) $p->telehealth_enabled,
+                ];
+            })->values();
+
+        $types = AppointmentType::where('tenant_id', $practice->id)
+            ->where('is_active', true)
+            ->where('is_public', true)
+            ->orderBy('sort_order')
+            ->get(['id', 'name', 'duration_minutes', 'is_telehealth', 'color']);
+
+        return response()->json([
+            'data' => [
+                'practice_name' => $practice->name,
+                'specialty' => $practice->specialty,
+                'timezone' => $practice->timezone,
+                'providers' => $providers,
+                'appointment_types' => $types,
+            ],
+        ]);
+    }
+
+    /**
+     * GET /external/booking/{tenantCode}/slots
+     *   ?provider_id=...&date=YYYY-MM-DD&duration_minutes=30
+     *
+     * Available slots for a given provider/date. Reuses
+     * AvailabilityService — same code path as the patient portal —
+     * so external busy blocks (Path A imports) and existing
+     * appointments both block slots automatically.
+     */
+    public function bookingSlots(Request $request, string $tenantCode): JsonResponse
+    {
+        $practice = Practice::where('tenant_code', $tenantCode)
+            ->where('is_active', true)
+            ->first();
+
+        if (!$practice) {
+            return response()->json(['error' => 'Practice not found'], 404);
+        }
+
+        $validated = $request->validate([
+            'provider_id' => 'required|uuid',
+            'date' => 'required|date_format:Y-m-d',
+            'duration_minutes' => 'sometimes|integer|min:5|max:240',
+        ]);
+
+        // Confirm provider belongs to the tenant — otherwise a
+        // visitor could enumerate other practices' providers.
+        $provider = Provider::where('id', $validated['provider_id'])
+            ->where('tenant_id', $practice->id)
+            ->first();
+        if (!$provider) {
+            return response()->json(['error' => 'Provider not found'], 404);
+        }
+
+        $service = new AvailabilityService();
+        $slots = $service->getAvailableSlots(
+            $provider->id,
+            $validated['date'],
+            (int) ($validated['duration_minutes'] ?? 30),
+            $practice->id,
+        );
+
+        return response()->json(['data' => $slots]);
+    }
+
+    /**
+     * POST /external/booking/{tenantCode}
+     *
+     * Submit a booking from the public widget. Creates:
+     *   - a lead User (role=patient, status=active, random password)
+     *     OR reuses an existing tenant user with the same email
+     *   - a Patient record (idempotent on tenant_id + user_id)
+     *   - a pending Appointment (status=requested, confirmed_at=null)
+     *   - a WidgetSubmission row so the practice intake queue surfaces
+     *     this in their UI
+     *
+     * Sends a "we received your request" email to the visitor. Practice
+     * approves from the intake queue; second email fires on approval.
+     *
+     * Honeypot + a 422 if the slot is no longer available (race window
+     * between slot fetch and submit). Validation errors return cleanly
+     * so the widget can render them inline.
+     */
+    public function bookingSubmit(Request $request, string $tenantCode): JsonResponse
+    {
+        // Honeypot — bots fill the hidden field, real users don't.
+        if ($request->filled('website_url')) {
+            return response()->json(['data' => ['ok' => true, 'reference' => 'BOOK-000000']]);
+        }
+
+        $practice = Practice::where('tenant_code', $tenantCode)
+            ->where('is_active', true)
+            ->first();
+        if (!$practice) {
+            return response()->json(['error' => 'Practice not found'], 404);
+        }
+
+        $validated = $request->validate([
+            'first_name' => 'required|string|max:100',
+            'last_name' => 'required|string|max:100',
+            'email' => 'required|email|max:255',
+            'phone' => 'required|string|max:30',
+            // DOB required because the patients table NOT-NULLs it,
+            // and clinical practices need it for ID/insurance match
+            // anyway. Frontend's contact-info step makes it required.
+            'date_of_birth' => 'required|date|before:today',
+            'reason' => 'nullable|string|max:1000',
+            'provider_id' => 'required|uuid',
+            'appointment_type_id' => 'required|uuid',
+            'scheduled_at' => 'required|date|after:now',
+        ]);
+
+        // Provider + appointment type must belong to this tenant
+        // AND the type must be public-bookable.
+        $provider = Provider::where('id', $validated['provider_id'])
+            ->where('tenant_id', $practice->id)
+            ->first();
+        $type = AppointmentType::where('id', $validated['appointment_type_id'])
+            ->where('tenant_id', $practice->id)
+            ->where('is_active', true)
+            ->where('is_public', true)
+            ->first();
+
+        if (!$provider) {
+            return response()->json(['error' => 'Provider not found'], 404);
+        }
+        if (!$type) {
+            return response()->json(['error' => 'Appointment type not available for public booking'], 422);
+        }
+
+        $scheduledAt = Carbon::parse($validated['scheduled_at']);
+        $duration = (int) $type->duration_minutes;
+
+        // Final availability check — slot may have been booked by
+        // someone else between the visitor's slot fetch and submit.
+        // Same service the staff side uses; honors external_busy_blocks.
+        $service = new AvailabilityService();
+        if (!$service->isSlotAvailable($provider->id, $scheduledAt->toDateTimeString(), $duration, $practice->id)) {
+            return response()->json([
+                'message' => 'That time is no longer available. Please pick another slot.',
+            ], 422);
+        }
+
+        // Lead user + patient creation. Idempotent per tenant + email
+        // — re-submitting from the same email reuses the existing
+        // Patient row.
+        $user = User::where('tenant_id', $practice->id)
+            ->where('email', $validated['email'])
+            ->first();
+
+        if (!$user) {
+            $user = User::create([
+                'tenant_id' => $practice->id,
+                'name' => trim($validated['first_name'] . ' ' . $validated['last_name']),
+                'first_name' => $validated['first_name'],
+                'last_name' => $validated['last_name'],
+                'email' => $validated['email'],
+                'password' => Hash::make(Str::random(16)),
+                'role' => 'patient',
+                'status' => 'active',
+            ]);
+        }
+
+        $patient = Patient::updateOrCreate(
+            [
+                'tenant_id' => $practice->id,
+                'user_id' => $user->id,
+            ],
+            [
+                'first_name' => $validated['first_name'],
+                'last_name' => $validated['last_name'],
+                'email' => $validated['email'],
+                'phone' => $validated['phone'],
+                'date_of_birth' => $validated['date_of_birth'] ?? null,
+                'is_active' => true,
+            ]
+        );
+
+        // Pending appointment — confirmed_at=null marks it as
+        // patient-self-booked / awaiting staff confirmation. The
+        // practice's existing "pending appointments" UI surfaces
+        // these alongside patient-portal self-bookings.
+        $appointment = Appointment::create([
+            'tenant_id' => $practice->id,
+            'patient_id' => $patient->id,
+            'provider_id' => $provider->id,
+            'appointment_type_id' => $type->id,
+            'scheduled_at' => $scheduledAt,
+            'duration_minutes' => $duration,
+            'is_telehealth' => (bool) $type->is_telehealth,
+            // Pending = awaiting practice confirmation, same shape as
+            // patient-self-booked appointments. confirmed_at=null is
+            // the canonical "needs review" signal in the existing
+            // queue UI.
+            'status' => 'pending',
+            'confirmed_at' => null,
+            'reason_for_visit' => $validated['reason'] ?? null,
+        ]);
+
+        // Drop a WidgetSubmission row so the practice's intake queue
+        // shows the lead. Stores the raw form for audit / triage.
+        try {
+            WidgetSubmission::create([
+                'tenant_id' => $practice->id,
+                'type' => 'booking',
+                'status' => 'pending',
+                'data' => array_merge($validated, [
+                    'appointment_id' => $appointment->id,
+                    'patient_id' => $patient->id,
+                ]),
+                'ip_address' => $request->ip(),
+                'user_agent' => substr((string) $request->userAgent(), 0, 500),
+                'referrer_url' => substr((string) $request->header('Referer'), 0, 500),
+                'converted_patient_id' => $patient->id,
+            ]);
+        } catch (Throwable $e) {
+            Log::warning('Failed to record widget submission for booking', [
+                'practice_id' => $practice->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        // Email confirmation to the visitor. We reuse the existing
+        // AppointmentConfirmation mailable so the practice's branded
+        // template lands consistently. The body view already handles
+        // patient timezone and the optional video link. A dedicated
+        // "request received, awaiting confirmation" subject + copy is
+        // a follow-up — for now the visitor gets the same email a
+        // staff-booked appointment would trigger.
+        try {
+            $appointment->load(['patient', 'provider.user', 'appointmentType']);
+            Mail::to($validated['email'])->send(
+                new AppointmentConfirmation($appointment, $patient, $practice)
+            );
+        } catch (Throwable $e) {
+            Log::warning('Failed to send booking-request email', [
+                'appointment_id' => $appointment->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        return response()->json([
+            'data' => [
+                'ok' => true,
+                'appointment_id' => $appointment->id,
+                'reference' => 'BOOK-' . substr($appointment->id, 0, 8),
+                'message' => 'Request received. The practice will confirm by email.',
+            ],
+        ], 201);
     }
 }

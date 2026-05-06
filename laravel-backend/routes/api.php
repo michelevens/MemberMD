@@ -117,6 +117,13 @@ Route::prefix('external')->middleware('throttle:60,1')->group(function () {
     Route::get('/signature-requests/{token}', [\App\Http\Controllers\Api\SignatureRequestController::class, 'publicShow']);
     Route::post('/signature-requests/{token}/sign', [\App\Http\Controllers\Api\SignatureRequestController::class, 'publicSign'])->middleware('throttle:10,1');
     Route::post('/signature-requests/{token}/viewed', [\App\Http\Controllers\Api\SignatureRequestController::class, 'publicMarkViewed'])->middleware('throttle:30,1');
+
+    // Public booking widget — embeddable on the practice's marketing
+    // site. options/slots are read-heavy, low risk; submit is rate-
+    // limited harder (5/min/IP) since it creates DB rows + sends email.
+    Route::get('/booking/{tenantCode}/options', [ExternalController::class, 'bookingOptions']);
+    Route::get('/booking/{tenantCode}/slots', [ExternalController::class, 'bookingSlots']);
+    Route::post('/booking/{tenantCode}', [ExternalController::class, 'bookingSubmit'])->middleware('throttle:5,1');
 });
 
 // ===== Resend webhook (public, shared-secret) =====
