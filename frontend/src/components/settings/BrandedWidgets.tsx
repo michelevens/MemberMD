@@ -780,14 +780,37 @@ function EmbedPanel() {
 
       <div className="rounded-2xl border p-5 flex items-start gap-3" style={{ backgroundColor: C.slate50, borderColor: C.slate200 }}>
         <ExternalLink className="w-4 h-4 shrink-0 mt-0.5" style={{ color: C.slate500 }} />
-        <div className="text-xs" style={{ color: C.slate600 }}>
-          <p className="font-semibold mb-1">Test your embed</p>
-          <p>
-            Open <a href={enrollUrl} target="_blank" rel="noreferrer" className="underline" style={{ color: C.teal600 }}>{enrollUrl}</a>{" "}
-            in a new tab. Members reach your enrollment flow with your branded theme applied.
+        <div className="text-xs flex-1" style={{ color: C.slate600 }}>
+          <p className="font-semibold mb-2">Preview your widgets</p>
+          <p className="mb-3">
+            Open each in a new tab to see exactly what website visitors see — your branded theme is applied automatically.
           </p>
+          <div className="flex flex-col gap-1.5">
+            <PreviewLink label="Enrollment" url={enrollUrl} />
+            <PreviewLink label="Plan comparison" url={plansUrl} />
+            <PreviewLink label="Booking" url={bookUrl} />
+          </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+function PreviewLink({ label, url }: { label: string; url: string }) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="text-[10px] uppercase font-semibold tracking-wide w-24 shrink-0" style={{ color: C.slate500 }}>
+        {label}
+      </span>
+      <a
+        href={url}
+        target="_blank"
+        rel="noreferrer"
+        className="underline truncate"
+        style={{ color: C.teal600 }}
+      >
+        {url}
+      </a>
     </div>
   );
 }
