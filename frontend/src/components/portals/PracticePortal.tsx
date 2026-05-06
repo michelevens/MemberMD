@@ -1861,15 +1861,44 @@ export function PracticePortal() {
   // telehealth session — without this, the "Today's schedule" widget
   // still shows the just-completed visit with a stale "Start video"
   // CTA until a manual refresh.
+  //
+  // GUARDRAILS: the original implementation fired on EVERY focus +
+  // visibilitychange event, which meant every cmd-tab back to the
+  // browser kicked off loadPracticeData() (17 parallel API calls).
+  // Three rules below to keep the listener honest:
+  //   1) Only refetch when the page was hidden for ≥ 30s. Brief
+  //      cmd-tabs (less than 30s) don't justify a full data sweep.
+  //   2) Throttle to at most once per 60s, regardless. If user
+  //      backgrounds + foregrounds rapidly, only one refetch fires.
+  //   3) `focus` is dropped entirely — `visibilitychange` is the
+  //      authoritative signal for "page became visible." The
+  //      window `focus` event ALSO fires when an iframe inside the
+  //      page gains focus (e.g. Stripe Checkout iframe, the
+  //      embedded YouTube video, etc.) — those weren't the
+  //      intended trigger.
   useEffect(() => {
-    const onVisible = () => {
-      if (document.visibilityState === "visible") loadPracticeData();
+    let lastHiddenAt = 0;
+    let lastRefetchAt = 0;
+    const HIDDEN_THRESHOLD_MS = 30_000;
+    const REFETCH_THROTTLE_MS = 60_000;
+
+    const onVisibilityChange = () => {
+      const now = Date.now();
+      if (document.visibilityState === "hidden") {
+        lastHiddenAt = now;
+        return;
+      }
+      if (document.visibilityState !== "visible") return;
+      const hiddenForMs = lastHiddenAt > 0 ? now - lastHiddenAt : 0;
+      if (hiddenForMs < HIDDEN_THRESHOLD_MS) return;
+      if (now - lastRefetchAt < REFETCH_THROTTLE_MS) return;
+      lastRefetchAt = now;
+      loadPracticeData();
     };
-    window.addEventListener("focus", onVisible);
-    document.addEventListener("visibilitychange", onVisible);
+
+    document.addEventListener("visibilitychange", onVisibilityChange);
     return () => {
-      window.removeEventListener("focus", onVisible);
-      document.removeEventListener("visibilitychange", onVisible);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
     };
   }, [loadPracticeData]);
 

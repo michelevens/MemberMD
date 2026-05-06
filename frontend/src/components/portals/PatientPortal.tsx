@@ -1072,19 +1072,34 @@ export function PatientPortal() {
 
   useEffect(() => { loadPatientData(); }, [loadPatientData]);
 
-  // Refetch on focus / visibility — same rationale as PracticePortal:
-  // after the patient finishes a telehealth session and returns here,
-  // the past-appointments list needs to refresh so the just-ended visit
-  // moves from Upcoming to Past.
+  // Refetch on visibility — same rationale + same guardrails as
+  // PracticePortal. Only refire when the page was hidden ≥ 30s, then
+  // throttle to once per 60s. Drop the focus listener (visibilitychange
+  // is enough; focus also fires when iframes gain focus, which we
+  // don't want).
   useEffect(() => {
-    const onVisible = () => {
-      if (document.visibilityState === "visible") loadPatientData();
+    let lastHiddenAt = 0;
+    let lastRefetchAt = 0;
+    const HIDDEN_THRESHOLD_MS = 30_000;
+    const REFETCH_THROTTLE_MS = 60_000;
+
+    const onVisibilityChange = () => {
+      const now = Date.now();
+      if (document.visibilityState === "hidden") {
+        lastHiddenAt = now;
+        return;
+      }
+      if (document.visibilityState !== "visible") return;
+      const hiddenForMs = lastHiddenAt > 0 ? now - lastHiddenAt : 0;
+      if (hiddenForMs < HIDDEN_THRESHOLD_MS) return;
+      if (now - lastRefetchAt < REFETCH_THROTTLE_MS) return;
+      lastRefetchAt = now;
+      loadPatientData();
     };
-    window.addEventListener("focus", onVisible);
-    document.addEventListener("visibilitychange", onVisible);
+
+    document.addEventListener("visibilitychange", onVisibilityChange);
     return () => {
-      window.removeEventListener("focus", onVisible);
-      document.removeEventListener("visibilitychange", onVisible);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
     };
   }, [loadPatientData]);
 
