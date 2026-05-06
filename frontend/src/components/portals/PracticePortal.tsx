@@ -96,6 +96,8 @@ import {
   Trash2,
   Megaphone,
   ChevronRight,
+  Sparkles,
+  Loader2,
 } from "lucide-react";
 import { RefreshButton } from "../shared/RefreshButton";
 import { OnboardingChecklist, ConnectSetupBanner } from "../shared/OnboardingChecklist";
@@ -1404,6 +1406,9 @@ export function PracticePortal() {
 
   // ─── Create Plan Modal ─────────────────────────────────────────────
   const [showCreatePlan, setShowCreatePlan] = useState(false);
+  // Starter plans dialog — preview specialty-curated plan templates
+  // and fork them into real MembershipPlan rows with one click.
+  const [showStarterPlans, setShowStarterPlans] = useState(false);
   const [createPlanForm, setCreatePlanForm] = useState({ name: "", monthlyPrice: "", annualPrice: "", enrollmentFee: "", description: "" });
   const [createPlanLoading, setCreatePlanLoading] = useState(false);
 
@@ -6459,6 +6464,14 @@ export function PracticePortal() {
           <div className="flex items-center gap-2">
             <RefreshButton onRefresh={loadPracticeData} title="Refresh plans" />
             <button
+              onClick={() => setShowStarterPlans(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+              title="Browse curated plan templates for your specialty"
+            >
+              <Sparkles className="w-4 h-4 text-purple-500" />
+              Starter plans
+            </button>
+            <button
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium text-white shadow-sm transition-colors"
               style={{ backgroundColor: "#635bff" }}
               onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#544ee0")}
@@ -6489,9 +6502,33 @@ export function PracticePortal() {
 
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
           {planList.length === 0 && (
-            <div className="col-span-full py-12 text-center text-slate-400">
-              <CreditCard className="w-10 h-10 mx-auto mb-2 opacity-40" />
-              <p>No membership plans configured yet.</p>
+            <div className="col-span-full">
+              <div className="rounded-2xl border-2 border-dashed border-slate-200 bg-white px-8 py-12 text-center">
+                <div className="w-12 h-12 rounded-full mx-auto mb-3 flex items-center justify-center bg-purple-100">
+                  <Sparkles className="w-6 h-6 text-purple-600" />
+                </div>
+                <h3 className="text-base font-semibold text-slate-900 mb-1">No membership plans yet</h3>
+                <p className="text-sm text-slate-500 max-w-md mx-auto mb-5">
+                  Get started with curated plans for your specialty, or build your own from scratch. Our templates use real-world pricing and benefits — edit anything before publishing.
+                </p>
+                <div className="flex items-center justify-center gap-2">
+                  <button
+                    onClick={() => setShowStarterPlans(true)}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-md text-sm font-semibold text-white"
+                    style={{ backgroundColor: "#7c3aed" }}
+                  >
+                    <Sparkles className="w-4 h-4" />
+                    Browse starter plans
+                  </button>
+                  <button
+                    onClick={() => setShowCreatePlan(true)}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-md text-sm font-medium border border-slate-200 text-slate-700 hover:bg-slate-50"
+                  >
+                    <Plus className="w-4 h-4" />
+                    Create from scratch
+                  </button>
+                </div>
+              </div>
             </div>
           )}
           {planList.map((plan) => {
@@ -6674,6 +6711,25 @@ export function PracticePortal() {
             <p className="text-sm text-slate-400 mt-1 text-center">Create a membership tier</p>
           </div>
         </div>
+
+        {/* Starter Plans dialog — preview + fork specialty-curated
+            templates. Renders in the same modal stack as Create Plan. */}
+        {showStarterPlans && (
+          <StarterPlansDialog
+            onClose={() => setShowStarterPlans(false)}
+            onForked={(count) => {
+              setShowStarterPlans(false);
+              setToast({
+                message: count > 0
+                  ? `Added ${count} starter plan${count === 1 ? "" : "s"}.`
+                  : "All starter plans already exist — nothing to add.",
+                type: "success",
+              });
+              loadPracticeData();
+            }}
+            setToast={setToast}
+          />
+        )}
 
         {/* Create Plan Modal */}
         {showCreatePlan && (
@@ -12125,5 +12181,256 @@ export function PracticePortal() {
       )}
 
     </>
+  );
+}
+
+// ─── StarterPlansDialog ───────────────────────────────────────────────
+//
+// Preview the practice's specialty-curated plan templates and fork
+// them into real MembershipPlan rows in one click. Backed by the
+// existing /external/plan-templates endpoint (preview, public) plus
+// /practice/starter-plans (fork, authenticated).
+//
+// Idempotent — backend skips templates whose name already matches an
+// existing plan, so re-clicking "Add" doesn't duplicate.
+
+interface StarterPlanBlueprint {
+  id: string;
+  name: string;
+  monthly_price: number | null;
+  annual_price: number | null;
+  visits_per_month: number | null;
+  telehealth_included: boolean;
+  messaging_included: boolean;
+  messaging_response_sla_hours: number | null;
+  crisis_support: boolean;
+  badge_text: string | null;
+}
+
+function StarterPlansDialog({
+  onClose,
+  onForked,
+  setToast,
+}: {
+  onClose: () => void;
+  onForked: (count: number) => void;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  setToast: (t: { message: string; type: "success" | "error" } | null) => void;
+}) {
+  const auth = useAuth();
+  // Practice specialty drives which templates we show. Fall through
+  // to "primary_care" so the dialog still works for practices that
+  // skipped specialty selection at signup (rare, but possible).
+  const practiceSpecialty =
+    (auth.user as { practice?: { specialty?: string } } | null)?.practice?.specialty
+    ?? "primary_care";
+  const specialtyCode = String(practiceSpecialty).toLowerCase().replace(/\s+/g, "_");
+
+  const [loading, setLoading] = useState(true);
+  const [blueprints, setBlueprints] = useState<StarterPlanBlueprint[]>([]);
+  const [specialtyName, setSpecialtyName] = useState<string>(specialtyCode);
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [forking, setForking] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      // Public endpoint, no auth needed — same one PracticeRegistration
+      // uses to preview during signup.
+      try {
+        const apiBase = (import.meta.env.VITE_API_URL as string | undefined) || "/api";
+        const res = await fetch(`${apiBase}/plan-templates?specialty=${encodeURIComponent(specialtyCode)}`);
+        const json = await res.json();
+        if (cancelled) return;
+        const data: StarterPlanBlueprint[] = Array.isArray(json.data) ? json.data : [];
+        setBlueprints(data);
+        setSpecialtyName(json.specialty?.name ?? specialtyCode);
+        // Default: select all.
+        setSelected(new Set(data.map((_, i) => i)));
+      } catch {
+        if (!cancelled) {
+          setToast({ message: "Couldn't load starter plans. Try again.", type: "error" });
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [specialtyCode, setToast]);
+
+  const toggle = (i: number) => {
+    const next = new Set(selected);
+    if (next.has(i)) next.delete(i);
+    else next.add(i);
+    setSelected(next);
+  };
+
+  const fork = async () => {
+    if (selected.size === 0) {
+      setToast({ message: "Pick at least one plan to add.", type: "error" });
+      return;
+    }
+    setForking(true);
+    const res = await onboardingService.forkStarterPlans({
+      specialtyCode,
+      planIndices: Array.from(selected).sort((a, b) => a - b),
+    });
+    setForking(false);
+    if (res.error) {
+      setToast({ message: res.error, type: "error" });
+      return;
+    }
+    onForked(res.data?.created ?? 0);
+  };
+
+  const fmtPrice = (cents: number | null): string => {
+    if (cents == null) return "—";
+    return new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: "USD",
+      maximumFractionDigits: cents % 1 === 0 ? 0 : 2,
+    }).format(cents);
+  };
+
+  const fmtVisits = (n: number | null): string => {
+    if (n == null) return "—";
+    if (n === -1) return "Unlimited visits";
+    return `${n} visit${n === 1 ? "" : "s"}/mo`;
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: "rgba(0,0,0,0.4)" }}>
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-3xl max-h-[90vh] flex flex-col">
+        <div className="px-6 py-4 border-b border-slate-100 flex items-start justify-between">
+          <div>
+            <h2 className="text-lg font-semibold text-slate-900 flex items-center gap-2">
+              <Sparkles className="w-5 h-5 text-purple-500" />
+              Starter plans for {specialtyName}
+            </h2>
+            <p className="text-sm text-slate-500 mt-0.5">
+              Curated tiers with real-world pricing for your specialty. Pick any combination — you can edit prices, visits, and benefits after they're added.
+            </p>
+          </div>
+          <button onClick={onClose} className="p-1.5 rounded hover:bg-slate-100 text-slate-400">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-6 py-5">
+          {loading && (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="w-6 h-6 animate-spin text-slate-400" />
+            </div>
+          )}
+          {!loading && blueprints.length === 0 && (
+            <div className="py-12 text-center text-slate-400">
+              <p className="text-sm">No starter plans configured for this specialty yet.</p>
+            </div>
+          )}
+          {!loading && blueprints.length > 0 && (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              {blueprints.map((bp, i) => {
+                const isSelected = selected.has(i);
+                return (
+                  <button
+                    key={bp.id}
+                    type="button"
+                    onClick={() => toggle(i)}
+                    className="text-left rounded-xl border-2 transition-all p-4 flex flex-col"
+                    style={{
+                      borderColor: isSelected ? "#7c3aed" : "#e2e8f0",
+                      backgroundColor: isSelected ? "#faf5ff" : "#ffffff",
+                    }}
+                  >
+                    <div className="flex items-start justify-between mb-2">
+                      <h3 className="font-semibold text-slate-900">{bp.name}</h3>
+                      {bp.badge_text && (
+                        <span
+                          className="text-[10px] uppercase font-bold px-2 py-0.5 rounded-full"
+                          style={{ backgroundColor: "#fef3c7", color: "#92400e" }}
+                        >
+                          {bp.badge_text}
+                        </span>
+                      )}
+                    </div>
+                    <div className="mb-3">
+                      <p className="text-2xl font-bold text-slate-900">{fmtPrice(bp.monthly_price)}<span className="text-sm font-normal text-slate-500">/mo</span></p>
+                      {bp.annual_price && (
+                        <p className="text-xs text-slate-500">or {fmtPrice(bp.annual_price)}/yr</p>
+                      )}
+                    </div>
+                    <ul className="space-y-1.5 text-xs text-slate-700 flex-1">
+                      <li className="flex items-center gap-1.5">
+                        <Check className="w-3 h-3 text-teal-600 flex-shrink-0" />
+                        {fmtVisits(bp.visits_per_month)}
+                      </li>
+                      {bp.telehealth_included && (
+                        <li className="flex items-center gap-1.5">
+                          <Check className="w-3 h-3 text-teal-600 flex-shrink-0" />
+                          Telehealth included
+                        </li>
+                      )}
+                      {bp.messaging_included && (
+                        <li className="flex items-center gap-1.5">
+                          <Check className="w-3 h-3 text-teal-600 flex-shrink-0" />
+                          Messaging
+                          {bp.messaging_response_sla_hours && (
+                            <span className="text-slate-400">({bp.messaging_response_sla_hours}h SLA)</span>
+                          )}
+                        </li>
+                      )}
+                      {bp.crisis_support && (
+                        <li className="flex items-center gap-1.5">
+                          <Check className="w-3 h-3 text-teal-600 flex-shrink-0" />
+                          Crisis support
+                        </li>
+                      )}
+                    </ul>
+                    <div className="mt-3 flex items-center gap-1.5 text-xs font-medium" style={{ color: isSelected ? "#7c3aed" : "#64748b" }}>
+                      <div
+                        className="w-4 h-4 rounded border flex items-center justify-center"
+                        style={{
+                          borderColor: isSelected ? "#7c3aed" : "#cbd5e1",
+                          backgroundColor: isSelected ? "#7c3aed" : "transparent",
+                        }}
+                      >
+                        {isSelected && <Check className="w-3 h-3 text-white" />}
+                      </div>
+                      {isSelected ? "Selected" : "Select"}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        <div className="px-6 py-4 border-t border-slate-100 flex items-center justify-between">
+          <p className="text-xs text-slate-500">
+            {selected.size > 0
+              ? `${selected.size} plan${selected.size === 1 ? "" : "s"} selected — duplicates skipped automatically`
+              : "Select at least one plan to add"}
+          </p>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={onClose}
+              className="px-4 py-2 rounded-md text-sm font-medium text-slate-700 hover:bg-slate-50"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={fork}
+              disabled={forking || selected.size === 0}
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-md text-sm font-semibold text-white disabled:opacity-50"
+              style={{ backgroundColor: "#7c3aed" }}
+            >
+              {forking ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+              Add {selected.size > 0 ? selected.size : ""} plan{selected.size === 1 ? "" : "s"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
