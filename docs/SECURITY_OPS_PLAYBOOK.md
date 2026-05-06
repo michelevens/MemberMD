@@ -162,6 +162,10 @@ Rotate (= generate new, update in Railway/Vercel env vars, deploy, verify, revok
 
 ### B. HIPAA Business Associate Agreements (BAAs)
 
+> **Templates:** ready-to-send request emails for all four launch-blocking
+> vendors live at `docs/policy/BAA_REQUESTS.md`. Use those for the initial
+> request; come back here for the quarterly verification.
+
 Verify you have a signed BAA with **every** vendor that touches PHI:
 - ✅ Stripe (request via Stripe Compliance portal — they offer one)
 - ✅ Resend (email — they have a HIPAA tier; verify subscription is on it)
