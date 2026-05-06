@@ -47,11 +47,27 @@ class AppointmentConfirmation extends Mailable
             ? $this->resolveVideoLink($this->appointment)
             : null;
 
+        // Cancel link for cash-pay bookings. Only emitted when the
+        // appointment has a cancellation_token AND was paid (a free
+        // booking has no refund to issue, no link needed). Lands on
+        // the public BookingCancelWidget which previews the refund
+        // math and lets the visitor confirm.
+        $cancelLink = null;
+        $token = $this->appointment->cancellation_token ?? null;
+        if ($token && (int) ($this->appointment->amount_paid_cents ?? 0) > 0) {
+            $appBase = config('app.frontend_url') ?: rtrim(config('app.url'), '/');
+            $tenantCode = $this->practice->tenant_code ?? null;
+            if ($tenantCode) {
+                $cancelLink = "{$appBase}/#/book/{$tenantCode}/cancel/{$token}";
+            }
+        }
+
         return new Content(
             view: 'emails.appointment-confirmation',
             with: [
                 'videoLink' => $videoLink,
                 'isTelehealth' => (bool) ($this->appointment->is_telehealth ?? false),
+                'cancelLink' => $cancelLink,
             ],
         );
     }

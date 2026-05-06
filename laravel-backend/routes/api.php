@@ -124,6 +124,12 @@ Route::prefix('external')->middleware('throttle:60,1')->group(function () {
     Route::get('/booking/{tenantCode}/options', [ExternalController::class, 'bookingOptions']);
     Route::get('/booking/{tenantCode}/slots', [ExternalController::class, 'bookingSlots']);
     Route::post('/booking/{tenantCode}', [ExternalController::class, 'bookingSubmit'])->middleware('throttle:5,1');
+
+    // Visitor cancel-by-token — the cancel link in the confirmation
+    // email lands here. GET previews the refund math, POST executes.
+    // Token is the credential (same model as e-signature links).
+    Route::get('/booking/cancel/{token}', [ExternalController::class, 'cancelPreview']);
+    Route::post('/booking/cancel/{token}', [ExternalController::class, 'cancelExecute'])->middleware('throttle:10,1');
 });
 
 // ===== Resend webhook (public, shared-secret) =====

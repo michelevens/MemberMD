@@ -962,6 +962,15 @@ class StripeWebhookController extends Controller
                 // Confirmed (not pending) — the visitor paid, the
                 // slot is theirs. confirmed_at = now stamps the
                 // moment payment cleared.
+                //
+                // Payment metadata (PI id, amount paid, cancellation
+                // token) is stamped here so the cancel flow can:
+                //   - issue refunds against the right Stripe PI
+                //   - know what the visitor actually paid (vs.
+                //     looking up the type's current price, which the
+                //     practice may have changed in the meantime)
+                //   - generate the visitor's cancel-link token
+                //     that lands in the confirmation email.
                 $appointment = Appointment::create([
                     'tenant_id' => $practice->id,
                     'patient_id' => $patient->id,
@@ -972,7 +981,11 @@ class StripeWebhookController extends Controller
                     'is_telehealth' => (bool) $pending->is_telehealth,
                     'status' => 'confirmed',
                     'confirmed_at' => now(),
-                    'reason_for_visit' => $pending->reason,
+                    'notes' => $pending->reason,
+                    'stripe_payment_intent_id' => $session->payment_intent ?? null,
+                    'amount_paid_cents' => (int) $pending->amount_cents,
+                    'amount_refunded_cents' => 0,
+                    'cancellation_token' => Str::random(48),
                 ]);
 
                 $pending->update([

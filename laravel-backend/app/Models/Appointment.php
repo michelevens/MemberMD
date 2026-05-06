@@ -25,6 +25,11 @@ class Appointment extends Model
         'notes', 'reminder_sent_at',
         'recurrence_rule', 'parent_appointment_id', 'patient_timezone',
         'confirmed_at', 'checked_in_at', 'check_in_method', 'started_at', 'completed_at',
+        // Cash-pay + cancellation: token gates the public cancel
+        // link, payment intent links to Stripe for refunds, the
+        // amount fields track partial refund state.
+        'cancellation_token', 'stripe_payment_intent_id',
+        'amount_paid_cents', 'amount_refunded_cents', 'cancelled_by',
     ];
 
     protected $casts = [
@@ -39,6 +44,8 @@ class Appointment extends Model
         'is_telehealth' => 'boolean',
         'no_show_fee' => 'decimal:2',
         'recurrence_rule' => 'array',
+        'amount_paid_cents' => 'integer',
+        'amount_refunded_cents' => 'integer',
     ];
 
     public function patient(): BelongsTo { return $this->belongsTo(Patient::class); }

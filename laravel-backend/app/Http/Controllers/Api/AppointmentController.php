@@ -730,11 +730,27 @@ class AppointmentController extends Controller
         }
         unset($isLateCancel); // reserved for future "allow with fee" mode
 
-        $appointment->update([
-            'status' => 'cancelled',
-            'cancel_reason' => $reason,
-            'cancelled_at' => now(),
-        ]);
+        // Cancel + auto-refund (cash-pay only — service no-ops when
+        // amount_paid_cents is 0/null). Practice-initiated cancels
+        // refund the full amount; patient cancels respect the
+        // deadline policy in practice.settings.scheduling.
+        $service = app(\App\Services\AppointmentCancellationService::class);
+        $practice = \App\Models\Practice::find($appointment->tenant_id);
+        if ($practice) {
+            $service->cancel(
+                appointment: $appointment,
+                practice: $practice,
+                cancelledBy: $user->isPatient() ? 'patient' : 'practice',
+                reason: $reason,
+            );
+        } else {
+            // Practice somehow missing — fall back to old behavior.
+            $appointment->update([
+                'status' => 'cancelled',
+                'cancel_reason' => $reason,
+                'cancelled_at' => now(),
+            ]);
+        }
 
         // Notify the patient. A patient cancelling their own appointment
         // gets a confirming "we got it" email; a staff cancellation gets

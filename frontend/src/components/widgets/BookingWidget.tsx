@@ -744,6 +744,244 @@ export function BookingSuccessWidget() {
 }
 
 /**
+ * Cancel-by-token page — visitor lands here from the cancel link
+ * in their booking confirmation email. Two-step flow:
+ *   1. Load the appointment + refund preview (GET)
+ *   2. Visitor confirms → backend executes the cancel + refund (POST)
+ *
+ * No auth — the token IS the credential. Same security model as
+ * SignatureRequest token URLs.
+ */
+interface CancelPreviewData {
+  already_cancelled?: boolean;
+  amount_refunded_cents?: number;
+  cancelled_at?: string;
+  appointment?: {
+    id: string;
+    scheduled_at_local: string;
+    duration_minutes: number;
+    is_telehealth: boolean;
+    provider_name: string;
+    appointment_type_name: string | null;
+  };
+  practice_name?: string;
+  amount_paid_cents?: number;
+  refund_cents?: number;
+  fee_cents?: number;
+  is_late_cancel?: boolean;
+  deadline_hours?: number;
+}
+
+export function BookingCancelWidget() {
+  const { tenantCode = "", token = "" } = useParams<{ tenantCode: string; token: string }>();
+  useWidgetTheme(tenantCode, "booking");
+
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [preview, setPreview] = useState<CancelPreviewData | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [done, setDone] = useState<{ refund_cents: number; fee_cents: number } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`${API_BASE_URL}/external/booking/cancel/${token}`);
+        if (!res.ok) {
+          setError(res.status === 404 ? "Cancellation link is invalid or expired." : "Couldn't load cancellation details.");
+          setLoading(false);
+          return;
+        }
+        const json = await res.json();
+        if (cancelled) return;
+        setPreview(json.data);
+      } catch {
+        if (!cancelled) setError("Couldn't reach the booking system. Please try again.");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [token]);
+
+  const submit = async () => {
+    setSubmitting(true);
+    try {
+      const res = await fetch(`${API_BASE_URL}/external/booking/cancel/${token}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({}),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        setError(json.message || "Couldn't cancel your appointment. Please contact the practice directly.");
+        setSubmitting(false);
+        return;
+      }
+      setDone({
+        refund_cents: json.data?.refund_amount_cents ?? 0,
+        fee_cents: json.data?.fee_cents ?? 0,
+      });
+    } catch {
+      setError("Network error. Please try again.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <Shell>
+        <div className="flex flex-col items-center justify-center py-20">
+          <Loader2 className="w-8 h-8 animate-spin" style={{ color: C.teal500 }} />
+        </div>
+      </Shell>
+    );
+  }
+
+  if (error) {
+    return (
+      <Shell>
+        <div className="flex flex-col items-center text-center py-16 px-6">
+          <AlertCircle className="w-10 h-10 mb-3" style={{ color: C.red500 }} />
+          <h2 className="text-lg font-semibold mb-2" style={{ color: C.navy900 }}>{error}</h2>
+        </div>
+      </Shell>
+    );
+  }
+
+  if (preview?.already_cancelled) {
+    return (
+      <Shell practiceName={preview.practice_name}>
+        <div className="flex flex-col items-center text-center py-16 px-6">
+          <Check className="w-10 h-10 mb-3" style={{ color: C.slate400 }} />
+          <h2 className="text-lg font-semibold" style={{ color: C.navy900 }}>This appointment is already cancelled</h2>
+          {preview.amount_refunded_cents != null && preview.amount_refunded_cents > 0 && (
+            <p className="text-sm mt-2" style={{ color: C.slate600 }}>
+              Refund of {formatCents(preview.amount_refunded_cents)} was issued.
+            </p>
+          )}
+        </div>
+      </Shell>
+    );
+  }
+
+  if (done) {
+    return (
+      <Shell practiceName={preview?.practice_name}>
+        <div className="flex flex-col items-center text-center py-16 px-6">
+          <div className="w-16 h-16 rounded-full flex items-center justify-center mb-4" style={{ backgroundColor: "#dcfce7" }}>
+            <Check className="w-8 h-8" style={{ color: C.teal600 }} />
+          </div>
+          <h2 className="text-xl font-bold mb-2" style={{ color: C.navy900 }}>Appointment cancelled</h2>
+          {done.refund_cents > 0 ? (
+            <p className="text-sm max-w-md" style={{ color: C.slate600 }}>
+              We've refunded <strong>{formatCents(done.refund_cents)}</strong> to your card.
+              {done.fee_cents > 0 && (
+                <> A {formatCents(done.fee_cents)} cancellation fee was retained.</>
+              )}
+              {" "}It may take a few business days to appear.
+            </p>
+          ) : (
+            <p className="text-sm max-w-md" style={{ color: C.slate600 }}>
+              Your appointment has been cancelled. {preview?.is_late_cancel
+                ? "Per the cancellation policy, the visit fee is non-refundable for late cancellations."
+                : ""}
+            </p>
+          )}
+        </div>
+      </Shell>
+    );
+  }
+
+  // Preview — show what'll happen, let visitor confirm.
+  const apt = preview?.appointment;
+  const paid = preview?.amount_paid_cents ?? 0;
+  const refund = preview?.refund_cents ?? 0;
+  const fee = preview?.fee_cents ?? 0;
+  return (
+    <Shell practiceName={preview?.practice_name}>
+      <div className="space-y-5">
+        <div>
+          <h2 className="text-lg font-bold mb-1" style={{ color: C.navy900 }}>Cancel appointment</h2>
+          <p className="text-sm" style={{ color: C.slate500 }}>
+            Review the details below and confirm to cancel.
+          </p>
+        </div>
+
+        {apt && (
+          <div className="rounded-lg p-4" style={{ backgroundColor: C.slate50, border: `1px solid ${C.slate200}` }}>
+            <p className="text-sm font-semibold" style={{ color: C.navy900 }}>{apt.appointment_type_name ?? "Appointment"}</p>
+            <p className="text-xs mt-0.5" style={{ color: C.slate500 }}>
+              with {apt.provider_name}
+            </p>
+            <p className="text-xs mt-1.5 font-medium" style={{ color: C.slate600 }}>
+              {apt.scheduled_at_local} · {apt.duration_minutes} min{apt.is_telehealth ? " · Telehealth" : ""}
+            </p>
+          </div>
+        )}
+
+        {paid > 0 && (
+          <div className="rounded-lg p-4 space-y-2" style={{ backgroundColor: C.white, border: `1px solid ${C.slate200}` }}>
+            <div className="flex justify-between text-sm">
+              <span style={{ color: C.slate600 }}>You paid</span>
+              <span className="font-semibold" style={{ color: C.navy900 }}>{formatCents(paid)}</span>
+            </div>
+            {fee > 0 && (
+              <div className="flex justify-between text-sm">
+                <span style={{ color: C.slate600 }}>Cancellation fee</span>
+                <span className="font-semibold" style={{ color: C.red500 }}>−{formatCents(fee)}</span>
+              </div>
+            )}
+            <div className="flex justify-between text-sm pt-2" style={{ borderTop: `1px solid ${C.slate200}` }}>
+              <span style={{ color: C.navy900 }}>Refund to your card</span>
+              <span className="font-bold" style={{ color: refund > 0 ? C.teal700 : C.slate500 }}>
+                {refund > 0 ? formatCents(refund) : "—"}
+              </span>
+            </div>
+            {preview?.is_late_cancel && (
+              <p className="text-[11px] mt-2 pt-2" style={{ color: C.slate500, borderTop: `1px solid ${C.slate200}` }}>
+                Cancelling within {preview.deadline_hours} hours of the appointment is a late cancellation per the practice's policy.
+              </p>
+            )}
+          </div>
+        )}
+
+        <div className="flex justify-end gap-2">
+          <button
+            onClick={() => window.history.back()}
+            className="px-4 py-2 rounded-lg text-sm font-medium"
+            style={{ color: C.slate600 }}
+          >
+            Keep appointment
+          </button>
+          <button
+            onClick={submit}
+            disabled={submitting}
+            className="inline-flex items-center gap-1.5 px-5 py-2.5 rounded-lg text-sm font-semibold text-white disabled:opacity-50"
+            style={{ backgroundColor: C.red500 }}
+          >
+            {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+            Confirm cancel{refund > 0 ? ` & refund ${formatCents(refund)}` : ""}
+          </button>
+        </div>
+      </div>
+    </Shell>
+  );
+}
+
+// Format integer cents as a USD currency string. Same pattern the
+// other widget helpers use, just operating on cents not dollars.
+function formatCents(cents: number): string {
+  const dollars = cents / 100;
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: dollars % 1 === 0 ? 0 : 2,
+  }).format(dollars);
+}
+
+/**
  * Stripe Checkout cancel landing page. Visitor closed/cancelled the
  * Stripe Checkout flow — slot wasn't held, they can try again.
  */

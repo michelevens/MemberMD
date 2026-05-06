@@ -12,6 +12,7 @@ use App\Models\ConsentSignature;
 use App\Models\ConsentTemplate;
 use App\Models\MembershipPlan;
 use App\Models\PendingBooking;
+use App\Services\AppointmentCancellationService;
 use App\Models\Patient;
 use App\Models\PatientEntitlement;
 use App\Models\PatientMembership;
@@ -1087,7 +1088,7 @@ class ExternalController extends Controller
             // queue UI.
             'status' => 'pending',
             'confirmed_at' => null,
-            'reason_for_visit' => $validated['reason'] ?? null,
+            'notes' => $validated['reason'] ?? null,
         ]);
 
         // Drop a WidgetSubmission row so the practice's intake queue
@@ -1140,5 +1141,126 @@ class ExternalController extends Controller
                 'message' => 'Request received. The practice will confirm by email.',
             ],
         ], 201);
+    }
+
+    // ─── Public cancel-by-token (visitor cancel) ────────────────────
+    //
+    // Cash-pay bookings ship a cancel link in the confirmation email.
+    // The link includes a random token from appointment.cancellation_token.
+    // No auth — the token IS the credential (same security model as
+    // SignatureRequest tokens).
+    //
+    // Two endpoints, GET (preview) + POST (execute), so the visitor
+    // sees the refund math BEFORE they click cancel and can't be
+    // surprised by a non-refundable late cancel.
+
+    /**
+     * GET /external/booking/cancel/{token}
+     *
+     * Visitor lands on the cancel page from their confirmation
+     * email. Returns appointment details + refund preview so the UI
+     * can show "you'll get $250 back, $50 cancellation fee applies."
+     * Doesn't actually cancel anything.
+     */
+    public function cancelPreview(string $token): JsonResponse
+    {
+        $appointment = Appointment::where('cancellation_token', $token)->first();
+        if (!$appointment) {
+            return response()->json(['error' => 'Cancellation link is invalid or expired.'], 404);
+        }
+        if ($appointment->status === 'cancelled') {
+            return response()->json([
+                'data' => [
+                    'already_cancelled' => true,
+                    'amount_refunded_cents' => (int) $appointment->amount_refunded_cents,
+                    'cancelled_at' => $appointment->cancelled_at,
+                ],
+            ]);
+        }
+
+        $practice = Practice::find($appointment->tenant_id);
+        if (!$practice) {
+            return response()->json(['error' => 'Practice not found.'], 404);
+        }
+
+        $service = app(AppointmentCancellationService::class);
+        $preview = $service->previewRefund($appointment, $practice, 'patient');
+
+        $appointment->loadMissing(['provider.user', 'appointmentType']);
+        $tz = $appointment->patient_timezone
+            ?? $appointment->provider?->timezone
+            ?? $practice->timezone
+            ?? 'UTC';
+
+        return response()->json([
+            'data' => [
+                'appointment' => [
+                    'id' => $appointment->id,
+                    'scheduled_at' => $appointment->scheduled_at,
+                    'scheduled_at_local' => $appointment->scheduled_at?->copy()->setTimezone($tz)->format('M j, Y g:i A'),
+                    'duration_minutes' => $appointment->duration_minutes,
+                    'is_telehealth' => (bool) $appointment->is_telehealth,
+                    'provider_name' => trim(
+                        ($appointment->provider?->user?->first_name ?? '') . ' ' .
+                        ($appointment->provider?->user?->last_name ?? '')
+                    ),
+                    'appointment_type_name' => $appointment->appointmentType?->name,
+                ],
+                'practice_name' => $practice->name,
+                'amount_paid_cents' => (int) ($appointment->amount_paid_cents ?? 0),
+                'currency' => 'usd',
+                // The math the visitor needs to see before clicking:
+                'refund_cents' => $preview['refund_cents'],
+                'fee_cents' => $preview['fee_cents'],
+                'is_late_cancel' => $preview['is_late_cancel'],
+                'deadline_hours' => $preview['deadline_hours'],
+            ],
+        ]);
+    }
+
+    /**
+     * POST /external/booking/cancel/{token}
+     *
+     * Visitor confirms the cancel. Executes the policy decided by
+     * cancelPreview() — issues the refund (if any) via Stripe
+     * Connect, marks the appointment cancelled, audits.
+     *
+     * Idempotent: a re-click on the cancel button (or a webhook
+     * retry on the email link) returns the existing cancelled
+     * state, doesn't double-refund.
+     */
+    public function cancelExecute(Request $request, string $token): JsonResponse
+    {
+        $appointment = Appointment::where('cancellation_token', $token)->first();
+        if (!$appointment) {
+            return response()->json(['error' => 'Cancellation link is invalid or expired.'], 404);
+        }
+
+        $practice = Practice::find($appointment->tenant_id);
+        if (!$practice) {
+            return response()->json(['error' => 'Practice not found.'], 404);
+        }
+
+        $reason = $request->input('reason');
+        if (is_string($reason)) {
+            $reason = mb_substr(trim($reason), 0, 500);
+        }
+
+        $service = app(AppointmentCancellationService::class);
+        $result = $service->cancel(
+            appointment: $appointment,
+            practice: $practice,
+            cancelledBy: 'patient',
+            reason: $reason ?: 'Cancelled by patient via email link',
+        );
+
+        return response()->json([
+            'data' => [
+                'ok' => true,
+                'refund_status' => $result['refund_status'],
+                'refund_amount_cents' => $result['refund_amount_cents'],
+                'fee_cents' => $result['fee_cents'],
+            ],
+        ]);
     }
 }

@@ -160,6 +160,9 @@ Your appointment on {{ $scheduledAt->format('M j, Y') }} has been confirmed.
 <!-- Cancellation policy -->
 <p style="margin: 0 0 24px; font-size: 13px; color: #6b7280; line-height: 1.5; text-align: center;">
     Please provide at least 24 hours' notice if you need to cancel or reschedule.
+    @if(!empty($cancelLink))
+        <br><a href="{{ $cancelLink }}" style="color: #6b7280; text-decoration: underline;">Cancel this appointment</a>
+    @endif
 </p>
 
 <!-- CTA Button -->
