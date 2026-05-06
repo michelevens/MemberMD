@@ -158,19 +158,22 @@ class PublicBookingTest extends TestCase
     {
         ['practice' => $p, 'provider' => $prov] = $this->setupPractice();
         // Pick a future weekday and ask for slots on that date.
-        $date = $this->nextWeekdayAt(2, 10, 0, $p->timezone)->format('Y-m-d');
+        $when = $this->nextWeekdayAt(2, 10, 0, $p->timezone);
+        $date = $when->format('Y-m-d');
 
-        // AvailabilityService generates slot timestamps with naive
-        // Carbon::parse("{date} {start_time}"), so they're effectively
-        // UTC values. Match that — store the block at 10:00 UTC on
-        // the same date so the overlap test catches it.
-        $blockStart = Carbon::createFromFormat('Y-m-d H:i', "{$date} 10:00", 'UTC');
+        // Block 10:00 in the provider's local time (which is the
+        // practice timezone for this fixture). AvailabilityService
+        // generates slots as wall-clock-in-provider-tz then converts
+        // to UTC for comparison; we store the block at the matching
+        // UTC instant.
+        $blockLocal = Carbon::parse("{$date} 10:00", $p->timezone);
+        $blockUtc = $blockLocal->copy()->utc();
         ExternalBusyBlock::create([
             'tenant_id' => $p->id,
             'provider_id' => $prov->id,
             'external_uid' => 'block-1',
-            'starts_at' => $blockStart,
-            'ends_at' => $blockStart->copy()->addHour(),
+            'starts_at' => $blockUtc,
+            'ends_at' => $blockUtc->copy()->addHour(),
             'all_day' => false,
             'last_seen_at' => now(),
         ]);
@@ -181,7 +184,7 @@ class PublicBookingTest extends TestCase
 
         $slots = collect($response->json('data'));
         $tenAm = $slots->firstWhere('start', '10:00');
-        $this->assertNull($tenAm, 'Slot at 10:00 should be filtered by external busy block.');
+        $this->assertNull($tenAm, 'Slot at 10:00 (provider local) should be filtered by external busy block.');
     }
 
     public function test_submit_creates_lead_patient_and_pending_appointment(): void

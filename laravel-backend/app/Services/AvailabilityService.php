@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\Appointment;
 use App\Models\ExternalBusyBlock;
 use App\Models\Practice;
+use App\Models\Provider;
 use App\Models\ProviderAvailability;
 use App\Models\ProviderScheduleOverride;
 use Carbon\Carbon;
@@ -34,6 +35,18 @@ class AvailabilityService
 
     /**
      * Get available time slots for a provider on a given date.
+     *
+     * Timezone handling — critical for the busy-block merge to work:
+     *   provider_availabilities stores wall-clock start_time / end_time
+     *   ("09:00", "17:00") that mean "9 AM in the provider's local
+     *   timezone." We materialize each candidate slot AS A TIMESTAMP IN
+     *   THAT TIMEZONE so when we convert to UTC for comparison against
+     *   external_busy_blocks (also UTC-stored, but reflecting wall-clock
+     *   moments in the provider's calendar timezone) the math is right.
+     *
+     *   Without this, a "10 AM" slot was being treated as 10:00 UTC and
+     *   compared to a busy block at 14:00 UTC (= 10 AM EST) — they
+     *   never overlapped and the slot stayed bookable.
      */
     public function getAvailableSlots(string $providerId, string $date, int $durationMinutes, string $tenantId): array
     {
@@ -41,15 +54,21 @@ class AvailabilityService
         $settings = $this->schedulingSettings($tenantId);
         $bufferMinutes = $settings['buffer_minutes'];
 
+        // Resolve provider timezone → practice timezone → UTC. Same
+        // fallback chain the appointment-confirmation email uses.
+        $provider = Provider::find($providerId);
+        $practice = Practice::find($tenantId);
+        $tz = $provider?->timezone ?? $practice?->timezone ?? 'UTC';
+
         // Same-day disabled? Reject any slot for today before doing work.
-        $dateOnly = Carbon::parse($date)->startOfDay();
+        $dateOnly = Carbon::parse($date, $tz)->startOfDay();
         if (!$settings['allow_same_day'] && $dateOnly->isToday()) {
             return [];
         }
 
         // Beyond max-advance window? Practice configured how far out
         // bookings are allowed; everything past that returns empty.
-        if ($dateOnly->gt(now()->addDays($settings['max_advance_days']))) {
+        if ($dateOnly->gt(now($tz)->addDays($settings['max_advance_days']))) {
             return [];
         }
 
@@ -80,43 +99,49 @@ class AvailabilityService
             $endTime = $availability->end_time;
         }
 
-        // Get booked appointments for this date
-        $dateStart = Carbon::parse($date)->startOfDay();
-        $dateEnd = Carbon::parse($date)->endOfDay();
+        // Get booked appointments for this date — appointments are
+        // stored as UTC instants, so we filter on the UTC equivalent
+        // of the provider's local-day window.
+        $dateStartUtc = Carbon::parse($date, $tz)->startOfDay()->utc();
+        $dateEndUtc = Carbon::parse($date, $tz)->endOfDay()->utc();
 
         $booked = Appointment::where('provider_id', $providerId)
             ->where('tenant_id', $tenantId)
-            ->whereBetween('scheduled_at', [$dateStart, $dateEnd])
+            ->whereBetween('scheduled_at', [$dateStartUtc, $dateEndUtc])
             ->whereNotIn('status', ['cancelled', 'no_show'])
             ->get(['scheduled_at', 'duration_minutes']);
 
         // External busy blocks pulled from the provider's personal
-        // calendar (Google/Apple/Outlook iCal feed). These are unioned
-        // with the practice's own appointments so a slot occupied on
-        // the provider's personal calendar is not bookable here.
-        // Stored in UTC; we filter to the day window in UTC then
-        // compare in the provider's local time below.
+        // calendar (Google/Apple/Outlook iCal feed). Same UTC-window
+        // filter as appointments above.
         $busyBlocks = ExternalBusyBlock::where('provider_id', $providerId)
-            ->where('starts_at', '<', $dateEnd->copy()->utc())
-            ->where('ends_at', '>', $dateStart->copy()->utc())
+            ->where('starts_at', '<', $dateEndUtc)
+            ->where('ends_at', '>', $dateStartUtc)
             ->get(['starts_at', 'ends_at']);
 
-        // Generate all possible slots in 15-minute increments
+        // Generate all possible slots in 15-minute increments. Slot
+        // timestamps are built in the provider's timezone so the
+        // wall-clock "09:00" becomes "09:00 in $tz", which converts
+        // correctly to UTC when compared to busy-block UTC values.
         $slots = [];
-        $current = Carbon::parse("{$date} {$startTime}");
-        $end = Carbon::parse("{$date} {$endTime}");
-        $minBookableTime = now()->addMinutes($settings['min_lead_minutes']);
+        $current = Carbon::parse("{$date} {$startTime}", $tz);
+        $end = Carbon::parse("{$date} {$endTime}", $tz);
+        $minBookableTime = now();
 
         while ($current->copy()->addMinutes($durationMinutes)->lte($end)) {
             $slotEnd = $current->copy()->addMinutes($durationMinutes);
             $isAvailable = true;
 
             // Lead-time gate — can't book a slot that starts before
-            // now + min_lead_minutes.
-            if ($current->lt($minBookableTime)) {
+            // now + min_lead_minutes. Compare in UTC so the lead time
+            // is wall-clock-agnostic.
+            if ($current->copy()->utc()->lt($minBookableTime->copy()->addMinutes($settings['min_lead_minutes']))) {
                 $current->addMinutes(15);
                 continue;
             }
+
+            $currentUtc = $current->copy()->utc();
+            $slotEndUtc = $slotEnd->copy()->utc();
 
             foreach ($booked as $apt) {
                 $aptStart = Carbon::parse($apt->scheduled_at);
@@ -125,7 +150,7 @@ class AvailabilityService
                 $aptStartPad = $aptStart->copy()->subMinutes($bufferMinutes);
                 $aptEndPad = $aptEnd->copy()->addMinutes($bufferMinutes);
 
-                if ($current->lt($aptEndPad) && $slotEnd->gt($aptStartPad)) {
+                if ($currentUtc->lt($aptEndPad) && $slotEndUtc->gt($aptStartPad)) {
                     $isAvailable = false;
                     break;
                 }
@@ -138,7 +163,7 @@ class AvailabilityService
                 foreach ($busyBlocks as $block) {
                     $blockStart = Carbon::parse($block->starts_at);
                     $blockEnd = Carbon::parse($block->ends_at);
-                    if ($current->lt($blockEnd) && $slotEnd->gt($blockStart)) {
+                    if ($currentUtc->lt($blockEnd) && $slotEndUtc->gt($blockStart)) {
                         $isAvailable = false;
                         break;
                     }
@@ -146,6 +171,9 @@ class AvailabilityService
             }
 
             if ($isAvailable) {
+                // Surface wall-clock H:i to the frontend — the booking
+                // widget renders these as "10:00 AM" in the provider's
+                // local time, which is what the visitor expects.
                 $slots[] = [
                     'start' => $current->format('H:i'),
                     'end' => $slotEnd->format('H:i'),
