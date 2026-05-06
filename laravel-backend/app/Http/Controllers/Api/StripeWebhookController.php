@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\Appointment;
 use App\Models\AuditLog;
 use App\Models\Invoice;
 use App\Models\Payment;
@@ -11,11 +12,13 @@ use App\Models\MembershipPlan;
 use App\Models\Patient;
 use App\Models\PatientMembership;
 use App\Mail\PlatformPaymentFailedMail;
+use App\Models\PendingBooking;
 use App\Models\PendingEnrollment;
 use App\Models\PlatformInvoice;
 use App\Models\Practice;
 use App\Models\PracticeSubscription;
 use App\Models\StripeConnectEvent;
+use App\Models\User;
 use App\Services\MailDispatcher;
 use App\Services\MembershipCreditService;
 use App\Services\MembershipEnrollmentService;
@@ -24,7 +27,9 @@ use App\Services\StripeConnectService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Str;
 use Stripe\Account;
 use Stripe\Event;
@@ -843,7 +848,164 @@ class StripeWebhookController extends Controller
     private function handleCheckoutSessionCompletedForConnect(Event $event, ?Practice $practice): void
     {
         if (!$practice) return;
-        $this->convertCheckoutSession($event->data->object, $practice, 'checkout.session.completed');
+
+        $session = $event->data->object;
+        $metadata = $session->metadata ?? null;
+
+        // Branch on metadata to tell enrollment vs cash-pay-booking
+        // checkouts apart. Both fire the same webhook event but each
+        // converts a different pending row into different concrete
+        // records (membership vs appointment).
+        $pendingBookingId = is_object($metadata)
+            ? ($metadata->pending_booking_id ?? null)
+            : (is_array($metadata) ? ($metadata['pending_booking_id'] ?? null) : null);
+
+        if ($pendingBookingId) {
+            $this->convertCheckoutSessionToBooking($session, $practice, 'checkout.session.completed');
+            return;
+        }
+
+        // Existing enrollment path.
+        $this->convertCheckoutSession($session, $practice, 'checkout.session.completed');
+    }
+
+    /**
+     * Convert a paid Stripe Checkout session for a cash-pay booking
+     * into:
+     *   - User row (or reuse existing tenant user with same email)
+     *   - Patient row
+     *   - Confirmed Appointment
+     * And mark the PendingBooking row as claimed.
+     *
+     * Idempotent: safe to call repeatedly. If the row is already
+     * claimed, we return the existing appointment.
+     *
+     * Mirrors convertCheckoutSession() which does the same job for
+     * subscription enrollments.
+     */
+    public function convertCheckoutSessionToBooking(
+        object $session,
+        Practice $practice,
+        string $source,
+    ): ?Appointment {
+        $metadata = $session->metadata ?? null;
+        $pendingId = is_object($metadata)
+            ? ($metadata->pending_booking_id ?? null)
+            : (is_array($metadata) ? ($metadata['pending_booking_id'] ?? null) : null);
+
+        if (empty($pendingId)) return null;
+
+        if (($session->payment_status ?? '') !== 'paid') {
+            Log::info('Cash-pay checkout not paid — skipping booking conversion', [
+                'pending_booking_id' => $pendingId,
+                'payment_status' => $session->payment_status ?? null,
+                'source' => $source,
+            ]);
+            return null;
+        }
+
+        $pending = PendingBooking::where('tenant_id', $practice->id)
+            ->where('id', $pendingId)
+            ->first();
+        if (!$pending) {
+            Log::warning('PendingBooking not found for checkout session', [
+                'pending_booking_id' => $pendingId,
+                'tenant_id' => $practice->id,
+                'source' => $source,
+            ]);
+            return null;
+        }
+
+        // Idempotent — already converted, return the existing
+        // appointment (callers may re-invoke from the reconcile path).
+        if ($pending->status === 'claimed' && $pending->appointment_id) {
+            return Appointment::find($pending->appointment_id);
+        }
+
+        try {
+            return DB::transaction(function () use ($pending, $practice, $session) {
+                // Lead user — reuse existing tenant user with same
+                // email or create a new one. Same shape as the
+                // ExternalController fallback path.
+                $user = User::where('tenant_id', $practice->id)
+                    ->where('email', $pending->email)
+                    ->first();
+
+                if (!$user) {
+                    $user = User::create([
+                        'tenant_id' => $practice->id,
+                        'name' => trim($pending->first_name . ' ' . $pending->last_name),
+                        'first_name' => $pending->first_name,
+                        'last_name' => $pending->last_name,
+                        'email' => $pending->email,
+                        'password' => Hash::make(Str::random(16)),
+                        'role' => 'patient',
+                        'status' => 'active',
+                    ]);
+                }
+
+                $patient = Patient::updateOrCreate(
+                    [
+                        'tenant_id' => $practice->id,
+                        'user_id' => $user->id,
+                    ],
+                    [
+                        'first_name' => $pending->first_name,
+                        'last_name' => $pending->last_name,
+                        'email' => $pending->email,
+                        'phone' => $pending->phone,
+                        'date_of_birth' => $pending->date_of_birth,
+                        'is_active' => true,
+                    ]
+                );
+
+                // Confirmed (not pending) — the visitor paid, the
+                // slot is theirs. confirmed_at = now stamps the
+                // moment payment cleared.
+                $appointment = Appointment::create([
+                    'tenant_id' => $practice->id,
+                    'patient_id' => $patient->id,
+                    'provider_id' => $pending->provider_id,
+                    'appointment_type_id' => $pending->appointment_type_id,
+                    'scheduled_at' => $pending->scheduled_at,
+                    'duration_minutes' => $pending->duration_minutes,
+                    'is_telehealth' => (bool) $pending->is_telehealth,
+                    'status' => 'confirmed',
+                    'confirmed_at' => now(),
+                    'reason_for_visit' => $pending->reason,
+                ]);
+
+                $pending->update([
+                    'status' => 'claimed',
+                    'appointment_id' => $appointment->id,
+                    'stripe_payment_intent_id' => $session->payment_intent ?? null,
+                ]);
+
+                // Send confirmation email — visitor paid, this is a
+                // real "your appointment is locked in" confirmation
+                // (vs. the existing "request received" copy from the
+                // non-cash branch).
+                try {
+                    $appointment->load(['patient', 'provider.user', 'appointmentType']);
+                    Mail::to($pending->email)->send(
+                        new \App\Mail\AppointmentConfirmation($appointment, $patient, $practice)
+                    );
+                } catch (Throwable $e) {
+                    Log::warning('Cash-pay booking confirmation email failed', [
+                        'appointment_id' => $appointment->id,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+
+                return $appointment;
+            });
+        } catch (Throwable $e) {
+            Log::error('Cash-pay booking conversion failed', [
+                'pending_booking_id' => $pending->id,
+                'error' => $e->getMessage(),
+            ]);
+            return null;
+        }
     }
 
     /**

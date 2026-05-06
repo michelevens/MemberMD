@@ -141,6 +141,16 @@ const BookingWidget = namedLazy(
   "BookingWidget"
 );
 
+const BookingSuccessWidget = namedLazy(
+  () => import("./components/widgets/BookingWidget"),
+  "BookingSuccessWidget"
+);
+
+const BookingCancelledWidget = namedLazy(
+  () => import("./components/widgets/BookingWidget"),
+  "BookingCancelledWidget"
+);
+
 const EnrollmentSuccessWidget = namedLazy(
   () => import("./components/widgets/EnrollmentResultWidget"),
   "EnrollmentSuccessWidget"
@@ -196,6 +206,8 @@ function AuthGate() {
           <Route path="/plans/:tenantCode" element={<PlanWidget />} />
           <Route path="/enroll/:tenantCode" element={<EnrollmentWidget />} />
           <Route path="/book/:tenantCode" element={<BookingWidget />} />
+          <Route path="/book/:tenantCode/success" element={<BookingSuccessWidget />} />
+          <Route path="/book/:tenantCode/cancelled" element={<BookingCancelledWidget />} />
           <Route path="/enrollment/success" element={<EnrollmentSuccessWidget />} />
           <Route path="/enrollment/cancelled" element={<EnrollmentCancelledWidget />} />
           <Route path="/intake/:tenantCode" element={<div className="min-h-screen flex items-center justify-center"><p className="text-slate-500">Patient Intake — Coming Soon</p></div>} />

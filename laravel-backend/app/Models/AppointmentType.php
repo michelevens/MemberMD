@@ -25,6 +25,11 @@ class AppointmentType extends Model
         // widget doesn't expose every internal visit type the moment
         // it ships — practice admin opts in per type.
         'is_public',
+        // Cash-pay (one-time, pre-pay via Stripe Checkout). When
+        // enabled, the booking widget routes the visitor through
+        // Checkout before confirming the slot. Price is held in
+        // cents to dodge float drift; currency is ISO 4217.
+        'cash_pay_enabled', 'cash_price_cents', 'cash_currency',
     ];
 
     protected $casts = [
@@ -35,6 +40,8 @@ class AppointmentType extends Model
         'is_active' => 'boolean',
         'required_documents' => 'array',
         'is_public' => 'boolean',
+        'cash_pay_enabled' => 'boolean',
+        'cash_price_cents' => 'integer',
     ];
 
     public function appointments(): HasMany { return $this->hasMany(Appointment::class); }

@@ -727,6 +727,114 @@ class StripeSubscriptionService
     }
 
     /**
+     * Create a Stripe Checkout session for a ONE-TIME payment (mode:
+     * payment, not subscription). Used for cash-pay appointment booking
+     * and any other ad-hoc charge a practice wants to collect upfront.
+     *
+     * Differs from createPaymentLinkSession:
+     *  - mode: 'payment' instead of 'subscription'
+     *  - no Customer needed (visitor isn't necessarily a tenant patient
+     *    yet — they're a lead until payment succeeds)
+     *  - takes a single line item with explicit amount + currency, not
+     *    a Stripe Price ID — practices set per-appointment-type prices
+     *    in their MemberMD admin, not in Stripe Dashboard
+     *  - applies platform fee directly via application_fee_amount on
+     *    the PaymentIntent metadata
+     *
+     * @param array  $metadata    arbitrary key/values, surfaced on the
+     *                            session + payment_intent for webhook
+     *                            reconciliation. Always include
+     *                            tenant_id + a stable idempotency key
+     *                            (e.g. pending_booking_id).
+     */
+    public function createOneTimeCheckoutSession(
+        Practice $practice,
+        string $idempotencyKey,
+        int $amountCents,
+        string $currency,
+        string $productName,
+        string $productDescription,
+        string $customerEmail,
+        string $successUrl,
+        string $cancelUrl,
+        array $metadata = [],
+    ): array {
+        $this->assertPracticeReady($practice);
+
+        // Platform fee — same calc as subscription mode but expressed
+        // as a fixed cents value (Stripe requires this for one-time
+        // payments instead of the percent it accepts on subscriptions).
+        $applicationFeeBps = $practice->platformFeeBps();
+        $applicationFeeCents = (int) floor(($amountCents * $applicationFeeBps) / 10_000);
+
+        $params = [
+            'mode' => 'payment',
+            // No customer — leave it on Stripe to email-match. We CAN
+            // pass customer_email to pre-fill, which dramatically cuts
+            // friction and helps Stripe Radar flag duplicates.
+            'customer_email' => $customerEmail,
+            'payment_method_types' => ['card', 'us_bank_account', 'cashapp', 'link'],
+            'line_items' => [[
+                'price_data' => [
+                    'currency' => $currency,
+                    'unit_amount' => $amountCents,
+                    'product_data' => [
+                        'name' => $productName,
+                        'description' => $productDescription,
+                    ],
+                ],
+                'quantity' => 1,
+            ]],
+            'success_url' => $successUrl,
+            'cancel_url' => $cancelUrl,
+            'metadata' => array_merge(
+                ['platform' => 'membermd', 'tenant_id' => $practice->id],
+                $metadata,
+            ),
+        ];
+
+        // Application fee on direct charges flows back to the platform
+        // automatically. We mirror the metadata onto the PaymentIntent
+        // so the webhook handler can reconcile from either object.
+        if ($applicationFeeCents > 0) {
+            $params['payment_intent_data'] = [
+                'application_fee_amount' => $applicationFeeCents,
+                'metadata' => array_merge(
+                    ['platform' => 'membermd', 'tenant_id' => $practice->id],
+                    $metadata,
+                ),
+            ];
+        } else {
+            $params['payment_intent_data'] = [
+                'metadata' => array_merge(
+                    ['platform' => 'membermd', 'tenant_id' => $practice->id],
+                    $metadata,
+                ),
+            ];
+        }
+
+        try {
+            $session = $this->stripe()->checkout->sessions->create(
+                $params,
+                [
+                    'stripe_account' => $practice->stripe_account_id,
+                    'idempotency_key' => "membermd-onetime-{$idempotencyKey}",
+                ],
+            );
+        } catch (ApiErrorException $e) {
+            throw new RuntimeException("Failed to create one-time checkout: {$e->getMessage()}", 0, $e);
+        }
+
+        return [
+            'session_id' => $session->id,
+            'url' => $session->url,
+            'expires_at' => $session->expires_at
+                ? now()->setTimestamp($session->expires_at)
+                : now()->addHours(24),
+        ];
+    }
+
+    /**
      * Pull the latest state of a Stripe Checkout Session from the
      * practice's Connect account. Used by the admin reconcile flow when
      * the checkout.session.completed webhook never arrived (event not

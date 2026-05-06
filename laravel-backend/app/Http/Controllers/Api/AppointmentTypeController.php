@@ -53,6 +53,10 @@ class AppointmentTypeController extends Controller
                 // "Allow public booking" checkbox in the admin
                 // panel, and the /external/booking endpoint's filter.
                 'is_public',
+                // Cash-pay (one-time payment) configuration. Drives
+                // the price chip on the public booking widget and the
+                // Stripe Checkout branch in bookingSubmit.
+                'cash_pay_enabled', 'cash_price_cents', 'cash_currency',
             ]);
 
         return response()->json(['data' => $types]);
@@ -76,12 +80,29 @@ class AppointmentTypeController extends Controller
             // Public booking widget visibility — practice opts in per
             // visit type. Default false on create.
             'is_public' => 'sometimes|boolean',
+            // Cash-pay (one-time, pre-pay via Stripe Checkout). Two
+            // fields move together — toggle + price. The frontend
+            // form should require a price when the toggle is on.
+            'cash_pay_enabled' => 'sometimes|boolean',
+            'cash_price_cents' => 'nullable|integer|min:100|max:1000000',
+            'cash_currency' => 'sometimes|string|size:3',
             'required_documents' => 'nullable|array',
             'required_documents.*.kind' => 'required_with:required_documents|string|in:consent_template,screening_template',
             'required_documents.*.id' => 'required_with:required_documents|uuid',
             'required_documents.*.freshness_days' => 'nullable|integer|min:1|max:3650',
             'required_documents.*.blocks_booking' => 'sometimes|boolean',
         ]);
+
+        // Defense in depth: if cash_pay_enabled was set true but
+        // there's no price, reject. Frontend should catch this first
+        // but we don't want a half-configured cash-pay type slipping
+        // through to the public widget.
+        if (!empty($validated['cash_pay_enabled']) && empty($validated['cash_price_cents'])) {
+            return response()->json([
+                'message' => 'A cash price is required when cash-pay is enabled.',
+                'errors' => ['cash_price_cents' => ['Set a price greater than $1.00 when cash-pay is enabled.']],
+            ], 422);
+        }
 
         $type = AppointmentType::create(array_merge($validated, [
             'tenant_id' => $user->tenant_id,
@@ -113,6 +134,10 @@ class AppointmentTypeController extends Controller
             // AppointmentTypesPanel. Patches independently of other
             // fields.
             'is_public' => 'sometimes|boolean',
+            // Cash-pay toggle + price + currency. Same shape as store.
+            'cash_pay_enabled' => 'sometimes|boolean',
+            'cash_price_cents' => 'nullable|integer|min:100|max:1000000',
+            'cash_currency' => 'sometimes|string|size:3',
             // Send empty array to clear the gate; null also clears.
             'required_documents' => 'nullable|array',
             'required_documents.*.kind' => 'required_with:required_documents|string|in:consent_template,screening_template',
@@ -120,6 +145,18 @@ class AppointmentTypeController extends Controller
             'required_documents.*.freshness_days' => 'nullable|integer|min:1|max:3650',
             'required_documents.*.blocks_booking' => 'sometimes|boolean',
         ]);
+
+        // Same defense in depth as store(). Use the post-merge state
+        // since update() can patch one field at a time and we don't
+        // want toggling cash-pay-on without setting a price to leave
+        // the type in an invalid state.
+        $merged = array_merge($type->toArray(), $validated);
+        if (!empty($merged['cash_pay_enabled']) && empty($merged['cash_price_cents'])) {
+            return response()->json([
+                'message' => 'A cash price is required when cash-pay is enabled.',
+                'errors' => ['cash_price_cents' => ['Set a price greater than $1.00 when cash-pay is enabled.']],
+            ], 422);
+        }
 
         $type->update($validated);
 

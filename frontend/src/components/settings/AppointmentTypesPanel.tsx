@@ -222,6 +222,14 @@ function TypeEditor({
   // (e.g. provider-only follow-ups) to website visitors. Practice
   // admin opts in per type.
   const [isPublic, setIsPublic] = useState((initial as { isPublic?: boolean } | undefined)?.isPublic ?? false);
+  // Cash-pay (one-time, pre-pay via Stripe Checkout). Two fields move
+  // together — toggle + price. Price held as a string here so the
+  // user can type freely; we convert to cents on submit.
+  const initCash = initial as { cashPayEnabled?: boolean; cashPriceCents?: number } | undefined;
+  const [cashPayEnabled, setCashPayEnabled] = useState(initCash?.cashPayEnabled ?? false);
+  const [cashPriceDollars, setCashPriceDollars] = useState<string>(
+    initCash?.cashPriceCents != null ? (initCash.cashPriceCents / 100).toFixed(2) : ""
+  );
   const [requiredDocs, setRequiredDocs] = useState<RequiredDocumentSpec[]>(
     initial?.requiredDocuments ?? [],
   );
@@ -229,6 +237,16 @@ function TypeEditor({
 
   const handleSubmit = async () => {
     if (!name.trim()) return;
+    // Cash-pay sanity — backend also enforces, but catch this in the
+    // UI so the form doesn't bounce with a 422.
+    if (cashPayEnabled) {
+      const dollars = parseFloat(cashPriceDollars);
+      if (!Number.isFinite(dollars) || dollars < 1) {
+        // eslint-disable-next-line no-alert
+        alert("Set a cash price of at least $1.00 before saving.");
+        return;
+      }
+    }
     setSubmitting(true);
     onSave({
       name: name.trim(),
@@ -239,6 +257,14 @@ function TypeEditor({
       requiredDocuments: requiredDocs.length > 0 ? requiredDocs : null,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       isPublic,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      cashPayEnabled,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      cashPriceCents: cashPayEnabled
+        ? Math.round(parseFloat(cashPriceDollars) * 100)
+        : null,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      cashCurrency: "usd",
     } as any);
   };
 
@@ -339,6 +365,48 @@ function TypeEditor({
             </span>
           </label>
         </div>
+      </div>
+
+      {/* Cash-pay (one-time, pre-pay via Stripe Checkout). Disabled
+          by default; when enabled the booking widget routes the
+          visitor through Checkout before confirming the slot. */}
+      <div className="border-t border-slate-200 pt-3">
+        <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer mb-2">
+          <input
+            type="checkbox"
+            checked={cashPayEnabled}
+            onChange={(e) => setCashPayEnabled(e.target.checked)}
+            className="rounded border-slate-300"
+          />
+          <span className="font-medium">
+            Cash-pay (one-time payment)
+            <span className="text-xs font-normal text-slate-400 ml-1">— visitor pays via Stripe before the slot is confirmed</span>
+          </span>
+        </label>
+        {cashPayEnabled && (
+          <div className="ml-6 pl-3 border-l-2 border-slate-100 space-y-2">
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-slate-500">Price</span>
+              <div className="flex items-center">
+                <span className="text-sm text-slate-500 px-2 py-1.5 border border-r-0 border-slate-200 rounded-l-md bg-slate-50">$</span>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="1.00"
+                  max="10000"
+                  value={cashPriceDollars}
+                  onChange={(e) => setCashPriceDollars(e.target.value)}
+                  placeholder="150.00"
+                  className="w-28 border border-slate-200 rounded-r-md px-2 py-1.5 text-sm"
+                />
+              </div>
+              <span className="text-xs text-slate-400">USD</span>
+            </div>
+            <p className="text-[11px] text-slate-500 leading-relaxed">
+              The price visitors see on the booking widget. Practice's Stripe Connect account must be active to accept payments. No subscription is created — this is a single transaction.
+            </p>
+          </div>
+        )}
       </div>
 
       {/* Required Documents picker */}

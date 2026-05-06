@@ -11,6 +11,7 @@ use App\Models\AppointmentType;
 use App\Models\ConsentSignature;
 use App\Models\ConsentTemplate;
 use App\Models\MembershipPlan;
+use App\Models\PendingBooking;
 use App\Models\Patient;
 use App\Models\PatientEntitlement;
 use App\Models\PatientMembership;
@@ -781,7 +782,13 @@ class ExternalController extends Controller
             ->where('is_active', true)
             ->where('is_public', true)
             ->orderBy('sort_order')
-            ->get(['id', 'name', 'duration_minutes', 'is_telehealth', 'color']);
+            ->get([
+                'id', 'name', 'duration_minutes', 'is_telehealth', 'color',
+                // Surface cash-pay so the widget can render a price
+                // chip on the visit-type card and route the visitor
+                // through Stripe Checkout when they pick the type.
+                'cash_pay_enabled', 'cash_price_cents', 'cash_currency',
+            ]);
 
         return response()->json([
             'data' => [
@@ -917,6 +924,96 @@ class ExternalController extends Controller
             ], 422);
         }
 
+        // ─── Cash-pay branch ─────────────────────────────────────
+        //
+        // If this appointment type is configured for cash-pay, we
+        // DON'T create User/Patient/Appointment yet. Instead:
+        //   1. Hold the form data + price in pending_bookings
+        //   2. Mint a Stripe Checkout session (mode: payment)
+        //   3. Return the checkout URL — frontend redirects there
+        //   4. Webhook converts pending → real records on payment
+        //
+        // The slot stays "soft-held" by pending_bookings; if the
+        // visitor abandons checkout, a sweeper can free it. No row
+        // in appointments locks the time prematurely.
+        if ($type->cash_pay_enabled && $type->cash_price_cents) {
+            if (!$practice->canAcceptPayments()) {
+                return response()->json([
+                    'message' => 'This practice is not yet set up to accept payments. Please contact them directly.',
+                ], 503);
+            }
+
+            try {
+                $pending = PendingBooking::create([
+                    'tenant_id' => $practice->id,
+                    'first_name' => $validated['first_name'],
+                    'last_name' => $validated['last_name'],
+                    'email' => $validated['email'],
+                    'phone' => $validated['phone'],
+                    'date_of_birth' => $validated['date_of_birth'],
+                    'reason' => $validated['reason'] ?? null,
+                    'provider_id' => $provider->id,
+                    'appointment_type_id' => $type->id,
+                    'scheduled_at' => $scheduledAt,
+                    'duration_minutes' => $duration,
+                    'is_telehealth' => (bool) $type->is_telehealth,
+                    'amount_cents' => (int) $type->cash_price_cents,
+                    'currency' => $type->cash_currency ?? 'usd',
+                    'status' => 'pending',
+                    'expires_at' => now()->addMinutes(30),
+                ]);
+
+                $appBase = config('app.frontend_url') ?: rtrim(config('app.url'), '/');
+                $successUrl = "{$appBase}/#/book/{$tenantCode}/success?pb={$pending->id}";
+                $cancelUrl = "{$appBase}/#/book/{$tenantCode}/cancelled?pb={$pending->id}";
+
+                $whenLocal = $scheduledAt
+                    ->copy()
+                    ->setTimezone($provider->timezone ?? $practice->timezone ?? 'UTC')
+                    ->format('M j, Y g:i A');
+
+                $session = $this->subscriptions->createOneTimeCheckoutSession(
+                    practice: $practice,
+                    idempotencyKey: $pending->id,
+                    amountCents: (int) $type->cash_price_cents,
+                    currency: $type->cash_currency ?? 'usd',
+                    productName: "{$type->name} — {$practice->name}",
+                    productDescription: "Appointment with {$provider->user?->first_name} {$provider->user?->last_name} on {$whenLocal}",
+                    customerEmail: $validated['email'],
+                    successUrl: $successUrl,
+                    cancelUrl: $cancelUrl,
+                    metadata: [
+                        'pending_booking_id' => $pending->id,
+                        'tenant_id' => $practice->id,
+                        'appointment_type_id' => $type->id,
+                        'provider_id' => $provider->id,
+                    ],
+                );
+
+                $pending->update([
+                    'stripe_session_id' => $session['session_id'],
+                ]);
+
+                return response()->json([
+                    'data' => [
+                        'ok' => true,
+                        'requires_payment' => true,
+                        'checkout_url' => $session['url'],
+                        'pending_booking_id' => $pending->id,
+                    ],
+                ]);
+            } catch (Throwable $e) {
+                Log::error('Cash-pay booking checkout creation failed', [
+                    'practice_id' => $practice->id,
+                    'error' => $e->getMessage(),
+                ]);
+                return response()->json([
+                    'message' => 'Could not start checkout. Please try again or contact the practice.',
+                ], 500);
+            }
+        }
+
+        // ─── Non-cash branch (existing request flow) ─────────────
         // Lead user + patient creation. Idempotent per tenant + email
         // — re-submitting from the same email reuses the existing
         // Patient row.

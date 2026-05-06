@@ -61,6 +61,12 @@ interface AppointmentTypeRow {
   duration_minutes: number;
   is_telehealth: boolean;
   color: string | null;
+  // Cash-pay fields. When cash_pay_enabled is true, the widget shows
+  // the price on the visit-type card and routes the visitor through
+  // Stripe Checkout instead of the existing "request" flow on submit.
+  cash_pay_enabled?: boolean;
+  cash_price_cents?: number | null;
+  cash_currency?: string | null;
 }
 interface OptionsResp {
   data: {
@@ -222,6 +228,13 @@ export function BookingWidget() {
         setSubmitting(false);
         return;
       }
+      // Cash-pay branch — backend returned a Stripe Checkout URL.
+      // Redirect the visitor to Stripe; they'll come back to
+      // /book/{tenantCode}/success?pb=... after payment.
+      if (json.data?.requires_payment && json.data?.checkout_url) {
+        window.location.href = json.data.checkout_url;
+        return;
+      }
       setConfirmation({
         reference: json.data?.reference ?? "BOOK-",
         message: json.data?.message ?? "Request received.",
@@ -311,26 +324,39 @@ export function BookingWidget() {
               {options.appointment_types.length === 0 && (
                 <p className="text-sm italic" style={{ color: C.slate400 }}>No public booking types configured. Contact the practice directly.</p>
               )}
-              {options.appointment_types.map((t) => (
-                <button
-                  key={t.id}
-                  onClick={() => setTypeId(t.id)}
-                  className="w-full flex items-center justify-between px-4 py-3 rounded-lg border text-left transition-colors"
-                  style={{
-                    borderColor: typeId === t.id ? C.teal500 : C.slate200,
-                    backgroundColor: typeId === t.id ? "#f0fdf4" : C.white,
-                  }}
-                >
-                  <div>
-                    <div className="text-sm font-semibold" style={{ color: C.navy900 }}>{t.name}</div>
-                    <div className="text-xs flex items-center gap-2 mt-0.5" style={{ color: C.slate500 }}>
-                      <Clock className="w-3 h-3" /> {t.duration_minutes} min
-                      {t.is_telehealth && <><Video className="w-3 h-3 ml-1" /> Telehealth</>}
+              {options.appointment_types.map((t) => {
+                const priceLabel = formatPriceLabel(t);
+                return (
+                  <button
+                    key={t.id}
+                    onClick={() => setTypeId(t.id)}
+                    className="w-full flex items-center justify-between px-4 py-3 rounded-lg border text-left transition-colors"
+                    style={{
+                      borderColor: typeId === t.id ? C.teal500 : C.slate200,
+                      backgroundColor: typeId === t.id ? "#f0fdf4" : C.white,
+                    }}
+                  >
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-semibold" style={{ color: C.navy900 }}>{t.name}</div>
+                      <div className="text-xs flex items-center gap-2 mt-0.5" style={{ color: C.slate500 }}>
+                        <Clock className="w-3 h-3" /> {t.duration_minutes} min
+                        {t.is_telehealth && <><Video className="w-3 h-3 ml-1" /> Telehealth</>}
+                      </div>
                     </div>
-                  </div>
-                  {typeId === t.id && <Check className="w-4 h-4" style={{ color: C.teal600 }} />}
-                </button>
-              ))}
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      {priceLabel && (
+                        <span
+                          className="text-sm font-semibold px-2 py-0.5 rounded"
+                          style={{ color: C.teal700, backgroundColor: "#dcfce7" }}
+                        >
+                          {priceLabel}
+                        </span>
+                      )}
+                      {typeId === t.id && <Check className="w-4 h-4" style={{ color: C.teal600 }} />}
+                    </div>
+                  </button>
+                );
+              })}
             </div>
           </div>
 
@@ -577,6 +603,75 @@ function FormField({ label, value, onChange, type = "text" }: { label: string; v
         style={{ borderColor: C.slate200 }}
       />
     </div>
+  );
+}
+
+// Render a price label for the visit-type card. Returns null when
+// the type isn't cash-pay configured — caller hides the chip.
+function formatPriceLabel(t: AppointmentTypeRow): string | null {
+  if (!t.cash_pay_enabled || !t.cash_price_cents) return null;
+  const dollars = t.cash_price_cents / 100;
+  const currency = (t.cash_currency || "usd").toUpperCase();
+  try {
+    return new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency,
+      maximumFractionDigits: dollars % 1 === 0 ? 0 : 2,
+    }).format(dollars);
+  } catch {
+    return `$${dollars.toFixed(2)}`;
+  }
+}
+
+/**
+ * Stripe Checkout success landing page for cash-pay bookings.
+ * Visitor lands here after paying. Webhooks fire async, so the
+ * appointment may not exist yet — we just say "payment received,
+ * confirmation email coming." Practice's intake queue picks up
+ * the converted appointment as soon as the webhook lands.
+ */
+export function BookingSuccessWidget() {
+  const { tenantCode = "" } = useParams<{ tenantCode: string }>();
+  useWidgetTheme(tenantCode, "booking");
+  return (
+    <Shell practiceName="Booking confirmed">
+      <div className="flex flex-col items-center text-center py-16 px-6">
+        <div className="w-16 h-16 rounded-full flex items-center justify-center mb-4" style={{ backgroundColor: "#dcfce7" }}>
+          <Check className="w-8 h-8" style={{ color: C.teal600 }} />
+        </div>
+        <h2 className="text-xl font-bold mb-2" style={{ color: C.navy900 }}>Payment received</h2>
+        <p className="text-sm max-w-md" style={{ color: C.slate600 }}>
+          Your appointment is locked in. A confirmation email is on its way with the visit details.
+        </p>
+      </div>
+    </Shell>
+  );
+}
+
+/**
+ * Stripe Checkout cancel landing page. Visitor closed/cancelled the
+ * Stripe Checkout flow — slot wasn't held, they can try again.
+ */
+export function BookingCancelledWidget() {
+  const { tenantCode = "" } = useParams<{ tenantCode: string }>();
+  useWidgetTheme(tenantCode, "booking");
+  return (
+    <Shell>
+      <div className="flex flex-col items-center text-center py-16 px-6">
+        <AlertCircle className="w-10 h-10 mb-3" style={{ color: C.slate400 }} />
+        <h2 className="text-lg font-semibold mb-2" style={{ color: C.navy900 }}>Booking cancelled</h2>
+        <p className="text-sm max-w-md mb-4" style={{ color: C.slate600 }}>
+          Your payment was cancelled and no appointment was created.
+        </p>
+        <a
+          href={`/#/book/${tenantCode}`}
+          className="inline-flex items-center gap-1.5 px-5 py-2.5 rounded-lg text-sm font-semibold text-white"
+          style={{ backgroundColor: C.teal600 }}
+        >
+          Start over
+        </a>
+      </div>
+    </Shell>
   );
 }
 
