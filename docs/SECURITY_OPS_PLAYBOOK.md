@@ -374,6 +374,13 @@ See quarterly checklist above. The drill validates that backups *actually* resto
   through visit-type pick → date → form, verifying the marketing-iframe
   conversion path stays alive. Skips cleanly when the demo tenant has
   no public booking types configured.
+- ✅ **Full-app E2E suite (read-only, prod-pointing)** — six spec files
+  cover auth flows, every patient/practice/superadmin nav tab, public
+  surfaces (login/forgot-password/register/plans/enroll/book widget +
+  invalid-tenant graceful failure), and cross-portal visibility (same
+  fixture seen from two roles). Hard fails on ErrorBoundary trips and
+  page errors; console errors are reported but don't block (often
+  environment-dependent). All read-only — no writes against prod.
 - ❌ **Webhook dead-letter dashboard** — visible only via raw `webhook_deliveries` table query. UI surface deferred.
 - ❌ **Dependency audit on schedule** — currently manual.
 - ❌ **Concurrent booking race tests** — manual; needs Playwright or pcntl-based runner.

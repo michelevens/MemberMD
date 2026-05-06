@@ -7547,7 +7547,18 @@ export function PracticePortal() {
   };
 
   function renderMessages() {
-    const threads = apiThreads || (isDemoMode ? MOCK_THREADS : []);
+    // The /messages endpoint returns a flat Message[] but this view
+    // expects thread-shaped rows ({ id, patient, lastMessage, time,
+    // unread, messages }). When the API data is in flat-message shape
+    // (no `patient` field on any row) we treat it as empty rather
+    // than render undefined and crash. Real thread API surfacing is
+    // deferred — see project_deferred_2026_05_04.md.
+    const apiHasThreadShape = Array.isArray(apiThreads)
+      && apiThreads.length > 0
+      && apiThreads.some((t: any) => typeof t?.patient === "string");
+    const threads = apiHasThreadShape
+      ? (apiThreads as typeof MOCK_THREADS)
+      : (isDemoMode ? MOCK_THREADS : []);
     const activeThread = threads.find((t: typeof MOCK_THREADS[0]) => t.id === selectedThread) || threads[0];
     const displayMessages = apiMessages || activeThread?.messages || [];
 
@@ -7614,20 +7625,20 @@ export function PracticePortal() {
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">
                         <p className="font-medium text-sm text-slate-800 truncate">
-                          {thread.patient}
+                          {(thread as any).patient ?? (thread as any).subject ?? "Conversation"}
                         </p>
-                        {thread.unread > 0 && (
+                        {((thread as any).unread ?? 0) > 0 && (
                           <span
                             className="w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold text-white shrink-0"
                             style={{ backgroundColor: "#635bff" }}
                           >
-                            {thread.unread}
+                            {(thread as any).unread}
                           </span>
                         )}
                       </div>
-                      <p className="text-xs text-slate-400 truncate mt-1">{thread.lastMessage}</p>
+                      <p className="text-xs text-slate-400 truncate mt-1">{(thread as any).lastMessage ?? (thread as any).body ?? ""}</p>
                     </div>
-                    <span className="text-xs text-slate-400 shrink-0">{thread.time}</span>
+                    <span className="text-xs text-slate-400 shrink-0">{(thread as any).time ?? ""}</span>
                   </div>
                 </button>
               ))}
@@ -7643,10 +7654,16 @@ export function PracticePortal() {
                   className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-semibold text-white"
                   style={{ backgroundColor: "#334e68" }}
                 >
-                  {activeThread.patient.split(" ").map((n: string) => n[0]).join("")}
+                  {((activeThread as any)?.patient ?? (activeThread as any)?.subject ?? "?")
+                    .split(" ")
+                    .map((n: string) => n[0])
+                    .filter(Boolean)
+                    .slice(0, 2)
+                    .join("")
+                    .toUpperCase()}
                 </div>
                 <div>
-                  <p className="font-medium text-sm text-slate-800">{activeThread.patient}</p>
+                  <p className="font-medium text-sm text-slate-800">{(activeThread as any)?.patient ?? (activeThread as any)?.subject ?? "Conversation"}</p>
                   <p className="text-xs text-slate-400">Member</p>
                 </div>
               </div>
