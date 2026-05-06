@@ -31,7 +31,7 @@ const SUPERADMIN_NAV = [
 
 test.describe("SuperAdmin Portal — deep walk", () => {
   test("walks every nav tab without ErrorBoundary trips", async ({ page }) => {
-    test.setTimeout(90_000);
+    test.setTimeout(180_000); // includes possible login throttle backoff
 
     const sink: ErrorSink = { errors: [], pageErrors: [] };
     attachLogCollector(page, sink);

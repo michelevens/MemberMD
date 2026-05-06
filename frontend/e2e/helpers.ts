@@ -62,8 +62,26 @@ export async function loginAsDemo(page: Page, role: Role) {
   await picker.waitFor({ state: "visible", timeout: 15_000 });
   await picker.click();
 
-  await page.getByRole("button", { name: new RegExp(`^${role}\\b`) }).click();
-  await page.waitForLoadState("networkidle", { timeout: 30_000 });
+  // Best-effort login click. If we hit the /api/login throttle (5/min
+  // per IP — see routes/api.php), retry once after backoff. We don't
+  // burn additional retries since rate-limit windows are minute-long.
+  const tryLogin = async () => {
+    await page.getByRole("button", { name: new RegExp(`^${role}\\b`) }).click();
+    await page.waitForLoadState("networkidle", { timeout: 30_000 });
+  };
+
+  await tryLogin();
+
+  // If we're still on /login after 3s, login was rejected — likely
+  // throttled. Wait out the minute and try once more. This keeps
+  // tests robust when the suite chains many logins quickly.
+  await page.waitForTimeout(2_500);
+  const stillOnLogin = await page.evaluate(() => window.location.hash.startsWith("#/login") || !window.location.hash);
+  if (stillOnLogin) {
+    // Rate-limit window is 60s. 65s ensures we're past it.
+    await page.waitForTimeout(65_000);
+    await tryLogin();
+  }
 }
 
 export async function logout(page: Page) {

@@ -86,7 +86,7 @@ const STAFF_NAV = [
 
 test.describe("Practice Portal — Practice Admin", () => {
   test("walks every nav tab without ErrorBoundary trips", async ({ page }) => {
-    test.setTimeout(120_000); // long sidebar
+    test.setTimeout(240_000); // long sidebar + possible login backoff
 
     const sink: ErrorSink = { errors: [], pageErrors: [] };
     attachLogCollector(page, sink);
@@ -184,7 +184,7 @@ test.describe("Practice Portal — Practice Admin", () => {
 
 test.describe("Practice Portal — Provider", () => {
   test("walks provider-scoped nav without errors", async ({ page }) => {
-    test.setTimeout(90_000);
+    test.setTimeout(180_000); // includes possible login throttle backoff
 
     const sink: ErrorSink = { errors: [], pageErrors: [] };
     attachLogCollector(page, sink);
@@ -206,7 +206,7 @@ test.describe("Practice Portal — Provider", () => {
 
 test.describe("Practice Portal — Staff", () => {
   test("walks staff-scoped nav without errors", async ({ page }) => {
-    test.setTimeout(90_000);
+    test.setTimeout(180_000); // includes possible login throttle backoff
 
     const sink: ErrorSink = { errors: [], pageErrors: [] };
     attachLogCollector(page, sink);

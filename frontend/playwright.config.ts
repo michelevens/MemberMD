@@ -15,7 +15,11 @@ const BASE_URL = process.env.E2E_BASE_URL || "https://app.membermd.io";
 
 export default defineConfig({
   testDir: "./e2e",
-  timeout: 60_000,
+  // Login API has a 5/min throttle — see routes/api.php. With many
+  // sequential logins in the suite, we sometimes hit it; the helper
+  // waits out the 60s window and retries. Bumped from 60s to 150s so
+  // a single backoff fits inside a single test budget.
+  timeout: 150_000,
   expect: { timeout: 10_000 },
   fullyParallel: false, // sequential — production app, no parallel hammering
   retries: 1,
