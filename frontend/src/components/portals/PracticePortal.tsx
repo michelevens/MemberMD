@@ -9,7 +9,7 @@ import { EncounterDetailPage } from "./EncounterDetailPage";
 import { PatientBillingTab } from "./PatientBillingTab";
 import { useAuth } from "../../contexts/AuthContext";
 import { dashboardService, membershipPlanService, messageService, patientService, appointmentService, encounterService, prescriptionService, invoiceService, programService, telehealthService, screeningService, couponService, providerService, paymentService, notificationService, apiFetch, billingEnhancedService, documentService, onboardingService, staffService, chartTemplateService, labService, referralService } from "../../lib/api";
-import { formatDob } from "../../lib/format";
+import { formatDob, formatRelative } from "../../lib/format";
 import { PortalShell, type NavSection as ShellNavSection, type PortalColor } from "../shared/PortalShell";
 import { MobileTodayScreen } from "../practice/MobileTodayScreen";
 import { MobileSheet } from "../shared/MobileSheet";
@@ -1589,9 +1589,60 @@ export function PracticePortal() {
     if (plansRes.status === "fulfilled" && plansRes.value.data && Array.isArray(plansRes.value.data)) {
       setApiPlans(plansRes.value.data);
     }
-    // Threads
+    // Threads — adapt API rows (Message[] with thread enrichments) to
+    // the thread shape the renderer was built around (MOCK_THREADS).
+    // Each row from /messages is the latest message in a thread plus
+    // unreadCount/messageCount fields. The renderer reads patient (a
+    // string) / lastMessage / time / unread / messages — so we derive
+    // them here. Without this adapter providers see the empty state
+    // even when unread messages exist.
     if (threadsRes.status === "fulfilled" && threadsRes.value.data && Array.isArray(threadsRes.value.data)) {
-      setApiThreads(threadsRes.value.data);
+      const currentUserId = auth.user?.id;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const adapted = (threadsRes.value.data as any[]).map((m: any) => {
+        // The "other party" is whichever side of the message isn't us.
+        const otherUser =
+          m.sender?.id && m.sender.id !== currentUserId ? m.sender :
+          m.recipient?.id && m.recipient.id !== currentUserId ? m.recipient :
+          (m.sender ?? m.recipient);
+        const otherName = otherUser
+          ? [otherUser.firstName ?? otherUser.first_name, otherUser.lastName ?? otherUser.last_name]
+              .filter(Boolean).join(" ").trim()
+              || otherUser.name
+              || otherUser.email
+              || "Patient"
+          : (m.subject ?? "Conversation");
+
+        const createdAt = m.createdAt ?? m.created_at ?? null;
+        const timeLabel = createdAt ? formatRelative(createdAt) : "";
+
+        return {
+          // Use thread_id (server's grouping key) so opening this
+          // thread loads the full conversation via /messages/thread/{id}.
+          id: m.threadId ?? m.thread_id ?? m.id,
+          patient: otherName,
+          // Recipient id for reply — without this the send endpoint
+          // 422s on missing recipient_id. Carried as a non-render
+          // field; the renderer ignores it.
+          otherUserId: otherUser?.id ?? null,
+          lastMessage: m.body ?? m.subject ?? "",
+          time: timeLabel,
+          unread: m.unreadCount ?? m.unread_count ?? 0,
+          // Initial messages array — getThread() loads the full set
+          // when the user clicks the thread, so we just seed with the
+          // latest message.
+          messages: [
+            {
+              id: m.id,
+              sender: otherName,
+              text: m.body ?? "",
+              time: timeLabel,
+              isPatient: !!m.sender && m.sender.id !== currentUserId && (m.sender.role === "patient" || !m.sender.role),
+            },
+          ],
+        };
+      });
+      setApiThreads(adapted);
     }
     // Patients (API returns paginated: {current_page, data: [...], ...})
     if (patientsRes.status === "fulfilled" && patientsRes.value.data) {
@@ -7520,14 +7571,32 @@ export function PracticePortal() {
       try {
         const res = await messageService.getThread(threadId);
         if (res.data && Array.isArray(res.data) && res.data.length > 0) {
+          const me = auth.user?.id;
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          setApiMessages(res.data.map((m: any) => ({
-            id: m.id,
-            sender: m.senderName ?? m.sender_name ?? "",
-            text: m.body ?? m.text ?? m.content ?? "",
-            time: m.createdAt ?? m.created_at ?? m.timestamp ?? "",
-            isPatient: m.senderRole === "patient" || m.is_patient === true,
-          })));
+          setApiMessages(res.data.map((m: any) => {
+            const sender = m.sender ?? null;
+            const senderName = sender
+              ? [sender.firstName ?? sender.first_name, sender.lastName ?? sender.last_name]
+                  .filter(Boolean).join(" ").trim()
+                  || sender.name
+                  || sender.email
+                  || "Sender"
+              : "—";
+            const senderIsMe = !!sender && sender.id === me;
+            // Position bubbles: anything not from me sits on the
+            // "patient" (left) side. The flag name is misleading
+            // — it's really "from the other party" — but renaming
+            // would touch the entire renderer.
+            const isOther = !senderIsMe;
+            const createdAt = m.createdAt ?? m.created_at ?? null;
+            return {
+              id: m.id,
+              sender: senderName,
+              text: m.body ?? m.text ?? "",
+              time: createdAt ? formatRelative(createdAt) : "",
+              isPatient: isOther,
+            };
+          }));
         } else {
           setApiMessages(null);
         }
@@ -7540,9 +7609,46 @@ export function PracticePortal() {
   const handleSendMessage = async () => {
     if (!messageInput.trim()) return;
     if (apiThreads) {
+      // The /messages POST requires recipient_id (validated tenant-
+      // scoped). We carry it on the adapted thread row as
+      // otherUserId; without it the send 422s.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const active = (apiThreads as any[]).find((t) => t.id === selectedThread);
+      const recipientId = active?.otherUserId;
+      if (!recipientId) {
+        setToast({ message: "Could not determine recipient. Try refreshing.", type: "error" });
+        return;
+      }
+      const body = messageInput.trim();
       try {
-        await messageService.send({ threadId: selectedThread, body: messageInput, text: messageInput } as Partial<import("../../types").Message>);
-      } catch { /* fallback: just clear input */ }
+        await apiFetch("/messages", {
+          method: "POST",
+          body: JSON.stringify({
+            recipient_id: recipientId,
+            thread_id: selectedThread,
+            body,
+            channel: "portal",
+          }),
+        });
+        // Optimistically append to the in-view conversation so the
+        // provider sees their reply immediately. The next refresh
+        // will reconcile with whatever the server stored.
+        setApiMessages((prev) => [
+          ...(prev ?? []),
+          {
+            id: `local-${Date.now()}`,
+            sender: "You",
+            text: body,
+            time: "just now",
+            isPatient: false,
+          },
+        ]);
+        setMessageInput("");
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : "Failed to send message.";
+        setToast({ message: msg, type: "error" });
+      }
+      return;
     }
     setMessageInput("");
   };
