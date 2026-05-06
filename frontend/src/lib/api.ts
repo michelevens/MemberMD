@@ -701,11 +701,14 @@ export const providerService = {
   // event titles) so the practice calendar grid can render them as
   // gray "busy" blocks alongside patient appointments without
   // leaking PHI across the practice/provider boundary.
+  // Note: apiFetch transforms snake_case → camelCase, so the keys
+  // arrive at callers as startsAt / endsAt / allDay even though the
+  // backend ships starts_at / ends_at / all_day.
   getBusyBlocks: async (id: string, dateFrom?: string, dateTo?: string): Promise<ApiResponse<Array<{
     id: string;
-    starts_at: string;
-    ends_at: string;
-    all_day: boolean;
+    startsAt: string;
+    endsAt: string;
+    allDay: boolean;
     label: string;
   }>>> => {
     if (useMockData()) return { data: [] };

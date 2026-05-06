@@ -1114,13 +1114,40 @@ function CalendarViewInner({ onAppointmentClick, onBookNew, onReschedule }: Cale
     setAppointments(mapped);
 
     // Pull busy blocks (personal-calendar imports) for every provider
-    // visible in the appointment list. A provider with no personal
-    // calendar configured returns an empty array — no harm. Failures
-    // don't block the appointment grid; we just render zero blocks.
+    // in the practice. We can't restrict to providers WITH appointments
+    // in the visible window — a provider may have no patient visits
+    // scheduled this week but still have personal calendar events that
+    // should render. Hit /providers to get the full roster, then fan
+    // out a busy-blocks fetch per provider. Failures don't block the
+    // appointment grid; we just render zero blocks for that provider.
     const providerIdToName = new Map<string, string>();
+    // Seed from appointments first (cheaper / already paid for).
     mapped.forEach((a) => {
       if (a.providerId) providerIdToName.set(a.providerId, a.providerName);
     });
+    // Then add any providers from the roster who weren't seen in
+    // appointments. Needed for "I don't have any patient visits this
+    // week but I do have personal commitments to render."
+    try {
+      const rosterRes = await apiFetch<unknown[]>("/providers");
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const roster: any[] = Array.isArray(rosterRes.data)
+        ? rosterRes.data
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        : Array.isArray((rosterRes.data as any)?.data) ? (rosterRes.data as any).data : [];
+      roster.forEach((p) => {
+        const pid = p?.id;
+        if (!pid || providerIdToName.has(pid)) return;
+        const u = p?.user ?? null;
+        const name = u?.name
+          ?? [u?.firstName ?? u?.first_name, u?.lastName ?? u?.last_name].filter(Boolean).join(" ").trim()
+          ?? "Provider";
+        providerIdToName.set(pid, name || "Provider");
+      });
+    } catch {
+      // Non-fatal — we still try with whatever providers we have
+      // from the appointment payload.
+    }
 
     if (providerIdToName.size === 0) {
       setBusyBlocks([]);
@@ -1129,8 +1156,17 @@ function CalendarViewInner({ onAppointmentClick, onBookNew, onReschedule }: Cale
         const r = await providerService.getBusyBlocks(pid, range.from, range.to);
         if (!r.data) return [] as BusyBlock[];
         return r.data.map((b): BusyBlock | null => {
-          const start = new Date(b.starts_at);
-          const end = new Date(b.ends_at);
+          // apiFetch already snake→camel'd these. Keep snake fallbacks
+          // in case a future call path skips the transform.
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const startsAt: string = (b as any).startsAt ?? (b as any).starts_at;
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const endsAt: string = (b as any).endsAt ?? (b as any).ends_at;
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const allDay: boolean = !!((b as any).allDay ?? (b as any).all_day);
+          if (!startsAt || !endsAt) return null;
+          const start = new Date(startsAt);
+          const end = new Date(endsAt);
           if (isNaN(start.getTime()) || isNaN(end.getTime())) return null;
           const durationMinutes = Math.max(15, Math.round((end.getTime() - start.getTime()) / 60000));
           return {
@@ -1141,7 +1177,7 @@ function CalendarViewInner({ onAppointmentClick, onBookNew, onReschedule }: Cale
             startHour: start.getHours(),
             startMinute: start.getMinutes(),
             durationMinutes,
-            allDay: !!b.all_day,
+            allDay,
           };
         }).filter((b): b is BusyBlock => b !== null);
       });
