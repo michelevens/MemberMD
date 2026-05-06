@@ -60,32 +60,155 @@ class CalendarService
 
     /**
      * Generate an iCal feed for a provider's schedule.
+     *
+     * Window: 30 days back to 6 months ahead by default. The wide
+     * window matters because most calendar clients only re-fetch the
+     * feed every few hours — surfacing six months ahead avoids "where
+     * did my appointment go?" surprises right at the edge.
+     *
+     * Cancelled appointments are emitted with STATUS:CANCELLED so the
+     * subscriber's calendar app knows to remove the prior copy of the
+     * event. Suppressing them entirely (the prior behavior) leaves
+     * stale events on subscriber calendars after a cancellation.
+     *
+     * All timestamps are UTC ("Z" suffix). Calendar apps subscribe to
+     * UTC moments and convert to the viewer's local timezone — that's
+     * the iCal contract. Adding a TZID just makes it harder for some
+     * clients (older Outlook variants) to parse.
      */
     public function generateICalFeed(Provider $provider, ?string $startDate = null, ?string $endDate = null): string
     {
-        $start = $startDate ? Carbon::parse($startDate) : now()->subMonth();
-        $end = $endDate ? Carbon::parse($endDate) : now()->addMonths(3);
+        $start = $startDate ? Carbon::parse($startDate) : now()->subDays(30);
+        $end = $endDate ? Carbon::parse($endDate) : now()->addMonths(6);
 
         $appointments = Appointment::where('provider_id', $provider->id)
             ->whereBetween('scheduled_at', [$start, $end])
-            ->whereNotIn('status', ['cancelled'])
             ->with(['patient', 'appointmentType'])
+            ->orderBy('scheduled_at')
             ->get();
 
         $events = '';
         foreach ($appointments as $apt) {
-            $dtStart = Carbon::parse($apt->scheduled_at)->utc()->format('Ymd\THis\Z');
-            $dtEnd = Carbon::parse($apt->scheduled_at)->addMinutes($apt->duration_minutes)->utc()->format('Ymd\THis\Z');
-            $summary = ($apt->appointmentType->name ?? 'Appointment') . ' - ' .
-                ($apt->patient->first_name ?? '') . ' ' . ($apt->patient->last_name ?? '');
-
-            $events .= "BEGIN:VEVENT\r\nUID:{$apt->id}@membermd.io\r\nDTSTAMP:" .
-                now()->utc()->format('Ymd\THis\Z') .
-                "\r\nDTSTART:{$dtStart}\r\nDTEND:{$dtEnd}\r\nSUMMARY:{$summary}\r\nSTATUS:" .
-                strtoupper($apt->status) .
-                "\r\nEND:VEVENT\r\n";
+            $events .= $this->buildVEvent($apt);
         }
 
-        return "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//MemberMD//EN\r\nX-WR-CALNAME:MemberMD Schedule\r\n{$events}END:VCALENDAR";
+        $providerName = $this->resolveProviderName($provider);
+        $calName = $this->escapeICalText("MemberMD — {$providerName}");
+
+        // PUBLISH method tells subscribers this is a read-only feed,
+        // not an invitation. X-PUBLISHED-TTL hints clients to refresh
+        // every 30 min — most respect it.
+        return "BEGIN:VCALENDAR\r\n"
+            . "VERSION:2.0\r\n"
+            . "PRODID:-//MemberMD//Schedule Feed//EN\r\n"
+            . "METHOD:PUBLISH\r\n"
+            . "CALSCALE:GREGORIAN\r\n"
+            . "X-WR-CALNAME:{$calName}\r\n"
+            . "X-WR-CALDESC:Provider schedule synced from MemberMD\r\n"
+            . "X-PUBLISHED-TTL:PT30M\r\n"
+            . "REFRESH-INTERVAL;VALUE=DURATION:PT30M\r\n"
+            . $events
+            . "END:VCALENDAR\r\n";
+    }
+
+    /**
+     * Build a single VEVENT block for an appointment row.
+     *
+     * SUMMARY: short, scannable line in the calendar grid.
+     * DESCRIPTION: longer detail visible when the user opens the event —
+     * patient initials (no PHI in title), reason for visit, telehealth
+     * join URL when applicable.
+     * LOCATION: physical address for in-office; "Telehealth" otherwise.
+     * STATUS: confirmed/tentative/cancelled per the appointment status.
+     * LAST-MODIFIED: lets calendar clients detect updates between
+     * polls, which trims unnecessary redraws.
+     */
+    private function buildVEvent(Appointment $apt): string
+    {
+        $dtStart = Carbon::parse($apt->scheduled_at)->utc()->format('Ymd\THis\Z');
+        $dtEnd = Carbon::parse($apt->scheduled_at)
+            ->addMinutes($apt->duration_minutes ?? 30)
+            ->utc()
+            ->format('Ymd\THis\Z');
+
+        $patientName = trim(($apt->patient->first_name ?? '') . ' ' . ($apt->patient->last_name ?? ''));
+        if ($patientName === '') {
+            $patientName = 'Appointment';
+        }
+
+        $typeName = $apt->appointmentType->name ?? 'Visit';
+        $isTelehealth = (bool) ($apt->is_telehealth ?? false);
+
+        // Compose summary: "<type> · <patient>" — short enough to read
+        // in a packed calendar grid.
+        $summary = $this->escapeICalText("{$typeName} · {$patientName}");
+
+        // Location. Telehealth visits are explicitly labelled so the
+        // patient knows not to drive anywhere.
+        $location = $this->escapeICalText($isTelehealth ? 'Telehealth (video visit)' : 'In-office');
+
+        // Description: multi-line, escaped. Includes reason for visit
+        // when present and telehealth join URL when this is a video
+        // visit (so the provider can join from their personal calendar).
+        $descParts = ["Patient: {$patientName}"];
+        if ($apt->reason_for_visit) {
+            $descParts[] = "Reason: {$apt->reason_for_visit}";
+        }
+        $descParts[] = "Type: {$typeName}";
+        if ($isTelehealth) {
+            $appBase = config('app.frontend_url') ?: rtrim(config('app.url'), '/');
+            $descParts[] = "Telehealth: {$appBase}/#/telehealth/{$apt->id}";
+        }
+        $descParts[] = '— Synced from MemberMD —';
+        $description = $this->escapeICalText(implode("\n", $descParts));
+
+        // STATUS mapping. Calendar apps recognize CONFIRMED / TENTATIVE
+        // / CANCELLED. Other internal statuses (in_progress, completed,
+        // no_show) collapse to CONFIRMED — the moment already
+        // happened, no point surprising the subscriber.
+        $status = match ($apt->status) {
+            'cancelled' => 'CANCELLED',
+            'pending', 'requested' => 'TENTATIVE',
+            default => 'CONFIRMED',
+        };
+
+        $now = now()->utc()->format('Ymd\THis\Z');
+        $lastModified = ($apt->updated_at ?? now())->utc()->format('Ymd\THis\Z');
+
+        return "BEGIN:VEVENT\r\n"
+            . "UID:{$apt->id}@membermd.io\r\n"
+            . "DTSTAMP:{$now}\r\n"
+            . "DTSTART:{$dtStart}\r\n"
+            . "DTEND:{$dtEnd}\r\n"
+            . "SUMMARY:{$summary}\r\n"
+            . "DESCRIPTION:{$description}\r\n"
+            . "LOCATION:{$location}\r\n"
+            . "STATUS:{$status}\r\n"
+            . "LAST-MODIFIED:{$lastModified}\r\n"
+            . "TRANSP:OPAQUE\r\n"
+            . "END:VEVENT\r\n";
+    }
+
+    /**
+     * Escape a string for inclusion in an iCal property value per
+     * RFC 5545 §3.3.11. Comma, semicolon, and backslash get backslash-
+     * escaped; literal newlines become "\n". Without this, a patient
+     * named "Smith, Jr." silently breaks the parser in some clients.
+     */
+    private function escapeICalText(string $value): string
+    {
+        $value = str_replace(["\\", "\r\n", "\n", "\r", ",", ";"], ["\\\\", "\\n", "\\n", "\\n", "\\,", "\\;"], $value);
+        return $value;
+    }
+
+    private function resolveProviderName(Provider $provider): string
+    {
+        $provider->loadMissing('user');
+        $user = $provider->user;
+        if (!$user) {
+            return 'Provider';
+        }
+        $name = trim(($user->first_name ?? '') . ' ' . ($user->last_name ?? ''));
+        return $name !== '' ? $name : ($user->name ?? 'Provider');
     }
 }

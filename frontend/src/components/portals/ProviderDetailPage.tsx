@@ -1492,6 +1492,22 @@ function CalendarSyncCard({ provider, mode, setToast, onSaved }: CalendarSyncCar
   // configured API base URL when available.
   const apiBase = (import.meta.env.VITE_API_URL as string | undefined) || "/api";
   const feedUrl = token ? `${apiBase.replace(/\/$/, "")}/calendar/ical/${token}` : null;
+  // webcal:// is the protocol Apple Calendar (mac + iOS) and Outlook
+  // (mobile) recognize for one-click subscribe. Same URL with the
+  // scheme rewritten — `https` → `webcal`. Plain https in the iOS
+  // Calendar app gets you a "download .ics once" instead of a
+  // subscription, which is the wrong behavior here.
+  const webcalUrl = feedUrl ? feedUrl.replace(/^https?:\/\//, "webcal://") : null;
+  // Google Calendar's "add by URL" deeplink. `cid` is URL-encoded.
+  // Lands in Settings → "Add calendar by URL" pre-filled.
+  const googleSubscribeUrl = feedUrl
+    ? `https://calendar.google.com/calendar/r?cid=${encodeURIComponent(feedUrl)}`
+    : null;
+  // Outlook web's add-from-internet deeplink. Outlook's docs call this
+  // out as the supported pattern for read-only calendar subscriptions.
+  const outlookSubscribeUrl = feedUrl
+    ? `https://outlook.live.com/calendar/0/addfromweb?url=${encodeURIComponent(feedUrl)}&name=${encodeURIComponent("MemberMD")}`
+    : null;
 
   const generate = async () => {
     setGenerating(true);
@@ -1585,23 +1601,52 @@ function CalendarSyncCard({ provider, mode, setToast, onSaved }: CalendarSyncCar
           )}
         </div>
 
-        {/* Google Calendar — backend OAuth is a placeholder today. We
-            surface that state honestly instead of pretending the
-            button works. */}
-        <div className="rounded-lg border border-slate-200 p-4 bg-slate-50/50">
-          <div className="flex items-start gap-3">
-            <div className="w-10 h-10 rounded-full bg-white border border-slate-200 flex items-center justify-center shrink-0">
-              <Calendar className="w-5 h-5 text-slate-400" />
+        {/* One-click subscribe buttons. Visible only after a feed URL
+            exists. Each opens the right "subscribe to calendar by URL"
+            destination — Google's add-by-URL page, Apple/iOS Calendar
+            via webcal:// (which iOS pops a confirm dialog for), and
+            Outlook web's add-from-web URL.
+            None of these need OAuth — they're public-feed subscribers
+            keyed off the secret token. The trade-off is one-way sync
+            (read-only); two-way sync via Google OAuth remains a
+            future ask, but for a calendar that just shows the schedule
+            this is the right shape.
+        */}
+        {feedUrl && (
+          <div className="rounded-lg border border-slate-200 p-4 space-y-3">
+            <p className="text-xs font-semibold text-slate-700">Subscribe in your calendar app</p>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              <a
+                href={googleSubscribeUrl ?? "#"}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg border border-slate-200 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              >
+                <Calendar className="w-4 h-4 text-blue-600" />
+                Google Calendar
+              </a>
+              <a
+                href={webcalUrl ?? "#"}
+                className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg border border-slate-200 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              >
+                <Calendar className="w-4 h-4 text-slate-700" />
+                Apple Calendar
+              </a>
+              <a
+                href={outlookSubscribeUrl ?? "#"}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg border border-slate-200 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              >
+                <Calendar className="w-4 h-4 text-blue-700" />
+                Outlook
+              </a>
             </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-semibold text-slate-800">Google Calendar (coming soon)</p>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Two-way sync via Google OAuth is on the roadmap. For now, use the iCal subscribe URL above —
-                paste it into Google Calendar's "Subscribe to calendar" by URL. Apple Calendar and Outlook accept the same URL.
-              </p>
-            </div>
+            <p className="text-[11px] text-slate-500 leading-relaxed">
+              These open the right "Subscribe to calendar by URL" flow in each app. The feed is read-only and refreshes about every 30 minutes — Google checks every few hours, Apple every 15 min by default. Two-way sync (creating events from your phone calendar back into MemberMD) requires OAuth and isn't enabled yet.
+            </p>
           </div>
-        </div>
+        )}
       </div>
     </div>
   );

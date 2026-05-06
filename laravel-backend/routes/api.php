@@ -139,7 +139,14 @@ Route::get('/registration/program-templates', [MasterProgramController::class, '
 Route::post('/coupons/validate', [CouponController::class, 'validate_'])->middleware('throttle:30,1');
 
 // ===== Public iCal Feed (no auth) =====
-Route::get('/calendar/ical/{token}', [CalendarController::class, 'icalFeed']);
+// {token} is a Str::random alphanumeric value. Constrain so this
+// route doesn't shadow `/calendar/ical/generate-token` (which lives
+// inside the auth-middleware group below). Without the constraint,
+// Laravel matches "generate-token" as a literal {token}, looks for
+// a provider with that ical_feed_token, returns 404, and the real
+// protected route never gets a chance.
+Route::get('/calendar/ical/{token}', [CalendarController::class, 'icalFeed'])
+    ->where('token', '(?!generate-token$)[A-Za-z0-9_\-]+');
 
 // ===== SMS Webhooks (public, no auth — Twilio callbacks) =====
 Route::prefix('webhooks/sms')->middleware('throttle:120,1')->group(function () {
