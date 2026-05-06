@@ -10403,6 +10403,7 @@ export function PracticePortal() {
         onLogout={auth.logout}
         headerTitle={activeLabel}
         onOpenMessages={() => goToTab("messages")}
+        messagesUnreadCount={unreadCount}
         onOpenSettings={() => goToTab("settings")}
       >
         {dataLoading && (
