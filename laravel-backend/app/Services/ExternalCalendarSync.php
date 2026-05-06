@@ -74,8 +74,15 @@ class ExternalCalendarSync
         $fetchUrl = preg_replace('#^webcal://#i', 'https://', $url);
 
         try {
+            // Follow redirects (Google often 302s to a host-pinned
+            // edge), accept gzip transparently, send Accept so servers
+            // that content-negotiate hand back the .ics representation.
             $response = Http::timeout(20)
-                ->withHeaders(['User-Agent' => 'MemberMD-Calendar-Sync/1.0'])
+                ->withHeaders([
+                    'User-Agent' => 'MemberMD-Calendar-Sync/1.0',
+                    'Accept' => 'text/calendar, application/octet-stream;q=0.9, */*;q=0.5',
+                    'Accept-Encoding' => 'gzip, deflate',
+                ])
                 ->get($fetchUrl);
         } catch (ConnectionException $e) {
             return $this->markFailed($provider, "Couldn't reach calendar URL: " . $e->getMessage());
@@ -86,8 +93,40 @@ class ExternalCalendarSync
         }
 
         $body = $response->body();
-        if (trim($body) === '' || stripos($body, 'BEGIN:VCALENDAR') === false) {
-            return $this->markFailed($provider, "URL did not return a valid iCal feed.");
+
+        // Strip a leading UTF-8/16 BOM if present — some Apple/Outlook
+        // exports include one. sabre/vobject's parser doesn't tolerate
+        // a BOM before BEGIN:VCALENDAR.
+        if (str_starts_with($body, "\xEF\xBB\xBF")) {
+            $body = substr($body, 3);
+        }
+
+        if (trim($body) === '') {
+            return $this->markFailed($provider, "Calendar URL returned an empty response.");
+        }
+
+        if (stripos($body, 'BEGIN:VCALENDAR') === false) {
+            // Diagnostic message — what kind of content DID we get?
+            // Helps the provider tell whether they pasted the public
+            // web URL instead of the iCal URL, or whether the calendar
+            // is private and requires auth.
+            $contentType = $response->header('Content-Type') ?? 'unknown';
+            $snippet = trim(substr(strip_tags($body), 0, 80));
+            $snippet = preg_replace('/\s+/', ' ', $snippet) ?? '';
+
+            $hint = '';
+            if (stripos($contentType, 'html') !== false || stripos($body, '<html') !== false) {
+                $hint = ' Looks like the URL returned a web page — make sure you copied the iCal/.ics URL, not the public calendar page link.';
+            } elseif (stripos($body, '<?xml') === 0 || stripos($contentType, 'xml') !== false) {
+                $hint = ' URL returned XML, not iCal. Some providers expose an XML CalDAV URL — look for the "iCal" or "ICS" specific link instead.';
+            } elseif (stripos($body, 'sign in') !== false || stripos($body, 'login') !== false || $response->status() === 401 || $response->status() === 403) {
+                $hint = ' The URL appears to require a login. Use the "secret/private/published" iCal URL that anyone can read without authentication.';
+            }
+
+            return $this->markFailed(
+                $provider,
+                "URL did not return a valid iCal feed (Content-Type: {$contentType})." . $hint
+            );
         }
 
         try {

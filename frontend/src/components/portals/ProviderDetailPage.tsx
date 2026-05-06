@@ -1810,9 +1810,46 @@ function ExternalCalendarSection({ providerId, isSelf, setToast }: {
             )}
           </div>
           {statusErr && (
-            <div className="text-xs text-red-700 bg-red-50 border border-red-200 rounded px-2 py-1 flex items-start gap-1.5">
-              <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
-              <span className="flex-1">{statusErr}</span>
+            <div className="text-xs text-red-700 bg-red-50 border border-red-200 rounded px-2 py-2 space-y-1.5">
+              <div className="flex items-start gap-1.5">
+                <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                <span className="flex-1">{statusErr}</span>
+              </div>
+              <button
+                onClick={() => setShowInstructions(!showInstructions)}
+                className="text-[11px] underline hover:no-underline ml-5"
+              >
+                {showInstructions ? "Hide" : "How do I find the right URL?"}
+              </button>
+            </div>
+          )}
+          {statusErr && showInstructions && (
+            <div className="text-xs text-slate-700 space-y-2 bg-white border border-slate-200 rounded p-3">
+              <p className="text-[11px] text-slate-500 leading-relaxed">
+                Make sure you copied the calendar's <span className="font-semibold">private/secret iCal URL</span>, not the public web link or sharing page. The right URL ends in <span className="font-mono">.ics</span> or contains <span className="font-mono">/ical/</span> and returns plain text starting with <span className="font-mono">BEGIN:VCALENDAR</span>.
+              </p>
+              <div>
+                <p className="font-semibold text-slate-800 mb-0.5">Google Calendar</p>
+                <p className="text-slate-600">Settings → click your calendar in the left list → "Integrate calendar" → copy <span className="font-mono">Secret address in iCal format</span> (NOT "Public address" or "Embed code").</p>
+              </div>
+              <div>
+                <p className="font-semibold text-slate-800 mb-0.5">Apple Calendar (iCloud)</p>
+                <p className="text-slate-600">Right-click the calendar → "Share Calendar…" → check <span className="font-mono">Public Calendar</span> → copy URL. Should start with <span className="font-mono">webcal://</span>.</p>
+              </div>
+              <div>
+                <p className="font-semibold text-slate-800 mb-0.5">Outlook / Microsoft 365</p>
+                <p className="text-slate-600">Settings → Calendar → Shared calendars → "Publish a calendar" → choose <span className="font-mono">Can view all details</span> → copy the <span className="font-mono">ICS</span> link (not HTML).</p>
+              </div>
+              <button
+                onClick={async () => {
+                  if (!confirm("Disconnect and try a different URL?")) return;
+                  await providerService.setExternalCalendar(providerId, null);
+                  load();
+                }}
+                className="text-[11px] text-red-700 underline hover:no-underline"
+              >
+                Disconnect and paste a different URL
+              </button>
             </div>
           )}
           <div className="flex items-center gap-2">
