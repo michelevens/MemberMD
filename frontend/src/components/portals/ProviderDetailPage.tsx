@@ -1694,9 +1694,35 @@ function ExternalCalendarSection({ providerId, isSelf, setToast }: {
 
   const load = async () => {
     setLoading(true);
-    const res = await providerService.getExternalCalendar(providerId);
-    if (res.data) setStatus(res.data);
-    setLoading(false);
+    try {
+      const res = await providerService.getExternalCalendar(providerId);
+      if (res.data) {
+        setStatus(res.data);
+      } else {
+        // Endpoint returned no data — render the disconnected default
+        // so the section doesn't sit on its loading spinner forever.
+        setStatus({
+          connected: false,
+          syncedAt: null,
+          syncStatus: null,
+          syncError: null,
+          busyBlockCount: 0,
+        });
+      }
+    } catch {
+      // Network blip / 500 / etc. — surface a clean disconnected
+      // state instead of throwing up the whole tab. The user can
+      // retry by reloading or by hitting the backend manually.
+      setStatus({
+        connected: false,
+        syncedAt: null,
+        syncStatus: null,
+        syncError: null,
+        busyBlockCount: 0,
+      });
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
