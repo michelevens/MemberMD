@@ -217,6 +217,11 @@ function TypeEditor({
   const [color, setColor] = useState(initial?.color ?? "#27ab83");
   const [isTeleHealth, setIsTeleHealth] = useState(initial?.isTeleHealth ?? false);
   const [requiresMembership, setRequiresMembership] = useState(initial?.requiresMembership ?? false);
+  // is_public exposes this visit type on the public booking widget.
+  // Default off so the widget doesn't surface internal-only types
+  // (e.g. provider-only follow-ups) to website visitors. Practice
+  // admin opts in per type.
+  const [isPublic, setIsPublic] = useState((initial as { isPublic?: boolean } | undefined)?.isPublic ?? false);
   const [requiredDocs, setRequiredDocs] = useState<RequiredDocumentSpec[]>(
     initial?.requiredDocuments ?? [],
   );
@@ -232,7 +237,9 @@ function TypeEditor({
       isTeleHealth,
       requiresMembership,
       requiredDocuments: requiredDocs.length > 0 ? requiredDocs : null,
-    });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      isPublic,
+    } as any);
   };
 
   // Templates that aren't already in the requiredDocs list — used by the
@@ -286,7 +293,7 @@ function TypeEditor({
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 items-end">
         <div>
           <label className="block text-xs font-medium text-slate-600 mb-1">Color</label>
           <input
@@ -296,24 +303,42 @@ function TypeEditor({
             className="w-full h-9 rounded-md border border-slate-200 bg-white cursor-pointer"
           />
         </div>
-        <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={isTeleHealth}
-            onChange={(e) => setIsTeleHealth(e.target.checked)}
-            className="rounded border-slate-300"
-          />
-          Telehealth (default)
-        </label>
-        <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={requiresMembership}
-            onChange={(e) => setRequiresMembership(e.target.checked)}
-            className="rounded border-slate-300"
-          />
-          Requires active membership
-        </label>
+        <div className="flex flex-col gap-2 pb-1">
+          <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={isTeleHealth}
+              onChange={(e) => setIsTeleHealth(e.target.checked)}
+              className="rounded border-slate-300"
+            />
+            Telehealth (default)
+          </label>
+          <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={requiresMembership}
+              onChange={(e) => setRequiresMembership(e.target.checked)}
+              className="rounded border-slate-300"
+            />
+            Requires active membership
+          </label>
+          {/* Public booking widget visibility — gates this visit type
+              on the embeddable /book/{tenantCode} page. Off by default
+              so internal-only types stay internal until the practice
+              opts in. */}
+          <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={isPublic}
+              onChange={(e) => setIsPublic(e.target.checked)}
+              className="rounded border-slate-300"
+            />
+            <span>
+              Allow public booking
+              <span className="text-xs text-slate-400 ml-1">(shows on the website widget)</span>
+            </span>
+          </label>
+        </div>
       </div>
 
       {/* Required Documents picker */}

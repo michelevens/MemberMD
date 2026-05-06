@@ -49,6 +49,10 @@ class AppointmentTypeController extends Controller
                 // Sprint 1 required-documents gate. Booking widget's
                 // pre-flight reads this. Null/empty for un-gated types.
                 'required_documents',
+                // Public booking widget visibility — drives the
+                // "Allow public booking" checkbox in the admin
+                // panel, and the /external/booking endpoint's filter.
+                'is_public',
             ]);
 
         return response()->json(['data' => $types]);
@@ -69,6 +73,9 @@ class AppointmentTypeController extends Controller
             'is_telehealth' => 'sometimes|boolean',
             'requires_plan' => 'sometimes|boolean',
             'sort_order' => 'nullable|integer',
+            // Public booking widget visibility — practice opts in per
+            // visit type. Default false on create.
+            'is_public' => 'sometimes|boolean',
             'required_documents' => 'nullable|array',
             'required_documents.*.kind' => 'required_with:required_documents|string|in:consent_template,screening_template',
             'required_documents.*.id' => 'required_with:required_documents|uuid',
@@ -102,6 +109,10 @@ class AppointmentTypeController extends Controller
             'requires_plan' => 'sometimes|boolean',
             'sort_order' => 'nullable|integer',
             'is_active' => 'sometimes|boolean',
+            // Public booking widget visibility — toggle from
+            // AppointmentTypesPanel. Patches independently of other
+            // fields.
+            'is_public' => 'sometimes|boolean',
             // Send empty array to clear the gate; null also clears.
             'required_documents' => 'nullable|array',
             'required_documents.*.kind' => 'required_with:required_documents|string|in:consent_template,screening_template',
