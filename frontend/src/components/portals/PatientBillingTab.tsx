@@ -18,6 +18,7 @@ import {
   DollarSign, Clock, ExternalLink, X, Plus, Trash2, Loader2,
 } from "lucide-react";
 import { membershipService, patientBillingService, apiFetch, adHocChargeService } from "../../lib/api";
+import type { AdHocChargeRow } from "../../lib/api";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Toast = (msg: { message: string; type: "success" | "error" }) => void;
@@ -67,6 +68,11 @@ export function PatientBillingTab({
   } | null>(null);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [loading, setLoading] = useState(true);
+  // Ad-hoc charges (one-off billing outside the subscription flow).
+  // Visible regardless of membership status — practices bill non-
+  // member patients too (cash-pay visit follow-ups, form letters
+  // for insurance-only patients, etc.).
+  const [adHocCharges, setAdHocCharges] = useState<AdHocChargeRow[]>([]);
 
   // ─── Dialog state ──────────────────────────────────────────────────
   const [showCardUpdate, setShowCardUpdate] = useState(false);
@@ -95,12 +101,13 @@ export function PatientBillingTab({
 
   const reload = async () => {
     setLoading(true);
-    const [insightsRes, upcomingRes, invoicesRes] = await Promise.all([
+    const [insightsRes, upcomingRes, invoicesRes, adHocRes] = await Promise.all([
       patientBillingService.getInsights(patientId),
       membershipId ? membershipService.upcomingInvoice(membershipId) : Promise.resolve({ data: null }),
       // Reuse the existing patient invoices endpoint that PracticePortal
       // already calls — keeps the data shape consistent.
       apiFetch<Invoice[]>(`/patients/${patientId}/invoices`).catch(() => ({ data: [] as Invoice[] })),
+      adHocChargeService.list({ patient_id: patientId }).catch(() => ({ data: [] })),
     ]);
     if (insightsRes.data) setInsights(insightsRes.data);
     setUpcoming(upcomingRes.data ?? null);
@@ -110,6 +117,17 @@ export function PatientBillingTab({
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         : ((invoicesRes.data as any).data ?? []);
       setInvoices(list);
+    }
+    // Backend's index() returns Laravel's pagination envelope —
+    // unwrap to the plain array. Empty array is a fine default.
+    if (adHocRes.data) {
+      const raw = adHocRes.data;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const list: AdHocChargeRow[] = Array.isArray(raw)
+        ? raw
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        : Array.isArray((raw as any).data) ? (raw as any).data : [];
+      setAdHocCharges(list);
     }
     setLoading(false);
   };
@@ -230,6 +248,46 @@ export function PatientBillingTab({
           </div>
         )}
       </div>
+
+      {/* ── Ad-hoc charges section ──────────────────────────────────── */}
+      {/* Surfaces every charge regardless of status — paid charges
+          also appear in Payments below (via Stripe webhooks → Payment
+          rows), but draft/sent/cancelled never reach that table.
+          This is the source of truth for "what have we billed this
+          patient for, outside the membership?" */}
+      <AdHocChargesSection
+        charges={adHocCharges}
+        onResend={async (id) => {
+          const r = await adHocChargeService.resend(id);
+          if (r.error) setToast({ message: r.error, type: "error" });
+          else setToast({ message: "Payment link resent.", type: "success" });
+          reload();
+        }}
+        onCancel={async (id) => {
+          const r = await adHocChargeService.cancel(id);
+          if (r.error) setToast({ message: r.error, type: "error" });
+          else setToast({ message: "Charge cancelled.", type: "success" });
+          reload();
+        }}
+        onCopyLink={async (id) => {
+          // resend without dispatching email — backend always returns
+          // the Stripe URL, which we copy. The endpoint also re-sends
+          // the email by design; if the practice ONLY wants the link
+          // without re-emailing, they can ignore the duplicate email.
+          // Acceptable trade-off for v1 — separate endpoint can ship
+          // later if anyone complains.
+          const r = await adHocChargeService.resend(id);
+          if (r.error) {
+            setToast({ message: r.error, type: "error" });
+            return;
+          }
+          const url = r.data?.checkout_url;
+          if (url) {
+            await navigator.clipboard.writeText(url);
+            setToast({ message: "Payment link copied.", type: "success" });
+          }
+        }}
+      />
 
       {/* ── Payments section ────────────────────────────────────────── */}
       <div className="glass rounded-xl">
@@ -645,6 +703,122 @@ function DialogShell({ title, subtitle, onClose, children }: { title: string; su
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────
+
+// Renders the ad-hoc charges list. Pure — receives data + action
+// callbacks from the parent. Lives in this file because it's tightly
+// coupled to PatientBillingTab's visual idiom (glass card + status
+// dot + kebab menu) and isn't reused anywhere else.
+function AdHocChargesSection({
+  charges,
+  onResend,
+  onCancel,
+  onCopyLink,
+}: {
+  charges: AdHocChargeRow[];
+  onResend: (id: string) => Promise<void> | void;
+  onCancel: (id: string) => Promise<void> | void;
+  onCopyLink: (id: string) => Promise<void> | void;
+}) {
+  const [openKebab, setOpenKebab] = useState<string | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (!containerRef.current?.contains(e.target as Node)) setOpenKebab(null);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const statusBadge = (status: string): { label: string; bg: string; color: string } => {
+    switch (status) {
+      case "paid": return { label: "Paid", bg: "#dcfce7", color: "#166534" };
+      case "sent": return { label: "Awaiting payment", bg: "#fef3c7", color: "#92400e" };
+      case "draft": return { label: "Draft", bg: "#f1f5f9", color: "#475569" };
+      case "cancelled": return { label: "Cancelled", bg: "#fee2e2", color: "#991b1b" };
+      case "expired": return { label: "Expired", bg: "#fee2e2", color: "#991b1b" };
+      default: return { label: status, bg: "#f1f5f9", color: "#475569" };
+    }
+  };
+
+  if (charges.length === 0) return null;
+
+  return (
+    <div ref={containerRef} className="glass rounded-xl">
+      <div className="flex items-center justify-between px-5 py-3 border-b border-slate-100">
+        <h3 className="font-semibold text-slate-800">Ad-hoc charges</h3>
+        <span className="text-xs text-slate-400">{charges.length} total</span>
+      </div>
+      <div className="divide-y divide-slate-100">
+        {charges.map((c) => {
+          const badge = statusBadge(c.status);
+          const total = (c.amount_cents / 100).toFixed(2);
+          const items = Array.isArray(c.line_items) ? c.line_items.length : 0;
+          const kebabId = `ahc-${c.id}`;
+          const canModify = c.status === "draft" || c.status === "sent";
+          return (
+            <div key={c.id} className="px-5 py-3 flex items-center gap-3">
+              <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: badge.color }} />
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-medium text-slate-800 truncate">${total} · {c.description}</div>
+                <div className="text-xs text-slate-500">
+                  {items} item{items === 1 ? "" : "s"} · {new Date(c.created_at).toLocaleDateString()}
+                  {c.paid_at && <> · paid {new Date(c.paid_at).toLocaleDateString()}</>}
+                </div>
+              </div>
+              <span
+                className="text-[10px] uppercase font-semibold tracking-wide px-2 py-0.5 rounded flex-shrink-0"
+                style={{ backgroundColor: badge.bg, color: badge.color }}
+              >
+                {badge.label}
+              </span>
+              {canModify && (
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setOpenKebab(openKebab === kebabId ? null : kebabId)}
+                    className="p-1.5 rounded hover:bg-slate-100"
+                  >
+                    <MoreHorizontal className="w-3.5 h-3.5 text-slate-400" />
+                  </button>
+                  {openKebab === kebabId && (
+                    <div className="absolute right-0 top-8 z-50 bg-white border border-slate-200 rounded-lg shadow-lg py-1 min-w-[180px]">
+                      <button
+                        type="button"
+                        onClick={() => { setOpenKebab(null); void onResend(c.id); }}
+                        className="w-full text-left px-3 py-1.5 text-xs hover:bg-slate-50 flex items-center gap-2"
+                      >
+                        <Mail className="w-3 h-3 text-slate-400" /> Resend payment link
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setOpenKebab(null); void onCopyLink(c.id); }}
+                        className="w-full text-left px-3 py-1.5 text-xs hover:bg-slate-50 flex items-center gap-2"
+                      >
+                        <Copy className="w-3 h-3 text-slate-400" /> Copy payment link
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setOpenKebab(null);
+                          if (confirm("Cancel this charge? The patient will no longer be able to pay.")) {
+                            void onCancel(c.id);
+                          }
+                        }}
+                        className="w-full text-left px-3 py-1.5 text-xs hover:bg-red-50 text-red-600 flex items-center gap-2"
+                      >
+                        <X className="w-3 h-3" /> Cancel charge
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
 function InsightCard({
   icon: Icon, label, value, hint,
