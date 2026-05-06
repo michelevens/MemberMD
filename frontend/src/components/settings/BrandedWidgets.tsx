@@ -171,7 +171,7 @@ function DomainsPanel() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <p className="text-sm" style={{ color: C.slate500 }}>
-          Serve your enrollment + plan widgets at your own domain (e.g.,{" "}
+          Serve your enrollment, plan, and booking widgets at your own domain (e.g.,{" "}
           <code className="px-1.5 py-0.5 rounded text-xs" style={{ backgroundColor: C.slate100, color: C.navy700 }}>
             enroll.yourbrand.com
           </code>
@@ -746,10 +746,18 @@ function EmbedPanel() {
   const plansUrl = primaryDomain
     ? `https://${primaryDomain}/plans`
     : `${platformBase}/#/plans/${tenantCode}`;
+  // Public booking widget (lets website visitors pick a slot and
+  // submit a request). Only surfaces appointment_types flagged
+  // is_public, and respects external_busy_blocks via AvailabilityService.
+  const bookUrl = primaryDomain
+    ? `https://${primaryDomain}/book`
+    : `${platformBase}/#/book/${tenantCode}`;
 
   const iframeEnroll = `<iframe src="${enrollUrl}" width="100%" height="780" frameborder="0" style="border-radius:20px;"></iframe>`;
   const iframePlans = `<iframe src="${plansUrl}" width="100%" height="640" frameborder="0" style="border-radius:20px;"></iframe>`;
+  const iframeBook = `<iframe src="${bookUrl}" width="100%" height="780" frameborder="0" style="border-radius:20px;"></iframe>`;
   const linkEnroll = `<a href="${enrollUrl}">Enroll now</a>`;
+  const linkBook = `<a href="${bookUrl}">Book an appointment</a>`;
 
   return (
     <div className="space-y-4">
@@ -766,7 +774,9 @@ function EmbedPanel() {
 
       <EmbedSnippet label="Enrollment widget (iframe)" code={iframeEnroll} />
       <EmbedSnippet label="Plan comparison (iframe)" code={iframePlans} />
-      <EmbedSnippet label="Direct link" code={linkEnroll} />
+      <EmbedSnippet label="Booking widget (iframe)" code={iframeBook} />
+      <EmbedSnippet label="Direct enrollment link" code={linkEnroll} />
+      <EmbedSnippet label="Direct booking link" code={linkBook} />
 
       <div className="rounded-2xl border p-5 flex items-start gap-3" style={{ backgroundColor: C.slate50, borderColor: C.slate200 }}>
         <ExternalLink className="w-4 h-4 shrink-0 mt-0.5" style={{ color: C.slate500 }} />
