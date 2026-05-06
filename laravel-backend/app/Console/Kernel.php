@@ -137,6 +137,21 @@ class Kernel extends ConsoleKernel
             ->onFailure(function () {
                 \Log::error('Enrollment sweeper failed');
             });
+
+        // Pull each provider's personal calendar (Google/Apple/Outlook
+        // iCal feed) into external_busy_blocks so the booking grid
+        // doesn't double-book over personal commitments. 15 min is the
+        // accepted lag — fast enough for practical scheduling, slow
+        // enough to amortize outbound HTTP calls. withoutOverlapping
+        // because iCal feeds can be slow (Google occasionally takes
+        // 5-10s) and we'd rather skip a tick than stack runs.
+        $schedule->command('calendar:sync-external')
+            ->everyFifteenMinutes()
+            ->name('external_calendar_sync')
+            ->withoutOverlapping()
+            ->onFailure(function () {
+                \Log::error('External calendar sync failed');
+            });
     }
 
     /**

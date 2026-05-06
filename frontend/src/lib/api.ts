@@ -666,6 +666,37 @@ export const providerService = {
     if (useMockData()) return { data: [] };
     return apiFetch(`/providers/${id}/programs`);
   },
+
+  // External calendar sync (Path A — read-only iCal pull from
+  // Google/Apple/Outlook). Three endpoints: status, set/clear URL,
+  // manual sync. URL itself is never returned to the client (it's
+  // encrypted at rest); we only get the connection state.
+  getExternalCalendar: async (id: string): Promise<ApiResponse<{
+    connected: boolean;
+    syncedAt: string | null;
+    syncStatus: "ok" | "error" | null;
+    syncError: string | null;
+    busyBlockCount: number;
+  }>> => {
+    if (useMockData()) return { data: { connected: false, syncedAt: null, syncStatus: null, syncError: null, busyBlockCount: 0 } };
+    return apiFetch(`/providers/${id}/external-calendar`);
+  },
+  setExternalCalendar: async (id: string, url: string | null): Promise<ApiResponse<{ connected: boolean; message: string }>> => {
+    if (useMockData()) return { data: { connected: !!url, message: "ok" } };
+    return apiFetch(`/providers/${id}/external-calendar`, {
+      method: "PUT",
+      body: JSON.stringify({ url }),
+    });
+  },
+  syncExternalCalendar: async (id: string): Promise<ApiResponse<{
+    status: string;
+    count: number;
+    syncedAt: string | null;
+    reason?: string;
+  }>> => {
+    if (useMockData()) return { data: { status: "ok", count: 0, syncedAt: null } };
+    return apiFetch(`/providers/${id}/external-calendar/sync`, { method: "POST" });
+  },
 };
 
 // ─── Provider Credentials ───────────────────────────────────────────────────

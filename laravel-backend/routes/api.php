@@ -558,6 +558,11 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
     Route::post('/providers/{id}/panel/assign', [ProviderController::class, 'assignPatient']);
     Route::delete('/providers/{id}/panel/{patientId}', [ProviderController::class, 'unassignPatient']);
     Route::get('/providers/{id}/programs', [ProviderController::class, 'programs']);
+    // External calendar sync (Path A — read-only iCal pull). Status
+    // is readable by self + admins; PUT/sync are provider-self only.
+    Route::get('/providers/{id}/external-calendar', [ProviderController::class, 'externalCalendarStatus']);
+    Route::put('/providers/{id}/external-calendar', [ProviderController::class, 'setExternalCalendar']);
+    Route::post('/providers/{id}/external-calendar/sync', [ProviderController::class, 'syncExternalCalendar']);
     Route::post('/providers', [ProviderController::class, 'store'])->middleware('plan.cap:providers');
     Route::apiResource('providers', ProviderController::class)->except(['destroy', 'store']);
 

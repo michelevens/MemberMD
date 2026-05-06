@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Appointment;
+use App\Models\ExternalBusyBlock;
 use App\Models\Practice;
 use App\Models\ProviderAvailability;
 use App\Models\ProviderScheduleOverride;
@@ -89,6 +90,17 @@ class AvailabilityService
             ->whereNotIn('status', ['cancelled', 'no_show'])
             ->get(['scheduled_at', 'duration_minutes']);
 
+        // External busy blocks pulled from the provider's personal
+        // calendar (Google/Apple/Outlook iCal feed). These are unioned
+        // with the practice's own appointments so a slot occupied on
+        // the provider's personal calendar is not bookable here.
+        // Stored in UTC; we filter to the day window in UTC then
+        // compare in the provider's local time below.
+        $busyBlocks = ExternalBusyBlock::where('provider_id', $providerId)
+            ->where('starts_at', '<', $dateEnd->copy()->utc())
+            ->where('ends_at', '>', $dateStart->copy()->utc())
+            ->get(['starts_at', 'ends_at']);
+
         // Generate all possible slots in 15-minute increments
         $slots = [];
         $current = Carbon::parse("{$date} {$startTime}");
@@ -116,6 +128,20 @@ class AvailabilityService
                 if ($current->lt($aptEndPad) && $slotEnd->gt($aptStartPad)) {
                     $isAvailable = false;
                     break;
+                }
+            }
+
+            // External busy blocks. No buffer — these are personal
+            // commitments, not visits, and we don't want a 5-min
+            // dentist appointment to spread across an hour of clinic.
+            if ($isAvailable) {
+                foreach ($busyBlocks as $block) {
+                    $blockStart = Carbon::parse($block->starts_at);
+                    $blockEnd = Carbon::parse($block->ends_at);
+                    if ($current->lt($blockEnd) && $slotEnd->gt($blockStart)) {
+                        $isAvailable = false;
+                        break;
+                    }
                 }
             }
 
@@ -201,6 +227,18 @@ class AvailabilityService
                 });
         })->exists();
 
-        return !$overlap;
+        if ($overlap) {
+            return false;
+        }
+
+        // External busy blocks (personal calendar) — same overlap test
+        // as above, but on a much simpler schema (we already store
+        // ends_at directly so no DURATION arithmetic is needed).
+        $externalOverlap = ExternalBusyBlock::where('provider_id', $providerId)
+            ->where('starts_at', '<', $appointmentEnd)
+            ->where('ends_at', '>', $appointmentStart)
+            ->exists();
+
+        return !$externalOverlap;
     }
 }

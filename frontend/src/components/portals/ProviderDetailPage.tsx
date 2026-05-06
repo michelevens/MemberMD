@@ -1647,9 +1647,258 @@ function CalendarSyncCard({ provider, mode, setToast, onSaved }: CalendarSyncCar
             </p>
           </div>
         )}
+
+        {/* Reverse direction — pull the provider's PERSONAL calendar
+            into MemberMD so personal commitments block the booking
+            grid. Only renders for the provider themselves; admins on
+            someone else's page see a status pill instead of the
+            URL-paste form (URL is encrypted at rest, never returned). */}
+        <ExternalCalendarSection providerId={provider.id} isSelf={isSelf} setToast={setToast} />
       </div>
     </div>
   );
+}
+
+// ─── External Calendar (reverse direction) ──────────────────────────────────
+//
+// Pulls the provider's personal calendar into MemberMD via a public
+// iCal URL they paste. A scheduled job (every 15 min) fetches the
+// URL, parses VEVENTs, and writes external_busy_blocks rows; the
+// availability service then unions those blocks with the practice's
+// own appointments so the booking grid won't double-book over a
+// personal commitment.
+//
+// One-way (read into MemberMD only). Pair this with the
+// MemberMD → personal feed above for effective bidirectional sync
+// without OAuth.
+
+interface ExternalCalendarStatus {
+  connected: boolean;
+  syncedAt: string | null;
+  syncStatus: "ok" | "error" | null;
+  syncError: string | null;
+  busyBlockCount: number;
+}
+
+function ExternalCalendarSection({ providerId, isSelf, setToast }: {
+  providerId: string;
+  isSelf: boolean;
+  setToast: (t: { message: string; type: "success" | "error" } | null) => void;
+}) {
+  const [status, setStatus] = useState<ExternalCalendarStatus | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [urlInput, setUrlInput] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [showInstructions, setShowInstructions] = useState(false);
+
+  const load = async () => {
+    setLoading(true);
+    const res = await providerService.getExternalCalendar(providerId);
+    if (res.data) setStatus(res.data);
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    load();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [providerId]);
+
+  const onSave = async () => {
+    if (!urlInput.trim()) return;
+    setSaving(true);
+    const res = await providerService.setExternalCalendar(providerId, urlInput.trim());
+    setSaving(false);
+    if (res.error) {
+      setToast({ message: res.error, type: "error" });
+      return;
+    }
+    setUrlInput("");
+    setToast({ message: "Calendar URL saved. Syncing now…", type: "success" });
+    // Auto-trigger first sync so the user sees their busy blocks
+    // populate without an extra click.
+    await onSync();
+  };
+
+  const onSync = async () => {
+    setSyncing(true);
+    const res = await providerService.syncExternalCalendar(providerId);
+    setSyncing(false);
+    if (res.error || res.data?.status === "error") {
+      setToast({ message: res.data?.reason || res.error || "Sync failed.", type: "error" });
+    } else {
+      setToast({ message: `Synced ${res.data?.count ?? 0} busy blocks.`, type: "success" });
+    }
+    load();
+  };
+
+  const onDisconnect = async () => {
+    if (!confirm("Disconnect external calendar? This will remove all imported busy blocks.")) return;
+    setSaving(true);
+    const res = await providerService.setExternalCalendar(providerId, null);
+    setSaving(false);
+    if (res.error) {
+      setToast({ message: res.error, type: "error" });
+      return;
+    }
+    setToast({ message: "Calendar disconnected.", type: "success" });
+    load();
+  };
+
+  if (loading) {
+    return (
+      <div className="rounded-lg border border-slate-200 p-4 bg-slate-50/50">
+        <div className="flex items-center gap-2 text-xs text-slate-500">
+          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+          Checking calendar status…
+        </div>
+      </div>
+    );
+  }
+
+  // Admin viewing someone else's page — read-only status only.
+  if (!isSelf) {
+    return (
+      <div className="rounded-lg border border-slate-200 p-4 bg-slate-50/50">
+        <div className="flex items-start gap-3">
+          <Calendar className="w-5 h-5 text-slate-500 shrink-0 mt-0.5" />
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-slate-800">Personal calendar import</p>
+            <p className="text-xs text-slate-500 mt-0.5">
+              {status?.connected
+                ? `Connected — ${status.busyBlockCount} busy block${status.busyBlockCount === 1 ? "" : "s"} imported${status.syncedAt ? `, last synced ${formatRelativeTime(status.syncedAt)}` : ""}.`
+                : "Not connected. The provider can paste their personal calendar URL from their My Profile → Settings tab."}
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Self — full UI with paste/sync/disconnect.
+  const connected = !!status?.connected;
+  const lastSync = status?.syncedAt ? formatRelativeTime(status.syncedAt) : null;
+  const statusErr = status?.syncStatus === "error" ? status?.syncError : null;
+
+  return (
+    <div className="rounded-lg border border-slate-200 p-4 space-y-3">
+      <div className="flex items-start gap-3">
+        <Calendar className="w-5 h-5 text-slate-500 shrink-0 mt-0.5" />
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-semibold text-slate-800">
+            Import your personal calendar
+            {connected && (
+              <span className="ml-2 text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded bg-emerald-100 text-emerald-700">
+                Connected
+              </span>
+            )}
+          </p>
+          <p className="text-xs text-slate-500 mt-0.5">
+            Block your booking grid with personal commitments from Google, Apple, Outlook, or any calendar that publishes an iCal URL.
+          </p>
+        </div>
+      </div>
+
+      {connected && (
+        <div className="bg-slate-50 border border-slate-200 rounded p-3 space-y-2">
+          <div className="flex items-center justify-between text-xs">
+            <span className="text-slate-600">
+              <span className="font-semibold text-slate-800">{status?.busyBlockCount ?? 0}</span> busy block{status?.busyBlockCount === 1 ? "" : "s"} imported
+            </span>
+            {lastSync && (
+              <span className="text-slate-500">Last synced {lastSync}</span>
+            )}
+          </div>
+          {statusErr && (
+            <div className="text-xs text-red-700 bg-red-50 border border-red-200 rounded px-2 py-1 flex items-start gap-1.5">
+              <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+              <span className="flex-1">{statusErr}</span>
+            </div>
+          )}
+          <div className="flex items-center gap-2">
+            <button
+              onClick={onSync}
+              disabled={syncing}
+              className="px-3 py-1.5 rounded-lg border border-slate-300 text-xs font-medium text-slate-700 hover:bg-white disabled:opacity-50 inline-flex items-center gap-1.5"
+            >
+              {syncing ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+              Sync now
+            </button>
+            <button
+              onClick={onDisconnect}
+              disabled={saving}
+              className="px-3 py-1.5 rounded-lg text-xs font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
+            >
+              Disconnect
+            </button>
+          </div>
+        </div>
+      )}
+
+      {!connected && (
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <input
+              type="url"
+              placeholder="Paste iCal URL — https://... or webcal://..."
+              value={urlInput}
+              onChange={(e) => setUrlInput(e.target.value)}
+              className="flex-1 border border-slate-200 rounded-lg px-3 py-2 text-xs font-mono text-slate-700"
+            />
+            <button
+              onClick={onSave}
+              disabled={saving || !urlInput.trim()}
+              className="px-4 py-2 rounded-lg text-sm font-medium text-white disabled:opacity-50 inline-flex items-center gap-1.5"
+              style={{ backgroundColor: "#147d64" }}
+            >
+              {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
+              Connect
+            </button>
+          </div>
+          <button
+            onClick={() => setShowInstructions(!showInstructions)}
+            className="text-xs text-indigo-700 hover:text-indigo-900"
+          >
+            {showInstructions ? "Hide" : "Where do I find my iCal URL?"}
+          </button>
+        </div>
+      )}
+
+      {!connected && showInstructions && (
+        <div className="text-xs text-slate-700 space-y-2 bg-slate-50 border border-slate-200 rounded p-3">
+          <div>
+            <p className="font-semibold text-slate-800 mb-0.5">Google Calendar</p>
+            <p className="text-slate-600">Settings → click your calendar in the left list → "Integrate calendar" → copy <span className="font-mono">Secret address in iCal format</span>. Treat this URL like a password — anyone with it can read every event.</p>
+          </div>
+          <div>
+            <p className="font-semibold text-slate-800 mb-0.5">Apple Calendar (iCloud)</p>
+            <p className="text-slate-600">In the Calendar app on Mac, right-click the calendar → "Share Calendar…" → check <span className="font-mono">Public Calendar</span> → copy URL. Starts with webcal:// — paste as-is, we'll convert it.</p>
+          </div>
+          <div>
+            <p className="font-semibold text-slate-800 mb-0.5">Outlook / Microsoft 365</p>
+            <p className="text-slate-600">Settings → Calendar → Shared calendars → "Publish a calendar" → choose <span className="font-mono">Can view all details</span> → copy the ICS link.</p>
+          </div>
+          <p className="text-[11px] text-slate-500 pt-1 border-t border-slate-200">
+            We store this URL encrypted, fetch it every 15 minutes, and import only the time blocks (start + end). Event titles are kept private to you — patients see "Unavailable", not your event names.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Format a relative time like "5m ago" / "2h ago" / "3d ago" — used
+// in the calendar status block. Falls back to absolute date for
+// anything older than a week.
+function formatRelativeTime(iso: string): string {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "—";
+  const sec = Math.floor((Date.now() - d.getTime()) / 1000);
+  if (sec < 60) return "just now";
+  if (sec < 3600) return `${Math.floor(sec / 60)}m ago`;
+  if (sec < 86400) return `${Math.floor(sec / 3600)}h ago`;
+  if (sec < 86400 * 7) return `${Math.floor(sec / 86400)}d ago`;
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
 // ─── Credentials Tab ────────────────────────────────────────────────────────

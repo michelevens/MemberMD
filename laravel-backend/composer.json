@@ -14,6 +14,7 @@
         "laravel/tinker": "^3.0",
         "minishlink/web-push": "^9.0",
         "resend/resend-laravel": "*",
+        "sabre/vobject": "^4.5",
         "stripe/stripe-php": "*"
     },
     "require-dev": {

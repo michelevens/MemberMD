@@ -30,6 +30,14 @@ class Provider extends Model
         // built-in LiveKit room for a personal Zoom / Google Meet /
         // Teams link. video_provider is informational (UI label).
         'external_video_url', 'video_provider',
+        // External calendar sync (Path A — read-only iCal subscribe).
+        // Provider pastes a Google/Apple/Outlook/etc. iCal URL here;
+        // a scheduled job pulls VEVENTs into external_busy_blocks so
+        // the booking grid won't double-book over personal commitments.
+        'external_calendar_url',
+        'external_calendar_synced_at',
+        'external_calendar_sync_status',
+        'external_calendar_sync_error',
     ];
 
     protected $casts = [
@@ -41,9 +49,13 @@ class Provider extends Model
         'telehealth_enabled' => 'boolean',
         'consultation_fee' => 'decimal:2',
         'npi' => 'encrypted',
+        // Encrypted: anyone with this URL can read every event in the
+        // provider's personal calendar. Treat as a credential.
+        'external_calendar_url' => 'encrypted',
+        'external_calendar_synced_at' => 'datetime',
     ];
 
-    protected $hidden = ['npi'];
+    protected $hidden = ['npi', 'external_calendar_url'];
 
     public function user(): BelongsTo { return $this->belongsTo(User::class); }
     public function availability(): HasMany { return $this->hasMany(ProviderAvailability::class); }
@@ -56,5 +68,16 @@ class Provider extends Model
         return $this->belongsToMany(Program::class, 'program_providers')
             ->withPivot('panel_capacity', 'role', 'is_active')
             ->withTimestamps();
+    }
+
+    /**
+     * Busy blocks pulled from the provider's personal external
+     * calendar (Google / Apple / Outlook iCal feed). Unioned with
+     * the practice's own appointments by the booking flow so the
+     * grid won't double-book over personal commitments.
+     */
+    public function externalBusyBlocks(): HasMany
+    {
+        return $this->hasMany(ExternalBusyBlock::class);
     }
 }

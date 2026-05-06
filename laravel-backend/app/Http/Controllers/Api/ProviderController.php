@@ -521,4 +521,128 @@ class ProviderController extends Controller
 
         return response()->json(['data' => $payload]);
     }
+
+    // ─── External Calendar Sync (Path A) ────────────────────────────
+    //
+    // Three endpoints for managing the provider's read-only iCal pull
+    // from their personal calendar. All three are restricted to the
+    // provider themselves — practice admins can VIEW the status (we
+    // surface it on the provider detail page) but only the owner of
+    // the calendar can paste/clear the URL or trigger a manual sync.
+
+    /**
+     * GET /providers/{id}/external-calendar
+     *
+     * Returns the sync status (last successful sync, error, status).
+     * Does NOT return the raw URL — that would defeat the encryption.
+     * The frontend doesn't need the URL anyway; it only needs to know
+     * whether one is configured ("connected" vs "not connected").
+     */
+    public function externalCalendarStatus(Request $request, string $id): JsonResponse
+    {
+        $user = $request->user();
+        $provider = Provider::where('tenant_id', $user->tenant_id)->findOrFail($id);
+
+        // Provider can read their own; admins can read any provider's
+        // status (used to render the My Profile / Settings card on
+        // someone else's page).
+        if ($user->role === 'provider' && $provider->user_id !== $user->id) {
+            abort(403);
+        }
+
+        return response()->json([
+            'data' => [
+                'connected' => !empty($provider->external_calendar_url),
+                'synced_at' => $provider->external_calendar_synced_at,
+                'sync_status' => $provider->external_calendar_sync_status,
+                'sync_error' => $provider->external_calendar_sync_error,
+                'busy_block_count' => $provider->externalBusyBlocks()->count(),
+            ],
+        ]);
+    }
+
+    /**
+     * PUT /providers/{id}/external-calendar
+     *
+     * Sets or clears the URL. Provider-self only — pasting another
+     * provider's URL is not a feature, it's a privacy violation.
+     * Empty/null URL clears the connection AND wipes existing busy
+     * blocks (so removing the calendar doesn't leave stale rows).
+     */
+    public function setExternalCalendar(Request $request, string $id): JsonResponse
+    {
+        $user = $request->user();
+        $provider = Provider::where('tenant_id', $user->tenant_id)->findOrFail($id);
+
+        if ($user->role !== 'provider' || $provider->user_id !== $user->id) {
+            abort(403, 'Only the provider can set their own external calendar URL.');
+        }
+
+        $validated = $request->validate([
+            'url' => 'nullable|string|max:2000',
+        ]);
+
+        $url = $validated['url'] ?? null;
+        if ($url) {
+            // Trim + accept webcal:// (we rewrite at fetch time).
+            $url = trim($url);
+            if (!preg_match('#^(https?|webcal)://#i', $url)) {
+                return response()->json(['message' => 'URL must start with https://, http://, or webcal://'], 422);
+            }
+        }
+
+        $provider->update([
+            'external_calendar_url' => $url ?: null,
+            'external_calendar_synced_at' => null,
+            'external_calendar_sync_status' => null,
+            'external_calendar_sync_error' => null,
+        ]);
+
+        // Wipe blocks if the URL was cleared. If a new URL was set,
+        // leave the old blocks until the next sync replaces them —
+        // beats showing an empty calendar in the booking grid for
+        // however long the first sync takes.
+        if (!$url) {
+            $provider->externalBusyBlocks()->delete();
+        }
+
+        return response()->json([
+            'data' => [
+                'connected' => (bool) $url,
+                'message' => $url ? 'Calendar URL saved. Trigger a sync to populate busy blocks.' : 'Calendar disconnected.',
+            ],
+        ]);
+    }
+
+    /**
+     * POST /providers/{id}/external-calendar/sync
+     *
+     * Manual sync trigger. Useful right after pasting a new URL
+     * (otherwise the user would wait for the next scheduled run).
+     * Same auth as setExternalCalendar — provider-self only, since
+     * the URL is encrypted and the operation costs an outbound HTTP
+     * fetch.
+     */
+    public function syncExternalCalendar(Request $request, string $id): JsonResponse
+    {
+        $user = $request->user();
+        $provider = Provider::where('tenant_id', $user->tenant_id)->findOrFail($id);
+
+        if ($user->role !== 'provider' || $provider->user_id !== $user->id) {
+            abort(403, 'Only the provider can trigger their own calendar sync.');
+        }
+
+        if (empty($provider->external_calendar_url)) {
+            return response()->json(['message' => 'No external calendar URL configured.'], 422);
+        }
+
+        $service = new \App\Services\ExternalCalendarSync();
+        $result = $service->syncProvider($provider->fresh());
+
+        return response()->json([
+            'data' => array_merge($result, [
+                'synced_at' => $provider->fresh()->external_calendar_synced_at,
+            ]),
+        ]);
+    }
 }
