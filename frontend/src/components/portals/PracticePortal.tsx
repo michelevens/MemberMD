@@ -8,7 +8,7 @@ import { ProviderDetailPage } from "./ProviderDetailPage";
 import { EncounterDetailPage } from "./EncounterDetailPage";
 import { PatientBillingTab } from "./PatientBillingTab";
 import { useAuth } from "../../contexts/AuthContext";
-import { dashboardService, membershipPlanService, messageService, patientService, appointmentService, encounterService, prescriptionService, invoiceService, programService, telehealthService, screeningService, couponService, providerService, paymentService, notificationService, apiFetch, billingEnhancedService, documentService, onboardingService, staffService, chartTemplateService } from "../../lib/api";
+import { dashboardService, membershipPlanService, messageService, patientService, appointmentService, encounterService, prescriptionService, invoiceService, programService, telehealthService, screeningService, couponService, providerService, paymentService, notificationService, apiFetch, billingEnhancedService, documentService, onboardingService, staffService, chartTemplateService, labService, referralService } from "../../lib/api";
 import { formatDob } from "../../lib/format";
 import { PortalShell, type NavSection as ShellNavSection, type PortalColor } from "../shared/PortalShell";
 import { MobileSheet } from "../shared/MobileSheet";
@@ -18,6 +18,7 @@ import { CommandPalette, useCommandPaletteShortcut } from "../shared/CommandPale
 import { AddAllergyDialog, type AllergyEntry } from "../clinical/AddAllergyDialog";
 import { AddMeasureDialog } from "../clinical/AddMeasureDialog";
 import { CareTimeline, generateDemoTimelineEvents } from "../clinical/CareTimeline";
+import type { CareEvent } from "../clinical/CareTimeline";
 import { PatientConsentsTab } from "./practice/PatientConsentsTab";
 import { MedicationAutocomplete } from "../shared/MedicationAutocomplete";
 import { PracticeSettings } from "../settings/PracticeSettings";
@@ -278,6 +279,184 @@ const NAV_SECTIONS: NavSection[] = [
  * PortalShell (after a small transform \u2014 PortalShell expects
  * { id, label?, items } per section).
  */
+/**
+ * Synthesize CareEvent rows for the practice-wide Recent Activity
+ * feed from data already loaded into state. Each source contributes
+ * one CareEvent per record, mapped to the timeline's type system.
+ *
+ * Patient name resolution: rows from /encounters etc. usually arrive
+ * with an embedded `patient` object (eager-loaded by the backend),
+ * but we fall back to a id-keyed lookup against the patient roster
+ * so a missing eager-load doesn't blank the row.
+ *
+ * Pure function — kept at module scope so it's testable in isolation.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function buildTimelineEventsFromApi(input: {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  encounters: any[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  prescriptions: any[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  screenings: any[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  labOrders: any[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  referrals: any[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  patients: any[];
+}): CareEvent[] {
+  const { encounters, prescriptions, screenings, labOrders, referrals, patients } = input;
+
+  // Map of patient_id → display name. Used as a fallback when a row
+  // doesn't carry an embedded patient object.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const nameByPatientId = new Map<string, string>();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  patients.forEach((p: any) => {
+    if (p?.id && p?.name) nameByPatientId.set(p.id, p.name);
+  });
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const resolvePatient = (row: any): string => {
+    const embed = row.patient ?? null;
+    if (embed) {
+      const direct = embed.name;
+      if (direct) return direct;
+      const composed = [embed.firstName, embed.lastName].filter(Boolean).join(" ").trim();
+      if (composed) return composed;
+    }
+    const pid = row.patientId ?? row.patient_id ?? null;
+    if (pid && nameByPatientId.has(pid)) return nameByPatientId.get(pid)!;
+    return "Unknown patient";
+  };
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const resolveProvider = (row: any): string | undefined => {
+    const p = row.provider ?? null;
+    if (!p) return row.providerName ?? undefined;
+    if (p.user?.name) return p.user.name;
+    const composed = [p.firstName ?? p.first_name, p.lastName ?? p.last_name].filter(Boolean).join(" ").trim();
+    return composed || undefined;
+  };
+
+  const out: CareEvent[] = [];
+
+  // Encounters — title leans on chief complaint or encounter type so
+  // the row says something useful even when the SOAP narrative is blank.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  encounters.forEach((e: any) => {
+    const dateStr = e.encounterDate ?? e.encounter_date ?? e.createdAt ?? e.created_at ?? null;
+    if (!dateStr) return;
+    const isSigned = !!(e.signedAt ?? e.signed_at);
+    const typeLabel = (e.encounterType ?? e.encounter_type ?? "Visit").toString().replace(/_/g, " ");
+    const cc = e.chiefComplaint ?? e.chief_complaint ?? "";
+    out.push({
+      id: `enc-${e.id}`,
+      type: "encounter",
+      date: new Date(dateStr),
+      patientName: resolvePatient(e),
+      providerName: resolveProvider(e),
+      title: isSigned ? `${typeLabel} signed` : `${typeLabel} drafted`,
+      detail: cc || (isSigned ? "Chart signed and locked." : "Draft chart awaiting signature."),
+    });
+  });
+
+  // Prescriptions — most recent first. We surface "prescribed" not
+  // "filled" since the platform doesn't track pharmacy state.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  prescriptions.forEach((rx: any) => {
+    const dateStr = rx.prescribedAt ?? rx.prescribed_at ?? rx.createdAt ?? rx.created_at ?? null;
+    if (!dateStr) return;
+    const med = rx.medicationName ?? rx.medication_name ?? rx.drugName ?? rx.drug_name ?? "Medication";
+    const dose = [rx.dosage, rx.frequency].filter(Boolean).join(" · ");
+    out.push({
+      id: `rx-${rx.id}`,
+      type: "prescription",
+      date: new Date(dateStr),
+      patientName: resolvePatient(rx),
+      providerName: resolveProvider(rx),
+      title: `${med} prescribed`,
+      detail: dose || undefined,
+    });
+  });
+
+  // Screenings — score + severity in the detail line so a glance tells
+  // you the result without opening the chart.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  screenings.forEach((sc: any) => {
+    const dateStr = sc.administeredAt ?? sc.administered_at ?? sc.createdAt ?? sc.created_at ?? null;
+    if (!dateStr) return;
+    const tplName = sc.template?.name ?? sc.template?.code ?? "Screening";
+    const score = sc.score ?? null;
+    const sev = sc.severity ?? null;
+    out.push({
+      id: `scr-${sc.id}`,
+      type: "screening",
+      date: new Date(dateStr),
+      patientName: resolvePatient(sc),
+      title: `${tplName} completed`,
+      detail: [score !== null ? `Score ${score}` : null, sev ? sev.replace(/_/g, " ") : null].filter(Boolean).join(" · ") || undefined,
+    });
+  });
+
+  // Lab orders — surface BOTH order placement (status=draft/sent) AND
+  // result return (status=resulted) as their own timeline events when
+  // we have the timestamps for it.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  labOrders.forEach((lo: any) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const panels: any[] = Array.isArray(lo.panels) ? lo.panels : [];
+    const panelLabel = panels.map((p) => p.name ?? p.code).filter(Boolean).join(", ") || "Lab panel";
+    const orderedAt = lo.orderedAt ?? lo.ordered_at ?? lo.createdAt ?? lo.created_at ?? null;
+    if (orderedAt) {
+      out.push({
+        id: `lab-ord-${lo.id}`,
+        type: "lab",
+        date: new Date(orderedAt),
+        patientName: resolvePatient(lo),
+        providerName: resolveProvider(lo),
+        title: `${panelLabel} ordered`,
+        detail: lo.priority && lo.priority !== "routine" ? lo.priority.toUpperCase() : undefined,
+      });
+    }
+    const resultedAt = lo.resultedAt ?? lo.resulted_at ?? null;
+    if (resultedAt) {
+      out.push({
+        id: `lab-res-${lo.id}`,
+        type: "lab",
+        date: new Date(resultedAt),
+        patientName: resolvePatient(lo),
+        title: `${panelLabel} resulted`,
+        detail: undefined,
+      });
+    }
+  });
+
+  // Referrals — placement event only. Acknowledged / completed
+  // states could be added later as separate rows once we wire those
+  // status timestamps from /referrals into the activity feed.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  referrals.forEach((r: any) => {
+    const dateStr = r.sentAt ?? r.sent_at ?? r.createdAt ?? r.created_at ?? null;
+    if (!dateStr) return;
+    out.push({
+      id: `ref-${r.id}`,
+      type: "referral",
+      date: new Date(dateStr),
+      patientName: resolvePatient(r),
+      providerName: resolveProvider(r),
+      title: `Referral to ${r.referredToName ?? r.referred_to_name ?? "specialist"}`,
+      detail: [r.referredToSpecialty ?? r.referred_to_specialty, r.urgency && r.urgency !== "routine" ? r.urgency : null].filter(Boolean).join(" · ") || undefined,
+    });
+  });
+
+  // Newest-first — CareTimeline groups by date but the within-group
+  // order is whatever we hand it.
+  out.sort((a, b) => b.date.getTime() - a.date.getTime());
+  return out;
+}
+
 function navForRole(role: PortalRole): NavSection[] {
   return NAV_SECTIONS
     .map((section) => ({
@@ -892,6 +1071,13 @@ export function PracticePortal() {
   const [apiInvoices, setApiInvoices] = useState<any[] | null>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [apiScreenings, setApiScreenings] = useState<any[]>([]);
+  // Lab orders + referrals — practice-wide lists used by the
+  // Recent Activity feed and the lab/referral panels. Loaded in
+  // parallel with everything else in loadPracticeData().
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [apiLabOrders, setApiLabOrders] = useState<any[]>([]);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [apiReferrals, setApiReferrals] = useState<any[]>([]);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [apiPayments, setApiPayments] = useState<any[]>([]);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1362,7 +1548,7 @@ export function PracticePortal() {
 
   const loadPracticeData = useCallback(async () => {
     setDataLoading(true);
-    const [statsRes, plansRes, threadsRes, patientsRes, appointmentsRes, encountersRes, prescriptionsRes, invoicesRes, programsRes, screeningsRes, paymentsRes, couponsRes, staffRes, notificationsRes, intakesRes, waitlistRes, providersRes] = await Promise.allSettled([
+    const [statsRes, plansRes, threadsRes, patientsRes, appointmentsRes, encountersRes, prescriptionsRes, invoicesRes, programsRes, screeningsRes, paymentsRes, couponsRes, staffRes, notificationsRes, intakesRes, waitlistRes, providersRes, labOrdersRes, referralsRes] = await Promise.allSettled([
       dashboardService.getPracticeStats(),
       membershipPlanService.list(),
       messageService.list(),
@@ -1380,6 +1566,13 @@ export function PracticePortal() {
       apiFetch<unknown[]>("/intakes").catch(() => ({ data: [] })),
       apiFetch<unknown[]>("/appointments/waitlist").catch(() => ({ data: [] })),
       providerService.list().catch(() => ({ data: [] })),
+      // Lab orders + referrals are eagerly loaded so the Recent
+      // Activity feed can render practice-wide. Both endpoints are
+      // paginated; we accept the first page (paginate default 25)
+      // which is enough for "recent activity" — older entries are
+      // still reachable from the dedicated panels.
+      labService.list().catch(() => ({ data: [] })),
+      referralService.list().catch(() => ({ data: [] })),
     ]);
     // Dashboard stats
     if (statsRes.status === "fulfilled" && statsRes.value.data && typeof statsRes.value.data === "object") {
@@ -1639,6 +1832,19 @@ export function PracticePortal() {
       if (provList.length > 0 && provList[0]?.id) {
         setDefaultProviderId(provList[0].id);
       }
+    }
+    // Lab orders + referrals — paginated like everything else, so we
+    // unwrap the same way. Empty array on miss so the timeline just
+    // renders without those event types instead of throwing.
+    if (labOrdersRes.status === "fulfilled" && labOrdersRes.value.data) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const list = Array.isArray(labOrdersRes.value.data) ? labOrdersRes.value.data : (labOrdersRes.value.data as any).data || [];
+      setApiLabOrders(list);
+    }
+    if (referralsRes.status === "fulfilled" && referralsRes.value.data) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const list = Array.isArray(referralsRes.value.data) ? referralsRes.value.data : (referralsRes.value.data as any).data || [];
+      setApiReferrals(list);
     }
     setDataLoading(false);
   }, []);
@@ -2874,11 +3080,23 @@ export function PracticePortal() {
   ];
 
   // ─── Recent Activity (Care Timeline) ────────────────────────────────────
-  // Practice-wide chronological feed. Demo data only for now — real
-  // version pulls from encounters / prescriptions / screenings / labs /
-  // vitals / referrals services.
+  // Practice-wide chronological feed. In demo mode we show
+  // generateDemoTimelineEvents() so the empty install isn't blank.
+  // Otherwise we synthesize CareEvent rows from the data already
+  // loaded into state: encounters, prescriptions, screenings, lab
+  // orders, and referrals. Vitals + alerts aren't surfaced as
+  // separate events — vitals are part of the encounter row.
   function renderRecentActivity() {
-    const events = isDemoMode ? generateDemoTimelineEvents() : [];
+    const events: CareEvent[] = isDemoMode
+      ? generateDemoTimelineEvents()
+      : buildTimelineEventsFromApi({
+          encounters: apiEncountersRaw ?? [],
+          prescriptions: apiPrescriptions ?? [],
+          screenings: apiScreenings ?? [],
+          labOrders: apiLabOrders,
+          referrals: apiReferrals,
+          patients: apiPatients ?? [],
+        });
     return (
       <div className="space-y-5">
         <div className="flex items-end justify-between gap-4">
