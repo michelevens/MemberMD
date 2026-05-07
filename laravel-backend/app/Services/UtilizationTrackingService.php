@@ -181,10 +181,16 @@ class UtilizationTrackingService
             ? $membership->current_period_end->toDateString()
             : $membership->started_at->copy()->addMonth()->toDateString();
 
-        // 4. Calculate current usage in current period
+        // 4. Calculate current usage in current period.
+        //
+        // Use whereDate so the comparison ignores any time component.
+        // Postgres stores period_start as DATE (no time) so the strict
+        // equality used to work, but SQLite stores it as TEXT and
+        // round-trips datetime values verbatim — using whereDate makes
+        // the query engine-agnostic without changing prod semantics.
         $currentUsed = EntitlementUsage::where('patient_membership_id', $membership->id)
             ->where('entitlement_type_id', $entitlementType->id)
-            ->where('period_start', $periodStart)
+            ->whereDate('period_start', $periodStart)
             ->sum('quantity');
 
         // Check if within limits
@@ -319,7 +325,7 @@ class UtilizationTrackingService
 
         $currentUsed = EntitlementUsage::where('patient_membership_id', $membership->id)
             ->where('entitlement_type_id', $entitlementType->id)
-            ->where('period_start', $periodStart)
+            ->whereDate('period_start', $periodStart)
             ->sum('quantity');
 
         // Also check visit pack credits

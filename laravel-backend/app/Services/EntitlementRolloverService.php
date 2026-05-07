@@ -27,10 +27,14 @@ class EntitlementRolloverService
 
         // Memberships whose current_period_end has elapsed are candidates.
         // We don't roll cancelled/expired/paused — they don't accrue benefits.
+        // The relation on MembershipPlan is planEntitlements (HasMany);
+        // earlier code used 'entitlements' which silently no-op'd as a
+        // typo because the gate below filtered out every membership in
+        // prod. Caught by EntitlementUsageTest::test_rollover_*.
         $memberships = PatientMembership::whereIn('status', ['active', 'past_due'])
             ->whereNotNull('current_period_end')
             ->where('current_period_end', '<=', now())
-            ->with(['plan.entitlements'])
+            ->with(['plan.planEntitlements'])
             ->get();
 
         foreach ($memberships as $membership) {
@@ -57,8 +61,10 @@ class EntitlementRolloverService
 
                 // Idempotency guard — don't double-create if a webhook or
                 // prior rollover run already seeded the next period.
+                // whereDate ignores any time component so the comparison
+                // works on both Postgres (DATE column) and SQLite (TEXT).
                 $existing = PatientEntitlement::where('membership_id', $membership->id)
-                    ->where('period_start', $newPeriodStart->toDateString())
+                    ->whereDate('period_start', $newPeriodStart->toDateString())
                     ->first();
                 if ($existing) {
                     $stats['skipped']++;
@@ -74,7 +80,7 @@ class EntitlementRolloverService
                 // concept in PatientEntitlement, so we use the smallest
                 // configured max across visit-flavored entitlement rows.
                 $cap = null;
-                foreach ($plan->entitlements as $pe) {
+                foreach ($plan->planEntitlements as $pe) {
                     if (!($pe->rollover_enabled ?? false)) continue;
                     if (!isset($pe->rollover_max) || $pe->rollover_max === null) continue;
                     $cap = $cap === null ? (int) $pe->rollover_max : min($cap, (int) $pe->rollover_max);
@@ -99,6 +105,16 @@ class EntitlementRolloverService
                     'telehealth_sessions_used' => 0,
                     'messages_sent' => 0,
                     'rollover_visits' => $unused,
+                ]);
+
+                // Advance the membership's period markers so the next
+                // cron run sees the membership as current and skips it.
+                // Without this, a membership that stays in the past keeps
+                // accruing new entitlement rows on every run — caught by
+                // EntitlementUsageTest::test_rollover_is_idempotent_across_runs.
+                $membership->update([
+                    'current_period_start' => $newPeriodStart,
+                    'current_period_end' => $newPeriodEnd,
                 ]);
 
                 if ($unused > 0) {
