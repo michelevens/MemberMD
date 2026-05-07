@@ -111,6 +111,7 @@ import {
   DetailDrawer,
   EntityId,
   FilterChips,
+  KebabMenu,
   MoneyAmount,
   StatusPill,
 } from "../shared/stripe-ui";
@@ -4412,13 +4413,20 @@ export function PracticePortal() {
                 </div>
               </div>
 
-              {/* Quick action buttons */}
-              <div className="flex flex-wrap gap-2">
+              {/* Quick action buttons. The 5 inline buttons cover the
+                  primary clinical / billing / portal actions. The kebab
+                  to the right surfaces secondary patient-management
+                  actions (View details, Edit, Request signature, Log
+                  activity, Change plan, Manage family, Pause membership,
+                  Cancel membership) — same set staff already see on the
+                  roster row, lifted onto the header for parity. */}
+              <div className="flex flex-wrap gap-2 items-center">
             <button
               className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium text-white transition-colors"
               style={{ backgroundColor: "#635bff" }}
               onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#147d64")}
               onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "#27ab83")}
+              onClick={() => setPatientDetailTab("messages")}
             >
               <Send className="w-4 h-4" /> Send Message
             </button>
@@ -4468,6 +4476,81 @@ export function PracticePortal() {
             >
               <Download className="w-4 h-4" /> Download Records
             </button>
+
+            {/* Spacer pushes the kebab to the right edge on wide rows;
+                wraps cleanly on narrow ones. */}
+            <div className="flex-1" />
+
+            {/* Secondary actions kebab — same set as the roster row. */}
+            <KebabMenu
+              ariaLabel={`More actions for ${pt.name}`}
+              actions={[
+                { label: "View details", onClick: () => setPatientDetailTab("demographics") },
+                { label: "Edit", onClick: () => openEditPatient(pt) },
+                {
+                  label: "Request signature",
+                  onClick: () => {
+                    setSignatureRequestPatient({ id: pt.id, name: pt.name, email: pt.email ?? null });
+                    fetchSignatureTemplates();
+                  },
+                },
+                { label: "Log activity", onClick: () => goToTab("activity-log") },
+                ...(pt.status === "active" && pt.membershipId
+                  ? [
+                      {
+                        label: "Change plan",
+                        onClick: () => {
+                          setRosterPlanDialog({
+                            patientId: pt.id,
+                            patientName: pt.name,
+                            membershipId: pt.membershipId,
+                            mode: "change" as const,
+                          });
+                          fetchRosterPlans();
+                          setRosterSelectedPlanId(null);
+                        },
+                      },
+                      {
+                        label: "Manage family",
+                        onClick: () => {
+                          if (pt.membershipId) {
+                            setManageFamilyFor({ membershipId: pt.membershipId, primaryName: pt.name });
+                            void loadDependents(pt.membershipId);
+                          }
+                        },
+                      },
+                      {
+                        label: "Pause membership",
+                        onClick: () => {
+                          setConfirmDialog({
+                            title: "Pause Membership",
+                            message: `Pause ${pt.name}'s membership? They will retain their plan but benefits will be suspended.`,
+                            confirmLabel: "Pause",
+                            onConfirm: async () => {
+                              if (pt.membershipId) await handlePauseMembership(pt.membershipId, pt.name);
+                              setConfirmDialog(null);
+                            },
+                          });
+                        },
+                      },
+                      {
+                        label: "Cancel membership",
+                        danger: true,
+                        onClick: () => {
+                          if (pt.membershipId) {
+                            setRosterCancelDialog({
+                              patientId: pt.id,
+                              patientName: pt.name,
+                              membershipId: pt.membershipId,
+                            });
+                            setRosterCancelReason("");
+                          }
+                        },
+                      },
+                    ]
+                  : []),
+              ]}
+            />
               </div>
             </div>
           </div>
