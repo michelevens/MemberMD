@@ -20,6 +20,7 @@ import {
 } from "../../lib/api";
 import { OperatorNetworkDashboard } from "./operator/OperatorNetworkDashboard";
 import { OperatorPlanTemplates } from "./operator/OperatorPlanTemplates";
+import { OperatorReconciliation } from "./operator/OperatorReconciliation";
 import { PhoneField, EmailField } from "../shared/fields";
 import { useConfirm } from "../shared/ConfirmDialog";
 import { RefreshButton } from "../shared/RefreshButton";
@@ -69,11 +70,12 @@ const C = {
 
 // ─── Tab Definitions ─────────────────────────────────────────────────────────
 
-type TabId = "dashboard" | "clinics" | "templates" | "members" | "users" | "settings";
+type TabId = "dashboard" | "clinics" | "reconciliation" | "templates" | "members" | "users" | "settings";
 
 const TABS: { id: TabId; label: string; icon: React.ElementType }[] = [
   { id: "dashboard", label: "Network Dashboard", icon: LayoutDashboard },
   { id: "clinics", label: "Clinics", icon: Building2 },
+  { id: "reconciliation", label: "Billing Reconciliation", icon: FileText },
   { id: "templates", label: "Plan Templates", icon: FileText },
   { id: "members", label: "Member Search", icon: Search },
   { id: "users", label: "Operator Users", icon: Users },
@@ -179,6 +181,8 @@ export function OperatorPortal() {
         return <OperatorNetworkDashboard />;
       case "clinics":
         return <ClinicsTab me={me} />;
+      case "reconciliation":
+        return <OperatorReconciliation />;
       case "templates":
         return <OperatorPlanTemplates me={me} />;
       case "members":
