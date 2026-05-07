@@ -1131,4 +1131,307 @@ class EntitlementUsageTest extends TestCase
         $stats = (new \App\Services\UsageAlertService)->processAlerts();
         $this->assertEquals(0, $stats['alerts_sent']);
     }
+
+    public function test_alert_email_routes_through_registry_and_uses_branded_mailable(): void
+    {
+        \Illuminate\Support\Facades\Mail::fake();
+        $ctx = $this->seedAlertFixture(allowed: 4, used: 4);
+
+        (new \App\Services\UsageAlertService)->processAlerts();
+
+        // Should fire UsageAlertEmail (branded), not Mail::raw.
+        \Illuminate\Support\Facades\Mail::assertSent(\App\Mail\UsageAlertEmail::class);
+
+        // MailDispatcher logs every send into mail_dispatch_logs with
+        // the registry context — confirms the registry gate is in play.
+        $logged = \DB::table('mail_dispatch_logs')
+            ->where('context', 'patient.usage_alert')
+            ->exists();
+        $this->assertTrue($logged, 'Alert send must be logged with the registry key');
+    }
+
+    public function test_alert_suppressed_when_practice_disables_registry_key(): void
+    {
+        \Illuminate\Support\Facades\Mail::fake();
+        $ctx = $this->seedAlertFixture(allowed: 4, used: 4);
+
+        // Disable the registry key for this tenant.
+        \App\Models\TenantNotificationPreference::create([
+            'tenant_id' => $ctx['practice']->id,
+            'notification_key' => 'patient.usage_alert',
+            'enabled' => false,
+        ]);
+
+        (new \App\Services\UsageAlertService)->processAlerts();
+
+        // The Mailable should not have been sent, but the
+        // membership_lifecycle_events row should still exist (the alert
+        // was *logically* fired, the email was just suppressed).
+        \Illuminate\Support\Facades\Mail::assertNotSent(\App\Mail\UsageAlertEmail::class);
+
+        $event = \DB::table('membership_lifecycle_events')
+            ->where('membership_id', $ctx['membership']->id)
+            ->where('event_type', 'like', 'usage_75pct_%')
+            ->exists();
+        $this->assertTrue($event, 'Alert event row should still record the threshold cross');
+
+        // MailDispatchLog status='suppressed' confirms the registry gate
+        // intercepted the send.
+        $suppressed = \DB::table('mail_dispatch_logs')
+            ->where('context', 'patient.usage_alert')
+            ->where('status', 'suppressed')
+            ->exists();
+        $this->assertTrue($suppressed, 'Suppressed sends are logged');
+    }
+
+    // ─── LabOrderObserver ────────────────────────────────────────────────
+
+    private function setupLabOrderContext(array $peOverrides = []): array
+    {
+        $ctx = $this->setupBaseline();
+        $labWork = EntitlementType::create([
+            'tenant_id' => $ctx['practice']->id,
+            'code' => 'lab_work',
+            'name' => 'Lab Work',
+            'category' => 'lab',
+            'unit_of_measure' => 'panel',
+            'is_active' => true,
+        ]);
+        PlanEntitlement::create(array_merge([
+            'plan_id' => $ctx['plan']->id,
+            'entitlement_type_id' => $labWork->id,
+            'quantity_limit' => 4,
+            'is_unlimited' => false,
+            'period_type' => 'per_month',
+            'overage_policy' => 'allow',
+            'is_active' => true,
+        ], $peOverrides));
+
+        $providerUser = User::create([
+            'name' => 'Dr', 'email' => 'dr-' . uniqid() . '@ent.com',
+            'password' => bcrypt('p'), 'tenant_id' => $ctx['practice']->id,
+            'role' => 'provider', 'first_name' => 'D', 'last_name' => 'X',
+            'status' => 'active',
+        ]);
+        return array_merge($ctx, ['labWorkType' => $labWork, 'providerUser' => $providerUser]);
+    }
+
+    public function test_lab_order_created_in_active_status_records_usage(): void
+    {
+        $ctx = $this->setupLabOrderContext();
+
+        // Created already 'sent' (skips the draft step).
+        $order = \App\Models\LabOrder::create([
+            'tenant_id' => $ctx['practice']->id,
+            'patient_id' => $ctx['patient']->id,
+            'provider_id' => $ctx['providerUser']->id,
+            'status' => 'sent',
+            'priority' => 'routine',
+            'panels' => ['CBC'],
+            'ordered_at' => now(),
+        ]);
+
+        $usage = EntitlementUsage::where('entitlement_type_id', $ctx['labWorkType']->id)->first();
+        $this->assertNotNull($usage, 'Observer should record on create when status is sent');
+        $this->assertEquals('lab_order', $usage->source_type);
+        $this->assertEquals($order->id, $usage->source_id);
+    }
+
+    public function test_lab_order_created_as_draft_does_not_track(): void
+    {
+        $ctx = $this->setupLabOrderContext();
+
+        \App\Models\LabOrder::create([
+            'tenant_id' => $ctx['practice']->id,
+            'patient_id' => $ctx['patient']->id,
+            'provider_id' => $ctx['providerUser']->id,
+            'status' => 'draft',
+            'priority' => 'routine',
+            'panels' => ['CBC'],
+            'ordered_at' => now(),
+        ]);
+
+        $this->assertEquals(0, EntitlementUsage::count());
+    }
+
+    public function test_lab_order_status_transition_from_draft_to_sent_tracks_once(): void
+    {
+        $ctx = $this->setupLabOrderContext();
+
+        $order = \App\Models\LabOrder::create([
+            'tenant_id' => $ctx['practice']->id,
+            'patient_id' => $ctx['patient']->id,
+            'provider_id' => $ctx['providerUser']->id,
+            'status' => 'draft',
+            'priority' => 'routine',
+            'panels' => ['CBC'],
+            'ordered_at' => now(),
+        ]);
+        $this->assertEquals(0, EntitlementUsage::count());
+
+        $order->update(['status' => 'sent']);
+        $this->assertEquals(1, EntitlementUsage::count());
+
+        // Subsequent active-band shuffles (sent → in_progress → resulted)
+        // must not re-track.
+        $order->update(['status' => 'in_progress']);
+        $order->update(['status' => 'resulted']);
+        $this->assertEquals(1, EntitlementUsage::count(),
+            'Active-to-active transitions should not double-track');
+    }
+
+    public function test_lab_order_cancelled_does_not_re_track_if_already_recorded(): void
+    {
+        $ctx = $this->setupLabOrderContext();
+
+        $order = \App\Models\LabOrder::create([
+            'tenant_id' => $ctx['practice']->id,
+            'patient_id' => $ctx['patient']->id,
+            'provider_id' => $ctx['providerUser']->id,
+            'status' => 'sent',
+            'priority' => 'routine',
+            'panels' => ['CBC'],
+            'ordered_at' => now(),
+        ]);
+        $this->assertEquals(1, EntitlementUsage::count());
+
+        // Cancel doesn't reverse the usage row (that's a refund-type
+        // operation that needs explicit admin intervention) — but it
+        // also shouldn't re-fire tracking.
+        $order->update(['status' => 'cancelled']);
+        $this->assertEquals(1, EntitlementUsage::count());
+    }
+
+    public function test_lab_order_observer_respects_practice_opt_out(): void
+    {
+        $ctx = $this->setupLabOrderContext();
+        $ctx['practice']->update([
+            'utilization_settings' => ['auto_track_labs' => false],
+        ]);
+
+        \App\Models\LabOrder::create([
+            'tenant_id' => $ctx['practice']->id,
+            'patient_id' => $ctx['patient']->id,
+            'provider_id' => $ctx['providerUser']->id,
+            'status' => 'sent',
+            'priority' => 'routine',
+            'panels' => ['CBC'],
+            'ordered_at' => now(),
+        ]);
+
+        $this->assertEquals(0, EntitlementUsage::count());
+    }
+
+    // ─── DispenseRecordObserver ──────────────────────────────────────────
+
+    public function test_dispense_record_records_usage_on_create(): void
+    {
+        $ctx = $this->setupBaseline();
+        $rxType = EntitlementType::create([
+            'tenant_id' => $ctx['practice']->id,
+            'code' => 'medication_dispensed',
+            'name' => 'Medication Dispensed',
+            'category' => 'rx',
+            'unit_of_measure' => 'item',
+            'is_active' => true,
+        ]);
+        PlanEntitlement::create([
+            'plan_id' => $ctx['plan']->id,
+            'entitlement_type_id' => $rxType->id,
+            'quantity_limit' => null,
+            'is_unlimited' => true,
+            'period_type' => 'per_month',
+            'overage_policy' => 'allow',
+            'is_active' => true,
+        ]);
+
+        $providerUser = User::create([
+            'name' => 'Dr', 'email' => 'dr-' . uniqid() . '@ent.com',
+            'password' => bcrypt('p'), 'tenant_id' => $ctx['practice']->id,
+            'role' => 'provider', 'first_name' => 'D', 'last_name' => 'X',
+            'status' => 'active',
+        ]);
+
+        // Inventory item is FK'd from dispense_records.
+        $invItem = \App\Models\InventoryItem::create([
+            'tenant_id' => $ctx['practice']->id,
+            'name' => 'Test Med',
+            'category' => 'medication',
+            'sku' => 'TM-' . uniqid(),
+            'unit_cost' => 1.00,
+            'sell_price' => 5.00,
+            'quantity_on_hand' => 100,
+            'reorder_point' => 10,
+            'is_active' => true,
+        ]);
+
+        $record = \App\Models\DispenseRecord::create([
+            'tenant_id' => $ctx['practice']->id,
+            'inventory_item_id' => $invItem->id,
+            'patient_id' => $ctx['patient']->id,
+            'provider_id' => $providerUser->id,
+            'quantity' => 30,
+            'unit_cost' => 1.00,
+            'sell_price' => 5.00,
+            'dispensed_at' => now(),
+        ]);
+
+        $usage = EntitlementUsage::where('entitlement_type_id', $rxType->id)->first();
+        $this->assertNotNull($usage, 'Observer should record on dispense create');
+        $this->assertEquals('dispense_record', $usage->source_type);
+        $this->assertEquals($record->id, $usage->source_id);
+        // Quantity should match the dispensed quantity (30 tablets).
+        $this->assertEquals(30, $usage->quantity);
+    }
+
+    public function test_dispense_observer_respects_practice_opt_out(): void
+    {
+        $ctx = $this->setupBaseline();
+        $ctx['practice']->update([
+            'utilization_settings' => ['auto_track_dispensing' => false],
+        ]);
+
+        $rxType = EntitlementType::create([
+            'tenant_id' => $ctx['practice']->id,
+            'code' => 'medication_dispensed',
+            'name' => 'Med', 'category' => 'rx',
+            'unit_of_measure' => 'item', 'is_active' => true,
+        ]);
+        PlanEntitlement::create([
+            'plan_id' => $ctx['plan']->id,
+            'entitlement_type_id' => $rxType->id,
+            'is_unlimited' => true, 'period_type' => 'per_month',
+            'overage_policy' => 'allow', 'is_active' => true,
+        ]);
+
+        $providerUser = User::create([
+            'name' => 'Dr', 'email' => 'dr-' . uniqid() . '@ent.com',
+            'password' => bcrypt('p'), 'tenant_id' => $ctx['practice']->id,
+            'role' => 'provider', 'first_name' => 'D', 'last_name' => 'X',
+            'status' => 'active',
+        ]);
+
+        $invItem = \App\Models\InventoryItem::create([
+            'tenant_id' => $ctx['practice']->id,
+            'name' => 'Test Med', 'category' => 'medication',
+            'sku' => 'TM-' . uniqid(),
+            'unit_cost' => 1.00, 'sell_price' => 5.00,
+            'quantity_on_hand' => 100, 'reorder_point' => 10,
+            'is_active' => true,
+        ]);
+
+        \App\Models\DispenseRecord::create([
+            'tenant_id' => $ctx['practice']->id,
+            'inventory_item_id' => $invItem->id,
+            'patient_id' => $ctx['patient']->id,
+            'provider_id' => $providerUser->id,
+            'quantity' => 5,
+            'unit_cost' => 1.00,
+            'sell_price' => 5.00,
+            'dispensed_at' => now(),
+        ]);
+
+        $this->assertEquals(0, EntitlementUsage::count(),
+            'auto_track_dispensing=false should suppress the observer');
+    }
 }

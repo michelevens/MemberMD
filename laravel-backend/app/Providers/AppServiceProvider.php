@@ -6,10 +6,14 @@ use App\Events\MembershipStateChanged;
 use App\Listeners\DispatchMembershipWebhook;
 use App\Listeners\LogMembershipTransition;
 use App\Models\Appointment;
+use App\Models\DispenseRecord;
 use App\Models\Encounter;
+use App\Models\LabOrder;
 use App\Models\Practice;
 use App\Observers\AppointmentObserver;
+use App\Observers\DispenseRecordObserver;
 use App\Observers\EncounterObserver;
+use App\Observers\LabOrderObserver;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\View;
 use Illuminate\Support\ServiceProvider;
@@ -31,6 +35,8 @@ class AppServiceProvider extends ServiceProvider
     {
         Appointment::observe(AppointmentObserver::class);
         Encounter::observe(EncounterObserver::class);
+        LabOrder::observe(LabOrderObserver::class);
+        DispenseRecord::observe(DispenseRecordObserver::class);
 
         // Lifecycle → outbound webhooks bridge. Every membership state
         // transition fires MembershipStateChanged; the listener fans it

@@ -284,6 +284,13 @@ class NotificationRegistry
             'default_enabled' => true,
             'is_phi_bearing' => false,
         ],
+        'patient.usage_alert' => [
+            'audience' => 'patient',
+            'label' => 'Visit Usage Threshold Alert',
+            'description' => 'Sent when a member crosses 75% / 90% / 100% of their included visits for the period.',
+            'default_enabled' => true,
+            'is_phi_bearing' => false,
+        ],
         'membership.first_visit_nudge' => [
             'audience' => 'membership',
             'label' => 'First-Visit Nudge',

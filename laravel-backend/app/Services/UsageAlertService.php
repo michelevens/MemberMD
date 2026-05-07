@@ -2,11 +2,11 @@
 
 namespace App\Services;
 
+use App\Mail\UsageAlertEmail;
 use App\Models\PatientEntitlement;
-use App\Models\PatientMembership;
+use App\Services\MailDispatcher;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Str;
 
 /**
@@ -101,21 +101,27 @@ class UsageAlertService
         $email = $ent->patient->email ?? null;
         if (!$email) return;
 
-        // Plain Mail::raw for now — practices can wire branded templates later.
-        // Deliberately not using a queued job since usage alerts are rare and
-        // the daily window is generous.
+        // Routed through MailDispatcher so the registry gate kicks in:
+        // practices can disable threshold alerts in Settings →
+        // Notifications via the 'patient.usage_alert' key. Earlier
+        // versions used Mail::raw which bypassed the gate entirely.
         try {
-            $remaining = max(0, (int) $ent->visits_allowed - (int) $ent->visits_used);
-            $subject = $threshold['subject'];
-            $body = "Hi,\n\n"
-                . "This is a heads-up about your membership visits.\n\n"
-                . "You have {$remaining} visit(s) remaining in this billing period "
-                . "(used {$ent->visits_used} of {$ent->visits_allowed}).\n\n"
-                . "Period ends: " . ($ent->period_end?->toFormattedDateString() ?? 'soon') . ".\n\n"
-                . "Reply to this email or log into your portal if you have questions.\n";
-            Mail::raw($body, function ($m) use ($email, $subject) {
-                $m->to($email)->subject($subject);
-            });
+            // Tone keys off the percent — strip 'usage_' prefix and the
+            // _<period> suffix the idempotency builder appends.
+            //   usage_75pct_20260531 → '75'
+            $tone = (string) ($threshold['pct'] ?? '75');
+
+            MailDispatcher::send(
+                $email,
+                new UsageAlertEmail(
+                    entitlement: $ent,
+                    tone: $tone,
+                    subject2: $threshold['subject'] ?? 'Membership usage update',
+                ),
+                'patient.usage_alert',
+                $ent->tenant_id,
+                $ent->patient_id,
+            );
         } catch (\Throwable $e) {
             Log::info('Usage alert email send failed (non-fatal)', [
                 'patient_id' => $ent->patient_id ?? null,
