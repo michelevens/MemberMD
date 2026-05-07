@@ -666,6 +666,124 @@ class PracticeController extends Controller
      * surface) — this only flips the local tier so reporting and
      * feature gating reflect what the practice is actually paying for.
      */
+    /**
+     * Superadmin-only: extend a practice's platform-subscription trial
+     * by N days. Driven by sales conversations — "we'll give you another
+     * 30 days to evaluate" mid-cycle. Idempotent in the sense that
+     * calling it twice with `extend_days=30` adds 60 total days; if the
+     * caller wants an absolute date, use the override path below.
+     *
+     * Modes:
+     *   - extend_days (1..365)   — ADD this many days to the existing
+     *                              trial_ends_at (or now() if expired)
+     *   - new_end_date (ISO)     — SET trial_ends_at to this date
+     *
+     * One of the two must be present. Reason note is required so we
+     * have a paper trail when finance asks why a 14-day trial became
+     * a 75-day trial. Recorded on AuditLog + as an internal note on
+     * the practice for visibility in the SuperAdmin notes thread.
+     *
+     * Side effect: if the subscription is past `trial` (e.g. already
+     * `active` or `cancelled`), we 422 — extending a non-trial doesn't
+     * make sense and would silently re-trial a paying customer.
+     */
+    public function extendTrial(Request $request, string $practiceId): JsonResponse
+    {
+        abort_if($request->user()->role !== 'superadmin', 403);
+
+        $data = $request->validate([
+            'extend_days' => 'required_without:new_end_date|integer|min:1|max:365',
+            'new_end_date' => 'required_without:extend_days|date|after:today',
+            'reason' => 'required|string|min:5|max:500',
+        ]);
+
+        $practice = Practice::findOrFail($practiceId);
+
+        $sub = \App\Models\PracticeSubscription::where('practice_id', $practice->id)
+            ->latest()
+            ->first();
+
+        if (!$sub) {
+            return response()->json([
+                'message' => 'No platform subscription on file for this practice. Create one first.',
+            ], 404);
+        }
+
+        if ($sub->status !== 'trial') {
+            return response()->json([
+                'message' => "Cannot extend trial — subscription is currently '{$sub->status}'. Use the plan-change flow for active subscriptions.",
+            ], 422);
+        }
+
+        $previousEndsAt = $sub->trial_ends_at;
+
+        // Compute new end date. extend_days is "from current end OR
+        // now if expired" — so a sales rep can revive a 2-day-expired
+        // trial with extend_days=30 and get 30 days from today, not
+        // 28 days from today.
+        if (!empty($data['new_end_date'])) {
+            $newEndsAt = \Carbon\Carbon::parse($data['new_end_date']);
+        } else {
+            $base = ($previousEndsAt && $previousEndsAt->isFuture())
+                ? $previousEndsAt
+                : now();
+            $newEndsAt = $base->copy()->addDays((int) $data['extend_days']);
+        }
+
+        $sub->update(['trial_ends_at' => $newEndsAt]);
+
+        // Audit + internal note. Both best-effort — extension itself
+        // already succeeded, paper trail is decoupled from the user-
+        // facing success.
+        try {
+            \App\Models\AuditLog::create([
+                'tenant_id' => $practice->id,
+                'user_id' => $request->user()->id,
+                'action' => 'superadmin.trial_extended',
+                'resource' => 'PracticeSubscription',
+                'resource_id' => $sub->id,
+                'metadata' => [
+                    'previous_ends_at' => $previousEndsAt?->toIso8601String(),
+                    'new_ends_at' => $newEndsAt->toIso8601String(),
+                    'extend_days' => $data['extend_days'] ?? null,
+                    'reason' => $data['reason'],
+                ],
+            ]);
+        } catch (\Throwable) {
+            // Audit best-effort; don't block sales action.
+        }
+
+        try {
+            \App\Models\PracticeInternalNote::create([
+                'tenant_id' => $practice->id,
+                'author_id' => $request->user()->id,
+                'category' => 'billing',
+                'body' => sprintf(
+                    "Trial extended to %s by superadmin.\nReason: %s",
+                    $newEndsAt->toFormattedDateString(),
+                    $data['reason'],
+                ),
+            ]);
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('Failed to record trial-extension internal note', [
+                'practice_id' => $practice->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        return response()->json([
+            'data' => [
+                'subscription_id' => $sub->id,
+                'previous_ends_at' => $previousEndsAt?->toIso8601String(),
+                'new_ends_at' => $newEndsAt->toIso8601String(),
+                'days_added' => $previousEndsAt
+                    ? (int) round($previousEndsAt->floatDiffInDays($newEndsAt, false))
+                    : (int) round(now()->floatDiffInDays($newEndsAt, false)),
+            ],
+            'message' => 'Trial extended.',
+        ]);
+    }
+
     public function changePlan(Request $request, string $practiceId): JsonResponse
     {
         abort_if($request->user()->role !== 'superadmin', 403);

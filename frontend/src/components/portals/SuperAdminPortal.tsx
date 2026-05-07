@@ -2817,7 +2817,9 @@ export function SuperAdminPortal() {
           </div>
 
           {/* Trial countdown — surfaces only while practice is on trial.
-              Turns red ≤3 days remaining. */}
+              Turns red ≤3 days remaining. Inline button extends the
+              trial via the superadmin extend-trial endpoint, which
+              records a reason on the audit log + as an internal note. */}
           {p.status === "trial" && p.trialEndsAt && (() => {
             const daysLeft = Math.max(
               0,
@@ -2839,6 +2841,49 @@ export function SuperAdminPortal() {
                 <span className="opacity-75">
                   (expires {new Date(p.trialEndsAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })})
                 </span>
+                <button
+                  onClick={async () => {
+                    const daysStr = window.prompt(
+                      `Extend ${p.name}'s trial by how many days?\n\n(Adds to current end date. Enter 1-365.)`,
+                      "30",
+                    );
+                    if (!daysStr) return;
+                    const days = parseInt(daysStr, 10);
+                    if (!Number.isFinite(days) || days < 1 || days > 365) {
+                      setApprovalMessage("Trial extension cancelled — enter 1-365 days.");
+                      return;
+                    }
+                    const reason = window.prompt(
+                      "Reason for extension (visible to other superadmins, recorded on audit log):",
+                      "",
+                    );
+                    if (!reason || reason.trim().length < 5) {
+                      setApprovalMessage("Trial extension cancelled — reason required (min 5 chars).");
+                      return;
+                    }
+                    const r = await apiFetch<{ new_ends_at: string; days_added: number }>(
+                      `/admin/practices/${p.id}/subscription/extend-trial`,
+                      {
+                        method: "POST",
+                        body: JSON.stringify({
+                          extend_days: days,
+                          reason: reason.trim(),
+                        }),
+                      },
+                    );
+                    if (r.error) {
+                      setApprovalMessage(`Trial extension failed: ${r.error}`);
+                      return;
+                    }
+                    setApprovalMessage(`${p.name}: trial extended by ${days} day${days !== 1 ? "s" : ""}.`);
+                    loadData();
+                  }}
+                  className="ml-1 inline-flex items-center gap-1 rounded px-2 py-0.5 text-[11px] font-semibold border border-current/20 hover:bg-white/60 transition-colors"
+                  style={{ color: "inherit" }}
+                  title="Extend this practice's trial period"
+                >
+                  Extend
+                </button>
               </div>
             );
           })()}

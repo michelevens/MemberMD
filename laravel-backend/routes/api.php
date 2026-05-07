@@ -241,6 +241,7 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
     Route::post('/admin/practices/{id}/suspend', [PracticeController::class, 'suspend']);
     Route::post('/admin/practices/{id}/activate', [PracticeController::class, 'activate']);
     Route::patch('/admin/practices/{id}/plan', [PracticeController::class, 'changePlan']);
+    Route::post('/admin/practices/{id}/subscription/extend-trial', [PracticeController::class, 'extendTrial']);
 
     // Tier 2 — superadmin internal notes + summary KPIs scoped to one tenant.
     Route::get('/admin/practices/{id}/notes', [PracticeController::class, 'listInternalNotes']);
