@@ -302,6 +302,8 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
 
     // ===== Patients =====
     Route::apiResource('patients', PatientController::class);
+    Route::post('/patients/bulk-import', [PatientController::class, 'bulkImport'])
+        ->middleware('throttle:5,1'); // 5 imports/min — operator migrations
     Route::get('/patients/{id}/memberships', [PatientController::class, 'memberships']);
     Route::get('/patients/{id}/appointments', [PatientController::class, 'appointments']);
     // Staff-side counterpart to /me/enrollments — used by the

@@ -161,6 +161,181 @@ class PatientController extends Controller
         return response()->json(['data' => $patient->fresh()]);
     }
 
+    /**
+     * Bulk-import patients from a CSV payload. Used by operators
+     * onboarding a new clinic with N existing patient records, or by
+     * any practice migrating off another platform.
+     *
+     * Required CSV columns: first_name, last_name, email, date_of_birth
+     * Optional columns: phone, gender, preferred_name, preferred_language
+     *
+     * Behavior:
+     *   - Tenant-scoped to the caller's practice (no cross-tenant import)
+     *   - One transaction per row — a single bad row doesn't kill the
+     *     whole import; we collect errors and return them
+     *   - User row reuse: if a user with that email exists in THIS
+     *     tenant we link to it; cross-tenant emails 422 the row
+     *   - Deduped by email within the same tenant — re-running the
+     *     same CSV updates instead of duplicating
+     *
+     * Returns: { created, updated, skipped, errors: [{row, email, reason}] }
+     *
+     * Hard cap of 1000 rows per call; for larger migrations chunk on
+     * the client side.
+     */
+    public function bulkImport(Request $request): JsonResponse
+    {
+        $actor = $request->user();
+        $this->authorize('create', Patient::class);
+
+        $validated = $request->validate([
+            'csv' => 'required_without:rows|string|max:5000000', // 5MB cap
+            'rows' => 'required_without:csv|array|max:1000',
+            'rows.*.first_name' => 'required_with:rows|string|max:120',
+            'rows.*.last_name' => 'required_with:rows|string|max:120',
+            'rows.*.email' => 'required_with:rows|email',
+            'rows.*.date_of_birth' => 'required_with:rows|date',
+        ]);
+
+        // Parse CSV → rows array if csv was provided. We accept either
+        // shape because the frontend is easier to write with structured
+        // JSON, but a raw CSV is what the user uploads.
+        $rows = $validated['rows'] ?? $this->parseCsvPayload($validated['csv'] ?? '');
+        if (count($rows) > 1000) {
+            return response()->json([
+                'message' => 'Bulk import is capped at 1000 rows per call. Split your CSV into smaller batches.',
+            ], 422);
+        }
+
+        $summary = ['created' => 0, 'updated' => 0, 'skipped' => 0, 'errors' => []];
+
+        foreach ($rows as $i => $row) {
+            $rowNumber = $i + 1; // human-friendly (header row excluded)
+            try {
+                // Per-row mini validation. Bail this row only.
+                $rowVal = validator($row, [
+                    'first_name' => 'required|string|max:120',
+                    'last_name' => 'required|string|max:120',
+                    'email' => 'required|email',
+                    'date_of_birth' => 'required|date',
+                    'phone' => 'sometimes|nullable|string|max:30',
+                    'gender' => 'sometimes|nullable|string|max:32',
+                    'preferred_name' => 'sometimes|nullable|string|max:120',
+                    'preferred_language' => 'sometimes|nullable|string|max:32',
+                ])->validate();
+
+                $email = strtolower(trim($rowVal['email']));
+
+                // Cross-tenant email collision check.
+                $existingUser = \App\Models\User::where('email', $email)->first();
+                if ($existingUser && $existingUser->tenant_id !== $actor->tenant_id) {
+                    $summary['errors'][] = [
+                        'row' => $rowNumber,
+                        'email' => $email,
+                        'reason' => 'Email exists at another practice. Use a different email or transfer.',
+                    ];
+                    $summary['skipped']++;
+                    continue;
+                }
+
+                // Existing patient in this tenant? Update path.
+                $existingPatient = $existingUser
+                    ? Patient::where('tenant_id', $actor->tenant_id)
+                        ->where('user_id', $existingUser->id)
+                        ->first()
+                    : null;
+
+                \Illuminate\Support\Facades\DB::transaction(function () use (
+                    $actor, $rowVal, $email, $existingUser, $existingPatient, &$summary
+                ) {
+                    $user = $existingUser ?: \App\Models\User::create([
+                        'tenant_id' => $actor->tenant_id,
+                        'email' => $email,
+                        'password' => \Illuminate\Support\Facades\Hash::make(\Illuminate\Support\Str::random(40)),
+                        'first_name' => $rowVal['first_name'],
+                        'last_name' => $rowVal['last_name'],
+                        'name' => trim($rowVal['first_name'] . ' ' . $rowVal['last_name']),
+                        'phone' => $rowVal['phone'] ?? null,
+                        'role' => 'patient',
+                        'status' => 'active',
+                    ]);
+
+                    $patientFields = array_merge($rowVal, [
+                        'tenant_id' => $actor->tenant_id,
+                        'user_id' => $user->id,
+                        'email' => $email,
+                        'is_active' => true,
+                        'preferred_language' => $rowVal['preferred_language'] ?? 'English',
+                    ]);
+
+                    if ($existingPatient) {
+                        $existingPatient->update($patientFields);
+                        $summary['updated']++;
+                    } else {
+                        Patient::create($patientFields);
+                        $summary['created']++;
+                    }
+                });
+            } catch (\Illuminate\Validation\ValidationException $e) {
+                $summary['errors'][] = [
+                    'row' => $rowNumber,
+                    'email' => $row['email'] ?? null,
+                    'reason' => collect($e->errors())->flatten()->first() ?? 'Validation failed',
+                ];
+                $summary['skipped']++;
+            } catch (\Throwable $e) {
+                \Illuminate\Support\Facades\Log::warning('Bulk patient import row failed', [
+                    'row' => $rowNumber,
+                    'error' => $e->getMessage(),
+                ]);
+                $summary['errors'][] = [
+                    'row' => $rowNumber,
+                    'email' => $row['email'] ?? null,
+                    'reason' => 'Server error: ' . $e->getMessage(),
+                ];
+                $summary['skipped']++;
+            }
+        }
+
+        return response()->json([
+            'data' => $summary,
+            'message' => sprintf(
+                'Import complete: %d created, %d updated, %d skipped.',
+                $summary['created'],
+                $summary['updated'],
+                $summary['skipped'],
+            ),
+        ]);
+    }
+
+    /**
+     * Parse a CSV string into associative rows. First line = header.
+     * Tolerates quoted fields, trims values. Drops empty rows.
+     */
+    private function parseCsvPayload(string $csv): array
+    {
+        $lines = preg_split('/\r\n|\r|\n/', trim($csv));
+        if (count($lines) < 2) {
+            return [];
+        }
+        $header = str_getcsv(array_shift($lines));
+        $header = array_map(fn ($h) => strtolower(trim($h)), $header);
+
+        $rows = [];
+        foreach ($lines as $line) {
+            if (trim($line) === '') continue;
+            $values = str_getcsv($line);
+            if (count($values) !== count($header)) continue; // shape mismatch
+            $row = [];
+            foreach ($header as $i => $col) {
+                $val = $values[$i] ?? null;
+                $row[$col] = is_string($val) ? trim($val) : $val;
+            }
+            $rows[] = $row;
+        }
+        return $rows;
+    }
+
     public function destroy(Request $request, string $id): JsonResponse
     {
         $user = $request->user();

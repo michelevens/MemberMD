@@ -13,6 +13,7 @@ import { formatDob, formatRelative } from "../../lib/format";
 import { PortalShell, type NavSection as ShellNavSection, type PortalColor } from "../shared/PortalShell";
 import { MobileTodayScreen } from "../practice/MobileTodayScreen";
 import { TrialBanner } from "../practice/TrialBanner";
+import { BulkImportPatientsModal } from "../practice/BulkImportPatientsModal";
 import { MobileSheet } from "../shared/MobileSheet";
 import { PhoneField, FaxField, EmailField, NPIField, ZipField, AddressField } from "../shared/fields";
 import { useConfirm } from "../shared/ConfirmDialog";
@@ -1118,6 +1119,7 @@ export function PracticePortal() {
   // right answer; multi-provider clinics get a TODO to add a picker.
   const [defaultProviderId, setDefaultProviderId] = useState<string | null>(null);
   const [showAddPatient, setShowAddPatient] = useState(false);
+  const [showBulkImport, setShowBulkImport] = useState(false);
   const [addPatientForm, setAddPatientForm] = useState<{ firstName: string; lastName: string; email: string; phone: string; dateOfBirth: string; gender: "male" | "female" | "other" | "prefer_not_to_say" }>({ firstName: "", lastName: "", email: "", phone: "", dateOfBirth: "", gender: "male" });
   const [addPatientLoading, setAddPatientLoading] = useState(false);
   const [addPatientError, setAddPatientError] = useState<string | null>(null);
@@ -3979,6 +3981,14 @@ export function PracticePortal() {
               title="Create a Stripe-style test patient — useful for clicking through the UI without committing real PHI"
             >
               + Sample patient
+            </button>
+            <button
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium text-slate-700 border border-slate-300 bg-white hover:bg-slate-50 transition-colors"
+              onClick={() => setShowBulkImport(true)}
+              title="Import multiple patients from a CSV file"
+            >
+              <FileText className="w-4 h-4" />
+              Import CSV
             </button>
             <button
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium text-white shadow-sm transition-colors"
@@ -10887,6 +10897,17 @@ export function PracticePortal() {
           </div>
         )}
       </MobileSheet>
+
+      {/* ─── Bulk Patient Import Modal ──────────────────────────────────── */}
+      {showBulkImport && (
+        <BulkImportPatientsModal
+          onClose={() => setShowBulkImport(false)}
+          onImported={() => {
+            setShowBulkImport(false);
+            loadPracticeData();
+          }}
+        />
+      )}
 
       {/* ─── Add Patient Modal ──────────────────────────────────────────── */}
       <MobileSheet
