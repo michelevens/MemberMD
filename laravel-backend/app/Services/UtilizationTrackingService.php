@@ -188,7 +188,16 @@ class UtilizationTrackingService
         // equality used to work, but SQLite stores it as TEXT and
         // round-trips datetime values verbatim — using whereDate makes
         // the query engine-agnostic without changing prod semantics.
-        $currentUsed = EntitlementUsage::where('patient_membership_id', $membership->id)
+        //
+        // Family-shared entitlements (plan_entitlements.family_shared =
+        // true) pool consumption across the primary + every dependent
+        // membership rather than per-membership. The family group is
+        // resolved by parent_membership_id: a primary's family includes
+        // itself + everything that points at it; a dependent's family
+        // includes the parent + all the parent's dependents.
+        $membershipIds = $this->familyMembershipIds($membership, (bool) $planEntitlement->family_shared);
+
+        $currentUsed = EntitlementUsage::whereIn('patient_membership_id', $membershipIds)
             ->where('entitlement_type_id', $entitlementType->id)
             ->whereDate('period_start', $periodStart)
             ->sum('quantity');
@@ -323,7 +332,12 @@ class UtilizationTrackingService
             ? $membership->current_period_start->toDateString()
             : $membership->started_at->startOfMonth()->toDateString();
 
-        $currentUsed = EntitlementUsage::where('patient_membership_id', $membership->id)
+        // Family-shared entitlements pool consumption across the family
+        // group — see recordUsage docblock above. Same family-resolution
+        // helper is used in both places to keep semantics consistent.
+        $membershipIds = $this->familyMembershipIds($membership, (bool) $planEntitlement->family_shared);
+
+        $currentUsed = EntitlementUsage::whereIn('patient_membership_id', $membershipIds)
             ->where('entitlement_type_id', $entitlementType->id)
             ->whereDate('period_start', $periodStart)
             ->sum('quantity');
@@ -411,5 +425,40 @@ class UtilizationTrackingService
         }
 
         return $settings[$settingKey] ?? true;
+    }
+
+    /**
+     * Return the membership IDs the entitlement check should aggregate
+     * over. When $familyShared=false (the common case), it's just the
+     * single membership. When true, we resolve the full family group:
+     *
+     *   - Primary membership: itself + every dependent (where
+     *     parent_membership_id = primary->id)
+     *   - Dependent membership: the primary it points at + that
+     *     primary's other dependents
+     *
+     * The family link is on patient_memberships.parent_membership_id —
+     * dependents are full memberships whose parent is the primary's
+     * membership row. See create_membermd_tables migration.
+     */
+    private function familyMembershipIds(PatientMembership $membership, bool $familyShared): array
+    {
+        if (!$familyShared) {
+            return [$membership->id];
+        }
+
+        // Identify the primary. If $membership IS a dependent, walk up
+        // one level; otherwise it's already the primary.
+        $primaryId = $membership->parent_membership_id ?? $membership->id;
+
+        // Pull primary + every dependent in one query.
+        $ids = PatientMembership::where(function ($q) use ($primaryId) {
+                $q->where('id', $primaryId)
+                  ->orWhere('parent_membership_id', $primaryId);
+            })
+            ->pluck('id')
+            ->all();
+
+        return array_values(array_unique($ids));
     }
 }

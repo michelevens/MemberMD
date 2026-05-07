@@ -800,4 +800,335 @@ class EntitlementUsageTest extends TestCase
         $this->assertEquals(4, $row['visits_allowed'] ?? $row['visitsAllowed']);
         $this->assertEquals(1, $row['visits_used'] ?? $row['visitsUsed']);
     }
+
+    // ─── Family-shared entitlements ──────────────────────────────────────
+
+    /**
+     * Set up a primary patient + 1 dependent on a family plan with
+     * family_shared=true. Primary's membership is the parent; dependent's
+     * membership has parent_membership_id pointing at the primary.
+     */
+    private function setupFamilyBaseline(int $sharedLimit = 4): array
+    {
+        $ctx = $this->setupBaseline(peOverrides: [
+            'family_shared' => true,
+            'quantity_limit' => $sharedLimit,
+        ]);
+
+        // Dependent patient + dependent membership.
+        $depUser = User::create([
+            'name' => 'Dep', 'email' => 'dep-' . uniqid() . '@ent.com',
+            'password' => bcrypt('p'), 'tenant_id' => $ctx['practice']->id,
+            'role' => 'patient', 'first_name' => 'Kid', 'last_name' => 'Patient',
+            'status' => 'active',
+        ]);
+        $dependent = Patient::create([
+            'tenant_id' => $ctx['practice']->id,
+            'user_id' => $depUser->id,
+            'first_name' => 'Kid', 'last_name' => 'Patient',
+            'date_of_birth' => '2015-06-01',
+            'phone' => '555-2',
+            'email' => $depUser->email,
+            'is_active' => true,
+        ]);
+
+        $now = now();
+        $depMembership = PatientMembership::create([
+            'tenant_id' => $ctx['practice']->id,
+            'patient_id' => $dependent->id,
+            'plan_id' => $ctx['plan']->id,
+            'parent_membership_id' => $ctx['membership']->id,
+            'status' => 'active',
+            'billing_mode' => 'manual',
+            'billing_frequency' => 'monthly',
+            'started_at' => $now,
+            'current_period_start' => $now->copy()->startOfMonth(),
+            'current_period_end' => $now->copy()->endOfMonth(),
+            'last_state_change_at' => $now,
+        ]);
+
+        return array_merge($ctx, [
+            'dependent' => $dependent,
+            'dependentMembership' => $depMembership,
+        ]);
+    }
+
+    public function test_family_shared_pools_usage_across_primary_and_dependents(): void
+    {
+        $ctx = $this->setupFamilyBaseline(sharedLimit: 4);
+
+        // Primary uses 2; dependent uses 2. Both should record fine.
+        for ($i = 1; $i <= 2; $i++) {
+            $r = $this->service()->recordUsage(
+                $ctx['patient']->id, 'visit', 1, 'appointment',
+                '00000000-0000-0000-0000-00000000000' . $i, $ctx['practice']->id,
+            );
+            $this->assertTrue($r['recorded']);
+            $this->assertFalse($r['overage'], 'Primary visit #' . $i . ' should not overage');
+        }
+        for ($i = 3; $i <= 4; $i++) {
+            $r = $this->service()->recordUsage(
+                $ctx['dependent']->id, 'visit', 1, 'appointment',
+                '00000000-0000-0000-0000-00000000000' . $i, $ctx['practice']->id,
+            );
+            $this->assertTrue($r['recorded']);
+            $this->assertFalse($r['overage'], 'Dependent visit #' . $i . ' should not overage');
+        }
+
+        // Pool is now full. Primary's 5th visit should overage. With
+        // the default 'notify' policy the row IS written but overage
+        // is flagged.
+        $r = $this->service()->recordUsage(
+            $ctx['patient']->id, 'visit', 1, 'appointment',
+            '00000000-0000-0000-0000-000000000005', $ctx['practice']->id,
+        );
+        $this->assertTrue($r['overage'], 'Primary visit #5 should hit shared limit');
+
+        // checkEntitlement reports the same pooled total for either side.
+        // Includes the notify-policy overage row that just landed.
+        $primaryCheck = $this->service()->checkEntitlement($ctx['patient']->id, 'visit');
+        $depCheck = $this->service()->checkEntitlement($ctx['dependent']->id, 'visit');
+        $this->assertEquals(5, $primaryCheck['used'], 'Primary sees pooled used count (incl. overage)');
+        $this->assertEquals(5, $depCheck['used'], 'Dependent sees pooled used count (incl. overage)');
+    }
+
+    public function test_non_family_shared_entitlements_remain_per_member(): void
+    {
+        // Same family structure but family_shared=false on the plan
+        // entitlement. Each member gets their own 4 visits.
+        $ctx = $this->setupFamilyBaseline(sharedLimit: 4);
+        $ctx['planEntitlement']->update(['family_shared' => false]);
+
+        // Primary uses all 4.
+        for ($i = 1; $i <= 4; $i++) {
+            $r = $this->service()->recordUsage(
+                $ctx['patient']->id, 'visit', 1, 'appointment',
+                '00000000-0000-0000-0000-00000000000' . $i, $ctx['practice']->id,
+            );
+            $this->assertTrue($r['recorded']);
+            $this->assertFalse($r['overage']);
+        }
+        // Primary's 5th overages.
+        $r = $this->service()->recordUsage(
+            $ctx['patient']->id, 'visit', 1, 'appointment',
+            '00000000-0000-0000-0000-000000000005', $ctx['practice']->id,
+        );
+        $this->assertTrue($r['overage']);
+
+        // BUT dependent should still have a fresh 4 — usage is per-member.
+        $r = $this->service()->recordUsage(
+            $ctx['dependent']->id, 'visit', 1, 'appointment',
+            '00000000-0000-0000-0000-000000000006', $ctx['practice']->id,
+        );
+        $this->assertTrue($r['recorded']);
+        $this->assertFalse($r['overage'], 'Non-shared entitlement: dependent gets own bucket');
+    }
+
+    public function test_family_shared_lookup_works_from_dependent_perspective(): void
+    {
+        // The dependent calling recordUsage should see the same family
+        // pool as the primary. Walks the tree up via parent_membership_id.
+        $ctx = $this->setupFamilyBaseline(sharedLimit: 2);
+
+        // Dependent uses 1.
+        $this->service()->recordUsage(
+            $ctx['dependent']->id, 'visit', 1, 'appointment',
+            '00000000-0000-0000-0000-000000000001', $ctx['practice']->id,
+        );
+        // Primary uses 1.
+        $this->service()->recordUsage(
+            $ctx['patient']->id, 'visit', 1, 'appointment',
+            '00000000-0000-0000-0000-000000000002', $ctx['practice']->id,
+        );
+
+        // Now the pool is full. Either member's next visit should overage.
+        $r1 = $this->service()->recordUsage(
+            $ctx['dependent']->id, 'visit', 1, 'appointment',
+            '00000000-0000-0000-0000-000000000003', $ctx['practice']->id,
+        );
+        $this->assertTrue($r1['overage']);
+    }
+
+    // ─── Encounter observer ──────────────────────────────────────────────
+
+    public function test_signed_encounter_auto_records_encounter_usage(): void
+    {
+        $ctx = $this->setupBaseline();
+
+        $encounterType = EntitlementType::create([
+            'tenant_id' => $ctx['practice']->id,
+            'code' => 'encounter',
+            'name' => 'Encounter',
+            'category' => 'visit',
+            'unit_of_measure' => 'visit',
+            'is_active' => true,
+        ]);
+        PlanEntitlement::create([
+            'plan_id' => $ctx['plan']->id,
+            'entitlement_type_id' => $encounterType->id,
+            'quantity_limit' => 10,
+            'is_unlimited' => false,
+            'period_type' => 'per_month',
+            'overage_policy' => 'allow',
+            'is_active' => true,
+        ]);
+
+        $providerUser = User::create([
+            'name' => 'Dr', 'email' => 'dr-' . uniqid() . '@ent.com',
+            'password' => bcrypt('p'), 'tenant_id' => $ctx['practice']->id,
+            'role' => 'provider', 'first_name' => 'D', 'last_name' => 'X',
+            'status' => 'active',
+        ]);
+        $provider = \App\Models\Provider::create([
+            'tenant_id' => $ctx['practice']->id,
+            'user_id' => $providerUser->id,
+            'first_name' => 'D', 'last_name' => 'X',
+        ]);
+
+        $encounter = \App\Models\Encounter::create([
+            'tenant_id' => $ctx['practice']->id,
+            'patient_id' => $ctx['patient']->id,
+            'provider_id' => $provider->id,
+            'encounter_type' => 'office',
+            'encounter_date' => now()->toDateString(),
+            'status' => 'draft',
+        ]);
+
+        // Flip to signed — observer fires.
+        $encounter->update(['status' => 'signed']);
+
+        $usage = EntitlementUsage::where('entitlement_type_id', $encounterType->id)->first();
+        $this->assertNotNull($usage, 'Observer should record usage on encounter sign');
+        $this->assertEquals('encounter', $usage->source_type);
+        $this->assertEquals($encounter->id, $usage->source_id);
+    }
+
+    public function test_encounter_in_draft_status_does_not_track(): void
+    {
+        $ctx = $this->setupBaseline();
+        EntitlementType::create([
+            'tenant_id' => $ctx['practice']->id,
+            'code' => 'encounter', 'name' => 'E', 'category' => 'visit',
+            'unit_of_measure' => 'visit', 'is_active' => true,
+        ]);
+
+        $providerUser = User::create([
+            'name' => 'Dr', 'email' => 'dr-' . uniqid() . '@ent.com',
+            'password' => bcrypt('p'), 'tenant_id' => $ctx['practice']->id,
+            'role' => 'provider', 'first_name' => 'D', 'last_name' => 'X',
+            'status' => 'active',
+        ]);
+        $provider = \App\Models\Provider::create([
+            'tenant_id' => $ctx['practice']->id, 'user_id' => $providerUser->id,
+            'first_name' => 'D', 'last_name' => 'X',
+        ]);
+
+        // Encounter created but never signed.
+        \App\Models\Encounter::create([
+            'tenant_id' => $ctx['practice']->id,
+            'patient_id' => $ctx['patient']->id,
+            'provider_id' => $provider->id,
+            'encounter_type' => 'office',
+            'encounter_date' => now()->toDateString(),
+            'status' => 'draft',
+        ]);
+
+        $this->assertEquals(0, EntitlementUsage::count());
+    }
+
+    // ─── UsageAlertService ───────────────────────────────────────────────
+
+    private function seedAlertFixture(int $allowed, int $used): array
+    {
+        $ctx = $this->setupBaseline();
+        \App\Models\PatientEntitlement::create([
+            'tenant_id' => $ctx['practice']->id,
+            'membership_id' => $ctx['membership']->id,
+            'patient_id' => $ctx['patient']->id,
+            'period_start' => now()->startOfMonth()->toDateString(),
+            'period_end' => now()->endOfMonth()->toDateString(),
+            'visits_allowed' => $allowed,
+            'visits_used' => $used,
+        ]);
+        return $ctx;
+    }
+
+    public function test_alert_fires_at_75_percent_usage(): void
+    {
+        \Illuminate\Support\Facades\Mail::fake();
+        // 3 of 4 visits used = 75%.
+        $ctx = $this->seedAlertFixture(allowed: 4, used: 3);
+
+        $stats = (new \App\Services\UsageAlertService)->processAlerts();
+
+        $this->assertGreaterThanOrEqual(1, $stats['alerts_sent']);
+
+        // membership_lifecycle_events should record the 75% threshold.
+        $event = \DB::table('membership_lifecycle_events')
+            ->where('membership_id', $ctx['membership']->id)
+            ->where('event_type', 'like', 'usage_75pct_%')
+            ->first();
+        $this->assertNotNull($event, '75% alert event should be recorded');
+    }
+
+    public function test_alert_fires_at_100_percent_usage(): void
+    {
+        \Illuminate\Support\Facades\Mail::fake();
+        $ctx = $this->seedAlertFixture(allowed: 4, used: 4);
+
+        (new \App\Services\UsageAlertService)->processAlerts();
+
+        // At 100% all three thresholds (75/90/100) should have fired
+        // since the loop walks each one.
+        $events = \DB::table('membership_lifecycle_events')
+            ->where('membership_id', $ctx['membership']->id)
+            ->where('event_type', 'like', 'usage_%pct_%')
+            ->get();
+        $eventTypes = collect($events)->pluck('event_type')->map(
+            fn ($t) => preg_replace('/_\d+$/', '', $t),
+        )->unique()->all();
+
+        $this->assertContains('usage_75pct', $eventTypes);
+        $this->assertContains('usage_90pct', $eventTypes);
+        $this->assertContains('usage_100pct', $eventTypes);
+    }
+
+    public function test_alerts_are_idempotent_within_period(): void
+    {
+        \Illuminate\Support\Facades\Mail::fake();
+        $ctx = $this->seedAlertFixture(allowed: 4, used: 3);
+
+        (new \App\Services\UsageAlertService)->processAlerts();
+        $afterFirst = \DB::table('membership_lifecycle_events')
+            ->where('membership_id', $ctx['membership']->id)
+            ->count();
+
+        (new \App\Services\UsageAlertService)->processAlerts();
+        $afterSecond = \DB::table('membership_lifecycle_events')
+            ->where('membership_id', $ctx['membership']->id)
+            ->count();
+
+        $this->assertEquals($afterFirst, $afterSecond, 'Same period: same threshold fires once');
+    }
+
+    public function test_unlimited_plans_skip_alerts(): void
+    {
+        \Illuminate\Support\Facades\Mail::fake();
+        // visits_allowed = -1 sentinel for unlimited.
+        $ctx = $this->seedAlertFixture(allowed: -1, used: 100);
+
+        $stats = (new \App\Services\UsageAlertService)->processAlerts();
+
+        $this->assertEquals(0, $stats['alerts_sent']);
+    }
+
+    public function test_alert_skipped_when_below_75_percent(): void
+    {
+        \Illuminate\Support\Facades\Mail::fake();
+        // 2 of 4 = 50% — below the lowest threshold (75%).
+        $this->seedAlertFixture(allowed: 4, used: 2);
+
+        $stats = (new \App\Services\UsageAlertService)->processAlerts();
+        $this->assertEquals(0, $stats['alerts_sent']);
+    }
 }
