@@ -192,17 +192,41 @@ export function OperatorPortal() {
 
   return (
     <div className="min-h-screen flex bg-slate-50">
-      {/* Sidebar — flat Stripe-style: white panel, slate active row,
-          Stripe-purple sigil. Was a navy gradient that didn't match the
-          rest of the platform after the Stripe-grade migration. */}
+      {/* Sidebar — flat Stripe-style by default, but operator can
+          override the sigil + accent color via default_branding.
+          When a logo_url is set, use it instead of the icon-tile;
+          when primary_color is set, color the active-tab strip and
+          icon-tile background. The "Operator" eyebrow and operator
+          name stay (consistent navigation hierarchy). */}
+      {(() => {
+        const branding = (me.operator.defaultBranding ?? {}) as {
+          logo_url?: string;
+          primary_color?: string;
+          brand_name?: string;
+        };
+        const accent = branding.primary_color || "#635bff";
+        return (
       <aside className="w-60 shrink-0 flex flex-col bg-white border-r border-slate-200">
         <div className="px-4 py-3.5 border-b border-slate-200">
           <div className="flex items-center gap-2.5">
-            <div className="w-7 h-7 rounded-md bg-[#635bff] flex items-center justify-center text-white font-semibold text-[13px]">
-              <Building2 className="w-3.5 h-3.5" />
-            </div>
+            {branding.logo_url ? (
+              <img
+                src={branding.logo_url}
+                alt={`${me.operator.name} logo`}
+                className="w-7 h-7 rounded-md object-cover flex-shrink-0"
+              />
+            ) : (
+              <div
+                className="w-7 h-7 rounded-md flex items-center justify-center text-white font-semibold text-[13px]"
+                style={{ backgroundColor: accent }}
+              >
+                <Building2 className="w-3.5 h-3.5" />
+              </div>
+            )}
             <div className="flex-1 min-w-0">
-              <p className="text-[10px] uppercase tracking-wider font-semibold text-slate-400">Operator</p>
+              <p className="text-[10px] uppercase tracking-wider font-semibold text-slate-400">
+                {branding.brand_name ?? "Operator"}
+              </p>
               <p className="text-[13px] text-slate-900 font-semibold tracking-tight truncate">{me.operator.name}</p>
             </div>
           </div>
@@ -248,6 +272,8 @@ export function OperatorPortal() {
           </button>
         </div>
       </aside>
+        );
+      })()}
 
       {/* Main */}
       <main className="flex-1 min-w-0 overflow-x-hidden">
@@ -723,6 +749,19 @@ function OperatorSettingsTab({ me, onSaved }: { me: OperatorMe; onSaved: () => v
   const [website, setWebsite] = useState(me.operator.website || "");
   const [saving, setSaving] = useState(false);
 
+  // White-label branding fields. Stored in operator.default_branding
+  // jsonb; convention: { logo_url, primary_color, brand_name }.
+  // Empty values are stored as null to keep the json clean.
+  const branding = (me.operator.defaultBranding ?? {}) as {
+    logo_url?: string;
+    primary_color?: string;
+    brand_name?: string;
+  };
+  const [logoUrl, setLogoUrl] = useState(branding.logo_url ?? "");
+  const [primaryColor, setPrimaryColor] = useState(branding.primary_color ?? "");
+  const [brandName, setBrandName] = useState(branding.brand_name ?? "");
+  const [savingBrand, setSavingBrand] = useState(false);
+
   const save = async () => {
     setSaving(true);
     const res = await operatorService.update({
@@ -737,6 +776,25 @@ function OperatorSettingsTab({ me, onSaved }: { me: OperatorMe; onSaved: () => v
       return;
     }
     toast("Operator settings saved.");
+    onSaved();
+  };
+
+  const saveBranding = async () => {
+    setSavingBrand(true);
+    const cleaned: Record<string, string> = {};
+    if (logoUrl.trim()) cleaned.logo_url = logoUrl.trim();
+    if (primaryColor.trim()) cleaned.primary_color = primaryColor.trim();
+    if (brandName.trim()) cleaned.brand_name = brandName.trim();
+
+    const res = await operatorService.update({
+      defaultBranding: Object.keys(cleaned).length > 0 ? cleaned : null,
+    } as Partial<OperatorMe["operator"]>);
+    setSavingBrand(false);
+    if (res.error) {
+      toast(res.error, "error");
+      return;
+    }
+    toast("Branding saved. Reload to see chrome update.");
     onSaved();
   };
 
@@ -800,6 +858,81 @@ function OperatorSettingsTab({ me, onSaved }: { me: OperatorMe; onSaved: () => v
           <p className="text-xs" style={{ color: C.slate500 }}>
             Read-only role. Ask an operator owner or admin to make changes.
           </p>
+        )}
+      </div>
+
+      {/* White-label branding — operator-supplied logo + accent color
+          shown in the operator console chrome (sidebar sigil + brand
+          name eyebrow). Tenant-level practice branding is separate. */}
+      <div
+        className="rounded-2xl border p-6 space-y-4"
+        style={{ backgroundColor: C.white, borderColor: C.slate200 }}
+      >
+        <div>
+          <h3 className="text-base font-semibold" style={{ color: C.navy900 }}>White-label branding</h3>
+          <p className="text-xs mt-1" style={{ color: C.slate500 }}>
+            Replaces the default purple sigil and "Operator" label in the operator console with your brand. Tenant-level practice branding is configured separately per clinic.
+          </p>
+        </div>
+
+        <Field label="Logo URL">
+          <input
+            type="url"
+            value={logoUrl}
+            onChange={(e) => setLogoUrl(e.target.value)}
+            disabled={!me.canWrite}
+            placeholder="https://yourbrand.com/logo.svg"
+            className="w-full px-3 py-2 rounded-lg border text-sm focus:outline-none focus:ring-2 focus:ring-teal-400 disabled:bg-slate-50"
+            style={{ borderColor: C.slate200 }}
+          />
+        </Field>
+
+        <Field label="Primary color (hex)">
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              value={primaryColor}
+              onChange={(e) => setPrimaryColor(e.target.value)}
+              disabled={!me.canWrite}
+              placeholder="#635bff"
+              className="flex-1 px-3 py-2 rounded-lg border text-sm font-mono focus:outline-none focus:ring-2 focus:ring-teal-400 disabled:bg-slate-50"
+              style={{ borderColor: C.slate200 }}
+            />
+            {primaryColor && (
+              <div
+                className="w-9 h-9 rounded-lg border flex-shrink-0"
+                style={{ backgroundColor: primaryColor, borderColor: C.slate200 }}
+                title="Color preview"
+              />
+            )}
+          </div>
+        </Field>
+
+        <Field label="Brand label">
+          <input
+            type="text"
+            value={brandName}
+            onChange={(e) => setBrandName(e.target.value)}
+            disabled={!me.canWrite}
+            placeholder="Network · Group · etc. (defaults to 'Operator')"
+            maxLength={32}
+            className="w-full px-3 py-2 rounded-lg border text-sm focus:outline-none focus:ring-2 focus:ring-teal-400 disabled:bg-slate-50"
+            style={{ borderColor: C.slate200 }}
+          />
+        </Field>
+
+        {me.canWrite && (
+          <div className="flex justify-end">
+            <button
+              onClick={saveBranding}
+              disabled={savingBrand}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-white shadow-sm transition-opacity hover:opacity-95 disabled:opacity-60"
+              style={{ background: `linear-gradient(135deg, ${C.teal500}, ${C.teal600})` }}
+            >
+              {savingBrand && <Loader2 className="w-4 h-4 animate-spin" />}
+              Save branding
+            </button>
+          </div>
         )}
       </div>
 
