@@ -114,15 +114,23 @@ class AuthController extends Controller
             ]);
         }
 
-        // MFA enforcement — when the practice has enforce_mfa=true and
-        // the user is in a privileged role (admin/provider/staff), block
-        // login until they enroll. Patients are exempted; their threat
-        // model differs and forcing TOTP on every patient kills adoption.
-        // Superadmins are tenant-less so we check the user role only.
+        // MFA enforcement — block privileged-role login until the user
+        // enrolls when EITHER:
+        //   - the user's practice/tenant has enforce_mfa=true, OR
+        //   - any operator the user belongs to has settings.enforce_mfa=true
+        //
+        // Operator-tier enforcement cascades to all operator-scoped
+        // users (owner/admin/viewer) regardless of their tenant role.
+        // Patients are exempt; superadmins are tenant-less so we
+        // only check the role.
         $privilegedRoles = ['superadmin', 'practice_admin', 'provider', 'staff'];
         $tenantEnforcesMfa = $user->practice && $user->practice->enforce_mfa;
-        $userIsPrivileged = in_array($user->role, $privilegedRoles, true);
-        if ($userIsPrivileged && $tenantEnforcesMfa && !$user->mfa_enabled) {
+        $operatorEnforcesMfa = $user->operators()
+            ->get()
+            ->contains(fn ($op) => (bool) ($op->settings['enforce_mfa'] ?? false));
+        $userIsPrivileged = in_array($user->role, $privilegedRoles, true) || $operatorEnforcesMfa;
+        $mfaRequired = $tenantEnforcesMfa || $operatorEnforcesMfa;
+        if ($userIsPrivileged && $mfaRequired && !$user->mfa_enabled) {
             // Issue a one-time enrollment token so the user can hit
             // the MFA setup endpoints without a full login. Frontend
             // should redirect to the enrollment page when it sees
