@@ -418,6 +418,20 @@ class PracticeController extends Controller
             ]);
         }
 
+        // Seed demo data so the practice admin doesn't land on an
+        // empty portal. Idempotent: re-running approve (e.g. after
+        // a test reject + re-approve) won't duplicate samples.
+        // Failure is silent — seeding is a UX win, not critical
+        // path.
+        try {
+            (new \App\Services\DemoTenantSeederService())->seed($practice);
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('Demo seed failed on practice approval', [
+                'practice_id' => $practice->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
         // Notify the practice admin so they know they can sign in now.
         try {
             $admin = User::where('tenant_id', $practice->id)
