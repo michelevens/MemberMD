@@ -33,12 +33,14 @@ import {
 } from "recharts";
 import {
   operatorService,
+  utilizationService,
   type OperatorNetworkMetrics,
   type OperatorClinicMetric,
   type OperatorTimeseries,
   type OperatorClinicDetail,
   type OperatorTimeBucket,
   type OperatorCohortPoint,
+  type OperatorUtilization,
 } from "../../../lib/api";
 
 // ─── Colors ──────────────────────────────────────────────────────────────────
@@ -198,6 +200,11 @@ export function OperatorNetworkDashboard() {
         <SmallStat label="New members (30d)" value={formatNumber(cur.newMembers)} delta={deltas.newMembersDelta} />
         <SmallStat label="Cancellations (30d)" value={formatNumber(cur.cancelled)} />
       </div>
+
+      {/* Cash-value ROI rollup across the operator's tenants — H1
+          wedge demo. Self-fetches; renders nothing if usage data
+          hasn't accrued yet for a brand-new operator. */}
+      <NetworkROISection />
 
       {/* MRR over time chart */}
       <div
@@ -835,3 +842,123 @@ function ErrorPanel({ message }: { message: string }) {
 
 // Suppress unused-export warning for ArrowRight (reserved for future open-clinic CTA)
 void ArrowRight;
+
+// ─── Network ROI section ────────────────────────────────────────────────
+//
+// Aggregates entitlement_usage.cash_value_used across every tenant under
+// the active operator. The H1 wedge demo number — what value did our
+// memberships deliver across the whole portfolio? Self-fetches.
+
+function fmtMoney(n: number): string {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 0,
+  }).format(n);
+}
+
+function NetworkROISection() {
+  const [data, setData] = useState<OperatorUtilization | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await utilizationService.operator();
+        if (!cancelled) setData(res.data ?? null);
+      } catch {
+        // Silent — section just hides if the endpoint hiccups.
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  if (loading) {
+    return (
+      <div
+        className="rounded-2xl border p-6 flex items-center justify-center"
+        style={{ backgroundColor: C.white, borderColor: C.slate200 }}
+      >
+        <Loader2 className="w-5 h-5 animate-spin" style={{ color: C.slate400 }} />
+      </div>
+    );
+  }
+
+  // Hide when there's no usage history yet — a brand-new operator
+  // shouldn't see a "$0 delivered" tile that looks broken.
+  if (!data || (data.savings_this_month === 0 && data.savings_trailing_year === 0)) {
+    return null;
+  }
+
+  return (
+    <div
+      className="rounded-2xl border p-5 space-y-4"
+      style={{ backgroundColor: C.white, borderColor: C.slate200 }}
+    >
+      <div className="flex items-center gap-2">
+        <TrendingUp className="w-4 h-4" style={{ color: C.teal600 }} />
+        <h3 className="text-sm font-semibold" style={{ color: C.navy900 }}>
+          Cash value delivered across {data.tenant_count} clinic{data.tenant_count === 1 ? "" : "s"}
+        </h3>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div className="rounded-lg border p-3" style={{ borderColor: C.slate200, backgroundColor: C.green50 }}>
+          <p className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: C.green700 }}>
+            This month
+          </p>
+          <p className="text-2xl font-bold mt-1" style={{ color: C.green700 }}>
+            {fmtMoney(data.savings_this_month)}
+          </p>
+          <p className="text-[11px] mt-1" style={{ color: C.slate500 }}>
+            {data.usage_events_this_month} usage event{data.usage_events_this_month === 1 ? "" : "s"}
+          </p>
+        </div>
+        <div className="rounded-lg border p-3" style={{ borderColor: C.slate200 }}>
+          <p className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: C.slate500 }}>
+            Trailing 12 mo
+          </p>
+          <p className="text-2xl font-bold mt-1" style={{ color: C.navy900 }}>
+            {fmtMoney(data.savings_trailing_year)}
+          </p>
+          <p className="text-[11px] mt-1" style={{ color: C.slate500 }}>
+            in cash-equivalent care
+          </p>
+        </div>
+        <div className="rounded-lg border p-3" style={{ borderColor: C.slate200 }}>
+          <p className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: C.slate500 }}>
+            Active members
+          </p>
+          <p className="text-2xl font-bold mt-1" style={{ color: C.navy900 }}>
+            {data.total_active_members ?? "—"}
+          </p>
+          <p className="text-[11px] mt-1" style={{ color: C.slate500 }}>
+            across portfolio
+          </p>
+        </div>
+      </div>
+
+      {data.top_tenants_this_month.length > 0 && (
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-wide mb-2" style={{ color: C.slate500 }}>
+            Top clinics by value delivered this month
+          </p>
+          <ul className="divide-y" style={{ borderColor: C.slate100 }}>
+            {data.top_tenants_this_month.slice(0, 5).map((t) => (
+              <li key={t.id} className="flex items-center justify-between py-2 text-sm">
+                <span className="truncate" style={{ color: C.navy800 }}>{t.name}</span>
+                <span style={{ color: C.slate600 }}>
+                  {t.total_used} use{t.total_used === 1 ? "" : "s"} ·{" "}
+                  <strong style={{ color: C.teal600 }}>{fmtMoney(Number(t.total_savings))}</strong>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}

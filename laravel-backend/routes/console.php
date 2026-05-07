@@ -29,3 +29,11 @@ Schedule::command('employers:process-invoice-cycle')
 Schedule::command('employers:flag-overdue-invoices')
     ->dailyAt('03:30')
     ->withoutOverlapping();
+
+// Daily zeroing of expired visit-pack credits. The consume-time path
+// already filters them out; this keeps SUM(credits_remaining)
+// reports honest and stops the patient portal from showing stale
+// "credits available" counts.
+Schedule::command('entitlements:expire-pack-credits')
+    ->dailyAt('03:45')
+    ->withoutOverlapping();

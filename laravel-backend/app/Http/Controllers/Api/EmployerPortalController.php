@@ -102,6 +102,108 @@ class EmployerPortalController extends Controller
         return response()->json(['data' => $invoices]);
     }
 
+    /**
+     * ROI rollup across all sponsored memberships for this employer.
+     *
+     * The pitch HR signs sponsored plans on: "you pay PEPM, members
+     * consume care, here's the cash-equivalent value they got." Returns
+     * cash-value-delivered and headline usage counts for both this
+     * billing month and the trailing 12 months so HR can take it to
+     * their CFO at renewal time.
+     */
+    public function utilization(Request $request): JsonResponse
+    {
+        $employer = $this->getEmployerForUser($request);
+        return response()->json([
+            'data' => $this->buildUtilizationSummary($employer),
+        ]);
+    }
+
+    /**
+     * Shared math used by /employer-portal/utilization (HR view) and
+     * /employer-billing/employers/{id}/utilization (practice view).
+     * Both surfaces read the same numbers — keep the math in one place
+     * so HR and the practice are looking at the same dashboard.
+     */
+    public static function buildUtilizationSummary(\App\Models\Employer $employer): array
+    {
+        $tenantId = $employer->tenant_id;
+        $employerId = $employer->id;
+
+        // Membership IDs sponsored by this employer. The flag was
+        // backfilled in the sponsored-employer commit — billing_mode =
+        // 'sponsored' AND sponsored_by_employer_id is the canonical
+        // signal. Fall back to patients.employer_id for legacy rows
+        // (pre-sponsorship-billing-mode) to avoid double-counting later.
+        $membershipIds = \App\Models\PatientMembership::where('tenant_id', $tenantId)
+            ->where(function ($q) use ($employerId) {
+                $q->where('sponsored_by_employer_id', $employerId)
+                  ->orWhereHas('patient', fn ($p) => $p->where('employer_id', $employerId));
+            })
+            ->pluck('id');
+
+        $monthStart = now()->startOfMonth()->toDateString();
+        $yearStart = now()->subYear()->startOfDay()->toDateString();
+
+        $monthSavings = (float) \App\Models\EntitlementUsage::whereIn('patient_membership_id', $membershipIds)
+            ->whereDate('period_start', '>=', $monthStart)
+            ->sum('cash_value_used');
+
+        $yearSavings = (float) \App\Models\EntitlementUsage::whereIn('patient_membership_id', $membershipIds)
+            ->whereDate('period_start', '>=', $yearStart)
+            ->sum('cash_value_used');
+
+        $monthUsageEvents = \App\Models\EntitlementUsage::whereIn('patient_membership_id', $membershipIds)
+            ->whereDate('period_start', '>=', $monthStart)
+            ->count();
+
+        // Top-5 entitlement categories by cash value this month — drives
+        // the "you got the most value from X" line on the HR dashboard.
+        $topCategories = \App\Models\EntitlementUsage::query()
+            ->whereIn('patient_membership_id', $membershipIds)
+            ->whereDate('entitlement_usage.period_start', '>=', $monthStart)
+            ->join('entitlement_types', 'entitlement_usage.entitlement_type_id', '=', 'entitlement_types.id')
+            ->select('entitlement_types.category')
+            ->selectRaw('SUM(entitlement_usage.quantity) as total_used')
+            ->selectRaw('SUM(entitlement_usage.cash_value_used) as total_savings')
+            ->groupBy('entitlement_types.category')
+            ->orderByDesc('total_savings')
+            ->limit(5)
+            ->get();
+
+        $headcount = \App\Models\Patient::where('tenant_id', $tenantId)
+            ->where('employer_id', $employerId)
+            ->where('is_active', true)
+            ->count();
+
+        // ROI ratio: cash value delivered / cumulative invoice spend
+        // (this year). >1.0 means employees got more value than the
+        // employer paid — the pitch number HR repeats to leadership.
+        $yearInvoiceSpend = (float) \App\Models\EmployerInvoice::where('tenant_id', $tenantId)
+            ->where('employer_id', $employerId)
+            ->whereIn('status', ['paid', 'sent', 'overdue'])
+            ->whereDate('period_start', '>=', $yearStart)
+            ->sum('total');
+
+        $roiRatio = $yearInvoiceSpend > 0
+            ? round($yearSavings / $yearInvoiceSpend, 2)
+            : null;
+
+        return [
+            'employer_id' => $employer->id,
+            'employer_name' => $employer->name,
+            'enrolled_count' => $headcount,
+            'month_start' => $monthStart,
+            'year_start' => $yearStart,
+            'savings_this_month' => round($monthSavings, 2),
+            'savings_trailing_year' => round($yearSavings, 2),
+            'usage_events_this_month' => $monthUsageEvents,
+            'top_categories_this_month' => $topCategories,
+            'invoice_spend_trailing_year' => round($yearInvoiceSpend, 2),
+            'roi_ratio_trailing_year' => $roiRatio,
+        ];
+    }
+
     public function enrollRoster(Request $request): JsonResponse
     {
         $employer = $this->getEmployerForUser($request);

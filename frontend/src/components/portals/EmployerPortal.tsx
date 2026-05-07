@@ -20,15 +20,18 @@ import { useEffect, useState, useCallback } from "react";
 import {
   LayoutDashboard, UserCheck, Users, FileText, Loader2,
   AlertTriangle, CheckCircle2, Clock, Building2, DollarSign, Mail, Download,
+  TrendingUp,
 } from "lucide-react";
 import { useAuth } from "../../contexts/AuthContext";
 import { PortalShell, type NavItem } from "../shared/PortalShell";
 import {
   employerPortalService,
   employerBillingService,
+  utilizationService,
   type EmployerDashboard,
   type EmployerEmployeeRow,
   type EmployerInvoiceRow,
+  type EmployerUtilization,
 } from "../../lib/api";
 import { EmployerEligibilityPanel } from "../practice/EmployerEligibilityPanel";
 
@@ -284,6 +287,10 @@ function DashboardSection({
         />
       </div>
 
+      {/* ROI / cash-value-delivered section. Self-fetches so we don't
+          have to thread another loader through DashboardSection. */}
+      <ROISection />
+
       {/* Plan-cap progress bar */}
       {dashboard.employee_count_cap && (
         <div className="rounded-xl border bg-white p-5" style={{ borderColor: C.slate200 }}>
@@ -323,6 +330,120 @@ function DashboardSection({
           <li>· Review monthly <strong>Invoices</strong> from your practice — payment terms are 30 days by default.</li>
         </ul>
       </div>
+    </div>
+  );
+}
+
+// ─── ROI / cash-value section ──────────────────────────────────────────
+//
+// Shows the headline pitch number HR takes to leadership at renewal:
+//   "this month: $X delivered to your employees"
+//   "trailing year: $Y delivered for $Z spent — Nx ROI"
+// All numbers come from /employer-portal/utilization which aggregates
+// entitlement_usage.cash_value_used across every sponsored membership.
+
+function ROISection() {
+  const [data, setData] = useState<EmployerUtilization | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await utilizationService.employerSelf();
+        if (!cancelled) setData(res.data ?? null);
+      } catch {
+        // Silent — surface stays hidden if the endpoint hiccups.
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  if (loading) {
+    return (
+      <div className="rounded-xl border bg-white p-8 flex items-center justify-center" style={{ borderColor: C.slate200 }}>
+        <Loader2 className="w-5 h-5 animate-spin" style={{ color: C.slate400 }} />
+      </div>
+    );
+  }
+
+  if (!data || (data.savings_this_month === 0 && data.savings_trailing_year === 0)) {
+    return null;
+  }
+
+  const ratio = data.roi_ratio_trailing_year;
+
+  return (
+    <div className="rounded-xl border p-5 space-y-4" style={{ borderColor: C.slate200, backgroundColor: C.white }}>
+      <div className="flex items-center gap-2">
+        <TrendingUp className="w-4 h-4" style={{ color: C.teal600 }} />
+        <h3 className="text-sm font-semibold" style={{ color: C.navy900 }}>
+          Cash value delivered to your employees
+        </h3>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div className="rounded-lg p-3 border" style={{ borderColor: C.teal100, backgroundColor: C.teal50 }}>
+          <div className="text-xs font-semibold uppercase tracking-wide" style={{ color: C.teal600 }}>
+            This month
+          </div>
+          <div className="text-2xl font-bold mt-1" style={{ color: C.teal600 }}>
+            {fmtMoney(data.savings_this_month)}
+          </div>
+          <div className="text-[11px] mt-1" style={{ color: C.slate500 }}>
+            {data.usage_events_this_month} usage event{data.usage_events_this_month === 1 ? "" : "s"}
+          </div>
+        </div>
+        <div className="rounded-lg p-3 border" style={{ borderColor: C.slate200 }}>
+          <div className="text-xs font-semibold uppercase tracking-wide" style={{ color: C.slate500 }}>
+            Trailing 12 mo · delivered
+          </div>
+          <div className="text-2xl font-bold mt-1" style={{ color: C.navy900 }}>
+            {fmtMoney(data.savings_trailing_year)}
+          </div>
+          <div className="text-[11px] mt-1" style={{ color: C.slate500 }}>
+            in cash-equivalent care
+          </div>
+        </div>
+        <div className="rounded-lg p-3 border" style={{ borderColor: C.slate200 }}>
+          <div className="text-xs font-semibold uppercase tracking-wide" style={{ color: C.slate500 }}>
+            Trailing 12 mo · spent
+          </div>
+          <div className="text-2xl font-bold mt-1" style={{ color: C.navy900 }}>
+            {fmtMoney(data.invoice_spend_trailing_year)}
+          </div>
+          <div className="text-[11px] mt-1 font-semibold" style={{ color: ratio !== null && ratio >= 1 ? C.teal600 : C.slate500 }}>
+            {ratio !== null
+              ? `${ratio.toFixed(1)}× ROI on PEPM spend`
+              : "no invoice history yet"}
+          </div>
+        </div>
+      </div>
+
+      {data.top_categories_this_month.length > 0 && (
+        <div>
+          <div className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: C.slate500 }}>
+            Top categories this month
+          </div>
+          <ul className="divide-y" style={{ borderColor: C.slate100 }}>
+            {data.top_categories_this_month.map((c) => (
+              <li key={c.category} className="flex items-center justify-between py-2 text-sm">
+                <span style={{ color: C.navy800 }}>{c.category}</span>
+                <span style={{ color: C.slate600 }}>
+                  {c.total_used} use{c.total_used === 1 ? "" : "s"} ·{" "}
+                  <strong style={{ color: C.teal600 }}>{fmtMoney(Number(c.total_savings))}</strong>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      <p className="text-[11px]" style={{ color: C.slate400 }}>
+        Cash value reflects retail-equivalent pricing for visits and services delivered. Actual benefit depends on member usage patterns.
+      </p>
     </div>
   );
 }

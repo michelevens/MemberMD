@@ -545,6 +545,10 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
         Route::get('/users', [OperatorController::class, 'listUsers']);
         Route::post('/users', [OperatorController::class, 'addUser']);
         Route::delete('/users/{userId}', [OperatorController::class, 'removeUser']);
+        // Cash-value ROI rollup across every tenant under this operator —
+        // the H1 wedge demo number ("how much value did our memberships
+        // deliver across all clinics this month?").
+        Route::get('/utilization', [OperatorController::class, 'utilization']);
 
         Route::prefix('analytics')->group(function () {
             Route::get('/network', [OperatorAnalyticsController::class, 'network']);
@@ -932,6 +936,10 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
         // can both fetch.
         Route::get('/invoices/{id}/pdf', [EmployerBillingController::class, 'pdf']);
         Route::get('/enrollment-report/{employerId}', [EmployerBillingController::class, 'enrollmentReport']);
+        // ROI rollup — cash value delivered to this employer's
+        // sponsored employees + invoice spend ratio. Practice-side
+        // view; HR uses /employer-portal/utilization for the same data.
+        Route::get('/employers/{employerId}/utilization', [EmployerBillingController::class, 'utilization']);
     });
 
     // ===== Employer Portal (employer_admin role) =====
@@ -939,6 +947,7 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
         Route::get('/dashboard', [EmployerPortalController::class, 'dashboard']);
         Route::get('/employees', [EmployerPortalController::class, 'employees']);
         Route::get('/invoices', [EmployerPortalController::class, 'invoices']);
+        Route::get('/utilization', [EmployerPortalController::class, 'utilization']);
         Route::post('/enroll-roster', [EmployerPortalController::class, 'enrollRoster']);
         // CSV-based bulk enroll (multipart upload). Accepts file with header
         // row first_name,last_name,email,date_of_birth. 1000-row cap per upload.

@@ -144,6 +144,25 @@ class EmployerBillingController extends Controller
     }
 
     /**
+     * Per-employer ROI summary — same numbers HR sees in
+     * /employer-portal/utilization, but accessible to practice admins
+     * for their portfolio view. Permission: practice_admin / staff /
+     * superadmin only; employer_admin uses the HR-side endpoint.
+     */
+    public function utilization(Request $request, string $employerId): JsonResponse
+    {
+        $user = $request->user();
+        abort_if(!in_array($user->role, ['practice_admin', 'staff', 'superadmin'], true), 403);
+
+        $employer = Employer::where('tenant_id', $user->tenant_id)
+            ->findOrFail($employerId);
+
+        return response()->json([
+            'data' => EmployerPortalController::buildUtilizationSummary($employer),
+        ]);
+    }
+
+    /**
      * Branded PDF for an employer invoice. Used by both the practice-side
      * "Download" action and the EmployerPortal invoices table so HR's AP
      * team can attach a real document to their internal payment system.

@@ -309,6 +309,95 @@ class OperatorController extends Controller
         ]);
     }
 
+    /**
+     * ROI rollup across every tenant under this operator. Aggregates
+     * cash-value-delivered and headline metrics so a multi-clinic
+     * operator can answer "how much did our memberships save patients
+     * this month, across the whole portfolio?" — the H1 wedge demo.
+     *
+     * Operator-tier feature: read access requires an OperatorContext.
+     * Aggregation happens here rather than per-tenant + sum-on-client
+     * because the shape of the rollup (top categories, top tenants by
+     * value) needs DB-side GROUP BY to be honest.
+     */
+    public function utilization(Request $request): JsonResponse
+    {
+        $ctx = $this->context();
+        $tenantIds = $ctx->tenantIds();
+
+        if (empty($tenantIds)) {
+            return response()->json([
+                'data' => [
+                    'tenant_count' => 0,
+                    'savings_this_month' => 0,
+                    'savings_trailing_year' => 0,
+                    'usage_events_this_month' => 0,
+                    'top_tenants_this_month' => [],
+                    'top_categories_this_month' => [],
+                ],
+            ]);
+        }
+
+        $monthStart = now()->startOfMonth()->toDateString();
+        $yearStart = now()->subYear()->startOfDay()->toDateString();
+
+        $monthSavings = (float) \App\Models\EntitlementUsage::whereIn('tenant_id', $tenantIds)
+            ->whereDate('period_start', '>=', $monthStart)
+            ->sum('cash_value_used');
+
+        $yearSavings = (float) \App\Models\EntitlementUsage::whereIn('tenant_id', $tenantIds)
+            ->whereDate('period_start', '>=', $yearStart)
+            ->sum('cash_value_used');
+
+        $monthUsageEvents = \App\Models\EntitlementUsage::whereIn('tenant_id', $tenantIds)
+            ->whereDate('period_start', '>=', $monthStart)
+            ->count();
+
+        $totalActiveMembers = \App\Models\PatientMembership::whereIn('tenant_id', $tenantIds)
+            ->where('status', 'active')
+            ->count();
+
+        // Top tenants by cash-value delivered this month — operator
+        // sees which clinic in their portfolio is moving the needle.
+        $topTenants = \App\Models\EntitlementUsage::query()
+            ->whereIn('entitlement_usage.tenant_id', $tenantIds)
+            ->whereDate('entitlement_usage.period_start', '>=', $monthStart)
+            ->join('practices', 'entitlement_usage.tenant_id', '=', 'practices.id')
+            ->select('practices.id', 'practices.name')
+            ->selectRaw('SUM(entitlement_usage.cash_value_used) as total_savings')
+            ->selectRaw('SUM(entitlement_usage.quantity) as total_used')
+            ->groupBy('practices.id', 'practices.name')
+            ->orderByDesc('total_savings')
+            ->limit(10)
+            ->get();
+
+        $topCategories = \App\Models\EntitlementUsage::query()
+            ->whereIn('entitlement_usage.tenant_id', $tenantIds)
+            ->whereDate('entitlement_usage.period_start', '>=', $monthStart)
+            ->join('entitlement_types', 'entitlement_usage.entitlement_type_id', '=', 'entitlement_types.id')
+            ->select('entitlement_types.category')
+            ->selectRaw('SUM(entitlement_usage.quantity) as total_used')
+            ->selectRaw('SUM(entitlement_usage.cash_value_used) as total_savings')
+            ->groupBy('entitlement_types.category')
+            ->orderByDesc('total_savings')
+            ->limit(5)
+            ->get();
+
+        return response()->json([
+            'data' => [
+                'tenant_count' => count($tenantIds),
+                'total_active_members' => $totalActiveMembers,
+                'month_start' => $monthStart,
+                'year_start' => $yearStart,
+                'savings_this_month' => round($monthSavings, 2),
+                'savings_trailing_year' => round($yearSavings, 2),
+                'usage_events_this_month' => $monthUsageEvents,
+                'top_tenants_this_month' => $topTenants,
+                'top_categories_this_month' => $topCategories,
+            ],
+        ]);
+    }
+
     // ─── Helpers ────────────────────────────────────────────────────────────
 
     private function context(): OperatorContext

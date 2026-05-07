@@ -2287,6 +2287,69 @@ export const employerEligibleEmailService = {
   },
 };
 
+// ─── Cash-value ROI rollups (entitlement_usage.cash_value_used) ──────────
+//
+// Two endpoints share a similar shape — employer-scoped (HR view) and
+// operator-scoped (multi-clinic operator view). Practice-scoped already
+// existed at /entitlement-usage/practice (EntitlementUsageController).
+
+export interface CategoryUsageRow {
+  category: string;
+  total_used: number;
+  total_savings: number;
+}
+
+export interface EmployerUtilization {
+  employer_id: string;
+  employer_name: string;
+  enrolled_count: number;
+  month_start: string;
+  year_start: string;
+  savings_this_month: number;
+  savings_trailing_year: number;
+  usage_events_this_month: number;
+  top_categories_this_month: CategoryUsageRow[];
+  invoice_spend_trailing_year: number;
+  roi_ratio_trailing_year: number | null;
+}
+
+export interface OperatorTenantUsage {
+  id: string;
+  name: string;
+  total_used: number;
+  total_savings: number;
+}
+
+export interface OperatorUtilization {
+  tenant_count: number;
+  total_active_members?: number;
+  month_start: string;
+  year_start: string;
+  savings_this_month: number;
+  savings_trailing_year: number;
+  usage_events_this_month: number;
+  top_tenants_this_month: OperatorTenantUsage[];
+  top_categories_this_month: CategoryUsageRow[];
+}
+
+export const utilizationService = {
+  // HR view — auto-scoped to the logged-in employer_admin's employer.
+  employerSelf: async (): Promise<ApiResponse<EmployerUtilization>> => {
+    if (useMockData()) return { data: {} as EmployerUtilization };
+    return apiFetch<EmployerUtilization>("/employer-portal/utilization");
+  },
+  // Practice view — scope to a specific employer in the practice's portfolio.
+  employerByPractice: async (employerId: string): Promise<ApiResponse<EmployerUtilization>> => {
+    if (useMockData()) return { data: {} as EmployerUtilization };
+    return apiFetch<EmployerUtilization>(`/employer-billing/employers/${employerId}/utilization`);
+  },
+  // Operator view — rolls up across every tenant under the active operator.
+  operator: async (): Promise<ApiResponse<OperatorUtilization>> => {
+    if (useMockData()) return { data: {} as OperatorUtilization };
+    return apiFetch<OperatorUtilization>("/operator/utilization");
+  },
+};
+
 // ─── Employer portal (HR-side, role=employer_admin) ──────────────────────
 
 export interface EmployerDashboard {
