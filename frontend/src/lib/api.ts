@@ -2919,6 +2919,33 @@ export const operatorService = {
     return apiFetch<OperatorTenant[]>("/operator/tenants");
   },
 
+  createTenant: async (input: {
+    name: string;
+    slug: string;
+    tenantCode: string;
+    timezone: string;
+    specialty?: string | null;
+    practiceModel?: string | null;
+    email?: string | null;
+    phone?: string | null;
+  }): Promise<ApiResponse<{ tenant: OperatorTenant; provisioning: Record<string, unknown> }>> => {
+    // Backend expects snake_case; apiFetch transforms responses but
+    // not requests, so map here.
+    return apiFetch<{ tenant: OperatorTenant; provisioning: Record<string, unknown> }>("/operator/tenants", {
+      method: "POST",
+      body: JSON.stringify({
+        name: input.name,
+        slug: input.slug,
+        tenant_code: input.tenantCode,
+        timezone: input.timezone,
+        specialty: input.specialty ?? null,
+        practice_model: input.practiceModel ?? null,
+        email: input.email ?? null,
+        phone: input.phone ?? null,
+      }),
+    });
+  },
+
   show: async (): Promise<ApiResponse<OperatorMe["operator"]>> => {
     return apiFetch<OperatorMe["operator"]>("/operator");
   },

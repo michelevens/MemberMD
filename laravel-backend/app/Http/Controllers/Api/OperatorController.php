@@ -60,6 +60,77 @@ class OperatorController extends Controller
         ]);
     }
 
+    /**
+     * Create a new clinic (Practice) under this operator. Spec from
+     * the onboarding wizard: name + slug + tenant_code + timezone +
+     * specialty + practice model. Triggers PracticeProvisioningService
+     * to seed default programs/templates so the clinic isn't a blank
+     * shell on first login.
+     *
+     * Inherits operator's default_branding so the new clinic uses
+     * the operator's brand by default; per-clinic overrides happen
+     * in the practice's own Branding settings later.
+     *
+     * Operator owner/admin only. Viewer cannot create clinics.
+     */
+    public function createTenant(Request $request): JsonResponse
+    {
+        $ctx = $this->context();
+        $this->assertCanWrite($ctx);
+
+        $validated = $request->validate([
+            'name' => 'required|string|max:255',
+            'slug' => 'required|string|max:64|unique:practices,slug|regex:/^[a-z0-9\-]+$/',
+            'tenant_code' => 'required|string|max:6|unique:practices,tenant_code',
+            'timezone' => 'required|string|max:64',
+            'specialty' => 'sometimes|nullable|string|max:64',
+            'practice_model' => 'sometimes|nullable|string|max:32',
+            'email' => 'sometimes|nullable|email|max:255',
+            'phone' => 'sometimes|nullable|string|max:30',
+        ]);
+
+        $operator = Operator::findOrFail($ctx->operatorId());
+
+        $practice = Practice::create(array_merge($validated, [
+            'operator_id' => $operator->id,
+            'is_active' => true,
+            'subscription_status' => 'trial',
+            // Inherit operator-level brand by default. Per-clinic
+            // overrides go through the practice settings UI.
+            'logo_url' => $operator->default_branding['logo_url'] ?? null,
+            'primary_color' => $operator->default_branding['primary_color'] ?? null,
+        ]));
+
+        // Run the existing provisioning service — seeds default
+        // programs, screening library, consent templates, appointment
+        // types so the clinic is usable on first login.
+        $provisioningSummary = [];
+        try {
+            $provisioningSummary = (new \App\Services\PracticeProvisioningService())
+                ->provisionPractice($practice);
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('Operator clinic provisioning failed', [
+                'practice_id' => $practice->id,
+                'operator_id' => $operator->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        $this->audit($request, 'operator.tenant_created', $operator->id, [
+            'tenant_id' => $practice->id,
+            'name' => $practice->name,
+            'slug' => $practice->slug,
+        ]);
+
+        return response()->json([
+            'data' => [
+                'tenant' => $this->serializeTenant($practice->fresh()),
+                'provisioning' => $provisioningSummary,
+            ],
+            'message' => "Clinic '{$practice->name}' created.",
+        ], 201);
+    }
+
     public function show(Request $request): JsonResponse
     {
         $ctx = $this->context();

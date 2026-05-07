@@ -309,6 +309,13 @@ function ClinicsTab({ me }: { me: OperatorMe }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const [wizardOpen, setWizardOpen] = useState(false);
+
+  const reloadTenants = useCallback(async () => {
+    const res = await operatorService.tenants();
+    if (res.error) setError(res.error);
+    if (res.data) setTenants(res.data);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -347,18 +354,41 @@ function ClinicsTab({ me }: { me: OperatorMe }) {
         <p className="text-sm" style={{ color: C.slate500 }}>
           {tenants.length} {tenants.length === 1 ? "clinic" : "clinics"} in {me.operator.name}
         </p>
-        <div className="relative">
-          <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-          <input
-            type="text"
-            placeholder="Search clinics…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="pl-9 pr-4 py-2 rounded-lg border text-sm bg-white focus:outline-none focus:ring-2 focus:ring-teal-400 w-64"
-            style={{ borderColor: C.slate200 }}
-          />
+        <div className="flex items-center gap-2">
+          <div className="relative">
+            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input
+              type="text"
+              placeholder="Search clinics…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="pl-9 pr-4 py-2 rounded-lg border text-sm bg-white focus:outline-none focus:ring-2 focus:ring-teal-400 w-64"
+              style={{ borderColor: C.slate200 }}
+            />
+          </div>
+          {me.canWrite && (
+            <button
+              onClick={() => setWizardOpen(true)}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-sm font-semibold text-white shadow-sm"
+              style={{ background: `linear-gradient(135deg, ${C.teal500}, ${C.teal600})` }}
+            >
+              <Plus className="w-4 h-4" />
+              New clinic
+            </button>
+          )}
         </div>
       </div>
+
+      {wizardOpen && (
+        <NewClinicWizard
+          onClose={() => setWizardOpen(false)}
+          onCreated={async (newTenant) => {
+            await reloadTenants();
+            setWizardOpen(false);
+            toast(`Clinic "${newTenant.name}" created.`);
+          }}
+        />
+      )}
 
       <div
         className="rounded-xl border overflow-hidden"
@@ -740,6 +770,209 @@ function AddUserModal({ onClose, onAdded }: { onClose: () => void; onAdded: () =
   );
 }
 
+// ─── New Clinic Wizard ──────────────────────────────────────────────────────
+
+function NewClinicWizard({
+  onClose,
+  onCreated,
+}: {
+  onClose: () => void;
+  onCreated: (tenant: OperatorTenant) => void;
+}) {
+  const [name, setName] = useState("");
+  const [slug, setSlug] = useState("");
+  const [tenantCode, setTenantCode] = useState("");
+  const [timezone, setTimezone] = useState("America/New_York");
+  const [specialty, setSpecialty] = useState("");
+  const [practiceModel, setPracticeModel] = useState("pure_dpc");
+  const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+
+  // Auto-derive slug + tenant code as they type the name. They can
+  // override either; we just save them the keystrokes.
+  const onNameChange = (v: string) => {
+    setName(v);
+    if (!slug) {
+      setSlug(v.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60));
+    }
+    if (!tenantCode) {
+      setTenantCode(v.replace(/[^A-Za-z0-9]/g, "").toUpperCase().slice(0, 6));
+    }
+  };
+
+  const submit = async () => {
+    setErrors({});
+    const fieldErrors: Record<string, string> = {};
+    if (!name.trim()) fieldErrors.name = "Required";
+    if (!slug.trim()) fieldErrors.slug = "Required";
+    if (slug && !/^[a-z0-9-]+$/.test(slug)) fieldErrors.slug = "Lowercase letters, numbers, hyphens only";
+    if (!tenantCode.trim()) fieldErrors.tenantCode = "Required";
+    if (tenantCode.length > 6) fieldErrors.tenantCode = "Max 6 characters";
+    if (!timezone.trim()) fieldErrors.timezone = "Required";
+    if (Object.keys(fieldErrors).length > 0) {
+      setErrors(fieldErrors);
+      return;
+    }
+
+    setSubmitting(true);
+    const res = await operatorService.createTenant({
+      name: name.trim(),
+      slug: slug.trim(),
+      tenantCode: tenantCode.trim(),
+      timezone: timezone.trim(),
+      specialty: specialty.trim() || null,
+      practiceModel: practiceModel || null,
+      email: email.trim() || null,
+      phone: phone.trim() || null,
+    });
+    setSubmitting(false);
+    if (res.error) {
+      toast(res.error, "error");
+      return;
+    }
+    if (res.data?.tenant) {
+      onCreated(res.data.tenant);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: "rgba(16,42,67,0.5)" }}>
+      <div className="rounded-2xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto" style={{ backgroundColor: C.white }}>
+        <div className="px-6 py-4 border-b" style={{ borderColor: C.slate200 }}>
+          <h3 className="text-base font-semibold" style={{ color: C.navy900 }}>New clinic</h3>
+          <p className="text-xs mt-0.5" style={{ color: C.slate500 }}>
+            Creates a Practice under this operator and seeds default programs, screening templates, and consent forms.
+          </p>
+        </div>
+
+        <div className="px-6 py-5 space-y-4">
+          <Field label="Clinic name" error={errors.name}>
+            <input
+              type="text"
+              value={name}
+              onChange={(e) => onNameChange(e.target.value)}
+              placeholder="Riverside Family Medicine"
+              autoFocus
+              className="w-full px-3 py-2 rounded-lg border text-sm focus:outline-none focus:ring-2 focus:ring-teal-400"
+              style={{ borderColor: errors.name ? "#ef4444" : C.slate200 }}
+            />
+          </Field>
+
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="URL slug" error={errors.slug}>
+              <input
+                type="text"
+                value={slug}
+                onChange={(e) => setSlug(e.target.value.toLowerCase())}
+                placeholder="riverside-family"
+                className="w-full px-3 py-2 rounded-lg border text-sm font-mono focus:outline-none focus:ring-2 focus:ring-teal-400"
+                style={{ borderColor: errors.slug ? "#ef4444" : C.slate200 }}
+              />
+            </Field>
+            <Field label="Tenant code" hint="Max 6 chars, A-Z 0-9" error={errors.tenantCode}>
+              <input
+                type="text"
+                value={tenantCode}
+                onChange={(e) => setTenantCode(e.target.value.toUpperCase().slice(0, 6))}
+                placeholder="RVFM"
+                maxLength={6}
+                className="w-full px-3 py-2 rounded-lg border text-sm font-mono uppercase focus:outline-none focus:ring-2 focus:ring-teal-400"
+                style={{ borderColor: errors.tenantCode ? "#ef4444" : C.slate200 }}
+              />
+            </Field>
+          </div>
+
+          <Field label="Timezone" error={errors.timezone}>
+            <select
+              value={timezone}
+              onChange={(e) => setTimezone(e.target.value)}
+              className="w-full px-3 py-2 rounded-lg border text-sm bg-white focus:outline-none focus:ring-2 focus:ring-teal-400"
+              style={{ borderColor: C.slate200 }}
+            >
+              <option value="America/New_York">Eastern (America/New_York)</option>
+              <option value="America/Chicago">Central (America/Chicago)</option>
+              <option value="America/Denver">Mountain (America/Denver)</option>
+              <option value="America/Phoenix">Arizona (America/Phoenix)</option>
+              <option value="America/Los_Angeles">Pacific (America/Los_Angeles)</option>
+              <option value="America/Anchorage">Alaska (America/Anchorage)</option>
+              <option value="Pacific/Honolulu">Hawaii (Pacific/Honolulu)</option>
+            </select>
+          </Field>
+
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Specialty (optional)">
+              <input
+                type="text"
+                value={specialty}
+                onChange={(e) => setSpecialty(e.target.value)}
+                placeholder="primary_care"
+                className="w-full px-3 py-2 rounded-lg border text-sm focus:outline-none focus:ring-2 focus:ring-teal-400"
+                style={{ borderColor: C.slate200 }}
+              />
+            </Field>
+            <Field label="Model">
+              <select
+                value={practiceModel}
+                onChange={(e) => setPracticeModel(e.target.value)}
+                className="w-full px-3 py-2 rounded-lg border text-sm bg-white focus:outline-none focus:ring-2 focus:ring-teal-400"
+                style={{ borderColor: C.slate200 }}
+              >
+                <option value="pure_dpc">Pure DPC</option>
+                <option value="hybrid">Hybrid</option>
+                <option value="concierge">Concierge</option>
+              </select>
+            </Field>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Contact email (optional)">
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="admin@clinic.com"
+                className="w-full px-3 py-2 rounded-lg border text-sm focus:outline-none focus:ring-2 focus:ring-teal-400"
+                style={{ borderColor: C.slate200 }}
+              />
+            </Field>
+            <Field label="Contact phone (optional)">
+              <input
+                type="tel"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                placeholder="555-0100"
+                className="w-full px-3 py-2 rounded-lg border text-sm focus:outline-none focus:ring-2 focus:ring-teal-400"
+                style={{ borderColor: C.slate200 }}
+              />
+            </Field>
+          </div>
+        </div>
+
+        <div className="px-6 py-4 border-t flex justify-end gap-2" style={{ borderColor: C.slate200 }}>
+          <button
+            onClick={onClose}
+            className="px-4 py-2 rounded-lg text-sm font-medium transition-colors hover:bg-slate-50"
+            style={{ color: C.slate600 }}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={submit}
+            disabled={submitting}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-white shadow-sm transition-opacity hover:opacity-95 disabled:opacity-60"
+            style={{ background: `linear-gradient(135deg, ${C.teal500}, ${C.teal600})` }}
+          >
+            {submitting && <Loader2 className="w-4 h-4 animate-spin" />}
+            Create clinic
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Operator Settings ──────────────────────────────────────────────────────
 
 function OperatorSettingsTab({ me, onSaved }: { me: OperatorMe; onSaved: () => void }) {
@@ -1007,11 +1240,27 @@ function RoleBadge({ role }: { role: "owner" | "admin" | "viewer" }) {
   );
 }
 
-function Field({ label, children }: { label: string; children: ReactNode }) {
+function Field({
+  label,
+  children,
+  error,
+  hint,
+}: {
+  label: string;
+  children: ReactNode;
+  error?: string;
+  hint?: string;
+}) {
   return (
     <div>
       <label className="block text-xs font-semibold mb-1.5" style={{ color: C.slate600 }}>{label}</label>
       {children}
+      {hint && !error && (
+        <p className="mt-1 text-[11px]" style={{ color: C.slate400 }}>{hint}</p>
+      )}
+      {error && (
+        <p className="mt-1 text-[11px]" style={{ color: "#dc2626" }}>{error}</p>
+      )}
     </div>
   );
 }

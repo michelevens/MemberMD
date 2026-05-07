@@ -528,6 +528,7 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
     Route::prefix('operator')->group(function () {
         Route::get('/me', [OperatorController::class, 'me']);
         Route::get('/tenants', [OperatorController::class, 'tenants']);
+        Route::post('/tenants', [OperatorController::class, 'createTenant']);
         Route::get('/', [OperatorController::class, 'show']);
         Route::put('/', [OperatorController::class, 'update']);
         Route::get('/users', [OperatorController::class, 'listUsers']);
