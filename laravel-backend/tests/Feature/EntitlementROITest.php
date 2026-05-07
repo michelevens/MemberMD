@@ -348,4 +348,56 @@ class EntitlementROITest extends TestCase
             ->getJson("/api/employer-billing/employers/{$ctx['employer']->id}/utilization")
             ->assertStatus(403);
     }
+
+    // ─── Utilization PDF ─────────────────────────────────────────────────
+
+    public function test_practice_admin_can_download_utilization_pdf(): void
+    {
+        $ctx = $this->setupTenantWithEmployer();
+        $this->makeSponsoredMember($ctx, visitsUsed: 3);
+
+        $response = $this->actingAs($ctx['admin'], 'sanctum')
+            ->get("/api/employer-billing/employers/{$ctx['employer']->id}/utilization/pdf");
+
+        $response->assertStatus(200)
+            ->assertHeader('content-type', 'application/pdf');
+        $this->assertStringStartsWith('%PDF-', $response->getContent());
+    }
+
+    public function test_employer_admin_can_download_their_own_utilization_pdf(): void
+    {
+        $ctx = $this->setupTenantWithEmployer();
+        $hr = User::create([
+            'name' => 'HR', 'email' => 'hr-' . uniqid() . '@a.com',
+            'password' => bcrypt('p'), 'tenant_id' => $ctx['practice']->id,
+            'employer_id' => $ctx['employer']->id,
+            'role' => 'employer_admin',
+            'first_name' => 'HR', 'last_name' => 'A', 'status' => 'active',
+        ]);
+
+        $this->actingAs($hr, 'sanctum')
+            ->get("/api/employer-billing/employers/{$ctx['employer']->id}/utilization/pdf")
+            ->assertStatus(200)
+            ->assertHeader('content-type', 'application/pdf');
+    }
+
+    public function test_employer_admin_cannot_download_another_employers_utilization_pdf(): void
+    {
+        $ctx = $this->setupTenantWithEmployer();
+        $other = Employer::create([
+            'tenant_id' => $ctx['practice']->id, 'name' => 'Beta',
+            'contact_name' => 'X', 'contact_email' => 'x@b.com',
+            'status' => 'active',
+        ]);
+        $otherHr = User::create([
+            'name' => 'X', 'email' => 'x-' . uniqid() . '@b.com',
+            'password' => bcrypt('p'), 'tenant_id' => $ctx['practice']->id,
+            'employer_id' => $other->id, 'role' => 'employer_admin',
+            'first_name' => 'X', 'last_name' => 'X', 'status' => 'active',
+        ]);
+
+        $this->actingAs($otherHr, 'sanctum')
+            ->get("/api/employer-billing/employers/{$ctx['employer']->id}/utilization/pdf")
+            ->assertStatus(403);
+    }
 }

@@ -8,6 +8,7 @@ import { ProviderDetailPage } from "./ProviderDetailPage";
 import { EncounterDetailPage } from "./EncounterDetailPage";
 import { PatientBillingTab } from "./PatientBillingTab";
 import { StalledEnrollmentsPanel } from "../practice/StalledEnrollmentsPanel";
+import { PracticeROISection } from "../practice/PracticeROISection";
 import { useAuth } from "../../contexts/AuthContext";
 import { dashboardService, membershipPlanService, messageService, patientService, appointmentService, encounterService, prescriptionService, invoiceService, programService, telehealthService, screeningService, couponService, providerService, paymentService, notificationService, apiFetch, billingEnhancedService, documentService, onboardingService, staffService, chartTemplateService, labService, referralService, stalledEnrollmentService } from "../../lib/api";
 import { formatDob, formatRelative } from "../../lib/format";
@@ -3623,6 +3624,12 @@ export function PracticePortal() {
         {/* Compliance score — port from Credentik. Widget self-fetches
             /compliance/score and renders the breakdown + top actions. */}
         <ComplianceWidget />
+
+        {/* Cash-value delivered to members this month. Pulls from the
+            existing /entitlement-usage/practice endpoint that until now
+            had no surface. Self-fetches; renders nothing if zero usage. */}
+        <PracticeROISection />
+
 
         {/* Revenue by Source */}
         <div>

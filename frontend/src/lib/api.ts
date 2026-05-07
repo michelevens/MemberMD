@@ -2348,6 +2348,31 @@ export const utilizationService = {
     if (useMockData()) return { data: {} as OperatorUtilization };
     return apiFetch<OperatorUtilization>("/operator/utilization");
   },
+  // Branded PDF utilization report for HR renewal decks. Returns a
+  // blob URL the caller can open in a new tab. Same permission gate
+  // as the invoice PDF endpoint.
+  employerPdf: async (employerId: string): Promise<{ url?: string; error?: string }> => {
+    if (useMockData()) return { url: "#" };
+    const token = (typeof window !== "undefined" && window.sessionStorage)
+      ? window.sessionStorage.getItem("membermd_token")
+      : null;
+    const res = await fetch(`${API_BASE_URL}/employer-billing/employers/${employerId}/utilization/pdf`, {
+      headers: {
+        Accept: "application/pdf",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+    });
+    if (!res.ok) {
+      try {
+        const json = await res.json();
+        return { error: json.message ?? `Download failed (${res.status})` };
+      } catch {
+        return { error: `Download failed (${res.status})` };
+      }
+    }
+    const blob = await res.blob();
+    return { url: URL.createObjectURL(blob) };
+  },
 };
 
 // ─── Employer portal (HR-side, role=employer_admin) ──────────────────────

@@ -86,6 +86,10 @@ export function BillingTab() {
   // a never-member could still hold a refund-as-credit if they paid for
   // a one-time charge that got reversed.
   const [creditSummary, setCreditSummary] = useState<PatientCreditSummary | null>(null);
+  // Cash-value delivered this period — pulled from the existing
+  // /entitlement-usage/patient/{membershipId} endpoint. The data has
+  // always been there; we just never showed it to the patient.
+  const [valueDelivered, setValueDelivered] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -131,7 +135,7 @@ export function BillingTab() {
         setMembership(m);
 
         if (m?.id) {
-          const [er, ir, ahr, cr] = await Promise.all([
+          const [er, ir, ahr, cr, ur] = await Promise.all([
             entitlementService.listForMembership(m.id),
             invoiceService.list(),
             // Ad-hoc charges live independently of memberships, so we
@@ -141,12 +145,21 @@ export function BillingTab() {
             // Account credit balance — patient-level, independent of
             // membership. Quietly returns empty when patient has none.
             patientCreditService.mine().catch(() => ({ data: null })),
+            // Per-membership cash-value rollup. Returns
+            //   { entitlements: [...], total_savings: <number> }
+            // We only show the headline total; the entitlements list
+            // is already rendered on the dedicated Entitlements tab.
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            apiFetch<any>(`/entitlement-usage/patient/${m.id}`).catch(() => ({ data: null })),
           ]);
           if (cancelled) return;
           setEntitlements(unwrap<PatientEntitlement>(er.data));
           setInvoices(unwrap<Invoice>(ir.data));
           setAdHocCharges(Array.isArray(ahr.data) ? ahr.data : []);
           setCreditSummary(cr?.data ?? null);
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const utilBody = (ur?.data as any) ?? null;
+          setValueDelivered(utilBody?.total_savings != null ? Number(utilBody.total_savings) : null);
         } else {
           setEntitlements([]);
           setInvoices([]);
@@ -423,6 +436,32 @@ export function BillingTab() {
           Same component as the standalone Family Members tab — drops
           its own card chrome to nest inside this section.  */}
       <FamilyMembersSection variant="card" />
+
+      {/* ── Value delivered this period ───────────────────────────────────
+          Cash-equivalent savings from membership-included services this
+          billing period. Pulled from /entitlement-usage/patient/{mid}.
+          Hidden when there's nothing to show (no membership / fresh
+          enrollee with no usage yet) so we don't surface a "$0 saved"
+          tile that looks broken. */}
+      {membership && valueDelivered !== null && valueDelivered > 0 && (
+        <div
+          className="rounded-2xl p-5 border"
+          style={{ backgroundColor: C.green50, borderColor: "#bbf7d0" }}
+        >
+          <div className="flex items-center gap-2 mb-1">
+            <CheckCircle2 className="w-4 h-4" style={{ color: C.green500 }} />
+            <h3 className="text-sm font-semibold" style={{ color: C.green500 }}>
+              Value delivered this period
+            </h3>
+          </div>
+          <p className="text-2xl font-bold" style={{ color: C.green500 }}>
+            {formatCurrency(valueDelivered)}
+          </p>
+          <p className="text-xs mt-1" style={{ color: C.slate600 }}>
+            Cash-equivalent savings from visits and services included with your membership.
+          </p>
+        </div>
+      )}
 
       {/* ── Account credit balance ──────────────────────────────────────────
           Surfaces credit issued by the practice (refunds-as-credit,

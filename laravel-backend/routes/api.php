@@ -940,6 +940,10 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
         // sponsored employees + invoice spend ratio. Practice-side
         // view; HR uses /employer-portal/utilization for the same data.
         Route::get('/employers/{employerId}/utilization', [EmployerBillingController::class, 'utilization']);
+        // Branded PDF utilization report for HR's renewal pitch deck.
+        // Same auth model as the invoice PDF: practice users +
+        // employer_admin who owns the employer.
+        Route::get('/employers/{employerId}/utilization/pdf', [EmployerBillingController::class, 'utilizationPdf']);
     });
 
     // ===== Employer Portal (employer_admin role) =====

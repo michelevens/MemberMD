@@ -163,6 +163,41 @@ class EmployerBillingController extends Controller
     }
 
     /**
+     * Branded PDF utilization report for HR's renewal pitch deck.
+     * Accessible by practice users + the employer_admin whose
+     * employer the report covers — same auth model as the invoice
+     * PDF endpoint right below.
+     */
+    public function utilizationPdf(Request $request, string $employerId): Response|JsonResponse
+    {
+        $user = $request->user();
+        $employer = Employer::where('tenant_id', $user->tenant_id)->findOrFail($employerId);
+
+        $allowed = in_array($user->role, ['practice_admin', 'staff', 'superadmin'], true)
+            || ($user->role === 'employer_admin' && $user->employer_id === $employer->id);
+        abort_if(!$allowed, 403, 'Unauthorized.');
+
+        $summary = EmployerPortalController::buildUtilizationSummary($employer);
+
+        $practice = $user->practice ?? \App\Models\Practice::find($user->tenant_id);
+        $primaryColor = $practice->primary_color ?? '#27ab83';
+
+        $pdf = Pdf::loadView('reports.employer-utilization', [
+            'employer' => $employer,
+            'practice' => $practice,
+            'primaryColor' => $primaryColor,
+            'summary' => $summary,
+        ]);
+        $pdf->setPaper('letter');
+
+        $monthLabel = \Carbon\Carbon::parse($summary['month_start'])->format('Y-m');
+        $filename = 'utilization-' . preg_replace('/[^a-z0-9]+/i', '-', strtolower($employer->name))
+            . '-' . $monthLabel . '.pdf';
+
+        return $pdf->stream($filename);
+    }
+
+    /**
      * Branded PDF for an employer invoice. Used by both the practice-side
      * "Download" action and the EmployerPortal invoices table so HR's AP
      * team can attach a real document to their internal payment system.

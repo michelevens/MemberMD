@@ -7,7 +7,7 @@ import { apiFetch } from "../../lib/api";
 import { formatUSPhone, normalizeUSPhone } from "../../lib/phone";
 import { AddressAutocomplete } from "../shared/AddressAutocomplete";
 import { EmployerEligibilityPanel } from "../practice/EmployerEligibilityPanel";
-import { employerInviteService, employerBillingService } from "../../lib/api";
+import { employerInviteService, employerBillingService, utilizationService } from "../../lib/api";
 import {
   Search,
   Plus,
@@ -526,6 +526,24 @@ export function EmployerManagementTab() {
                                 style={{ borderColor: "#27ab83", color: "#147d64" }}
                               >
                                 Invite HR contact
+                              </button>
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  const employerId = expandedDetail.employer.id;
+                                  const res = await utilizationService.employerPdf(employerId);
+                                  if (res.error || !res.url) return;
+                                  const a = document.createElement("a");
+                                  a.href = res.url;
+                                  a.target = "_blank";
+                                  a.rel = "noopener noreferrer";
+                                  a.click();
+                                  setTimeout(() => URL.revokeObjectURL(res.url!), 60_000);
+                                }}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border bg-white hover:bg-slate-50"
+                                style={{ borderColor: "#cbd5e1", color: "#475569" }}
+                              >
+                                Download utilization report
                               </button>
                             </div>
 

@@ -377,11 +377,32 @@ function ROISection() {
 
   return (
     <div className="rounded-xl border p-5 space-y-4" style={{ borderColor: C.slate200, backgroundColor: C.white }}>
-      <div className="flex items-center gap-2">
-        <TrendingUp className="w-4 h-4" style={{ color: C.teal600 }} />
-        <h3 className="text-sm font-semibold" style={{ color: C.navy900 }}>
-          Cash value delivered to your employees
-        </h3>
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <TrendingUp className="w-4 h-4" style={{ color: C.teal600 }} />
+          <h3 className="text-sm font-semibold" style={{ color: C.navy900 }}>
+            Cash value delivered to your employees
+          </h3>
+        </div>
+        <button
+          type="button"
+          onClick={async () => {
+            const res = await utilizationService.employerPdf(data.employer_id);
+            if (res.error || !res.url) return;
+            const a = document.createElement("a");
+            a.href = res.url;
+            a.target = "_blank";
+            a.rel = "noopener noreferrer";
+            a.click();
+            setTimeout(() => URL.revokeObjectURL(res.url!), 60_000);
+          }}
+          title="Download PDF report"
+          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium border bg-white hover:bg-slate-50"
+          style={{ borderColor: C.slate200, color: C.slate600 }}
+        >
+          <Download className="w-3.5 h-3.5" />
+          Download report
+        </button>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
