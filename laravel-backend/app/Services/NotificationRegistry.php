@@ -299,6 +299,22 @@ class NotificationRegistry
             'is_phi_bearing' => false,
         ],
 
+        // ─── Employer (sponsored-membership HR contacts) ────────────────
+        'employer.admin_invited' => [
+            'audience' => 'employer',
+            'label' => 'Employer Admin Invitation',
+            'description' => 'Sent when a practice admin invites an HR contact to manage their employer account.',
+            'default_enabled' => true,
+            'is_phi_bearing' => false,
+        ],
+        'employer.invoice_issued' => [
+            'audience' => 'employer',
+            'label' => 'Monthly PEPM Invoice',
+            'description' => 'Sent to the HR contact when a new monthly per-employee-per-month invoice is generated.',
+            'default_enabled' => true,
+            'is_phi_bearing' => false,
+        ],
+
         // ─── Platform billing (Practice → Superadmin) ──────────────────
         'platform_billing.payment_failed' => [
             'audience' => 'practice',

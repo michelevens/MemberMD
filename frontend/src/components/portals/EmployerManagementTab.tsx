@@ -7,6 +7,7 @@ import { apiFetch } from "../../lib/api";
 import { formatUSPhone, normalizeUSPhone } from "../../lib/phone";
 import { AddressAutocomplete } from "../shared/AddressAutocomplete";
 import { EmployerEligibilityPanel } from "../practice/EmployerEligibilityPanel";
+import { employerInviteService } from "../../lib/api";
 import {
   Search,
   Plus,
@@ -154,6 +155,13 @@ export function EmployerManagementTab() {
   // New employer form
   const [newEmployer, setNewEmployer] = useState({ name: "", contactName: "", contactEmail: "", contactPhone: "", address: "" });
 
+  // Invite-HR dialog state. Opens from the per-employer expanded row;
+  // employerId pinpoints the target so the dialog doesn't need its own
+  // employer dropdown.
+  const [inviteDialog, setInviteDialog] = useState<{ employerId: string; employerName: string } | null>(null);
+  const [inviteForm, setInviteForm] = useState({ firstName: "", lastName: "", email: "", phone: "" });
+  const [inviteSubmitting, setInviteSubmitting] = useState(false);
+
   // New contract form
   const [newContract, setNewContract] = useState({ employerId: "", membershipPlanId: "", pepmRate: "", effectiveDate: "", expirationDate: "" });
 
@@ -251,6 +259,30 @@ export function EmployerManagementTab() {
       setNewEmployer({ name: "", contactName: "", contactEmail: "", contactPhone: "", address: "" });
       loadEmployers();
     }
+  };
+
+  const handleInviteAdmin = async () => {
+    if (!inviteDialog) return;
+    if (!inviteForm.email.trim() || !inviteForm.firstName.trim() || !inviteForm.lastName.trim()) {
+      setError("First name, last name, and email are required.");
+      return;
+    }
+    setInviteSubmitting(true);
+    const res = await employerInviteService.inviteAdmin(inviteDialog.employerId, {
+      firstName: inviteForm.firstName.trim(),
+      lastName: inviteForm.lastName.trim(),
+      email: inviteForm.email.trim(),
+      phone: inviteForm.phone.trim() || undefined,
+    });
+    setInviteSubmitting(false);
+    if (res.error) {
+      setError(res.error);
+      return;
+    }
+    setInviteDialog(null);
+    setInviteForm({ firstName: "", lastName: "", email: "", phone: "" });
+    setError(null);
+    alert(`Invitation sent to ${inviteForm.email.trim()}. They'll receive a password-reset email to access the Employer Portal.`);
   };
 
   const handleNewContract = async () => {
@@ -421,7 +453,7 @@ export function EmployerManagementTab() {
                       <tr key={`${emp.id}-detail`}>
                         <td colSpan={6} className="px-4 py-4" style={{ backgroundColor: "#f8fafc" }}>
                           <div className="space-y-4">
-                            {/* Employer details */}
+                            {/* Employer details + admin actions */}
                             <div className="grid grid-cols-2 gap-4 text-sm">
                               <div>
                                 <span className="text-slate-500">Email:</span>{" "}
@@ -435,6 +467,17 @@ export function EmployerManagementTab() {
                                 <span className="text-slate-500">Address:</span>{" "}
                                 <span className="text-slate-800">{expandedDetail.employer.address}</span>
                               </div>
+                            </div>
+
+                            <div className="flex flex-wrap gap-2">
+                              <button
+                                type="button"
+                                onClick={() => setInviteDialog({ employerId: expandedDetail.employer.id, employerName: expandedDetail.employer.name })}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border bg-white hover:bg-slate-50"
+                                style={{ borderColor: "#27ab83", color: "#147d64" }}
+                              >
+                                Invite HR contact
+                              </button>
                             </div>
 
                             {/* Contracts */}
@@ -784,6 +827,78 @@ export function EmployerManagementTab() {
           </div>
         </div>
       )}
+
+      {/* Invite HR contact dialog. Mints an employer_admin user + sends a
+          password-reset email so HR can set their own password and land
+          in the EmployerPortal. Idempotent on email — re-invite resends. */}
+      <DialogOverlay
+        open={!!inviteDialog}
+        onClose={() => { setInviteDialog(null); setInviteForm({ firstName: "", lastName: "", email: "", phone: "" }); }}
+        title={inviteDialog ? `Invite HR contact for ${inviteDialog.employerName}` : "Invite HR contact"}
+      >
+        <div className="space-y-4">
+          <p className="text-xs text-slate-500">
+            They'll receive an email with a password-reset link. Once they set a password, they can log in to the Employer Portal at /#/employer.
+          </p>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">First name</label>
+              <input
+                type="text"
+                value={inviteForm.firstName}
+                onChange={(e) => setInviteForm({ ...inviteForm, firstName: e.target.value })}
+                className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Last name</label>
+              <input
+                type="text"
+                value={inviteForm.lastName}
+                onChange={(e) => setInviteForm({ ...inviteForm, lastName: e.target.value })}
+                className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm"
+              />
+            </div>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Email</label>
+            <input
+              type="email"
+              value={inviteForm.email}
+              onChange={(e) => setInviteForm({ ...inviteForm, email: e.target.value })}
+              placeholder="hr@acme.com"
+              className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Phone (optional)</label>
+            <input
+              type="tel"
+              value={inviteForm.phone}
+              onChange={(e) => setInviteForm({ ...inviteForm, phone: e.target.value })}
+              className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm"
+            />
+          </div>
+          <div className="flex justify-end gap-2 pt-2">
+            <button
+              type="button"
+              onClick={() => { setInviteDialog(null); setInviteForm({ firstName: "", lastName: "", email: "", phone: "" }); }}
+              className="px-3 py-2 rounded-lg text-sm font-medium border border-slate-200 text-slate-600 hover:bg-slate-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={handleInviteAdmin}
+              disabled={inviteSubmitting}
+              className="px-4 py-2 rounded-lg text-sm font-semibold text-white disabled:opacity-50"
+              style={{ backgroundColor: "#27ab83" }}
+            >
+              {inviteSubmitting ? "Sending…" : "Send invite"}
+            </button>
+          </div>
+        </div>
+      </DialogOverlay>
     </div>
   );
 }

@@ -910,6 +910,9 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
         Route::post('/{employerId}/eligible-emails', [\App\Http\Controllers\Api\EmployerEligibleEmailController::class, 'store']);
         Route::post('/{employerId}/eligible-emails/bulk', [\App\Http\Controllers\Api\EmployerEligibleEmailController::class, 'bulk']);
         Route::delete('/{employerId}/eligible-emails/{id}', [\App\Http\Controllers\Api\EmployerEligibleEmailController::class, 'destroy']);
+
+        // Invite an HR contact as employer_admin for the EmployerPortal.
+        Route::post('/{id}/invite-admin', [EmployerController::class, 'inviteAdmin']);
     });
 
     // ===== Employer Contracts =====

@@ -2135,6 +2135,31 @@ export const patientCreditService = {
   },
 };
 
+// ─── Employer admin invitations ───────────────────────────────────────────
+//
+// Practice admin → POST /employers/{id}/invite-admin to mint an
+// employer_admin user + send a password-reset link. Idempotent on email:
+// re-inviting an existing admin resends the link.
+
+export const employerInviteService = {
+  inviteAdmin: async (
+    employerId: string,
+    data: { firstName: string; lastName: string; email: string; phone?: string },
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ): Promise<ApiResponse<any>> => {
+    if (useMockData()) return { data: {} };
+    return apiFetch(`/employers/${employerId}/invite-admin`, {
+      method: "POST",
+      body: JSON.stringify({
+        first_name: data.firstName,
+        last_name: data.lastName,
+        email: data.email,
+        phone: data.phone,
+      }),
+    });
+  },
+};
+
 // ─── Employer eligible-emails (sponsored-employer allow-list) ─────────────
 //
 // Pre-enrollment allow-list. The public enrollment widget hashes the

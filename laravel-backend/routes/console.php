@@ -13,3 +13,11 @@ Schedule::command('dunning:process')->daily()->at('06:00')->withoutOverlapping()
 // Stalled-enrollment recovery — runs hourly so the T-2h window can fire
 // near-real-time. Idempotent via the reminders_sent JSON map per row.
 Schedule::command('enrollments:process-reminders')->hourly()->withoutOverlapping();
+
+// Monthly auto-bill for sponsoring employers. Fires on the 1st of each
+// month at 02:00 server time so the prior month has fully closed.
+// Idempotent via deterministic invoice_number per (employer, month) —
+// safe to retry if the first run failed.
+Schedule::command('employers:process-invoice-cycle')
+    ->monthlyOn(1, '02:00')
+    ->withoutOverlapping();
