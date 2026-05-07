@@ -13,7 +13,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   CreditCard, X, AlertCircle, Calendar, CheckCircle2,
-  Receipt, Plus, Star, Shield, Loader2, ChevronRight,
+  Receipt, Plus, Star, Shield, Loader2, ChevronRight, FileText,
 } from "lucide-react";
 import {
   membershipService,
@@ -54,12 +54,32 @@ const C = {
 };
 
 
+// ─── Ad-hoc charge row (patient-side shape from /me/ad-hoc-charges) ─────────
+
+interface AdHocChargeRow {
+  id: string;
+  description: string;
+  lineItems: Array<{ description: string; amount_cents?: number; amountCents?: number }> | null;
+  amountCents: number;
+  currency: string;
+  status: "draft" | "sent" | "paid" | "cancelled" | "expired";
+  checkoutUrl: string | null;
+  sentAt: string | null;
+  paidAt: string | null;
+  createdAt: string;
+}
+
 // ─── Component ──────────────────────────────────────────────────────────────
 
 export function BillingTab() {
   const [membership, setMembership] = useState<PatientMembership | null>(null);
   const [entitlements, setEntitlements] = useState<PatientEntitlement[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
+  // Ad-hoc charges (one-time bills the practice issued for forms,
+  // after-hours calls, etc.). Patients pay via the Stripe-hosted
+  // checkout link — we surface unpaid ones prominently so the
+  // patient doesn't have to dig through email.
+  const [adHocCharges, setAdHocCharges] = useState<AdHocChargeRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -105,16 +125,30 @@ export function BillingTab() {
         setMembership(m);
 
         if (m?.id) {
-          const [er, ir] = await Promise.all([
+          const [er, ir, ahr] = await Promise.all([
             entitlementService.listForMembership(m.id),
             invoiceService.list(),
+            // Ad-hoc charges live independently of memberships, so we
+            // fetch them whether or not there's an active plan. Caller
+            // is auth'd as patient; backend scopes by user.id → patient.
+            apiFetch<AdHocChargeRow[]>("/me/ad-hoc-charges"),
           ]);
           if (cancelled) return;
           setEntitlements(unwrap<PatientEntitlement>(er.data));
           setInvoices(unwrap<Invoice>(ir.data));
+          setAdHocCharges(Array.isArray(ahr.data) ? ahr.data : []);
         } else {
           setEntitlements([]);
           setInvoices([]);
+          // Even without a membership, a patient might owe an ad-hoc
+          // charge (e.g. self-pay one-off visit before they enroll).
+          // Fetch independently of m?.id check.
+          try {
+            const ahr = await apiFetch<AdHocChargeRow[]>("/me/ad-hoc-charges");
+            if (!cancelled) setAdHocCharges(Array.isArray(ahr.data) ? ahr.data : []);
+          } catch {
+            if (!cancelled) setAdHocCharges([]);
+          }
         }
       } catch (e) {
         if (cancelled) return;
@@ -370,6 +404,78 @@ export function BillingTab() {
           Same component as the standalone Family Members tab — drops
           its own card chrome to nest inside this section.  */}
       <FamilyMembersSection variant="card" />
+
+      {/* ── Open ad-hoc charges ──────────────────────────────────────────── */}
+      {/* Surfaces practice-issued one-time bills (forms, after-hours
+          calls, etc.) so patients can pay in-app instead of digging
+          through email. Only renders when there's at least one
+          'sent' charge — paid history rolls up into the Invoice list
+          below. */}
+      {(() => {
+        const open = adHocCharges.filter((c) => c.status === "sent");
+        if (open.length === 0) return null;
+        const totalDueCents = open.reduce((acc, c) => acc + (c.amountCents || 0), 0);
+        return (
+          <div
+            className="rounded-2xl p-5 border"
+            style={{ backgroundColor: C.amber50, borderColor: "#fde68a" }}
+          >
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <AlertCircle className="w-4 h-4" style={{ color: C.amber500 }} />
+                <h3 className="text-sm font-semibold" style={{ color: "#92400e" }}>
+                  Open balance
+                </h3>
+              </div>
+              <span className="text-sm font-bold" style={{ color: "#92400e" }}>
+                {formatCurrency(totalDueCents / 100)} due
+              </span>
+            </div>
+            <ul className="space-y-2">
+              {open.map((c) => (
+                <li
+                  key={c.id}
+                  className="flex items-center gap-3 p-3 rounded-lg"
+                  style={{ backgroundColor: C.white, border: `1px solid #fde68a` }}
+                >
+                  <div
+                    className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0"
+                    style={{ backgroundColor: C.amber50, color: C.amber500 }}
+                  >
+                    <FileText className="w-4 h-4" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium truncate" style={{ color: C.navy900 }}>
+                      {c.description || "One-time charge"}
+                    </p>
+                    <p className="text-xs" style={{ color: C.slate500 }}>
+                      Sent {c.sentAt ? formatDate(c.sentAt) : formatDate(c.createdAt)}
+                    </p>
+                  </div>
+                  <span className="text-sm font-semibold flex-shrink-0" style={{ color: C.navy800 }}>
+                    {formatCurrency(c.amountCents / 100)}
+                  </span>
+                  <button
+                    onClick={() => {
+                      if (!c.checkoutUrl) {
+                        setToast({ message: "Payment link unavailable. Please contact the practice.", type: "error" });
+                        return;
+                      }
+                      window.open(c.checkoutUrl, "_blank", "noopener,noreferrer");
+                    }}
+                    disabled={!c.checkoutUrl}
+                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold text-white disabled:opacity-50"
+                    style={{ backgroundColor: C.teal500 }}
+                  >
+                    Pay now
+                    <ChevronRight className="w-3 h-3" />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        );
+      })()}
 
       {/* ── Invoice list ──────────────────────────────────────────────────── */}
       <div className="glass rounded-2xl p-5">

@@ -360,4 +360,101 @@ class AdHocChargeController extends Controller
             abort(403, 'Only practice admins and staff can manage ad-hoc charges.');
         }
     }
+
+    // ─── Patient-facing endpoints ───────────────────────────────────────────
+    //
+    // Patients see their OWN open charges in the Billing tab. These
+    // endpoints are tightly scoped: patient_id derived from
+    // auth()->user()->id (via patient.user_id), never trusted from a
+    // request param. The hosted Stripe Checkout URL is the same one
+    // emailed at creation time — we just expose it in the portal so
+    // the patient can pay without hunting in their inbox.
+
+    /**
+     * GET /me/ad-hoc-charges
+     *
+     * Patient's own open charges (sent + draft + paid history). The
+     * patient is identified by auth()->user(); we lookup their Patient
+     * row by user_id within their tenant. No request-side patient_id —
+     * a patient cannot view another patient's charges via this route.
+     */
+    public function myCharges(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        abort_if(!$user || $user->role !== 'patient', 403, 'Patient role required.');
+
+        $patient = Patient::where('tenant_id', $user->tenant_id)
+            ->where('user_id', $user->id)
+            ->first();
+
+        if (!$patient) {
+            return response()->json(['data' => []]);
+        }
+
+        // Surface open + recently-paid charges. Cancelled/expired hide
+        // from the default view but are returned with status filter.
+        $query = AdHocCharge::where('tenant_id', $user->tenant_id)
+            ->where('patient_id', $patient->id);
+
+        $statusFilter = $request->query('status');
+        if ($statusFilter) {
+            $query->where('status', $statusFilter);
+        } else {
+            $query->whereIn('status', [
+                AdHocCharge::STATUS_DRAFT,
+                AdHocCharge::STATUS_SENT,
+                AdHocCharge::STATUS_PAID,
+            ]);
+        }
+
+        $rows = $query->orderByDesc('created_at')->limit(50)->get();
+
+        return response()->json([
+            'data' => $rows->map(fn ($c) => [
+                'id' => $c->id,
+                'description' => $c->description,
+                'line_items' => $c->line_items,
+                'amount_cents' => $c->amount_cents,
+                'currency' => $c->currency,
+                'status' => $c->status,
+                // Hosted Stripe Checkout URL — only meaningful when
+                // status is 'sent'. Frontend uses this to pop the
+                // Stripe-hosted payment page in a new tab.
+                'checkout_url' => $c->status === AdHocCharge::STATUS_SENT
+                    ? $this->resolveCheckoutUrl($c)
+                    : null,
+                'sent_at' => $c->sent_at,
+                'paid_at' => $c->paid_at,
+                'created_at' => $c->created_at,
+            ])->values(),
+        ]);
+    }
+
+    /**
+     * Re-fetch the Stripe Checkout session URL. Patient may bookmark
+     * this charge; the URL on the row is the original one issued at
+     * create-time and still works as long as the session hasn't
+     * expired. For long-stale charges Stripe returns a redirect to
+     * an "expired" page — we surface that as-is, the patient hits
+     * Stripe's expired page and contacts the practice to resend.
+     */
+    private function resolveCheckoutUrl(AdHocCharge $c): ?string
+    {
+        if (!$c->stripe_session_id) {
+            return null;
+        }
+        $practice = Practice::find($c->tenant_id);
+        if (!$practice) {
+            return null;
+        }
+        try {
+            return $this->subscriptions->getCheckoutSessionUrl($practice, $c->stripe_session_id);
+        } catch (\Throwable $e) {
+            Log::warning('Failed to refetch Stripe Checkout URL for ad-hoc charge', [
+                'charge_id' => $c->id,
+                'error' => $e->getMessage(),
+            ]);
+            return null;
+        }
+    }
 }

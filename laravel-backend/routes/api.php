@@ -594,6 +594,12 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
     Route::post('/ad-hoc-charges/{id}/cancel', [\App\Http\Controllers\Api\AdHocChargeController::class, 'cancel']);
     Route::post('/ad-hoc-charges/{id}/resend', [\App\Http\Controllers\Api\AdHocChargeController::class, 'resend']);
 
+    // Patient-facing — patient sees their OWN charges in the portal
+    // billing tab. Tightly scoped: derives patient via auth user, no
+    // request-side patient_id. Separate route + controller method
+    // from the admin-facing /ad-hoc-charges (assertCanManage gate).
+    Route::get('/me/ad-hoc-charges', [\App\Http\Controllers\Api\AdHocChargeController::class, 'myCharges']);
+
     // ===== Notifications =====
     Route::get('/notifications/preferences', [NotificationController::class, 'getPreferences']);
     Route::put('/notifications/preferences', [NotificationController::class, 'updatePreferences']);
