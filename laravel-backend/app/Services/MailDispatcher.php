@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\MailDispatchLog;
+use App\Services\NotificationRegistry;
 use Illuminate\Mail\Mailable;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Log;
@@ -26,13 +27,45 @@ class MailDispatcher
 {
     /**
      * Send a Mailable to one or more recipients. Returns true on success,
-     * false if delivery failed. Errors are caught and logged.
+     * false if delivery failed OR was suppressed by registry rules.
+     *
+     * The $context param doubles as the NotificationRegistry key —
+     * when it matches a registered key, NotificationRegistry::shouldSend
+     * gates the send: tenant-level disable wins, PHI-bearing notifications
+     * require an active phi_communication_consent for the patient.
+     *
+     * Pass $patientId when the email contains PHI and we can identify
+     * which patient it's about — drives the consent check. Null when
+     * unknown (e.g., system alerts, employer mail) — those skip the
+     * patient-consent gate but still respect tenant-level disable.
      */
-    public static function send(string|array $to, Mailable $mailable, ?string $context = null): bool
-    {
+    public static function send(
+        string|array $to,
+        Mailable $mailable,
+        ?string $context = null,
+        ?string $tenantId = null,
+        ?string $patientId = null,
+    ): bool {
         $recipients = is_array($to) ? $to : [$to];
         $mailableClass = class_basename($mailable);
-        $tenantId = Auth::user()?->tenant_id;
+        $tenantId = $tenantId ?: Auth::user()?->tenant_id;
+
+        // Registry gate — silently no-op when this notification is
+        // disabled at the tenant level or PHI consent is missing.
+        // Logged so the SuperAdmin email-deliverability dashboard
+        // shows the suppressed count separately from delivery failures.
+        $decision = NotificationRegistry::shouldSend($context, $tenantId, $patientId);
+        if (!$decision['allow']) {
+            self::recordLog(
+                $recipients,
+                $mailableClass,
+                $context,
+                MailDispatchLog::STATUS_SUPPRESSED ?? 'suppressed',
+                $decision['reason'],
+                $tenantId,
+            );
+            return false;
+        }
 
         try {
             Mail::to($to)->send($mailable);

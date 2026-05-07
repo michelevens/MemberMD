@@ -345,7 +345,9 @@ class AppointmentController extends Controller
                     patient: $appointment->patient,
                     practice: $appointment->practice ?? \App\Models\Practice::find($user->tenant_id),
                 ),
-                'appointment-confirmation',
+                'patient.appointment_confirmation',
+                $user->tenant_id,
+                $appointment->patient->id,
             );
         }
 

@@ -264,6 +264,14 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
 
     // Practice: own practice
     Route::get('/practice/me', [PracticeController::class, 'myPractice']);
+
+    // Notification settings — registry-backed per-tenant toggles +
+    // ePHI communication waiver tracking.
+    Route::get('/practice/notifications', [\App\Http\Controllers\Api\NotificationSettingsController::class, 'index']);
+    Route::put('/practice/notifications/{key}', [\App\Http\Controllers\Api\NotificationSettingsController::class, 'update']);
+    Route::get('/practice/phi-waivers/pending', [\App\Http\Controllers\Api\NotificationSettingsController::class, 'pendingWaivers']);
+    Route::post('/practice/phi-waivers/{patientId}', [\App\Http\Controllers\Api\NotificationSettingsController::class, 'grantWaiver']);
+    Route::delete('/practice/phi-waivers/{patientId}', [\App\Http\Controllers\Api\NotificationSettingsController::class, 'revokeWaiver']);
     // Practice staff team management — distinct from /providers (the staff
     // invite UI used to mistakenly POST there). plan.cap:staff enforces tier
     // limits independently from the providers cap.

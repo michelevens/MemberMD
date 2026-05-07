@@ -43,6 +43,8 @@ import { AppointmentTypesPanel } from "./AppointmentTypesPanel";
 import { PlatformSubscriptionSection } from "./PlatformSubscriptionSection";
 import { WebhooksPanel } from "./WebhooksPanel";
 import { FacilitiesPanel } from "./FacilitiesPanel";
+import { NotificationRegistryPanel } from "./NotificationRegistryPanel";
+import { PhiWaiversPanel } from "./PhiWaiversPanel";
 import { PhoneField, EmailField, NPIField, ZipField, AddressField } from "../shared/fields";
 
 // ─── Colors ──────────────────────────────────────────────────────────────────
@@ -1327,9 +1329,14 @@ export function PracticeSettings({ initialTab }: { initialTab?: string }) {
 
     return (
       <>
-        <SectionCard title="Practice Notifications">
+        {/* Registry-driven, backend-gated notification toggles. The
+            local-state cards below remain for the channel/timing
+            controls that haven't been moved into the registry yet. */}
+        <NotificationRegistryPanel />
+
+        <SectionCard title="Channel & timing defaults">
           <p className="text-xs mb-4" style={{ color: C.slate400 }}>
-            Configure what notifications the practice team receives.
+            Per-notification channel + timing defaults for the practice team. Toggling notifications on/off is now controlled by the registry above.
           </p>
           <div className="space-y-2">
             {practiceNotifs.map((n, i) => (
@@ -1517,6 +1524,12 @@ export function PracticeSettings({ initialTab }: { initialTab?: string }) {
 
     return (
       <>
+        {/* ePHI communication waiver tracking — patients without an
+            active waiver can't receive PHI-bearing notifications. */}
+        <SectionCard title="ePHI Communication Waivers">
+          <PhiWaiversPanel />
+        </SectionCard>
+
         <SectionCard title="HIPAA Compliance">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="flex items-center justify-between py-2">

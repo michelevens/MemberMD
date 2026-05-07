@@ -22,4 +22,9 @@ class MailDispatchLog extends Model
 
     public const STATUS_SENT = 'sent';
     public const STATUS_FAILED = 'failed';
+    // STATUS_SUPPRESSED = NotificationRegistry blocked the send
+    // (tenant disabled this key, or PHI consent missing). The
+    // error_message column carries the reason
+    // ('tenant_disabled' | 'phi_consent_missing').
+    public const STATUS_SUPPRESSED = 'suppressed';
 }
