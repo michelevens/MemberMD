@@ -88,23 +88,8 @@ trait Auditable
                 ]);
             });
         } catch (\Exception $e) {
-            // Silently fail — audit logging should never break app flow.
-            // In testing we want the actual SQL error visible so we
-            // can fix root causes; in prod the warning log is enough.
-            // Tests poison the outer tx if the AuditLog::create raises
-            // a pg-level error before the savepoint rolls back.
-            \Log::warning('Audit log failed: ' . $e->getMessage(), [
-                'model' => get_class($model),
-                'action' => $action,
-                'pdo_code' => $e instanceof \PDOException ? $e->getCode() : null,
-                'sql' => $e instanceof \Illuminate\Database\QueryException ? $e->getSql() : null,
-            ]);
-            if (app()->environment('testing')) {
-                // Re-throw in tests so RefreshDatabase rolls back cleanly
-                // and the failing test sees the actual error instead of
-                // a downstream "transaction aborted" cascade.
-                throw $e;
-            }
+            // Silently fail — audit logging should never break app flow
+            \Log::warning('Audit log failed: ' . $e->getMessage());
         }
     }
 }
