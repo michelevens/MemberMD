@@ -114,6 +114,36 @@ class AuthController extends Controller
             ]);
         }
 
+        // MFA enforcement — when the practice has enforce_mfa=true and
+        // the user is in a privileged role (admin/provider/staff), block
+        // login until they enroll. Patients are exempted; their threat
+        // model differs and forcing TOTP on every patient kills adoption.
+        // Superadmins are tenant-less so we check the user role only.
+        $privilegedRoles = ['superadmin', 'practice_admin', 'provider', 'staff'];
+        $tenantEnforcesMfa = $user->practice && $user->practice->enforce_mfa;
+        $userIsPrivileged = in_array($user->role, $privilegedRoles, true);
+        if ($userIsPrivileged && $tenantEnforcesMfa && !$user->mfa_enabled) {
+            // Issue a one-time enrollment token so the user can hit
+            // the MFA setup endpoints without a full login. Frontend
+            // should redirect to the enrollment page when it sees
+            // mfa_enrollment_required=true.
+            $enrollmentToken = $user->createToken(
+                'mfa-enrollment-required',
+                ['mfa-enroll'],
+                now()->addMinutes(15),
+            )->plainTextToken;
+
+            $this->logSecurityEvent('mfa_enrollment_required', $request, $user->tenant_id, $user->id);
+
+            return response()->json([
+                'data' => [
+                    'mfaEnrollmentRequired' => true,
+                    'enrollmentToken' => $enrollmentToken,
+                    'message' => 'Your practice requires two-factor authentication. Please complete enrollment to continue.',
+                ],
+            ]);
+        }
+
         $user->update(['last_login_at' => now()]);
 
         $token = $user->createToken('auth-token')->plainTextToken;

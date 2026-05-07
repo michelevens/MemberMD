@@ -28,7 +28,7 @@ interface AuthState {
 }
 
 interface AuthContextValue extends AuthState {
-  login: (credentials: LoginCredentials) => Promise<{ success: boolean; error?: string; mfaRequired?: boolean }>;
+  login: (credentials: LoginCredentials) => Promise<{ success: boolean; error?: string; mfaRequired?: boolean; mfaEnrollmentRequired?: boolean; enrollmentToken?: string }>;
   verifyMFA: (code: string) => Promise<{ success: boolean; error?: string }>;
   logout: () => void;
   updateUser: (user: Partial<User>) => void;
@@ -149,6 +149,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         mfaToken: result.data!.mfaToken || null,
       }));
       return { success: true, mfaRequired: true };
+    }
+
+    // Practice has enforce_mfa=true but the user hasn't enrolled yet.
+    // Backend issues an enrollment-scoped token; UI should redirect
+    // to the MFA setup screen with the message displayed.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    if ((result.data as any)?.mfaEnrollmentRequired) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const data = result.data as any;
+      setState(prev => ({ ...prev, isLoading: false }));
+      return {
+        success: false,
+        error: data.message ?? "Two-factor authentication is required. Please enroll to continue.",
+        mfaEnrollmentRequired: true,
+        enrollmentToken: data.enrollmentToken,
+      };
     }
 
     if (result.data) {

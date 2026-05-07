@@ -1746,7 +1746,10 @@ export const signatureRequestService = {
  */
 async function downloadAuthenticatedFile(path: string, filename: string): Promise<void> {
   const base = (typeof import.meta !== "undefined" ? (import.meta as { env?: { VITE_API_URL?: string } }).env?.VITE_API_URL : null) || "";
-  const token = localStorage.getItem("auth_token") ?? localStorage.getItem("token") ?? "";
+  // Same token key the rest of api.ts uses. The earlier
+  // localStorage fallbacks were never set, so authenticated downloads
+  // (signed-PDF, CSV exports) were hitting the API with no auth header.
+  const token = sessionStorage.getItem("membermd_token") ?? "";
   const res = await fetch(`${base}${path}`, {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
   });

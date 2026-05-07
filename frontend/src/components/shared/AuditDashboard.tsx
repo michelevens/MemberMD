@@ -160,7 +160,10 @@ export function AuditDashboard() {
     setExporting(type);
     try {
       const apiBase = (import.meta.env.VITE_API_URL || "/api").replace(/\/$/, "");
-      const token = localStorage.getItem("token");
+      // Auth token lives in sessionStorage:membermd_token (see lib/api.ts).
+      // Reading localStorage.token returned null → CSV export sent
+      // unauthenticated, hit 401, and silently failed.
+      const token = sessionStorage.getItem("membermd_token");
       const url = `${apiBase}/audit/export?type=${type}`;
       const res = await fetch(url, {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
