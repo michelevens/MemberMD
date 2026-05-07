@@ -129,33 +129,34 @@ class AuthControllerTest extends TestCase
             'password_confirmation' => 'Str0ngP@ssword!',
         ]);
 
+        // Register no longer auto-issues an access_token. New practices
+        // land in pending_approval state and only get a session after
+        // a superadmin activates them — see AuthController::register
+        // ("Pending-approval registrations DO NOT auto-login").
         $response->assertStatus(201)
             ->assertJsonStructure([
                 'data' => [
-                    'access_token',
-                    'token_type',
-                    'user' => [
-                        'id',
-                        'first_name',
-                        'last_name',
-                        'email',
-                        'role',
-                        'tenant_id',
-                    ],
+                    'status',
+                    'practice_id',
+                    'practice_name',
+                    'applicant_email',
                     'bootstrap_status',
                 ],
             ])
-            ->assertJsonPath('data.user.role', 'practice_admin')
-            ->assertJsonPath('data.user.first_name', 'Alice')
-            ->assertJsonPath('data.user.last_name', 'Smith');
+            ->assertJsonPath('data.status', 'pending_approval')
+            ->assertJsonPath('data.practice_name', 'My New Clinic')
+            ->assertJsonPath('data.applicant_email', 'alice@newclinic.com');
 
-        // Verify practice was created in the database
+        // Practice was created in the database (likely with
+        // subscription_status=pending or similar — only the row's
+        // existence is asserted here).
         $this->assertDatabaseHas('practices', [
             'name'        => 'My New Clinic',
             'owner_email' => 'alice@newclinic.com',
         ]);
 
-        // Verify user was created with correct role
+        // The applicant user row exists with practice_admin role even
+        // though they can't log in until activation.
         $this->assertDatabaseHas('users', [
             'email' => 'alice@newclinic.com',
             'role'  => 'practice_admin',

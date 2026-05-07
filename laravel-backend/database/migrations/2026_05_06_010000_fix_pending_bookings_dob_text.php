@@ -22,10 +22,20 @@ return new class extends Migration {
             return;
         }
 
-        // PostgreSQL needs USING when changing types if existing rows
-        // can't auto-cast. PendingBooking rows expire in ~30 min so
-        // any in-flight rows are safe to drop.
-        DB::statement("ALTER TABLE pending_bookings ALTER COLUMN date_of_birth TYPE TEXT USING date_of_birth::text");
+        $driver = Schema::getConnection()->getDriverName();
+
+        if ($driver === 'pgsql') {
+            // PostgreSQL: needs USING when changing from date → text
+            // because rows can't auto-cast. PendingBooking rows expire
+            // in ~30 min so any in-flight rows are safe to drop.
+            DB::statement("ALTER TABLE pending_bookings ALTER COLUMN date_of_birth TYPE TEXT USING date_of_birth::text");
+            return;
+        }
+
+        // SQLite (used in test runs locally) has dynamic typing — a
+        // date column already accepts arbitrary text, so the encrypted
+        // ciphertext writes work without an ALTER. No-op is correct.
+        // If we add MySQL one day this branch needs an explicit MODIFY.
     }
 
     public function down(): void
