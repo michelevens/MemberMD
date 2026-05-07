@@ -12,6 +12,7 @@ import { dashboardService, membershipPlanService, messageService, patientService
 import { formatDob, formatRelative } from "../../lib/format";
 import { PortalShell, type NavSection as ShellNavSection, type PortalColor } from "../shared/PortalShell";
 import { MobileTodayScreen } from "../practice/MobileTodayScreen";
+import { TrialBanner } from "../practice/TrialBanner";
 import { MobileSheet } from "../shared/MobileSheet";
 import { PhoneField, FaxField, EmailField, NPIField, ZipField, AddressField } from "../shared/fields";
 import { useConfirm } from "../shared/ConfirmDialog";
@@ -10430,6 +10431,12 @@ export function PracticePortal() {
         messagesUnreadCount={unreadCount}
         onOpenSettings={() => goToTab("settings")}
       >
+        {/* Trial banner — shown on every tab while practice is in
+            trial. Tapping "Upgrade Now" jumps to the platform
+            subscription tab inside Practice Settings. */}
+        <TrialBanner
+          onUpgrade={() => navigate("/practice/settings?tab=subscription")}
+        />
         {dataLoading && (
           <div className="h-0.5 w-full overflow-hidden mb-4 -mt-2 bg-slate-100">
             <div className="h-full animate-pulse" style={{ backgroundColor: "#635bff", width: "40%", animationDuration: "1s" }} />
