@@ -28,7 +28,7 @@ import {
 interface PatientSearchResult {
   id: string;
   name: string;
-  email?: string;
+  email?: string | null;
   planName?: string;
 }
 
@@ -132,6 +132,7 @@ export function ActivityLoggerTab() {
   const [patientResults, setPatientResults] = useState<PatientSearchResult[]>([]);
   const [selectedPatient, setSelectedPatient] = useState<PatientSearchResult | null>(null);
   const [showPatientDropdown, setShowPatientDropdown] = useState(false);
+  const [searchingPatients, setSearchingPatients] = useState(false);
   const [activityType, setActivityType] = useState("");
   const [duration, setDuration] = useState("");
   const [notes, setNotes] = useState("");
@@ -218,17 +219,35 @@ export function ActivityLoggerTab() {
   const searchPatients = useCallback(async (query: string) => {
     if (query.length < 2) {
       setPatientResults([]);
+      setSearchingPatients(false);
       return;
     }
+    setSearchingPatients(true);
     const res = await apiFetch<unknown>(`/patients?search=${encodeURIComponent(query)}`);
+    setSearchingPatients(false);
     if (!res.error && res.data) {
+      // /patients returns Laravel paginator: { data: [...], current_page, ... }
+      // which apiFetch unwraps to res.data = the paginator wrapper. The actual
+      // list lives at res.data.data (or res.data when the response is already
+      // a flat array).
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const list = Array.isArray(res.data) ? res.data : (res.data as any)?.data || [];
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      setPatientResults(list.map((p: any) => ({
-        id: p.id,
-        name: `${p.firstName || p.first_name || ""} ${p.lastName || p.last_name || ""}`.trim(),
-      })));
+      setPatientResults(list.map((p: any) => {
+        // Patient.fullName fallback for rows where first/last didn't
+        // round-trip cleanly.
+        const first = p.firstName || p.first_name || "";
+        const last = p.lastName || p.last_name || "";
+        const name = `${first} ${last}`.trim() || p.name || p.fullName || "Unnamed patient";
+        return {
+          id: p.id,
+          name,
+          email: p.email ?? null,
+          planName: p.activeMembership?.plan?.name ?? p.plan ?? undefined,
+        };
+      }));
+    } else {
+      setPatientResults([]);
     }
   }, []);
 
@@ -419,7 +438,8 @@ export function ActivityLoggerTab() {
                   setPatientSearch(e.target.value);
                   if (selectedPatient) setSelectedPatient(null);
                 }}
-                placeholder="Search patient..."
+                onFocus={() => setShowPatientDropdown(true)}
+                placeholder="Type 2+ chars to search by name or email"
                 className="w-full pl-9 pr-8 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
               />
               {selectedPatient && (
@@ -428,20 +448,39 @@ export function ActivityLoggerTab() {
                 </button>
               )}
             </div>
-            {showPatientDropdown && patientResults.length > 0 && !selectedPatient && (
+            {/* Dropdown — renders searching, no-results, or hits.
+                Hidden once a patient is selected so the chip-style
+                cleared input doesn't keep popping it open. */}
+            {showPatientDropdown && !selectedPatient && patientSearch.length >= 2 && (
               <div className="absolute z-10 w-full mt-1 bg-white border border-slate-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
-                {patientResults.map((p) => (
-                  <button
-                    key={p.id}
-                    onClick={() => selectPatient(p)}
-                    className="w-full text-left px-3 py-2 hover:bg-slate-50 text-sm"
-                  >
-                    <span className="font-medium text-slate-800">{p.name}</span>
-                    {p.planName && (
-                      <span className="ml-2 text-xs text-slate-400">{p.planName}</span>
-                    )}
-                  </button>
-                ))}
+                {searchingPatients ? (
+                  <div className="px-3 py-2 text-sm text-slate-400">Searching…</div>
+                ) : patientResults.length === 0 ? (
+                  <div className="px-3 py-2 text-sm text-slate-400">
+                    No patients match "{patientSearch}".
+                  </div>
+                ) : (
+                  patientResults.map((p) => (
+                    <button
+                      key={p.id}
+                      onClick={() => selectPatient(p)}
+                      className="w-full text-left px-3 py-2 hover:bg-slate-50 text-sm"
+                    >
+                      <span className="font-medium text-slate-800">{p.name}</span>
+                      {p.email && (
+                        <span className="ml-2 text-xs text-slate-400">{p.email}</span>
+                      )}
+                      {p.planName && (
+                        <span className="ml-2 text-xs text-slate-400">{p.planName}</span>
+                      )}
+                    </button>
+                  ))
+                )}
+              </div>
+            )}
+            {showPatientDropdown && !selectedPatient && patientSearch.length > 0 && patientSearch.length < 2 && (
+              <div className="absolute z-10 w-full mt-1 bg-white border border-slate-200 rounded-lg shadow-lg">
+                <div className="px-3 py-2 text-sm text-slate-400">Type at least 2 characters…</div>
               </div>
             )}
           </div>

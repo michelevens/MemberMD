@@ -48,7 +48,7 @@ class ActivityLogController extends Controller
 
         $validated = $request->validate([
             'patient_id' => 'required|uuid|exists:patients,id',
-            'activity_type' => 'required|string|in:phone_call,text_message,after_hours_call,home_visit,care_coordination,referral_call,education,medication_dispensed,other',
+            'activity_type' => 'required|string|in:phone_call,text_message,after_hours_call,home_visit,care_coordination,referral_call,education,medication_dispensed,ccm_time,rpm_review,other',
             'duration_minutes' => 'nullable|integer|min:0',
             'notes' => 'nullable|string|max:2000',
             'entitlement_code' => 'nullable|string|max:100',
@@ -83,6 +83,11 @@ class ActivityLogController extends Controller
             'care_coordination' => 'care_coordination',
             'education' => 'education',
             'medication_dispensed' => 'medication_dispensed',
+            // CCM/RPM time. The frontend offers these in the activity-type
+            // dropdown alongside the timer; if we don't map them here the
+            // form posts a 422 silently.
+            'ccm_time' => 'ccm_time',
+            'rpm_review' => 'rpm_review',
             'other' => 'other',
         ];
 
