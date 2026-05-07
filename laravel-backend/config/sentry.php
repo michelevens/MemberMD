@@ -42,24 +42,14 @@ return [
     // hotspot. Same quota cost as tracing.
     'profiles_sample_rate' => env('SENTRY_PROFILES_SAMPLE_RATE') === null ? null : (float) env('SENTRY_PROFILES_SAMPLE_RATE'),
 
-    // Last-line PHI scrubber + tenant tagger. Runs on every event
-    // before send. See SentryScrubber for the rules. Even with
-    // send_default_pii=false (below), exception messages can carry
-    // patient names from upstream code — this catches that.
-    'before_send' => static function (\Sentry\Event $event, ?\Sentry\EventHint $hint): ?\Sentry\Event {
-        // App container may not be ready in the deepest CLI / boot
-        // failure paths. Fall through gracefully.
-        try {
-            return app(\App\Services\SentryScrubber::class)($event, $hint);
-        } catch (\Throwable $e) {
-            // Better to send the unscrubbed event (free-tier-only,
-            // no patients yet) than to lose a real bug report.
-            // Once we have paying customers this should be a hard
-            // error and we'd rather drop than leak — flip to:
-            //   return null;
-            return $event;
-        }
-    },
+    // before_send PHI scrubber is registered at runtime in
+    // AppServiceProvider::boot() — NOT here. Closures can't be
+    // serialized by `php artisan config:cache` (Railway runs that on
+    // every deploy and the build fails otherwise), and Sentry's
+    // options-resolver rejects `null` for this key. Easiest answer is
+    // to omit the key entirely; the SDK treats absence as "no
+    // before_send" and we then attach one via the runtime path.
+    // See App\Services\SentryScrubber for the actual scrub rules.
 
     // Only continue incoming traces when the organization IDs are compatible with this SDK instance.
     'strict_trace_continuation' => env('SENTRY_STRICT_TRACE_CONTINUATION', false),

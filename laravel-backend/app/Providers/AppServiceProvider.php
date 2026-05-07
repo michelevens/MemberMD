@@ -38,6 +38,33 @@ class AppServiceProvider extends ServiceProvider
         LabOrder::observe(LabOrderObserver::class);
         DispenseRecord::observe(DispenseRecordObserver::class);
 
+        // Sentry before_send PHI scrubber. Registered at runtime instead
+        // of in config/sentry.php because closures can't be serialized
+        // by `php artisan config:cache` (Railway runs that on every
+        // deploy, fails the build otherwise). Wires the scrubber onto
+        // the active Sentry client when one exists. No-op when Sentry
+        // isn't bound (local dev, tests, missing DSN).
+        try {
+            $client = \Sentry\SentrySdk::getCurrentHub()->getClient();
+            if ($client !== null) {
+                $client->getOptions()->setBeforeSendCallback(
+                    static function (\Sentry\Event $event, ?\Sentry\EventHint $hint = null): ?\Sentry\Event {
+                        try {
+                            return app(\App\Services\SentryScrubber::class)($event, $hint);
+                        } catch (\Throwable) {
+                            // Better to send the unscrubbed event than
+                            // lose a real bug report. Flip to `return null`
+                            // once we have paying customers and dropping
+                            // beats leaking.
+                            return $event;
+                        }
+                    }
+                );
+            }
+        } catch (\Throwable) {
+            // Sentry SDK not loaded yet / not configured — silent no-op.
+        }
+
         // Lifecycle → outbound webhooks bridge. Every membership state
         // transition fires MembershipStateChanged; the listener fans it
         // out to any practice-registered webhook endpoint subscribed to
