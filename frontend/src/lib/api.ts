@@ -1996,6 +1996,11 @@ export interface AdHocChargeRow {
   notes: string | null;
   line_items: Array<{ description: string; amount_cents: number }>;
   amount_cents: number;
+  // Patient credit consumed against this charge (0 when no credit was
+  // applied or apply_credit=false). amount_due_cents = what actually
+  // hit Stripe Checkout (gross - credit_applied).
+  credit_applied_cents?: number;
+  amount_due_cents?: number | null;
   currency: string;
   status: "draft" | "sent" | "paid" | "cancelled" | "expired";
   sent_at: string | null;
@@ -2019,7 +2024,10 @@ export const adHocChargeService = {
     lineItems: Array<{ description: string; amountCents: number }>;
     notes?: string;
     sendEmail?: boolean;
-  }): Promise<ApiResponse<{ charge: AdHocChargeRow; checkout_url: string }>> => {
+    // Default true server-side. Pass false to bill the patient the full
+    // amount even when they have an available credit balance.
+    applyCredit?: boolean;
+  }): Promise<ApiResponse<{ charge: AdHocChargeRow; checkout_url: string | null; fully_covered_by_credit?: boolean }>> => {
     if (useMockData()) return { data: { charge: {} as AdHocChargeRow, checkout_url: "#" } };
     return apiFetch(`/ad-hoc-charges`, {
       method: "POST",
@@ -2035,6 +2043,7 @@ export const adHocChargeService = {
         })),
         notes: data.notes,
         send_email: data.sendEmail ?? true,
+        apply_credit: data.applyCredit ?? true,
       }),
     });
   },
@@ -2045,6 +2054,84 @@ export const adHocChargeService = {
   resend: async (id: string): Promise<ApiResponse<{ charge: AdHocChargeRow; checkout_url: string }>> => {
     if (useMockData()) return { data: { charge: {} as AdHocChargeRow, checkout_url: "#" } };
     return apiFetch(`/ad-hoc-charges/${id}/resend`, { method: "POST" });
+  },
+};
+
+// ─── Patient credits (account balance) ────────────────────────────────────
+//
+// Per-patient credit ledger — distinct from membership_credits. Applies
+// against ad-hoc charges before Stripe Checkout. See PatientCreditService
+// docblock on the backend.
+
+export interface PatientCreditApplication {
+  id: string;
+  amount_applied_cents: number;
+  target_type: string;
+  target_id: string;
+  applied_at: string | null;
+}
+
+export interface PatientCreditRow {
+  id: string;
+  amount_cents: number;
+  balance_cents: number;
+  currency: string;
+  source: "manual" | "refund" | "goodwill" | "overpayment";
+  notes: string | null;
+  expires_at: string | null;
+  voided_at: string | null;
+  void_reason?: string | null;
+  voided_by_user_id?: string | null;
+  created_by_user_id?: string | null;
+  created_at: string | null;
+  applications: PatientCreditApplication[];
+}
+
+export interface PatientCreditSummary {
+  balance_cents: number;
+  currency: string;
+  credits: PatientCreditRow[];
+}
+
+export const patientCreditService = {
+  // Practice-side — list a specific patient's credits + summary balance.
+  list: async (patientId: string): Promise<ApiResponse<PatientCreditSummary>> => {
+    if (useMockData()) return { data: { balance_cents: 0, currency: "usd", credits: [] } };
+    return apiFetch<PatientCreditSummary>(`/practice/patients/${patientId}/credits`);
+  },
+  // Practice-side — issue a new credit. Cents-based to match the rest
+  // of the money columns. expires_at is YYYY-MM-DD or null.
+  issue: async (
+    patientId: string,
+    data: { amountCents: number; source?: string; notes?: string; expiresAt?: string | null },
+  ): Promise<ApiResponse<PatientCreditRow> & { balance_cents?: number }> => {
+    if (useMockData()) return { data: {} as PatientCreditRow };
+    return apiFetch(`/practice/patients/${patientId}/credits`, {
+      method: "POST",
+      body: JSON.stringify({
+        amount_cents: data.amountCents,
+        source: data.source,
+        notes: data.notes,
+        expires_at: data.expiresAt,
+      }),
+    });
+  },
+  // Practice-side — void a credit. Reason is required.
+  void: async (
+    patientId: string,
+    creditId: string,
+    reason: string,
+  ): Promise<ApiResponse<PatientCreditRow> & { balance_cents?: number }> => {
+    if (useMockData()) return { data: {} as PatientCreditRow };
+    return apiFetch(`/practice/patients/${patientId}/credits/${creditId}/void`, {
+      method: "POST",
+      body: JSON.stringify({ reason }),
+    });
+  },
+  // Patient-side — self balance + history (excludes voided).
+  mine: async (): Promise<ApiResponse<PatientCreditSummary>> => {
+    if (useMockData()) return { data: { balance_cents: 0, currency: "usd", credits: [] } };
+    return apiFetch<PatientCreditSummary>(`/me/credits`);
   },
 };
 

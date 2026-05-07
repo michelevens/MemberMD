@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { membershipService, patientBillingService, apiFetch, adHocChargeService } from "../../lib/api";
 import type { AdHocChargeRow } from "../../lib/api";
+import { PatientCreditsPanel } from "../practice/PatientCreditsPanel";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Toast = (msg: { message: string; type: "success" | "error" }) => void;
@@ -248,6 +249,11 @@ export function PatientBillingTab({
           </div>
         )}
       </div>
+
+      {/* ── Account credits section ──────────────────────────────────
+          Patient-level credit balance. Auto-applies against ad-hoc
+          charges before they go to Stripe. */}
+      <PatientCreditsPanel patientId={patientId} patientName={patientName} setToast={setToast} />
 
       {/* ── Ad-hoc charges section ──────────────────────────────────── */}
       {/* Surfaces every charge regardless of status — paid charges
@@ -763,6 +769,9 @@ function AdHocChargesSection({
                 <div className="text-xs text-slate-500">
                   {items} item{items === 1 ? "" : "s"} · {new Date(c.created_at).toLocaleDateString()}
                   {c.paid_at && <> · paid {new Date(c.paid_at).toLocaleDateString()}</>}
+                  {(c.credit_applied_cents ?? 0) > 0 && (
+                    <> · <span style={{ color: "#147d64", fontWeight: 600 }}>credit ${((c.credit_applied_cents ?? 0) / 100).toFixed(2)} applied</span></>
+                  )}
                 </div>
               </div>
               <span

@@ -22,7 +22,9 @@ import {
   entitlementService,
   clinicalSettingsService,
   apiFetch,
+  patientCreditService,
 } from "../../../lib/api";
+import type { PatientCreditSummary } from "../../../lib/api";
 import { formatDate, formatCurrency } from "../../../lib/format";
 import { MyAgreementsSection } from "./MyAgreementsSection";
 import { FamilyMembersSection } from "./FamilyMembersSection";
@@ -80,6 +82,10 @@ export function BillingTab() {
   // checkout link — we surface unpaid ones prominently so the
   // patient doesn't have to dig through email.
   const [adHocCharges, setAdHocCharges] = useState<AdHocChargeRow[]>([]);
+  // Patient-level credit balance + history. Independent of membership —
+  // a never-member could still hold a refund-as-credit if they paid for
+  // a one-time charge that got reversed.
+  const [creditSummary, setCreditSummary] = useState<PatientCreditSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -125,29 +131,42 @@ export function BillingTab() {
         setMembership(m);
 
         if (m?.id) {
-          const [er, ir, ahr] = await Promise.all([
+          const [er, ir, ahr, cr] = await Promise.all([
             entitlementService.listForMembership(m.id),
             invoiceService.list(),
             // Ad-hoc charges live independently of memberships, so we
             // fetch them whether or not there's an active plan. Caller
             // is auth'd as patient; backend scopes by user.id → patient.
             apiFetch<AdHocChargeRow[]>("/me/ad-hoc-charges"),
+            // Account credit balance — patient-level, independent of
+            // membership. Quietly returns empty when patient has none.
+            patientCreditService.mine().catch(() => ({ data: null })),
           ]);
           if (cancelled) return;
           setEntitlements(unwrap<PatientEntitlement>(er.data));
           setInvoices(unwrap<Invoice>(ir.data));
           setAdHocCharges(Array.isArray(ahr.data) ? ahr.data : []);
+          setCreditSummary(cr?.data ?? null);
         } else {
           setEntitlements([]);
           setInvoices([]);
           // Even without a membership, a patient might owe an ad-hoc
-          // charge (e.g. self-pay one-off visit before they enroll).
-          // Fetch independently of m?.id check.
+          // charge (e.g. self-pay one-off visit before they enroll) or
+          // hold a refund-as-credit. Fetch independently of m?.id check.
           try {
-            const ahr = await apiFetch<AdHocChargeRow[]>("/me/ad-hoc-charges");
-            if (!cancelled) setAdHocCharges(Array.isArray(ahr.data) ? ahr.data : []);
+            const [ahr, cr] = await Promise.all([
+              apiFetch<AdHocChargeRow[]>("/me/ad-hoc-charges"),
+              patientCreditService.mine().catch(() => ({ data: null })),
+            ]);
+            if (!cancelled) {
+              setAdHocCharges(Array.isArray(ahr.data) ? ahr.data : []);
+              setCreditSummary(cr?.data ?? null);
+            }
           } catch {
-            if (!cancelled) setAdHocCharges([]);
+            if (!cancelled) {
+              setAdHocCharges([]);
+              setCreditSummary(null);
+            }
           }
         }
       } catch (e) {
@@ -404,6 +423,49 @@ export function BillingTab() {
           Same component as the standalone Family Members tab — drops
           its own card chrome to nest inside this section.  */}
       <FamilyMembersSection variant="card" />
+
+      {/* ── Account credit balance ──────────────────────────────────────────
+          Surfaces credit issued by the practice (refunds-as-credit,
+          goodwill, overpayments). Auto-applies against the next ad-hoc
+          charge before it goes to Stripe — patient sees this reflected
+          in the charge row when it does. */}
+      {creditSummary && creditSummary.balance_cents > 0 && (
+        <div
+          className="rounded-2xl p-5 border"
+          style={{ backgroundColor: C.teal50, borderColor: "#a7f3d0" }}
+        >
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4" style={{ color: C.teal600 }} />
+              <h3 className="text-sm font-semibold" style={{ color: C.teal600 }}>
+                Account credit
+              </h3>
+            </div>
+            <span className="text-lg font-bold" style={{ color: C.teal600 }}>
+              {formatCurrency(creditSummary.balance_cents / 100)}
+            </span>
+          </div>
+          <p className="text-xs" style={{ color: C.slate600 }}>
+            This balance is automatically applied toward your next charge from the practice.
+          </p>
+          {creditSummary.credits.filter((c) => c.balance_cents > 0).length > 0 && (
+            <ul className="mt-3 space-y-1.5">
+              {creditSummary.credits
+                .filter((c) => c.balance_cents > 0)
+                .slice(0, 3)
+                .map((c) => (
+                  <li key={c.id} className="text-xs" style={{ color: C.slate600 }}>
+                    · {formatCurrency(c.balance_cents / 100)} available
+                    {c.notes && <> · <span style={{ color: C.slate500 }}>{c.notes}</span></>}
+                    {c.expires_at && (
+                      <> · <span style={{ color: C.amber500 }}>expires {formatDate(c.expires_at)}</span></>
+                    )}
+                  </li>
+                ))}
+            </ul>
+          )}
+        </div>
+      )}
 
       {/* ── Open ad-hoc charges ──────────────────────────────────────────── */}
       {/* Surfaces practice-issued one-time bills (forms, after-hours

@@ -7,6 +7,7 @@ use App\Mail\AdHocChargeRequest;
 use App\Models\AdHocCharge;
 use App\Models\Patient;
 use App\Models\Practice;
+use App\Services\PatientCreditService;
 use App\Services\StripeSubscriptionService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -34,6 +35,7 @@ class AdHocChargeController extends Controller
 {
     public function __construct(
         private readonly StripeSubscriptionService $subscriptions,
+        private readonly PatientCreditService $credits,
     ) {}
 
     public function index(Request $request): JsonResponse
@@ -100,6 +102,11 @@ class AdHocChargeController extends Controller
             'notes' => 'nullable|string|max:2000',
             'send_email' => 'sometimes|boolean',
             'currency' => 'sometimes|string|size:3',
+            // Whether to apply available patient credit balance toward this
+            // charge before going to Stripe. Default true — staff would have
+            // to deliberately uncheck "use credit" to charge a patient who
+            // has a balance, which is the right safety default.
+            'apply_credit' => 'sometimes|boolean',
         ]);
 
         $patient = Patient::where('tenant_id', $user->tenant_id)
@@ -112,11 +119,6 @@ class AdHocChargeController extends Controller
         $practice = Practice::find($user->tenant_id);
         if (!$practice) {
             return response()->json(['message' => 'Practice not found.'], 404);
-        }
-        if (!$practice->canAcceptPayments()) {
-            return response()->json([
-                'message' => 'Practice is not yet set up to accept payments. Connect Stripe in Settings → Billing first.',
-            ], 503);
         }
         if (!$patient->email) {
             return response()->json([
@@ -138,11 +140,12 @@ class AdHocChargeController extends Controller
         }
 
         $sendEmail = $validated['send_email'] ?? true;
+        $applyCredit = $validated['apply_credit'] ?? true;
         $currency = $validated['currency'] ?? 'usd';
 
-        // Create the row first so we have a stable id for the Stripe
-        // idempotency key + metadata. If the Stripe call fails we'll
-        // mark this as cancelled below — we never leave the practice
+        // Create the row first so we have a stable id for the credit
+        // applications + Stripe metadata. If anything downstream fails
+        // we'll mark cancelled below — we never leave the practice
         // staring at a half-created row.
         $charge = AdHocCharge::create([
             'tenant_id' => $practice->id,
@@ -150,12 +153,75 @@ class AdHocChargeController extends Controller
             'created_by_user_id' => $user->id,
             'line_items' => $validated['line_items'],
             'amount_cents' => $total,
+            'credit_applied_cents' => 0,
+            'amount_due_cents' => $total,
             'currency' => $currency,
             'description' => $validated['description'],
             'notes' => $validated['notes'] ?? null,
             'status' => AdHocCharge::STATUS_DRAFT,
             'expires_at' => now()->addHours(24),
         ]);
+
+        // Consume patient credit BEFORE going to Stripe. Recording
+        // applications against the freshly-created row gives us a
+        // stable target_id for the ledger. If Stripe later fails the
+        // catch block reverses these so credits don't get stranded.
+        $appliedCents = 0;
+        if ($applyCredit) {
+            $result = $this->credits->applyToAdHocCharge($charge, $user->id);
+            $appliedCents = (int) $result['applied_cents'];
+            if ($appliedCents > 0) {
+                $charge->update([
+                    'credit_applied_cents' => $appliedCents,
+                    'amount_due_cents' => max(0, $total - $appliedCents),
+                ]);
+                $charge->refresh();
+            }
+        }
+
+        // If credit covers the whole bill, skip Stripe entirely. The
+        // patient owes nothing externally; we mark paid + email a
+        // "your balance was applied" receipt-style confirmation.
+        if ($appliedCents >= $total) {
+            $charge->update([
+                'status' => AdHocCharge::STATUS_PAID,
+                'paid_at' => now(),
+                'sent_at' => now(),
+                'amount_due_cents' => 0,
+            ]);
+
+            return response()->json([
+                'data' => [
+                    'charge' => $charge->fresh()->load('patient:id,first_name,last_name,email'),
+                    'checkout_url' => null,
+                    'fully_covered_by_credit' => true,
+                ],
+            ], 201);
+        }
+
+        // Past this point we need a Stripe Checkout session — verify
+        // the practice can actually receive payments. Done here (not
+        // earlier) so a fully-credited charge still works on a practice
+        // that hasn't connected Stripe yet (e.g., goodwill credit).
+        if (!$practice->canAcceptPayments()) {
+            // Roll back any credit we just applied — the charge can't
+            // proceed without Stripe, so we shouldn't strand the funds.
+            if ($appliedCents > 0) {
+                $this->credits->reverseApplications(
+                    \App\Models\PatientCreditApplication::TARGET_AD_HOC_CHARGE,
+                    $charge->id,
+                );
+            }
+            $charge->update([
+                'status' => AdHocCharge::STATUS_CANCELLED,
+                'cancelled_at' => now(),
+            ]);
+            return response()->json([
+                'message' => 'Practice is not yet set up to accept payments. Connect Stripe in Settings → Billing first.',
+            ], 503);
+        }
+
+        $remainingDue = $total - $appliedCents;
 
         try {
             $appBase = config('app.frontend_url') ?: rtrim(config('app.url'), '/');
@@ -165,9 +231,11 @@ class AdHocChargeController extends Controller
             $session = $this->subscriptions->createOneTimeCheckoutSession(
                 practice: $practice,
                 idempotencyKey: $charge->id,
-                amountCents: $total,
+                amountCents: $remainingDue,
                 currency: $currency,
-                productName: $validated['description'],
+                productName: $validated['description'] . ($appliedCents > 0
+                    ? ' (after $' . number_format($appliedCents / 100, 2) . ' credit applied)'
+                    : ''),
                 productDescription: "Payment requested by {$practice->name}",
                 customerEmail: $patient->email,
                 successUrl: $successUrl,
@@ -176,6 +244,7 @@ class AdHocChargeController extends Controller
                     'ad_hoc_charge_id' => $charge->id,
                     'tenant_id' => $practice->id,
                     'patient_id' => $patient->id,
+                    'credit_applied_cents' => $appliedCents,
                 ],
             );
 
@@ -212,8 +281,22 @@ class AdHocChargeController extends Controller
                 ],
             ], 201);
         } catch (Throwable $e) {
-            // Stripe failed — mark the charge cancelled so the row
-            // doesn't pretend to be a real bill.
+            // Stripe failed — reverse any credits we applied so they
+            // aren't stranded on a phantom charge, then mark the row
+            // cancelled so it doesn't pretend to be a real bill.
+            if ($appliedCents > 0) {
+                try {
+                    $this->credits->reverseApplications(
+                        \App\Models\PatientCreditApplication::TARGET_AD_HOC_CHARGE,
+                        $charge->id,
+                    );
+                } catch (Throwable $reverseEx) {
+                    Log::error('Failed to reverse credit applications after Stripe failure', [
+                        'charge_id' => $charge->id,
+                        'error' => $reverseEx->getMessage(),
+                    ]);
+                }
+            }
             $charge->update([
                 'status' => AdHocCharge::STATUS_CANCELLED,
                 'cancelled_at' => now(),
@@ -252,6 +335,27 @@ class AdHocChargeController extends Controller
                 'status' => AdHocCharge::STATUS_CANCELLED,
                 'cancelled_at' => now(),
             ]);
+
+            // Reverse any credit applications so the funds return to
+            // the patient's available balance instead of getting
+            // stranded on a cancelled charge.
+            if ((int) $charge->credit_applied_cents > 0) {
+                try {
+                    $this->credits->reverseApplications(
+                        \App\Models\PatientCreditApplication::TARGET_AD_HOC_CHARGE,
+                        $charge->id,
+                    );
+                    $charge->update([
+                        'credit_applied_cents' => 0,
+                        'amount_due_cents' => $charge->amount_cents,
+                    ]);
+                } catch (Throwable $e) {
+                    Log::warning('Failed to reverse credit applications on cancel', [
+                        'charge_id' => $charge->id,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+            }
 
             // Best-effort: try to expire the Stripe session so the
             // patient can't pay after we cancelled. Stripe doesn't

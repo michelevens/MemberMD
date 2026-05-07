@@ -30,7 +30,7 @@ class AdHocCharge extends Model
 
     protected $fillable = [
         'tenant_id', 'patient_id', 'created_by_user_id',
-        'line_items', 'amount_cents', 'currency',
+        'line_items', 'amount_cents', 'credit_applied_cents', 'amount_due_cents', 'currency',
         'description', 'notes',
         'status',
         'stripe_session_id', 'stripe_payment_intent_id',
@@ -42,6 +42,8 @@ class AdHocCharge extends Model
         // Validated at the controller layer.
         'line_items' => 'array',
         'amount_cents' => 'integer',
+        'credit_applied_cents' => 'integer',
+        'amount_due_cents' => 'integer',
         'sent_at' => 'datetime',
         'paid_at' => 'datetime',
         'cancelled_at' => 'datetime',

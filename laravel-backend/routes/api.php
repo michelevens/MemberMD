@@ -613,6 +613,13 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
     // from the admin-facing /ad-hoc-charges (assertCanManage gate).
     Route::get('/me/ad-hoc-charges', [\App\Http\Controllers\Api\AdHocChargeController::class, 'myCharges']);
 
+    // ===== Patient credits (account balance, refund-as-credit, goodwill) =====
+    Route::get('/practice/patients/{patientId}/credits', [\App\Http\Controllers\Api\PatientCreditController::class, 'indexForPatient']);
+    Route::post('/practice/patients/{patientId}/credits', [\App\Http\Controllers\Api\PatientCreditController::class, 'store']);
+    Route::post('/practice/patients/{patientId}/credits/{creditId}/void', [\App\Http\Controllers\Api\PatientCreditController::class, 'void']);
+    // Patient-side balance + history. Self-only — derives patient from auth user.
+    Route::get('/me/credits', [\App\Http\Controllers\Api\PatientCreditController::class, 'indexForSelf']);
+
     // ===== Notifications =====
     Route::get('/notifications/preferences', [NotificationController::class, 'getPreferences']);
     Route::put('/notifications/preferences', [NotificationController::class, 'updatePreferences']);
