@@ -121,6 +121,11 @@ const OperatorPortal = namedLazy(
   "OperatorPortal"
 );
 
+const EmployerPortal = namedLazy(
+  () => import("./components/portals/EmployerPortal"),
+  "EmployerPortal"
+);
+
 const PracticeRegistration = namedLazy(
   () => import("./components/auth/PracticeRegistration"),
   "PracticeRegistration"
@@ -250,6 +255,7 @@ function AuthGate() {
         <Route path="/operator/*" element={<OperatorPortal />} />
         <Route path="/practice/*" element={<PracticePortal />} />
         <Route path="/patient/*" element={<PatientPortal />} />
+        <Route path="/employer/*" element={<EmployerPortal />} />
         <Route path="/telehealth/:sessionId" element={<TelehealthRoom />} />
         <Route path="/enrollment/success" element={<EnrollmentSuccessWidget />} />
         <Route path="/enrollment/cancelled" element={<EnrollmentCancelledWidget />} />
@@ -271,6 +277,8 @@ function getPortalPath(role?: string): string {
       return "/practice";
     case "patient":
       return "/patient";
+    case "employer_admin":
+      return "/employer";
     default:
       return "/login";
   }

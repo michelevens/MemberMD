@@ -2208,6 +2208,66 @@ export const employerEligibleEmailService = {
   },
 };
 
+// ─── Employer portal (HR-side, role=employer_admin) ──────────────────────
+
+export interface EmployerDashboard {
+  employer_name: string;
+  enrolled_count: number;
+  employee_count_cap: number | null;
+  active_contracts: number;
+  outstanding_invoices_count: number;
+  outstanding_invoices_total: number;
+}
+
+export interface EmployerEmployeeRow {
+  id: string;
+  first_name: string;
+  last_name: string;
+  email: string | null;
+  created_at: string;
+  is_active: boolean;
+  active_membership?: {
+    id: string;
+    plan_id: string;
+    status: string;
+    started_at: string;
+    plan?: { id: string; name: string };
+  } | null;
+}
+
+export interface EmployerInvoiceRow {
+  id: string;
+  invoice_number: string;
+  period_start: string;
+  period_end: string;
+  enrolled_count: number;
+  pepm_rate: number;
+  subtotal: number;
+  adjustments: number;
+  total: number;
+  status: "draft" | "sent" | "paid" | "overdue" | "void";
+  due_date: string;
+  paid_at: string | null;
+  created_at: string;
+}
+
+export const employerPortalService = {
+  dashboard: async (): Promise<ApiResponse<EmployerDashboard>> => {
+    if (useMockData()) return { data: {} as EmployerDashboard };
+    return apiFetch<EmployerDashboard>("/employer-portal/dashboard");
+  },
+  employees: async (): Promise<ApiResponse<{ data: EmployerEmployeeRow[] }>> => {
+    if (useMockData()) return { data: { data: [] } };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return apiFetch<any>("/employer-portal/employees");
+  },
+  invoices: async (): Promise<ApiResponse<{ data: EmployerInvoiceRow[] }>> => {
+    if (useMockData()) return { data: { data: [] } };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return apiFetch<any>("/employer-portal/invoices");
+  },
+};
+
 // ─── Stalled enrollments (recovery / rescue queue) ────────────────────────
 //
 // Patients who started enrollment but didn't complete payment. Surfaces

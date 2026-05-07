@@ -981,6 +981,10 @@ class AuthController extends Controller
             'last_login_at' => $user->last_login_at,
             'patient_id' => $patientId,
             'provider_id' => $providerId,
+            // employer_id is only meaningful for role=employer_admin — those
+            // users represent an HR contact at a sponsoring employer and
+            // need this to load their employer-scoped portal.
+            'employer_id' => $user->role === 'employer_admin' ? $user->employer_id : null,
             'practice' => $practice ? [
                 'id' => $practice->id,
                 'name' => $practice->name,

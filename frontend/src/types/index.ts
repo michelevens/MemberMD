@@ -35,7 +35,8 @@ export type UserRole =
   | "practice_admin"
   | "provider"
   | "staff"
-  | "patient";
+  | "patient"
+  | "employer_admin";
 
 // ─── Operator membership ──────────────────────────────────────────────────────
 
@@ -73,6 +74,9 @@ export interface User {
    *  so the provider's "My Profile" tab can mount ProviderDetailPage
    *  against their own row without a separate /providers/me lookup. */
   providerId?: string | null;
+  /** Linked Employer row id when role=employer_admin. Lets the
+   *  EmployerPortal load HR's data without a separate lookup. */
+  employerId?: string | null;
   /** Practice's MemberMD subscription summary. Null for users without
    *  a tenant (superadmin / unbound). Inlined on /auth/me so the SPA can
    *  render usage badges and gate features without a second round-trip. */
