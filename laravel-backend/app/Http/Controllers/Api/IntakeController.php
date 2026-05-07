@@ -179,12 +179,15 @@ class IntakeController extends Controller
         $enrollUrl = rtrim($appUrl, '/') . '/#/enroll/' . $practice->tenant_code;
 
         try {
-            \Illuminate\Support\Facades\Mail::to($data['email'])->send(
+            \App\Services\MailDispatcher::send(
+                $data['email'],
                 new \App\Mail\IntakeLinkInvitation(
                     practice: $practice,
                     enrollUrl: $enrollUrl,
                     personalNote: $data['note'] ?? null,
                 ),
+                'patient.intake_link_invitation',
+                $practice->id,
             );
         } catch (\Throwable $e) {
             Log::warning('Intake link email failed', [

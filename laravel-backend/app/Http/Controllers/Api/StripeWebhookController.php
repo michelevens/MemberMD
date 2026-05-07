@@ -262,7 +262,8 @@ class StripeWebhookController extends Controller
                 $sent = MailDispatcher::send(
                     $recipient,
                     new PlatformPaymentFailedMail($sub, $platformInvoice),
-                    "platform_billing.{$key}",
+                    'platform_billing.payment_failed',
+                    $sub->practice_id,
                 );
                 if ($sent) {
                     $sub->markNotificationSent($key);
@@ -1066,14 +1067,36 @@ class StripeWebhookController extends Controller
                     'stripe_payment_intent_id' => $session->payment_intent ?? null,
                 ]);
 
+                // Visitor self-registered through a public Stripe Checkout
+                // for this booking — they freely provided their email and
+                // expect transactional confirmations. Record a self-granted
+                // PHI communication consent so the AppointmentConfirmation
+                // (PHI-bearing) actually delivers. Idempotent on the unique
+                // (tenant_id, patient_id) pair.
+                \App\Models\PhiCommunicationConsent::firstOrCreate(
+                    [
+                        'tenant_id' => $practice->id,
+                        'patient_id' => $patient->id,
+                    ],
+                    [
+                        'granted_at' => now(),
+                        'granted_by_method' => \App\Models\PhiCommunicationConsent::METHOD_SELF,
+                        'granted_by_reference' => 'public_cash_booking:' . $pending->id,
+                    ],
+                );
+
                 // Send confirmation email — visitor paid, this is a
                 // real "your appointment is locked in" confirmation
                 // (vs. the existing "request received" copy from the
                 // non-cash branch).
                 try {
                     $appointment->load(['patient', 'provider.user', 'appointmentType']);
-                    Mail::to($pending->email)->send(
-                        new \App\Mail\AppointmentConfirmation($appointment, $patient, $practice)
+                    MailDispatcher::send(
+                        $pending->email,
+                        new \App\Mail\AppointmentConfirmation($appointment, $patient, $practice),
+                        'patient.appointment_confirmation',
+                        $practice->id,
+                        $patient->id,
                     );
                 } catch (Throwable $e) {
                     Log::warning('Cash-pay booking confirmation email failed', [

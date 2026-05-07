@@ -190,8 +190,12 @@ class AdHocChargeController extends Controller
             // has the URL in the response and can /resend).
             if ($sendEmail) {
                 try {
-                    Mail::to($patient->email)->send(
-                        new AdHocChargeRequest($charge->fresh(), $patient, $practice, $session['url'])
+                    \App\Services\MailDispatcher::send(
+                        $patient->email,
+                        new AdHocChargeRequest($charge->fresh(), $patient, $practice, $session['url']),
+                        'patient.ad_hoc_charge',
+                        $practice->id,
+                        $patient->id,
                     );
                 } catch (Throwable $e) {
                     Log::warning('Ad-hoc charge email failed', [
@@ -326,8 +330,12 @@ class AdHocChargeController extends Controller
         }
 
         try {
-            Mail::to($patient->email)->send(
-                new AdHocChargeRequest($charge, $patient, $practice, $sessionUrl)
+            \App\Services\MailDispatcher::send(
+                $patient->email,
+                new AdHocChargeRequest($charge, $patient, $practice, $sessionUrl),
+                'patient.ad_hoc_charge',
+                $practice->id,
+                $patient->id,
             );
             $charge->update([
                 'status' => AdHocCharge::STATUS_SENT,

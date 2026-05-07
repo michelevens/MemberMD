@@ -55,8 +55,13 @@ class MembershipLifecycleEmailService
                 }
 
                 if ($membership->patient && $membership->patient->email) {
-                    Mail::to($membership->patient->email)
-                        ->send(new MembershipActivated($membership));
+                    \App\Services\MailDispatcher::send(
+                        $membership->patient->email,
+                        new MembershipActivated($membership),
+                        'membership.first_visit_nudge',
+                        $membership->tenant_id,
+                        $membership->patient_id,
+                    );
                 }
                 $this->recordEvent($membership, 'first_visit_nudge', 'sent');
                 $stats['sent']++;

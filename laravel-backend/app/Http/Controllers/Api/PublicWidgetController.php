@@ -227,7 +227,8 @@ class PublicWidgetController extends Controller
                         submissionType: $type,
                         applicantName: is_string($applicantName) ? $applicantName : null,
                     ),
-                    'widget-submission-received',
+                    'patient.widget_submission_received',
+                    $practice->id,
                 );
             } catch (\Throwable $e) {
                 \Illuminate\Support\Facades\Log::warning('Widget submission ack email failed', [
@@ -254,7 +255,8 @@ class PublicWidgetController extends Controller
                         submissionType: $type,
                         submissionData: $validated['data'],
                     ),
-                    'widget-submission-new',
+                    'practice.widget_lead_received',
+                    $practice->id,
                 );
             }
         } catch (\Throwable $e) {

@@ -56,6 +56,27 @@ class NotificationRegistry
             'default_enabled' => true,
             'is_phi_bearing' => true,
         ],
+        'patient.appointment_cancelled' => [
+            'audience' => 'patient',
+            'label' => 'Appointment Cancelled',
+            'description' => 'Sent to the patient when their appointment is cancelled.',
+            'default_enabled' => true,
+            'is_phi_bearing' => true,
+        ],
+        'patient.appointment_rescheduled' => [
+            'audience' => 'patient',
+            'label' => 'Appointment Rescheduled',
+            'description' => 'Sent when an appointment date or time changes.',
+            'default_enabled' => true,
+            'is_phi_bearing' => true,
+        ],
+        'patient.telehealth_link' => [
+            'audience' => 'patient',
+            'label' => 'Telehealth Session Link',
+            'description' => 'Sent before a telehealth visit with the join link.',
+            'default_enabled' => true,
+            'is_phi_bearing' => true,
+        ],
         'patient.welcome' => [
             'audience' => 'patient',
             'label' => 'Welcome to the Practice',
@@ -112,6 +133,27 @@ class NotificationRegistry
             'default_enabled' => true,
             'is_phi_bearing' => true,
         ],
+        'patient.waitlist_invitation' => [
+            'audience' => 'patient',
+            'label' => 'Waitlist Invitation',
+            'description' => 'Sent to a waitlisted patient when the practice invites them to enroll / book.',
+            'default_enabled' => true,
+            'is_phi_bearing' => false,
+        ],
+        'patient.payment_link' => [
+            'audience' => 'patient',
+            'label' => 'Membership Payment Link',
+            'description' => 'Sent to a pending enrollee with the Stripe Checkout link to start their membership.',
+            'default_enabled' => true,
+            'is_phi_bearing' => false,
+        ],
+        'patient.billing_portal_link' => [
+            'audience' => 'patient',
+            'label' => 'Billing Portal Link',
+            'description' => 'Sent to a member when staff manually shares the Stripe Customer Portal link.',
+            'default_enabled' => true,
+            'is_phi_bearing' => false,
+        ],
 
         // ─── Membership lifecycle ───────────────────────────────────────
         'membership.activated' => [
@@ -165,11 +207,88 @@ class NotificationRegistry
             'default_enabled' => true,
             'is_phi_bearing' => false,
         ],
+        'practice.registration_received' => [
+            'audience' => 'practice',
+            'label' => 'Registration Received',
+            'description' => 'Sent to a new practice applicant immediately after registration submission.',
+            'default_enabled' => true,
+            'is_phi_bearing' => false,
+        ],
+        'practice.mfa_enabled' => [
+            'audience' => 'practice',
+            'label' => 'Two-Factor Authentication Enabled',
+            'description' => 'Security canary email sent when 2FA is enabled on a practice account.',
+            'default_enabled' => true,
+            'is_phi_bearing' => false,
+        ],
         'practice.approved' => [
             'audience' => 'practice',
             'label' => 'Practice Approved',
             'description' => 'Sent to a practice admin when their application is approved by superadmin.',
             'default_enabled' => true,
+            'is_phi_bearing' => false,
+        ],
+        'practice.rejected' => [
+            'audience' => 'practice',
+            'label' => 'Practice Application Rejected',
+            'description' => 'Sent to a practice admin when their application is rejected by superadmin.',
+            'default_enabled' => true,
+            'is_phi_bearing' => false,
+        ],
+        'practice.staff_invited' => [
+            'audience' => 'practice',
+            'label' => 'Staff Invitation',
+            'description' => 'Sent to a new staff/provider when invited to join the practice.',
+            'default_enabled' => true,
+            'is_phi_bearing' => false,
+        ],
+        'practice.password_reset' => [
+            'audience' => 'practice',
+            'label' => 'Staff Password Reset',
+            'description' => 'Sent to a practice user requesting a password reset.',
+            'default_enabled' => true,
+            'is_phi_bearing' => false,
+        ],
+        'practice.widget_lead_received' => [
+            'audience' => 'practice',
+            'label' => 'New Lead From Widget',
+            'description' => 'Sent to practice when a public widget submission lands.',
+            'default_enabled' => true,
+            'is_phi_bearing' => true,
+        ],
+        'patient.widget_submission_received' => [
+            'audience' => 'patient',
+            'label' => 'Widget Submission Received',
+            'description' => 'Sent to a public visitor confirming receipt of their widget submission (lead capture / inquiry).',
+            'default_enabled' => true,
+            'is_phi_bearing' => false,
+        ],
+        'practice.intake_received' => [
+            'audience' => 'practice',
+            'label' => 'New Intake Submitted',
+            'description' => 'Sent to practice when a patient submits intake forms.',
+            'default_enabled' => true,
+            'is_phi_bearing' => true,
+        ],
+        'patient.intake_link_invitation' => [
+            'audience' => 'patient',
+            'label' => 'Intake / Enrollment Link Invitation',
+            'description' => 'Sent when staff manually emails a prospective member their enrollment link.',
+            'default_enabled' => true,
+            'is_phi_bearing' => false,
+        ],
+        'membership.first_visit_nudge' => [
+            'audience' => 'membership',
+            'label' => 'First-Visit Nudge',
+            'description' => 'Reminder sent to new members who haven\'t booked their first visit yet.',
+            'default_enabled' => true,
+            'is_phi_bearing' => false,
+        ],
+        'membership.win_back' => [
+            'audience' => 'membership',
+            'label' => 'Win-Back Outreach',
+            'description' => 'Sent to lapsed members 15 days after cancellation as a re-engagement touch.',
+            'default_enabled' => false,
             'is_phi_bearing' => false,
         ],
 
@@ -178,6 +297,20 @@ class NotificationRegistry
             'audience' => 'practice',
             'label' => 'Platform Billing — Payment Failed',
             'description' => 'Sent when the practice\'s platform subscription payment fails.',
+            'default_enabled' => true,
+            'is_phi_bearing' => false,
+        ],
+        'platform_billing.trial_ending_soon' => [
+            'audience' => 'practice',
+            'label' => 'Trial Ending Soon',
+            'description' => 'Sent to a practice 7 days before trial expiration.',
+            'default_enabled' => true,
+            'is_phi_bearing' => false,
+        ],
+        'platform_billing.trial_expired' => [
+            'audience' => 'practice',
+            'label' => 'Trial Expired',
+            'description' => 'Sent when a platform-subscription trial expires without conversion.',
             'default_enabled' => true,
             'is_phi_bearing' => false,
         ],
@@ -214,7 +347,12 @@ class NotificationRegistry
      *   1. Key registered? Unknown keys default to allow (legacy call
      *      sites unaware of registry shouldn't be silently dropped).
      *   2. Tenant-level disabled? Block.
-     *   3. PHI-bearing AND patient hasn't granted consent? Block.
+     *   3. PHI-bearing AND patient/membership audience AND patient hasn't
+     *      granted consent? Block. (Practice/operator/employer audiences
+     *      have a treatment relationship; HIPAA's transmission-consent
+     *      rule applies to mail TO the patient, not internal notices ABOUT
+     *      a patient. We still flag is_phi_bearing on those keys so the
+     *      Settings UI surfaces the data sensitivity.)
      *   4. Otherwise allow.
      */
     public static function shouldSend(?string $key, ?string $tenantId, ?string $patientId = null): array
@@ -237,7 +375,8 @@ class NotificationRegistry
             }
         }
 
-        if (!empty($def['is_phi_bearing']) && $tenantId && $patientId) {
+        $patientFacing = in_array($def['audience'] ?? null, ['patient', 'membership'], true);
+        if (!empty($def['is_phi_bearing']) && $patientFacing && $tenantId && $patientId) {
             $consent = PhiCommunicationConsent::where('tenant_id', $tenantId)
                 ->where('patient_id', $patientId)
                 ->whereNotNull('granted_at')

@@ -342,7 +342,9 @@ class MembershipController extends Controller
                     plan: $plan,
                     pending: $pending,
                 ),
-                'payment-link',
+                'patient.payment_link',
+                $practice->id,
+                $patient->id,
             );
         } catch (\Throwable $e) {
             Log::warning('Payment link email failed (link still usable)', [
@@ -1980,7 +1982,9 @@ class MembershipController extends Controller
                         portalUrl: $portalUrl,
                         personalNote: $note,
                     ),
-                    'billing-portal-link',
+                    'patient.billing_portal_link',
+                    $practice->id,
+                    $patient->id,
                 );
                 $deliveredVia[] = 'email';
             } catch (\Throwable $e) {

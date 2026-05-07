@@ -179,7 +179,16 @@ class ProcessPlatformSubscriptionLifecycle extends Command
             return false;
         }
 
-        $sent = MailDispatcher::send($recipient, $mailableFactory(), "platform_billing.{$key}");
+        // Map the milestone key to the registered NotificationRegistry
+        // key so tenant-level toggles can apply. Only two registered
+        // platform_billing.* keys cover trial_* milestones:
+        //   - trial_expired         → final expiration
+        //   - trial_ending_soon     → all T-30 / T-7 / T-1 reminders
+        $registryKey = $key === 'trial_expired'
+            ? 'platform_billing.trial_expired'
+            : 'platform_billing.trial_ending_soon';
+
+        $sent = MailDispatcher::send($recipient, $mailableFactory(), $registryKey, $sub->practice_id);
         if ($sent) {
             $sub->markNotificationSent($key);
         }

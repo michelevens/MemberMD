@@ -529,7 +529,13 @@ class ExternalController extends Controller
     ): void {
         try {
             if ($patientEmail) {
-                Mail::to($patientEmail)->send(new MembershipActivated($membership));
+                \App\Services\MailDispatcher::send(
+                    $patientEmail,
+                    new MembershipActivated($membership),
+                    'membership.activated',
+                    $practice->id,
+                    $patient->id,
+                );
             }
         } catch (Throwable $e) {
             Log::warning('Welcome email failed to send', [
@@ -565,12 +571,18 @@ class ExternalController extends Controller
 
                 try {
                     if ($admin->email) {
-                        Mail::to($admin->email)->send(new \App\Mail\NewMemberEnrolledMail(
-                            membership: $membership,
-                            patientName: $patientName,
-                            patientEmail: $patientEmail ?? '',
-                            planName: $planName,
-                        ));
+                        \App\Services\MailDispatcher::send(
+                            $admin->email,
+                            new \App\Mail\NewMemberEnrolledMail(
+                                membership: $membership,
+                                patientName: $patientName,
+                                patientEmail: $patientEmail ?? '',
+                                planName: $planName,
+                            ),
+                            'practice.new_member_enrolled',
+                            $practice->id,
+                            $patient->id,
+                        );
                     }
                 } catch (Throwable $e) {
                     Log::warning('NewMemberEnrolled email failed', [
@@ -1114,6 +1126,29 @@ class ExternalController extends Controller
             ]);
         }
 
+        // Visitor self-registered through the public booking widget —
+        // they freely provided their email. Record an implied PHI
+        // communication consent so the appointment confirmation lands.
+        // Idempotent on (tenant_id, patient_id).
+        try {
+            \App\Models\PhiCommunicationConsent::firstOrCreate(
+                [
+                    'tenant_id' => $practice->id,
+                    'patient_id' => $patient->id,
+                ],
+                [
+                    'granted_at' => now(),
+                    'granted_by_method' => \App\Models\PhiCommunicationConsent::METHOD_SELF,
+                    'granted_by_reference' => 'public_booking_widget:' . $appointment->id,
+                ],
+            );
+        } catch (Throwable $e) {
+            Log::warning('Failed to record implied PHI consent for public-booking visitor', [
+                'patient_id' => $patient->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
         // Email confirmation to the visitor. We reuse the existing
         // AppointmentConfirmation mailable so the practice's branded
         // template lands consistently. The body view already handles
@@ -1123,8 +1158,12 @@ class ExternalController extends Controller
         // staff-booked appointment would trigger.
         try {
             $appointment->load(['patient', 'provider.user', 'appointmentType']);
-            Mail::to($validated['email'])->send(
-                new AppointmentConfirmation($appointment, $patient, $practice)
+            \App\Services\MailDispatcher::send(
+                $validated['email'],
+                new AppointmentConfirmation($appointment, $patient, $practice),
+                'patient.appointment_confirmation',
+                $practice->id,
+                $patient->id,
             );
         } catch (Throwable $e) {
             Log::warning('Failed to send booking-request email', [

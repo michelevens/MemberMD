@@ -379,6 +379,26 @@ class SignatureRequestController extends Controller
             $practice = Practice::find($req->tenant_id);
             if (!$patient || !$patient->email || !$template || !$practice) return;
 
+            // Registry gate — respect tenant-level toggle. PHI consent
+            // is not gated for this key (signature_request is non-PHI per
+            // registry), so the gate is effectively just the tenant
+            // toggle here. We do the inline check (instead of going
+            // through MailDispatcher::send) because we need the
+            // SentMessage return value to extract Resend's email_id for
+            // delivery-proof matching in the webhook.
+            $gate = \App\Services\NotificationRegistry::shouldSend(
+                'patient.signature_request',
+                $req->tenant_id,
+                $patient->id,
+            );
+            if (!$gate['allow']) {
+                Log::info('Signature request email suppressed by registry', [
+                    'request_id' => $req->id,
+                    'reason' => $gate['reason'],
+                ]);
+                return;
+            }
+
             $appUrl = (string) config('app.frontend_url', config('app.url', 'https://app.membermd.io'));
             $signUrl = rtrim($appUrl, '/') . '/#/sign/' . $req->public_token;
 

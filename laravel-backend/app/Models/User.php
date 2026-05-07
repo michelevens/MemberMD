@@ -149,10 +149,15 @@ class User extends Authenticatable
         $resetUrl = rtrim($frontend, '/') . "/#/reset-password?token={$token}&email=" . urlencode($this->email);
         $userName = trim(($this->first_name ?? '') . ' ' . ($this->last_name ?? '')) ?: null;
 
+        $key = $this->role === 'patient'
+            ? 'patient.password_reset'
+            : 'practice.password_reset';
+
         \App\Services\MailDispatcher::send(
             $this->email,
             new \App\Mail\PasswordReset(resetUrl: $resetUrl, userName: $userName),
-            'password-reset',
+            $key,
+            $this->tenant_id,
         );
     }
 }

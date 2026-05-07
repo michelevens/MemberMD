@@ -75,6 +75,18 @@ class AdHocChargeTest extends TestCase
             'is_active' => true,
         ]);
 
+        // Tests for PHI-bearing emails (ad_hoc_charge) need an active
+        // PhiCommunicationConsent row, otherwise NotificationRegistry's
+        // gate will silently suppress the send. Mirrors what staff
+        // would record at intake.
+        \App\Models\PhiCommunicationConsent::create([
+            'tenant_id' => $practice->id,
+            'patient_id' => $patient->id,
+            'granted_at' => now(),
+            'granted_by_method' => \App\Models\PhiCommunicationConsent::METHOD_PRACTICE_ADMIN,
+            'granted_by_user_id' => $admin->id,
+        ]);
+
         return compact('practice', 'admin', 'patient');
     }
 

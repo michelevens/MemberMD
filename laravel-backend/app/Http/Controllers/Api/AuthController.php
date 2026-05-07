@@ -400,7 +400,8 @@ class AuthController extends Controller
                     user: $user,
                     practice: $practice,
                 ),
-                'practice-registration-received',
+                'practice.registration_received',
+                $practice->id,
             );
         } catch (\Throwable $e) {
             \Illuminate\Support\Facades\Log::warning('Registration confirmation email failed', [
@@ -451,7 +452,7 @@ class AuthController extends Controller
                         practice: $practice,
                         applicantUser: $user,
                     ),
-                    'superadmin-new-practice',
+                    'practice.application_received',
                 );
             }
         } catch (\Throwable $e) {
@@ -767,7 +768,8 @@ class AuthController extends Controller
         \App\Services\MailDispatcher::send(
             $user->email,
             new \App\Mail\MfaEnabledMail(user: $user, ipAddress: $request->ip() ?? 'unknown'),
-            'mfa-enabled',
+            'practice.mfa_enabled',
+            $user->tenant_id,
         );
 
         return response()->json([

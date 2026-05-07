@@ -446,7 +446,8 @@ class PracticeController extends Controller
                 \App\Services\MailDispatcher::send(
                     $admin->email,
                     new \App\Mail\PracticeApprovedEmail(user: $admin, practice: $practice),
-                    'practice-approved',
+                    'practice.approved',
+                    $practice->id,
                 );
             } else {
                 \Illuminate\Support\Facades\Log::warning('Approval email skipped — no admin user found', [
@@ -505,7 +506,8 @@ class PracticeController extends Controller
                         practice: $practice,
                         reason: $data['reason'] ?? null,
                     ),
-                    'practice-rejected',
+                    'practice.rejected',
+                    $practice->id,
                 );
             }
         } catch (\Throwable $e) {
@@ -1500,7 +1502,8 @@ class PracticeController extends Controller
                 \App\Services\MailDispatcher::send(
                     $newUser->email,
                     new \App\Mail\StaffInvitationEmail($newUser, $practice, $token, $invitedByName),
-                    'staff_invitation',
+                    'practice.staff_invited',
+                    $practice->id,
                 );
             }
         } catch (\Throwable $e) {

@@ -231,7 +231,9 @@ class MembershipEnrollmentService
             \App\Services\MailDispatcher::send(
                 $membership->patient->email,
                 new \App\Mail\MembershipActivated(membership: $membership),
-                'membership-activated',
+                'membership.activated',
+                $membership->tenant_id,
+                $membership->patient_id,
             );
         }
 

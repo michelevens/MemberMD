@@ -469,7 +469,9 @@ class AppointmentController extends Controller
                             patient: $patient,
                             practice: $practice,
                         ),
-                        'appointment-confirmation',
+                        'patient.appointment_confirmation',
+                        $appointment->tenant_id,
+                        $patient->id,
                     );
                 }
                 // Also drop an in-app notification on the patient's
@@ -767,7 +769,9 @@ class AppointmentController extends Controller
                     reason: $reason,
                     byPatient: $user->isPatient(),
                 ),
-                'appointment-canceled',
+                'patient.appointment_cancelled',
+                $appointment->tenant_id,
+                $appointment->patient->id,
             );
         }
 
@@ -912,7 +916,9 @@ class AppointmentController extends Controller
                     appointment: $fresh,
                     oldScheduledAt: (string) $oldScheduledAt,
                 ),
-                'appointment-rescheduled',
+                'patient.appointment_rescheduled',
+                $fresh->tenant_id,
+                $fresh->patient->id,
             );
         }
 
@@ -1021,12 +1027,16 @@ class AppointmentController extends Controller
             $appUrl = (string) config('app.frontend_url', config('app.url', 'https://app.membermd.io'));
             $loginUrl = rtrim($appUrl, '/') . '/#/login';
 
-            \Illuminate\Support\Facades\Mail::to($patient->email)->send(
+            \App\Services\MailDispatcher::send(
+                $patient->email,
                 new \App\Mail\WaitlistInvitation(
                     practice: $practice,
                     patient: $patient,
                     loginUrl: $loginUrl,
-                )
+                ),
+                'patient.waitlist_invitation',
+                $user->tenant_id,
+                $patient->id,
             );
 
             $entry->update([
@@ -1117,7 +1127,8 @@ class AppointmentController extends Controller
                 if (!$practice) continue;
                 $appUrl = (string) config('app.frontend_url', config('app.url', 'https://app.membermd.io'));
                 $signUrl = rtrim($appUrl, '/') . '/#/sign/' . $req->public_token;
-                \Illuminate\Support\Facades\Mail::to($patient->email)->send(
+                \App\Services\MailDispatcher::send(
+                    $patient->email,
                     new \App\Mail\SignatureRequestEmail(
                         practice: $practice,
                         patient: $patient,
@@ -1126,6 +1137,9 @@ class AppointmentController extends Controller
                         personalNote: 'Please complete this before your visit on '
                             . \Carbon\Carbon::parse($appointment->scheduled_at)->format('F j, Y') . '.',
                     ),
+                    'patient.signature_request',
+                    $tenantId,
+                    $patient->id,
                 );
             } catch (\Throwable $e) {
                 \Log::warning('Auto-request email send failed', [
