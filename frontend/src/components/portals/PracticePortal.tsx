@@ -4368,8 +4368,12 @@ export function PracticePortal() {
           Back to patients
         </button>
 
-        {/* Patient header card — flat border treatment */}
-        <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
+        {/* Patient header card — flat border treatment.
+            Note: no `overflow-hidden` here even though it'd be nicer
+            for clipping the rounded corners — the kebab menu spills
+            below the card and gets clipped if the parent hides
+            overflow. Children render fine without it. */}
+        <div className="rounded-xl border border-slate-200 bg-white">
           <div className="p-5 flex flex-col md:flex-row items-start gap-5">
             {/* Avatar */}
             <div
