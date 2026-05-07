@@ -2135,6 +2135,60 @@ export const patientCreditService = {
   },
 };
 
+// ─── Employer billing (practice + employer-side AR) ──────────────────────
+//
+// Practice admin marks invoices paid + downloads PDFs. EmployerPortal HR
+// users only download PDFs (they pay out of band, not in-app).
+
+export const employerBillingService = {
+  markPaid: async (
+    invoiceId: string,
+    data: {
+      paymentMethod?: string;
+      paymentReference?: string;
+      paidAt?: string;
+      notes?: string;
+    },
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ): Promise<ApiResponse<any>> => {
+    if (useMockData()) return { data: {} };
+    return apiFetch(`/employer-billing/invoices/${invoiceId}/paid`, {
+      method: "PUT",
+      body: JSON.stringify({
+        payment_method: data.paymentMethod,
+        payment_reference: data.paymentReference,
+        paid_at: data.paidAt,
+        notes: data.notes,
+      }),
+    });
+  },
+  // PDF is a binary stream. Return a blob URL the caller can either
+  // open in a new tab or trigger a download from. Bypasses apiFetch's
+  // JSON parsing.
+  downloadPdf: async (invoiceId: string): Promise<{ url?: string; error?: string }> => {
+    if (useMockData()) return { url: "#" };
+    const token = (typeof window !== "undefined" && window.sessionStorage)
+      ? window.sessionStorage.getItem("membermd_token")
+      : null;
+    const res = await fetch(`${API_BASE_URL}/employer-billing/invoices/${invoiceId}/pdf`, {
+      headers: {
+        Accept: "application/pdf",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+    });
+    if (!res.ok) {
+      try {
+        const json = await res.json();
+        return { error: json.message ?? `Download failed (${res.status})` };
+      } catch {
+        return { error: `Download failed (${res.status})` };
+      }
+    }
+    const blob = await res.blob();
+    return { url: URL.createObjectURL(blob) };
+  },
+};
+
 // ─── Employer admin invitations ───────────────────────────────────────────
 //
 // Practice admin → POST /employers/{id}/invite-admin to mint an

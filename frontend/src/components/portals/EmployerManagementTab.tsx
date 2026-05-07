@@ -7,7 +7,7 @@ import { apiFetch } from "../../lib/api";
 import { formatUSPhone, normalizeUSPhone } from "../../lib/phone";
 import { AddressAutocomplete } from "../shared/AddressAutocomplete";
 import { EmployerEligibilityPanel } from "../practice/EmployerEligibilityPanel";
-import { employerInviteService } from "../../lib/api";
+import { employerInviteService, employerBillingService } from "../../lib/api";
 import {
   Search,
   Plus,
@@ -162,6 +162,17 @@ export function EmployerManagementTab() {
   const [inviteForm, setInviteForm] = useState({ firstName: "", lastName: "", email: "", phone: "" });
   const [inviteSubmitting, setInviteSubmitting] = useState(false);
 
+  // Mark-paid dialog state. Opens from the invoice row; carries the
+  // invoice id so the dialog can submit without a roundtrip lookup.
+  const [markPaidDialog, setMarkPaidDialog] = useState<EmployerInvoice | null>(null);
+  const [markPaidForm, setMarkPaidForm] = useState({
+    paymentMethod: "wire",
+    paymentReference: "",
+    paidAt: "",
+    notes: "",
+  });
+  const [markPaidSubmitting, setMarkPaidSubmitting] = useState(false);
+
   // New contract form
   const [newContract, setNewContract] = useState({ employerId: "", membershipPlanId: "", pepmRate: "", effectiveDate: "", expirationDate: "" });
 
@@ -312,15 +323,53 @@ export function EmployerManagementTab() {
     setGeneratingInvoice(false);
   };
 
-  const handleMarkPaid = async (invoiceId: string) => {
-    const res = await apiFetch<EmployerInvoice>(`/employer-billing/invoices/${invoiceId}/paid`, {
-      method: "PUT",
+  const openMarkPaid = (invoice: EmployerInvoice) => {
+    setMarkPaidDialog(invoice);
+    setMarkPaidForm({
+      paymentMethod: "wire",
+      paymentReference: "",
+      paidAt: new Date().toISOString().slice(0, 10),
+      notes: "",
     });
+  };
+
+  const submitMarkPaid = async () => {
+    if (!markPaidDialog) return;
+    if (!markPaidForm.paymentReference.trim()) {
+      setError("Payment reference is required (wire confirmation, ACH trace, or check #).");
+      return;
+    }
+    setMarkPaidSubmitting(true);
+    const res = await employerBillingService.markPaid(markPaidDialog.id, {
+      paymentMethod: markPaidForm.paymentMethod,
+      paymentReference: markPaidForm.paymentReference.trim(),
+      paidAt: markPaidForm.paidAt || undefined,
+      notes: markPaidForm.notes.trim() || undefined,
+    });
+    setMarkPaidSubmitting(false);
     if (res.error) {
       setError(res.error);
-    } else {
-      loadInvoices();
+      return;
     }
+    setMarkPaidDialog(null);
+    setError(null);
+    loadInvoices();
+  };
+
+  const downloadInvoicePdf = async (invoiceId: string) => {
+    const res = await employerBillingService.downloadPdf(invoiceId);
+    if (res.error || !res.url) {
+      setError(res.error ?? "Could not download PDF.");
+      return;
+    }
+    // Open in a new tab. AP teams typically print or save-as.
+    const a = document.createElement("a");
+    a.href = res.url;
+    a.target = "_blank";
+    a.rel = "noopener noreferrer";
+    a.click();
+    // Revoke after a tick so the new tab has time to load.
+    setTimeout(() => URL.revokeObjectURL(res.url!), 60_000);
   };
 
   // ─── Filtered Employers ──────────────────────────────────────────────────
@@ -809,16 +858,27 @@ export function EmployerManagementTab() {
                     </td>
                     <td className="px-4 py-3 text-slate-600">{inv.dueDate}</td>
                     <td className="px-4 py-3">
-                      {inv.status !== "paid" && (
+                      <div className="flex items-center gap-1">
                         <button
-                          onClick={() => handleMarkPaid(inv.id)}
-                          className="flex items-center gap-1 px-3 py-1 rounded-md text-xs font-medium text-white"
-                          style={{ backgroundColor: "#635bff" }}
+                          type="button"
+                          onClick={() => downloadInvoicePdf(inv.id)}
+                          title="Download PDF"
+                          className="flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium border border-slate-200 text-slate-600 hover:bg-slate-50"
                         >
-                          <Check className="w-3 h-3" />
-                          Mark Paid
+                          PDF
                         </button>
-                      )}
+                        {inv.status !== "paid" && (
+                          <button
+                            type="button"
+                            onClick={() => openMarkPaid(inv)}
+                            className="flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium text-white"
+                            style={{ backgroundColor: "#147d64" }}
+                          >
+                            <Check className="w-3 h-3" />
+                            Mark Paid
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -895,6 +955,93 @@ export function EmployerManagementTab() {
               style={{ backgroundColor: "#27ab83" }}
             >
               {inviteSubmitting ? "Sending…" : "Send invite"}
+            </button>
+          </div>
+        </div>
+      </DialogOverlay>
+
+      {/* Mark-paid dialog. payment_reference is the AR-team's match
+          key (wire confirmation, ACH trace, check #) — required so the
+          deposit reconciles. paid_at lets staff backdate to the actual
+          deposit date for AR-aging accuracy. */}
+      <DialogOverlay
+        open={!!markPaidDialog}
+        onClose={() => { setMarkPaidDialog(null); }}
+        title={markPaidDialog ? `Mark ${markPaidDialog.invoiceNumber} paid` : "Mark paid"}
+      >
+        <div className="space-y-4">
+          {markPaidDialog && (
+            <div className="rounded-lg p-3 bg-slate-50 border border-slate-200 text-sm flex items-center justify-between">
+              <span className="text-slate-600">Total</span>
+              <span className="font-semibold text-slate-900">${markPaidDialog.total.toLocaleString()}</span>
+            </div>
+          )}
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Payment method</label>
+            <select
+              value={markPaidForm.paymentMethod}
+              onChange={(e) => setMarkPaidForm({ ...markPaidForm, paymentMethod: e.target.value })}
+              className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm bg-white"
+            >
+              <option value="wire">Wire</option>
+              <option value="ach">ACH</option>
+              <option value="check">Check</option>
+              <option value="other">Other</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">
+              Payment reference <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="text"
+              value={markPaidForm.paymentReference}
+              onChange={(e) => setMarkPaidForm({ ...markPaidForm, paymentReference: e.target.value })}
+              placeholder="Wire confirmation #, ACH trace, or check number"
+              className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm font-mono"
+            />
+            <p className="text-[11px] text-slate-400 mt-1">
+              Required for AP reconciliation. Will appear on the receipt PDF.
+            </p>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Deposit date</label>
+            <input
+              type="date"
+              value={markPaidForm.paidAt}
+              onChange={(e) => setMarkPaidForm({ ...markPaidForm, paidAt: e.target.value })}
+              className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm"
+            />
+            <p className="text-[11px] text-slate-400 mt-1">
+              Defaults to today. Backdate if the wire/ACH cleared earlier.
+            </p>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Notes (optional)</label>
+            <textarea
+              value={markPaidForm.notes}
+              onChange={(e) => setMarkPaidForm({ ...markPaidForm, notes: e.target.value })}
+              rows={2}
+              className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm"
+              placeholder="e.g. Received via Bank of America"
+            />
+          </div>
+          <div className="flex justify-end gap-2 pt-2">
+            <button
+              type="button"
+              onClick={() => setMarkPaidDialog(null)}
+              className="px-3 py-2 rounded-lg text-sm font-medium border border-slate-200 text-slate-600 hover:bg-slate-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={submitMarkPaid}
+              disabled={markPaidSubmitting || !markPaidForm.paymentReference.trim()}
+              className="px-4 py-2 rounded-lg text-sm font-semibold text-white disabled:opacity-50"
+              style={{ backgroundColor: "#147d64" }}
+            >
+              {markPaidSubmitting ? "Recording…" : "Record payment"}
             </button>
           </div>
         </div>

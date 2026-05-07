@@ -927,6 +927,10 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
         Route::get('/invoices', [EmployerBillingController::class, 'invoices']);
         Route::post('/invoices/generate', [EmployerBillingController::class, 'generateInvoice']);
         Route::put('/invoices/{id}/paid', [EmployerBillingController::class, 'markPaid']);
+        // Branded PDF download. Permission gate inside the controller —
+        // practice-side users + the employer_admin who owns the invoice
+        // can both fetch.
+        Route::get('/invoices/{id}/pdf', [EmployerBillingController::class, 'pdf']);
         Route::get('/enrollment-report/{employerId}', [EmployerBillingController::class, 'enrollmentReport']);
     });
 

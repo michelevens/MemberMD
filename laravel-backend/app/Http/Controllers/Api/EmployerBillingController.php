@@ -8,8 +8,10 @@ use App\Models\EmployerContract;
 use App\Models\EmployerInvoice;
 use App\Models\Encounter;
 use App\Models\Patient;
+use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response;
 use Illuminate\Support\Str;
 
 class EmployerBillingController extends Controller
@@ -98,23 +100,82 @@ class EmployerBillingController extends Controller
     public function markPaid(Request $request, string $id): JsonResponse
     {
         $user = $request->user();
-        abort_if(!in_array($user->role, ['superadmin', 'practice_admin']), 403, 'Unauthorized.');
+        abort_if(!in_array($user->role, ['superadmin', 'practice_admin', 'staff']), 403, 'Unauthorized.');
 
         $invoice = EmployerInvoice::where('tenant_id', $user->tenant_id)->findOrFail($id);
 
+        // Already paid? Idempotent — return the existing row instead of
+        // overwriting paid_at, which would lose the original collection
+        // date for AP reconciliation.
+        if ($invoice->status === 'paid') {
+            return response()->json(['data' => $invoice->load(['employer', 'contract'])]);
+        }
+
         $validated = $request->validate([
-            'payment_method' => 'nullable|string|max:255',
+            // ACH / wire / check / other — surfaced as a free-form
+            // string in the AP reference. We don't enum these because
+            // every accounting team uses different terms.
+            'payment_method' => 'nullable|string|max:50',
+            // Wire confirmation, ACH trace, check #, etc. Required in
+            // practice for matching the deposit; we make it optional
+            // server-side so tests / quick-mark-paid still work.
             'payment_reference' => 'nullable|string|max:255',
+            // Lets staff backdate to the actual deposit date (AR aging
+            // matters). Defaults to now when omitted.
+            'paid_at' => 'nullable|date',
+            'notes' => 'nullable|string|max:1000',
         ]);
+
+        $paidAt = !empty($validated['paid_at'])
+            ? \Carbon\Carbon::parse($validated['paid_at'])
+            : now();
 
         $invoice->update([
             'status' => 'paid',
-            'paid_at' => now(),
+            'paid_at' => $paidAt,
             'payment_method' => $validated['payment_method'] ?? null,
             'payment_reference' => $validated['payment_reference'] ?? null,
+            'notes' => isset($validated['notes'])
+                ? trim(($invoice->notes ? $invoice->notes . "\n" : '') . 'Payment recorded: ' . $validated['notes'])
+                : $invoice->notes,
         ]);
 
         return response()->json(['data' => $invoice->fresh()->load(['employer', 'contract'])]);
+    }
+
+    /**
+     * Branded PDF for an employer invoice. Used by both the practice-side
+     * "Download" action and the EmployerPortal invoices table so HR's AP
+     * team can attach a real document to their internal payment system.
+     *
+     * Permission: practice_admin / staff / superadmin OR the
+     * employer_admin user whose employer owns the invoice.
+     */
+    public function pdf(Request $request, string $id): Response|JsonResponse
+    {
+        $user = $request->user();
+        $invoice = EmployerInvoice::where('tenant_id', $user->tenant_id)
+            ->with(['employer', 'contract'])
+            ->findOrFail($id);
+
+        $allowed = in_array($user->role, ['practice_admin', 'staff', 'superadmin'], true)
+            || ($user->role === 'employer_admin' && $user->employer_id === $invoice->employer_id);
+        abort_if(!$allowed, 403, 'Unauthorized.');
+
+        $practice = $user->practice;
+        $primaryColor = $practice->primary_color ?? '#27ab83';
+
+        $pdf = Pdf::loadView('invoices.employer-pdf', [
+            'invoice' => $invoice,
+            'employer' => $invoice->employer,
+            'contract' => $invoice->contract,
+            'practice' => $practice,
+            'primaryColor' => $primaryColor,
+        ]);
+        $pdf->setPaper('letter');
+
+        $filename = 'invoice-' . $invoice->invoice_number . '.pdf';
+        return $pdf->stream($filename);
     }
 
     public function enrollmentReport(Request $request, string $employerId): JsonResponse

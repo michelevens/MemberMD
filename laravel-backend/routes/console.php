@@ -21,3 +21,11 @@ Schedule::command('enrollments:process-reminders')->hourly()->withoutOverlapping
 Schedule::command('employers:process-invoice-cycle')
     ->monthlyOn(1, '02:00')
     ->withoutOverlapping();
+
+// Daily sweep that flips employer invoices past their due_date from
+// 'sent' → 'overdue'. Keeps the EmployerPortal dashboard's
+// outstanding-balance card and the practice-side AR aging accurate
+// without per-pageload date math.
+Schedule::command('employers:flag-overdue-invoices')
+    ->dailyAt('03:30')
+    ->withoutOverlapping();

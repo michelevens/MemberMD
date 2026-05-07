@@ -19,12 +19,13 @@
 import { useEffect, useState, useCallback } from "react";
 import {
   LayoutDashboard, UserCheck, Users, FileText, Loader2,
-  AlertTriangle, CheckCircle2, Clock, Building2, DollarSign, Mail,
+  AlertTriangle, CheckCircle2, Clock, Building2, DollarSign, Mail, Download,
 } from "lucide-react";
 import { useAuth } from "../../contexts/AuthContext";
 import { PortalShell, type NavItem } from "../shared/PortalShell";
 import {
   employerPortalService,
+  employerBillingService,
   type EmployerDashboard,
   type EmployerEmployeeRow,
   type EmployerInvoiceRow,
@@ -559,6 +560,7 @@ function InvoicesSection({ setToast }: { setToast: (t: Toast) => void }) {
                 <th className="text-right px-4 py-2.5 text-xs font-semibold uppercase tracking-wide" style={{ color: C.slate500 }}>Total</th>
                 <th className="text-left px-4 py-2.5 text-xs font-semibold uppercase tracking-wide" style={{ color: C.slate500 }}>Due</th>
                 <th className="text-left px-4 py-2.5 text-xs font-semibold uppercase tracking-wide" style={{ color: C.slate500 }}>Status</th>
+                <th className="text-right px-4 py-2.5 text-xs font-semibold uppercase tracking-wide" style={{ color: C.slate500 }}>PDF</th>
               </tr>
             </thead>
             <tbody className="divide-y" style={{ borderColor: C.slate100 }}>
@@ -586,6 +588,30 @@ function InvoicesSection({ setToast }: { setToast: (t: Toast) => void }) {
                       >
                         {sc.label}
                       </span>
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          const res = await employerBillingService.downloadPdf(inv.id);
+                          if (res.error || !res.url) {
+                            setToast({ message: res.error ?? "Could not download PDF.", type: "error" });
+                            return;
+                          }
+                          const a = document.createElement("a");
+                          a.href = res.url;
+                          a.target = "_blank";
+                          a.rel = "noopener noreferrer";
+                          a.click();
+                          setTimeout(() => URL.revokeObjectURL(res.url!), 60_000);
+                        }}
+                        title="Download PDF"
+                        className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium border bg-white hover:bg-slate-50"
+                        style={{ borderColor: C.slate200, color: C.slate600 }}
+                      >
+                        <Download className="w-3 h-3" />
+                        PDF
+                      </button>
                     </td>
                   </tr>
                 );
