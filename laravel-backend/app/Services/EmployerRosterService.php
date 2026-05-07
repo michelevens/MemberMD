@@ -3,6 +3,8 @@
 namespace App\Services;
 
 use App\Models\Employer;
+use App\Models\EmployerContract;
+use App\Models\EmployerEligibleEmail;
 use App\Models\Patient;
 use App\Models\PatientMembership;
 use Carbon\Carbon;
@@ -182,5 +184,72 @@ class EmployerRosterService
             'employees' => $perEmployee,
             'effective_headcount' => round($totalFraction, 4),
         ];
+    }
+
+    /**
+     * Resolve the active sponsorship for a given email + tenant. Used by
+     * the public enrollment widget to short-circuit Stripe Checkout when
+     * the patient is on an employer's eligible-emails list.
+     *
+     * Returns:
+     *   ['employer' => Employer, 'eligible' => EmployerEligibleEmail,
+     *    'contract' => EmployerContract|null]
+     * Or null when no active eligibility exists.
+     *
+     * Match logic:
+     *   1. Email hashed with the same blind index used for storage.
+     *   2. Row must not be removed_at + not claimed_at.
+     *   3. Employer must be in 'active' status.
+     *   4. The active contract on that employer determines plan + pepm_rate.
+     *      If no active contract, sponsorship resolution returns null and
+     *      the caller falls through to normal enrollment — we don't pre-bill
+     *      an employer who hasn't actually contracted with us yet.
+     */
+    public function findActiveSponsorshipForEmail(string $tenantId, string $email): ?array
+    {
+        $hash = EmployerEligibleEmail::blindHashFor($email);
+
+        $eligible = EmployerEligibleEmail::query()
+            ->where('tenant_id', $tenantId)
+            ->where('email_blind_index', $hash)
+            ->whereNull('removed_at')
+            ->whereNull('claimed_at')
+            ->first();
+
+        if (!$eligible) return null;
+
+        $employer = Employer::where('tenant_id', $tenantId)
+            ->where('id', $eligible->employer_id)
+            ->where('status', 'active')
+            ->first();
+
+        if (!$employer) return null;
+
+        $contract = EmployerContract::where('tenant_id', $tenantId)
+            ->where('employer_id', $employer->id)
+            ->where('status', 'active')
+            ->orderByDesc('effective_date')
+            ->first();
+
+        if (!$contract) return null;
+
+        return [
+            'employer' => $employer,
+            'eligible' => $eligible,
+            'contract' => $contract,
+        ];
+    }
+
+    /**
+     * Mark an eligible-email row as claimed once the employee actually
+     * enrolls. Idempotent — calling twice for the same row is a no-op.
+     */
+    public function claimEligibleEmail(EmployerEligibleEmail $row, Patient $patient): void
+    {
+        if ($row->claimed_at !== null) return;
+        $row->update([
+            'claimed_at' => now(),
+            'claimed_patient_id' => $patient->id,
+        ]);
     }
 }

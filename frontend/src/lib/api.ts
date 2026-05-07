@@ -2135,6 +2135,79 @@ export const patientCreditService = {
   },
 };
 
+// ─── Employer eligible-emails (sponsored-employer allow-list) ─────────────
+//
+// Pre-enrollment allow-list. The public enrollment widget hashes the
+// patient's email and queries this list to decide whether to skip
+// Stripe Checkout (sponsored) or charge the card (stripe). HR drops
+// employee emails in here ahead of enrollment.
+
+export interface EligibleEmailRow {
+  id: string;
+  employer_id: string;
+  email: string;
+  first_name: string | null;
+  last_name: string | null;
+  date_of_birth: string | null;
+  claimed_at: string | null;
+  claimed_patient_id: string | null;
+  removed_at: string | null;
+  removed_reason: string | null;
+  created_at: string | null;
+}
+
+export interface EligibleEmailsSummary {
+  data: EligibleEmailRow[];
+  meta?: { total: number; pending: number; claimed: number; removed: number };
+}
+
+export const employerEligibleEmailService = {
+  list: async (employerId: string): Promise<EligibleEmailsSummary> => {
+    if (useMockData()) return { data: [] };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return apiFetch<any>(`/employers/${employerId}/eligible-emails`) as unknown as Promise<EligibleEmailsSummary>;
+  },
+  add: async (
+    employerId: string,
+    data: { email: string; firstName?: string; lastName?: string; dateOfBirth?: string },
+  ): Promise<ApiResponse<EligibleEmailRow>> => {
+    if (useMockData()) return { data: {} as EligibleEmailRow };
+    return apiFetch(`/employers/${employerId}/eligible-emails`, {
+      method: "POST",
+      body: JSON.stringify({
+        email: data.email,
+        first_name: data.firstName,
+        last_name: data.lastName,
+        date_of_birth: data.dateOfBirth,
+      }),
+    });
+  },
+  bulkAdd: async (
+    employerId: string,
+    rows: Array<{ email: string; firstName?: string; lastName?: string; dateOfBirth?: string }>,
+  ): Promise<ApiResponse<{ added: number; reactivated: number; skipped: number; errors: Array<{ email: string; error: string }> }>> => {
+    if (useMockData()) return { data: { added: 0, reactivated: 0, skipped: 0, errors: [] } };
+    return apiFetch(`/employers/${employerId}/eligible-emails/bulk`, {
+      method: "POST",
+      body: JSON.stringify({
+        rows: rows.map((r) => ({
+          email: r.email,
+          first_name: r.firstName,
+          last_name: r.lastName,
+          date_of_birth: r.dateOfBirth,
+        })),
+      }),
+    });
+  },
+  remove: async (employerId: string, id: string, reason?: string): Promise<ApiResponse<EligibleEmailRow>> => {
+    if (useMockData()) return { data: {} as EligibleEmailRow };
+    return apiFetch(`/employers/${employerId}/eligible-emails/${id}`, {
+      method: "DELETE",
+      body: JSON.stringify({ reason: reason ?? "" }),
+    });
+  },
+};
+
 // ─── Stalled enrollments (recovery / rescue queue) ────────────────────────
 //
 // Patients who started enrollment but didn't complete payment. Surfaces

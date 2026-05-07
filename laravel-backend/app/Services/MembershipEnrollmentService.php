@@ -35,19 +35,27 @@ class MembershipEnrollmentService
      * Resolve which billing path to use for an enrollment.
      *
      * Returns one of:
-     *   - 'stripe'   — bill via the practice's Connect account
-     *   - 'comped'   — explicit comp, no billing
-     *   - 'manual'   — practice/plan not Stripe-ready, billing_enforced=false
-     *   - 'rejected' — practice/plan not Stripe-ready, billing_enforced=true
+     *   - 'stripe'    — bill via the practice's Connect account
+     *   - 'comped'    — explicit comp, no billing
+     *   - 'sponsored' — employer pays via PEPM contract, no patient charge
+     *   - 'manual'    — practice/plan not Stripe-ready, billing_enforced=false
+     *   - 'rejected'  — practice/plan not Stripe-ready, billing_enforced=true
      */
     public function resolveBillingMode(
         Practice $practice,
         MembershipPlan $plan,
         string $billingFrequency,
         bool $isComp,
+        bool $isSponsored = false,
     ): string {
         if ($isComp) {
             return 'comped';
+        }
+
+        // Sponsored short-circuits ahead of Stripe — the employer's contract
+        // pays the bill via PEPM, the patient never sees Stripe Checkout.
+        if ($isSponsored) {
+            return 'sponsored';
         }
 
         $priceId = $billingFrequency === 'annual'
@@ -105,6 +113,12 @@ class MembershipEnrollmentService
         // checks for waiver before adding the line item).
         bool $waiveEnrollmentFee = false,
         ?string $waiverReason = null,
+        // Sponsored-by-employer flow. When non-null, billing_mode becomes
+        // 'sponsored' and the membership rows record which employer +
+        // contract paid for it. Stripe is skipped entirely; the employer
+        // is billed via the monthly PEPM invoice.
+        ?\App\Models\Employer $sponsoringEmployer = null,
+        ?\App\Models\EmployerContract $sponsoringContract = null,
     ): PatientMembership {
         // Single-active-membership invariant. The DB partial unique index
         // (uniq_active_primary_membership) is the hard backstop; this is
@@ -121,12 +135,22 @@ class MembershipEnrollmentService
             );
         }
 
-        $billingMode = $this->resolveBillingMode($practice, $plan, $billingFrequency, $isComp);
+        $isSponsored = $sponsoringEmployer !== null && $sponsoringContract !== null;
+        $billingMode = $this->resolveBillingMode($practice, $plan, $billingFrequency, $isComp, $isSponsored);
 
         if ($billingMode === 'rejected') {
             throw new RuntimeException(
                 'Cannot enroll patient: practice requires billing but Stripe is not fully configured. '
                 . 'Complete Stripe Connect onboarding and set a Stripe price on this plan, or comp the membership.'
+            );
+        }
+
+        // Sponsored-flow safety check — caller passed exactly one of
+        // employer/contract. Refuse rather than silently fall through to
+        // Stripe billing without locking in which contract paid.
+        if (($sponsoringEmployer === null) !== ($sponsoringContract === null)) {
+            throw new RuntimeException(
+                'Sponsored enrollment requires both an employer and an active contract.'
             );
         }
 
@@ -164,6 +188,8 @@ class MembershipEnrollmentService
             'billing_mode' => $billingMode,
             'comp_reason' => $isComp ? $compReason : null,
             'comped_by_user_id' => $isComp ? $sourceUserId : null,
+            'sponsored_by_employer_id' => $isSponsored ? $sponsoringEmployer->id : null,
+            'sponsored_by_contract_id' => $isSponsored ? $sponsoringContract->id : null,
             'billing_frequency' => $billingFrequency,
             'started_at' => $now,
             'current_period_start' => $now,
@@ -201,6 +227,16 @@ class MembershipEnrollmentService
                 ]);
                 $membership->delete();
                 throw new RuntimeException('Could not start the subscription. ' . $e->getMessage());
+            }
+        }
+
+        // Sponsored path side-effects: stamp employer_id on the patient
+        // record so reports / dashboards filter cleanly, and mark the
+        // EmployerEligibleEmail row as claimed if the caller resolved
+        // sponsorship via the eligibility allow-list.
+        if ($isSponsored) {
+            if (empty($patient->employer_id)) {
+                $patient->update(['employer_id' => $sponsoringEmployer->id]);
             }
         }
 

@@ -20,6 +20,7 @@ class PatientMembership extends Model
         'locked_monthly_price', 'locked_annual_price', 'locked_plan_version',
         'status', 'billing_frequency',
         'billing_mode', 'comp_reason', 'comped_by_user_id',
+        'sponsored_by_employer_id', 'sponsored_by_contract_id',
         'stripe_subscription_id', 'stripe_customer_id',
         'started_at', 'trial_ends_at', 'paused_at', 'cancelled_at', 'expires_at',
         'cancel_reason',

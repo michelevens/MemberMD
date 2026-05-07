@@ -6,6 +6,7 @@ import { useState, useEffect, useCallback } from "react";
 import { apiFetch } from "../../lib/api";
 import { formatUSPhone, normalizeUSPhone } from "../../lib/phone";
 import { AddressAutocomplete } from "../shared/AddressAutocomplete";
+import { EmployerEligibilityPanel } from "../practice/EmployerEligibilityPanel";
 import {
   Search,
   Plus,
@@ -480,6 +481,18 @@ export function EmployerManagementTab() {
                                   ))}
                                 </div>
                               )}
+                            </div>
+
+                            {/* Eligible-employees allow-list — controls who
+                                can self-enroll without paying. The public
+                                enrollment widget hashes the patient's email
+                                and short-circuits Stripe when matched. */}
+                            <div>
+                              <EmployerEligibilityPanel
+                                employerId={expandedDetail.employer.id}
+                                employerName={expandedDetail.employer.name}
+                                setToast={(msg) => alert(msg.message)}
+                              />
                             </div>
                           </div>
                         </td>

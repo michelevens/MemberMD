@@ -251,14 +251,48 @@ class ExternalController extends Controller
             'is_active' => true,
             ],
         );
+        // ─── Sponsored-employer pre-check ──────────────────────────────────
+        // Before deciding the billing mode, ask the employer roster service
+        // whether this email is on an employer's pre-staged eligibility
+        // list AND that employer has an active contract. When yes, we
+        // skip Stripe entirely — the employer will be billed via the
+        // monthly PEPM invoice instead.
+        //
+        // The widget understands two scenarios:
+        //   1. Patient hits a normal enrollment URL with an email that
+        //      happens to be on a roster → sponsored, free for them
+        //   2. Patient hits a "?employer=acme" URL with an email NOT on
+        //      the roster → 422 with "contact your HR rep". We don't
+        //      silently fall back to Stripe charging when the URL hints
+        //      at sponsorship; that would surprise-bill the patient.
+        $rosterService = app(\App\Services\EmployerRosterService::class);
+        $sponsorship = $rosterService->findActiveSponsorshipForEmail(
+            $practice->id,
+            (string) $validated['email'],
+        );
+        $expectedEmployerHint = $request->input('employer'); // optional URL hint
+        if (!$sponsorship && !empty($expectedEmployerHint)) {
+            return response()->json([
+                'message' => "Your email isn't on the eligible-employee list for this employer. "
+                    . 'Contact your HR rep to be added, or enroll as an individual member.',
+                'code' => 'sponsorship_not_eligible',
+            ], 422);
+        }
+
         // ─── Branch on billing mode ────────────────────────────────────────
         // Resolve once, here, so the widget either redirects the patient to
-        // Stripe Checkout (stripe path) or completes a free enrollment
-        // immediately (manual path — practice not Stripe-ready and not
-        // billing_enforced). Comp is unreachable from a public widget.
-        // 'rejected' = practice has billing_enforced=true but no Stripe yet.
+        // Stripe Checkout (stripe path), bypasses Stripe entirely
+        // (sponsored path — employer pays via PEPM contract), or completes
+        // a free enrollment immediately (manual path — practice not
+        // Stripe-ready and not billing_enforced). Comp is unreachable
+        // from a public widget. 'rejected' = practice has
+        // billing_enforced=true but no Stripe yet.
         $billingMode = $this->enrollment->resolveBillingMode(
-            $practice, $plan, $validated['billing_frequency'], false,
+            $practice,
+            $plan,
+            $validated['billing_frequency'],
+            false,
+            $sponsorship !== null,
         );
 
         if ($billingMode === 'rejected') {
@@ -362,6 +396,88 @@ class ExternalController extends Controller
                 'pending_enrollment_id' => $pending->id,
                 'patient_id' => $patient->id,
             ], 201);
+        }
+
+        // ─── Sponsored path: employer pays via PEPM contract ───────────────
+        // Membership is active immediately, no Stripe, no patient charge.
+        // We swap the requested plan for the contract's plan since the
+        // employer is paying for a specific plan tier — letting the
+        // patient pick a different (more expensive) plan and surprise-bill
+        // the employer is the wrong default. If the patient really wants
+        // a higher tier they can upgrade later and pay the difference
+        // themselves; that's a separate flow.
+        if ($billingMode === 'sponsored' && $sponsorship !== null) {
+            $sponsoredPlan = MembershipPlan::where('tenant_id', $practice->id)
+                ->where('id', $sponsorship['contract']->membership_plan_id)
+                ->where('is_active', true)
+                ->first();
+            if (!$sponsoredPlan) {
+                Log::warning('Sponsored contract references inactive plan; falling back to manual', [
+                    'practice_id' => $practice->id,
+                    'employer_id' => $sponsorship['employer']->id,
+                    'contract_id' => $sponsorship['contract']->id,
+                ]);
+                // Fall through to manual.
+            } else {
+                try {
+                    $membership = $this->enrollment->enroll(
+                        practice: $practice,
+                        patient: $patient,
+                        plan: $sponsoredPlan,
+                        billingFrequency: $validated['billing_frequency'],
+                        isComp: false,
+                        compReason: null,
+                        sourceUserId: null,
+                        paymentMethodId: null,
+                        source: 'external.enroll.sponsored',
+                        sponsoringEmployer: $sponsorship['employer'],
+                        sponsoringContract: $sponsorship['contract'],
+                    );
+                } catch (\RuntimeException $e) {
+                    return response()->json([
+                        'message' => 'Sponsored enrollment failed: ' . $e->getMessage(),
+                        'patient_id' => $patient->id,
+                    ], 422);
+                }
+
+                // Mark the eligibility row claimed so HR sees the change
+                // without polling the memberships table.
+                $rosterService->claimEligibleEmail($sponsorship['eligible'], $patient);
+
+                // Open an employer_employee_periods row so PEPM proration
+                // works for partial-month enrollments (joiners after the
+                // 1st pay only the prorated fraction).
+                $rosterService->openPeriod($sponsorship['employer'], $patient);
+
+                self::writeConsentSignatures(
+                    practice: $practice,
+                    patient: $patient,
+                    membership: $membership,
+                    consentTypes: (array) $validated['consents'],
+                    signatureData: (string) $validated['signature_data'],
+                    ip: $request->ip(),
+                    userAgent: substr((string) $request->userAgent(), 0, 255),
+                    timezone: $validated['timezone'] ?? null,
+                    tzOffsetMinutes: isset($validated['tz_offset_minutes']) ? (int) $validated['tz_offset_minutes'] : null,
+                );
+
+                self::firePostEnrollmentNotifications(
+                    practice: $practice,
+                    patient: $patient,
+                    user: $user,
+                    membership: $membership,
+                    patientEmail: $validated['email'] ?? null,
+                    patientName: trim(($validated['first_name'] ?? '') . ' ' . ($validated['last_name'] ?? '')),
+                );
+
+                return response()->json([
+                    'requires_payment' => false,
+                    'sponsored' => true,
+                    'sponsoring_employer_name' => $sponsorship['employer']->name,
+                    'membership_id' => $membership->id,
+                    'patient_id' => $patient->id,
+                ], 201);
+            }
         }
 
         // ─── Manual path: practice not billing-enforced, no Stripe ─────────

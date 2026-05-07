@@ -901,6 +901,15 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
         Route::get('/{id}', [EmployerController::class, 'show']);
         Route::put('/{id}', [EmployerController::class, 'update']);
         Route::delete('/{id}', [EmployerController::class, 'destroy']);
+
+        // Pre-enrollment eligibility allow-list (sponsored-employer flow).
+        // The public widget checks an enrollee's email against this list
+        // to decide whether to skip Stripe Checkout. Practice admins or
+        // employer admins can manage entries.
+        Route::get('/{employerId}/eligible-emails', [\App\Http\Controllers\Api\EmployerEligibleEmailController::class, 'index']);
+        Route::post('/{employerId}/eligible-emails', [\App\Http\Controllers\Api\EmployerEligibleEmailController::class, 'store']);
+        Route::post('/{employerId}/eligible-emails/bulk', [\App\Http\Controllers\Api\EmployerEligibleEmailController::class, 'bulk']);
+        Route::delete('/{employerId}/eligible-emails/{id}', [\App\Http\Controllers\Api\EmployerEligibleEmailController::class, 'destroy']);
     });
 
     // ===== Employer Contracts =====
