@@ -7,8 +7,9 @@ import { useNavigate, useLocation } from "react-router-dom";
 import { ProviderDetailPage } from "./ProviderDetailPage";
 import { EncounterDetailPage } from "./EncounterDetailPage";
 import { PatientBillingTab } from "./PatientBillingTab";
+import { StalledEnrollmentsPanel } from "../practice/StalledEnrollmentsPanel";
 import { useAuth } from "../../contexts/AuthContext";
-import { dashboardService, membershipPlanService, messageService, patientService, appointmentService, encounterService, prescriptionService, invoiceService, programService, telehealthService, screeningService, couponService, providerService, paymentService, notificationService, apiFetch, billingEnhancedService, documentService, onboardingService, staffService, chartTemplateService, labService, referralService } from "../../lib/api";
+import { dashboardService, membershipPlanService, messageService, patientService, appointmentService, encounterService, prescriptionService, invoiceService, programService, telehealthService, screeningService, couponService, providerService, paymentService, notificationService, apiFetch, billingEnhancedService, documentService, onboardingService, staffService, chartTemplateService, labService, referralService, stalledEnrollmentService } from "../../lib/api";
 import { formatDob, formatRelative } from "../../lib/format";
 import { PortalShell, type NavSection as ShellNavSection, type PortalColor } from "../shared/PortalShell";
 import { MobileTodayScreen } from "../practice/MobileTodayScreen";
@@ -120,6 +121,7 @@ type TabId =
   | "dashboard"
   | "programs"
   | "roster"
+  | "stalled"
   | "intakes"
   | "waitlist"
   | "appointments"
@@ -189,6 +191,10 @@ const NAV_SECTIONS: NavSection[] = [
     title: "Members",
     items: [
       { id: "roster", label: "Patient Roster", icon: Users },
+      // Recovery queue for patients who started enrolling but didn't pay.
+      // Sits with Members so staff find it adjacent to the Roster they
+      // already triage daily.
+      { id: "stalled", label: "Stalled Signups", icon: AlertTriangle, roles: ["practice_admin", "staff", "superadmin"] },
       { id: "intakes", label: "Intake Submissions", icon: ClipboardList },
       { id: "waitlist", label: "Waitlist", icon: Clock },
     ],
@@ -1062,6 +1068,10 @@ export function PracticePortal() {
   const [patientDetailTab, setPatientDetailTab] = useState("demographics");
   const [expandedEncounters, setExpandedEncounters] = useState<string[]>([]);
   const [notificationFilter, setNotificationFilter] = useState<"all" | "members" | "appointments" | "billing" | "system">("all");
+  // Pending-enrollment recovery counter — populated by StalledEnrollmentsPanel
+  // when it loads, drives the Roster top-banner that nudges staff toward
+  // the rescue queue. Auto-refreshes when the user opens the Stalled tab.
+  const [stalledCount, setStalledCount] = useState<number>(0);
   const [showBookingWidget, setShowBookingWidget] = useState(false);
   const [telehealthMode, setTelehealthMode] = useState<"builtin" | "external">("builtin");
   const [externalPlatform, setExternalPlatform] = useState<"zoom" | "doxy" | "teams" | "google_meet" | "custom">("zoom");
@@ -1219,6 +1229,21 @@ export function PracticePortal() {
   // ─── Toast ──────────────────────────────────────────────────────────
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   useEffect(() => { if (toast) { const t = setTimeout(() => setToast(null), 4000); return () => clearTimeout(t); } }, [toast]);
+
+  // Stalled-enrollment count for the Roster banner. One-shot on mount —
+  // the Stalled tab keeps the count in sync afterward via onCountChange.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await stalledEnrollmentService.list("pending");
+        if (!cancelled) setStalledCount(res.meta?.pending_count ?? (Array.isArray(res.data) ? res.data.length : 0));
+      } catch {
+        // Silent — banner just won't render.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   // ─── Confirm Dialog ─────────────────────────────────────────────────
   const [confirmDialog, setConfirmDialog] = useState<{ title: string; message: string; onConfirm: () => void; confirmLabel?: string; danger?: boolean } | null>(null);
@@ -3937,6 +3962,23 @@ export function PracticePortal() {
                 : `${filtered.length} of ${filteredPatients.length}`}
             </p>
           </div>
+          {/* Stalled-enrollment recovery banner — visible only when there
+              are pending signups awaiting payment. One click into the
+              rescue queue. */}
+          {stalledCount > 0 && (
+            <button
+              type="button"
+              onClick={() => goToTab("stalled")}
+              className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border text-sm font-medium hover:bg-amber-100 transition-colors"
+              style={{ backgroundColor: "#fffbeb", borderColor: "#fde68a", color: "#92400e" }}
+            >
+              <AlertTriangle className="w-4 h-4" />
+              <span>
+                {stalledCount} {stalledCount === 1 ? "patient" : "patients"} started enrolling but haven't paid
+              </span>
+              <span className="text-xs font-semibold underline">Review</span>
+            </button>
+          )}
           <div className="flex items-center gap-2 shrink-0">
             <RefreshButton onRefresh={loadPracticeData} title="Refresh roster" />
             {/* Bulk-delete sample patients — appears only when at least
@@ -10226,6 +10268,13 @@ export function PracticePortal() {
         return <ProgramsSection />;
       case "roster":
         return renderRoster();
+      case "stalled":
+        return (
+          <StalledEnrollmentsPanel
+            setToast={setToast}
+            onCountChange={(n) => setStalledCount(n)}
+          />
+        );
       case "intakes":
         return renderIntakes();
       case "waitlist":

@@ -147,6 +147,13 @@ class NotificationRegistry
             'default_enabled' => true,
             'is_phi_bearing' => false,
         ],
+        'patient.enrollment_reminder' => [
+            'audience' => 'patient',
+            'label' => 'Stalled Enrollment Reminder',
+            'description' => 'Auto-sent reminder when a pending enrollee hasn\'t completed payment (T-2h expiring, T+24h fresh link, T+72h final).',
+            'default_enabled' => true,
+            'is_phi_bearing' => false,
+        ],
         'patient.billing_portal_link' => [
             'audience' => 'patient',
             'label' => 'Billing Portal Link',

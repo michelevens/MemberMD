@@ -26,6 +26,9 @@ class PendingEnrollment extends Model
         // payment-link round trip and applied by the
         // checkout.session.completed webhook.
         'waive_enrollment_fee', 'waiver_reason',
+        // Recovery / reminder cadence
+        'last_resent_at', 'reminders_sent', 'reminder_count',
+        'cached_first_name', 'cached_last_name', 'cached_email',
     ];
 
     protected $casts = [
@@ -33,6 +36,9 @@ class PendingEnrollment extends Model
         'claimed_at' => 'datetime',
         'consent_payload' => 'array',
         'waive_enrollment_fee' => 'boolean',
+        'last_resent_at' => 'datetime',
+        'reminders_sent' => 'array',
+        'reminder_count' => 'integer',
     ];
 
     public function patient(): BelongsTo

@@ -274,6 +274,11 @@ class MembershipController extends Controller
             'expires_at' => now()->addHours(24),
             'waive_enrollment_fee' => $waiveEnrollmentFee,
             'waiver_reason' => $waiveEnrollmentFee ? $waiverReason : null,
+            // Cache patient identity for the Stalled-enrollments list so
+            // the recovery surface doesn't need a join.
+            'cached_first_name' => $patient->first_name,
+            'cached_last_name' => $patient->last_name,
+            'cached_email' => $patient->email,
         ]);
 
         $appUrl = (string) config('app.frontend_url', config('app.url'));

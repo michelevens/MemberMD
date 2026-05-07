@@ -288,6 +288,11 @@ class ExternalController extends Controller
                 'signed_ip' => $request->ip(),
                 'signed_user_agent' => substr((string) $request->userAgent(), 0, 255),
                 'expires_at' => now()->addHours(24),
+                // Cache patient identity for the Stalled-enrollments list
+                // so the recovery surface doesn't need a join.
+                'cached_first_name' => $patient->first_name,
+                'cached_last_name' => $patient->last_name,
+                'cached_email' => $patient->email ?? $validated['email'],
             ]);
 
             $appUrl = (string) config('app.frontend_url', config('app.url'));

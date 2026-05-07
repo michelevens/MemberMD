@@ -2135,6 +2135,54 @@ export const patientCreditService = {
   },
 };
 
+// ─── Stalled enrollments (recovery / rescue queue) ────────────────────────
+//
+// Patients who started enrollment but didn't complete payment. Surfaces
+// the pending_enrollments table for staff triage. Resend transparently
+// refreshes the Stripe session if it's expired.
+
+export interface StalledEnrollmentRow {
+  id: string;
+  patient_id: string;
+  plan_id: string;
+  plan_name: string | null;
+  plan_monthly_price: number | null;
+  plan_annual_price: number | null;
+  billing_frequency: string;
+  first_name: string | null;
+  last_name: string | null;
+  email: string | null;
+  status: "pending" | "claimed" | "expired" | "cancelled";
+  checkout_url: string | null;
+  reminder_count: number;
+  last_resent_at: string | null;
+  reminders_sent: Record<string, string> | null;
+  expires_at: string | null;
+  created_at: string | null;
+}
+
+export interface StalledEnrollmentsResponse {
+  data: StalledEnrollmentRow[];
+  meta?: { pending_count: number };
+}
+
+export const stalledEnrollmentService = {
+  list: async (status?: "pending" | "all" | "cancelled"): Promise<StalledEnrollmentsResponse> => {
+    if (useMockData()) return { data: [], meta: { pending_count: 0 } };
+    const q = status ? `?status=${status}` : "";
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return apiFetch<any>(`/practice/pending-enrollments${q}`) as unknown as Promise<StalledEnrollmentsResponse>;
+  },
+  resend: async (id: string): Promise<ApiResponse<StalledEnrollmentRow> & { checkout_url?: string | null }> => {
+    if (useMockData()) return { data: {} as StalledEnrollmentRow };
+    return apiFetch(`/practice/pending-enrollments/${id}/resend`, { method: "POST" });
+  },
+  cancel: async (id: string): Promise<ApiResponse<StalledEnrollmentRow>> => {
+    if (useMockData()) return { data: {} as StalledEnrollmentRow };
+    return apiFetch<StalledEnrollmentRow>(`/practice/pending-enrollments/${id}/cancel`, { method: "POST" });
+  },
+};
+
 // ─── Coupons ────────────────────────────────────────────────────────────────
 
 export const couponService = {

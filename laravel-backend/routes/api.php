@@ -620,6 +620,15 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
     // Patient-side balance + history. Self-only — derives patient from auth user.
     Route::get('/me/credits', [\App\Http\Controllers\Api\PatientCreditController::class, 'indexForSelf']);
 
+    // ===== Stalled enrollments (recovery / rescue queue) =====
+    // Practice surface for patients who started enrollment but didn't pay.
+    // Backed by pending_enrollments rows. The reminder cron + manual
+    // resend both ride the PendingEnrollmentController::ensureFreshCheckoutUrl
+    // helper so expired Stripe sessions get re-minted transparently.
+    Route::get('/practice/pending-enrollments', [\App\Http\Controllers\Api\PendingEnrollmentController::class, 'index']);
+    Route::post('/practice/pending-enrollments/{id}/resend', [\App\Http\Controllers\Api\PendingEnrollmentController::class, 'resend']);
+    Route::post('/practice/pending-enrollments/{id}/cancel', [\App\Http\Controllers\Api\PendingEnrollmentController::class, 'cancel']);
+
     // ===== Notifications =====
     Route::get('/notifications/preferences', [NotificationController::class, 'getPreferences']);
     Route::put('/notifications/preferences', [NotificationController::class, 'updatePreferences']);
