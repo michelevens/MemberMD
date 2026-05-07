@@ -19,6 +19,7 @@ import { EntitlementsTab } from "./patient/EntitlementsTab";
 import { LabResultsTab } from "./patient/LabResultsTab";
 import { LocationsTab } from "./patient/LocationsTab";
 import { FamilyMembersSection } from "./patient/FamilyMembersSection";
+import { DependentsPanel } from "./patient/DependentsPanel";
 import { PatientConsentsTab } from "./practice/PatientConsentsTab";
 import { usePushNotifications } from "../../hooks/usePushNotifications";
 import {
@@ -1607,6 +1608,21 @@ export function PatientPortal() {
           Here&apos;s your health summary
         </p>
       </div>
+
+      {/* Dependents panel — only renders when the patient has
+          dependents on their family membership. Each dependent gets
+          a row showing next visit / unread / open balance with
+          tap-through to the relevant tab. */}
+      <DependentsPanel
+        onNavigate={(target) => {
+          // DependentsPanel uses generic targets; map to local tab
+          // ids ("billing" → "account" because the patient portal
+          // labeled the tab Account when it shipped, even though
+          // it surfaces billing data).
+          const tabId = target === "billing" ? "account" : target;
+          setActiveTab(tabId as TabId);
+        }}
+      />
 
       {/* Pending payment link banner — surfaces when the practice sent
           an admin-created Stripe Checkout link but the patient hasn't

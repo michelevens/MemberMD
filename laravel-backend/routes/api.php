@@ -448,6 +448,7 @@ Route::middleware(['auth:sanctum', 'operator.scope', 'phi.log'])->group(function
     // message if not. The id returned by GET is the dependent's
     // PatientMembership id; the patient deletes by that.
     Route::get('/family/members', [\App\Http\Controllers\Api\MembershipController::class, 'myFamilyMembers']);
+    Route::get('/me/dependents-summary', [\App\Http\Controllers\Api\MembershipController::class, 'dependentsSummary']);
     Route::post('/family/members', [\App\Http\Controllers\Api\MembershipController::class, 'addMyFamilyMember']);
     Route::delete('/family/members/{membershipId}', [\App\Http\Controllers\Api\MembershipController::class, 'removeMyFamilyMember']);
     // Stripe-hosted Customer Portal for patient self-serve card / invoice

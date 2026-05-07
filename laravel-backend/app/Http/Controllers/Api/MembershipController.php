@@ -1583,6 +1583,132 @@ class MembershipController extends Controller
         return response()->json(['data' => ['url' => $url]]);
     }
 
+    /**
+     * GET /me/dependents-summary
+     *
+     * Richer-than-myFamilyMembers view for the patient dashboard:
+     * for each dependent on the caller's family membership, return
+     * the per-dependent things a guardian needs to glance at —
+     * upcoming appointment, unread messages, open ad-hoc charges.
+     *
+     * Tightly tenant + family scoped: dependents must be linked to
+     * the caller's primary membership via parent_membership_id;
+     * other patients' data is NEVER reachable through this endpoint.
+     *
+     * Returns: array of { dependent: {...}, upcoming, unread,
+     * open_balance_cents }
+     */
+    public function dependentsSummary(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        abort_if(!$user->isPatient() || !$user->patient, 403, 'Patient role required.');
+
+        $primary = $user->patient->activeMembership;
+        if (!$primary) {
+            return response()->json(['data' => []]);
+        }
+
+        $dependents = PatientMembership::where('tenant_id', $user->tenant_id)
+            ->where('parent_membership_id', $primary->id)
+            ->where('status', '!=', 'cancelled')
+            ->with('patient')
+            ->orderByDesc('created_at')
+            ->get();
+
+        if ($dependents->isEmpty()) {
+            return response()->json(['data' => []]);
+        }
+
+        $links = \App\Models\PatientFamilyMember::where('tenant_id', $user->tenant_id)
+            ->where('primary_patient_id', $primary->patient_id)
+            ->get()
+            ->keyBy('member_patient_id');
+
+        $patientIds = $dependents->pluck('patient_id')->all();
+
+        // Fetch per-dependent rollup data in 3 batched queries rather
+        // than N×3 to keep the patient-portal load fast even with
+        // multiple kids.
+        $upcomingByPatient = \App\Models\Appointment::whereIn('patient_id', $patientIds)
+            ->where('tenant_id', $user->tenant_id)
+            ->where('scheduled_at', '>=', now())
+            ->whereIn('status', ['confirmed', 'pending'])
+            ->orderBy('scheduled_at')
+            ->get()
+            ->groupBy('patient_id')
+            ->map(fn ($g) => $g->first());
+
+        // Unread messages where the dependent is the recipient.
+        $unreadByPatient = \App\Models\Message::whereIn('recipient_id',
+                \App\Models\User::whereIn('id',
+                    \App\Models\Patient::whereIn('id', $patientIds)
+                        ->pluck('user_id')
+                )->pluck('id')
+            )
+            ->where('tenant_id', $user->tenant_id)
+            ->whereNull('read_at')
+            ->get()
+            ->groupBy(function ($m) {
+                // Map back to patient_id via recipient user. We carry
+                // the recipient_id only; resolve to patient via the
+                // pre-fetched relationship below.
+                return $m->recipient_id;
+            });
+
+        $userIdToPatientId = \App\Models\Patient::whereIn('id', $patientIds)
+            ->pluck('id', 'user_id');
+
+        $openChargesByPatient = \App\Models\AdHocCharge::whereIn('patient_id', $patientIds)
+            ->where('tenant_id', $user->tenant_id)
+            ->where('status', \App\Models\AdHocCharge::STATUS_SENT)
+            ->get()
+            ->groupBy('patient_id');
+
+        $payload = $dependents->map(function ($m) use ($links, $upcomingByPatient, $unreadByPatient, $userIdToPatientId, $openChargesByPatient) {
+            $p = $m->patient;
+            $patientId = $m->patient_id;
+            $rel = $links->get($patientId)?->relationship ?? 'other';
+
+            // Resolve unread count via the user_id → patient_id map.
+            $userId = $p?->user_id;
+            $unreadCount = ($userId && $unreadByPatient->has($userId))
+                ? $unreadByPatient->get($userId)->count()
+                : 0;
+            unset($userIdToPatientId);
+
+            $upcoming = $upcomingByPatient->get($patientId);
+            $openCharges = $openChargesByPatient->get($patientId, collect());
+            $openBalanceCents = (int) $openCharges->sum('amount_cents');
+
+            return [
+                'dependent' => [
+                    'id' => $m->id,
+                    'patient_id' => $patientId,
+                    'first_name' => $p?->first_name ?? '',
+                    'last_name' => $p?->last_name ?? '',
+                    'preferred_name' => $p?->preferred_name,
+                    'date_of_birth' => $p?->date_of_birth?->toDateString(),
+                    'relationship' => $rel,
+                    'is_minor' => $p?->date_of_birth
+                        ? $p->date_of_birth->diffInYears(now()) < 18
+                        : false,
+                ],
+                'upcoming_appointment' => $upcoming ? [
+                    'id' => $upcoming->id,
+                    'scheduled_at' => $upcoming->scheduled_at?->toIso8601String(),
+                    'duration_minutes' => $upcoming->duration_minutes,
+                    'status' => $upcoming->status,
+                    'is_telehealth' => (bool) $upcoming->is_telehealth,
+                ] : null,
+                'unread_messages' => $unreadCount,
+                'open_balance_cents' => $openBalanceCents,
+                'open_charges_count' => $openCharges->count(),
+            ];
+        });
+
+        return response()->json(['data' => $payload->values()]);
+    }
+
     public function myFamilyMembers(Request $request): JsonResponse
     {
         $user = $request->user();
