@@ -288,6 +288,33 @@ class UtilizationTrackingService
     }
 
     /**
+     * Reverse usage previously recorded against a source (e.g. an
+     * appointment that was marked completed by mistake and then
+     * cancelled, or a lab order that was voided after being placed).
+     *
+     * Implementation: hard-delete the EntitlementUsage rows keyed by
+     * source_type + source_id. We don't carry a separate "reversed"
+     * flag because (a) used_quantity is computed by SUM(quantity)
+     * across rows, so the cleanest reversal is row removal, and (b)
+     * the audit trail for the reversal lives on the source itself
+     * (the appointment status transition, etc.). Pack credits that
+     * were consumed for this source ARE NOT auto-refunded — pack
+     * credits are paid for separately and a partial credit refund
+     * needs a deliberate ops decision.
+     *
+     * Idempotent: returns the count of rows deleted (0 if nothing
+     * matched, which is fine — observer reversal is allowed to fire
+     * before any record was created, e.g. a draft appointment that
+     * went straight to cancelled).
+     */
+    public function reverseUsage(string $sourceType, string $sourceId): int
+    {
+        return EntitlementUsage::where('source_type', $sourceType)
+            ->where('source_id', $sourceId)
+            ->delete();
+    }
+
+    /**
      * Check if patient has remaining entitlement.
      *
      * @return array{has_entitlement: bool, allowed: int|string, used: int, remaining: int|string, overage_policy: string}

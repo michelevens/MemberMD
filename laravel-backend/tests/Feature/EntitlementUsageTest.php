@@ -1434,4 +1434,272 @@ class EntitlementUsageTest extends TestCase
         $this->assertEquals(0, EntitlementUsage::count(),
             'auto_track_dispensing=false should suppress the observer');
     }
+
+    // ─── Reversal: completed → cancelled / no_show ──────────────────────────
+
+    /**
+     * Real bug this protects against: provider marks an appointment
+     * 'completed' by mistake (auto-track fires, bucket -1), then corrects
+     * to 'cancelled'. Without reversal the bucket stays decremented
+     * forever and the patient eventually sees spurious overage warnings.
+     */
+    public function test_appointment_completed_then_cancelled_reverses_usage(): void
+    {
+        $ctx = $this->setupBaseline();
+
+        $officeVisit = EntitlementType::create([
+            'tenant_id' => $ctx['practice']->id,
+            'code' => 'office_visit',
+            'name' => 'Office Visit', 'category' => 'visit',
+            'unit_of_measure' => 'visit', 'is_active' => true,
+        ]);
+        PlanEntitlement::create([
+            'plan_id' => $ctx['plan']->id,
+            'entitlement_type_id' => $officeVisit->id,
+            'quantity_limit' => 4, 'is_unlimited' => false,
+            'period_type' => 'per_month', 'overage_policy' => 'notify',
+            'is_active' => true,
+        ]);
+
+        $providerUser = User::create([
+            'name' => 'Dr', 'email' => 'dr-' . uniqid() . '@ent.com',
+            'password' => bcrypt('p'), 'tenant_id' => $ctx['practice']->id,
+            'role' => 'provider', 'first_name' => 'D', 'last_name' => 'X',
+            'status' => 'active',
+        ]);
+        $provider = \App\Models\Provider::create([
+            'tenant_id' => $ctx['practice']->id,
+            'user_id' => $providerUser->id,
+            'first_name' => 'D', 'last_name' => 'X',
+        ]);
+        $apptType = \App\Models\AppointmentType::create([
+            'tenant_id' => $ctx['practice']->id,
+            'name' => 'Office Visit', 'duration_minutes' => 30,
+            'is_active' => true,
+        ]);
+
+        $appointment = \App\Models\Appointment::create([
+            'tenant_id' => $ctx['practice']->id,
+            'patient_id' => $ctx['patient']->id,
+            'provider_id' => $provider->id,
+            'appointment_type_id' => $apptType->id,
+            'scheduled_at' => now(),
+            'duration_minutes' => 30,
+            'status' => 'scheduled',
+            'is_telehealth' => false,
+        ]);
+
+        // Provider marks completed by mistake — observer records.
+        $appointment->update(['status' => 'completed']);
+        $this->assertEquals(1, EntitlementUsage::where('source_type', 'appointment')
+            ->where('source_id', $appointment->id)->count());
+
+        // Provider corrects to cancelled — observer must reverse.
+        $appointment->update(['status' => 'cancelled']);
+        $this->assertEquals(0, EntitlementUsage::where('source_type', 'appointment')
+            ->where('source_id', $appointment->id)->count(),
+            'Reversal must remove the usage row when status leaves the consuming set');
+    }
+
+    /**
+     * No-show is the other terminal non-consuming state. Same reversal
+     * rule must apply (patient-side: they were checked_in but didn't
+     * receive service, bucket should be credited back).
+     */
+    public function test_appointment_checked_in_then_no_show_reverses_usage(): void
+    {
+        $ctx = $this->setupBaseline();
+
+        $officeVisit = EntitlementType::create([
+            'tenant_id' => $ctx['practice']->id,
+            'code' => 'office_visit',
+            'name' => 'Office Visit', 'category' => 'visit',
+            'unit_of_measure' => 'visit', 'is_active' => true,
+        ]);
+        PlanEntitlement::create([
+            'plan_id' => $ctx['plan']->id,
+            'entitlement_type_id' => $officeVisit->id,
+            'quantity_limit' => 4, 'is_unlimited' => false,
+            'period_type' => 'per_month', 'overage_policy' => 'notify',
+            'is_active' => true,
+        ]);
+
+        $providerUser = User::create([
+            'name' => 'Dr', 'email' => 'dr-' . uniqid() . '@ent.com',
+            'password' => bcrypt('p'), 'tenant_id' => $ctx['practice']->id,
+            'role' => 'provider', 'first_name' => 'D', 'last_name' => 'X',
+            'status' => 'active',
+        ]);
+        $provider = \App\Models\Provider::create([
+            'tenant_id' => $ctx['practice']->id,
+            'user_id' => $providerUser->id,
+            'first_name' => 'D', 'last_name' => 'X',
+        ]);
+        $apptType = \App\Models\AppointmentType::create([
+            'tenant_id' => $ctx['practice']->id,
+            'name' => 'Office Visit', 'duration_minutes' => 30,
+            'is_active' => true,
+        ]);
+
+        $appointment = \App\Models\Appointment::create([
+            'tenant_id' => $ctx['practice']->id,
+            'patient_id' => $ctx['patient']->id,
+            'provider_id' => $provider->id,
+            'appointment_type_id' => $apptType->id,
+            'scheduled_at' => now(),
+            'duration_minutes' => 30,
+            'status' => 'scheduled',
+            'is_telehealth' => false,
+        ]);
+
+        $appointment->update(['status' => 'checked_in']);
+        $this->assertEquals(1, EntitlementUsage::where('source_type', 'appointment')
+            ->where('source_id', $appointment->id)->count());
+
+        $appointment->update(['status' => 'no_show']);
+        $this->assertEquals(0, EntitlementUsage::where('source_type', 'appointment')
+            ->where('source_id', $appointment->id)->count(),
+            'no_show after checked_in must reverse the bucket decrement');
+    }
+
+    /**
+     * checked_in → completed should NOT double-record. Both states are
+     * in the consuming set — flipping between them is a refinement of
+     * the same visit, not a second one. The observer guard (was vs is
+     * consuming) protects against double-decrement.
+     */
+    public function test_appointment_checked_in_to_completed_does_not_double_record(): void
+    {
+        $ctx = $this->setupBaseline();
+
+        $officeVisit = EntitlementType::create([
+            'tenant_id' => $ctx['practice']->id,
+            'code' => 'office_visit',
+            'name' => 'Office Visit', 'category' => 'visit',
+            'unit_of_measure' => 'visit', 'is_active' => true,
+        ]);
+        PlanEntitlement::create([
+            'plan_id' => $ctx['plan']->id,
+            'entitlement_type_id' => $officeVisit->id,
+            'quantity_limit' => 4, 'is_unlimited' => false,
+            'period_type' => 'per_month', 'overage_policy' => 'notify',
+            'is_active' => true,
+        ]);
+
+        $providerUser = User::create([
+            'name' => 'Dr', 'email' => 'dr-' . uniqid() . '@ent.com',
+            'password' => bcrypt('p'), 'tenant_id' => $ctx['practice']->id,
+            'role' => 'provider', 'first_name' => 'D', 'last_name' => 'X',
+            'status' => 'active',
+        ]);
+        $provider = \App\Models\Provider::create([
+            'tenant_id' => $ctx['practice']->id,
+            'user_id' => $providerUser->id,
+            'first_name' => 'D', 'last_name' => 'X',
+        ]);
+        $apptType = \App\Models\AppointmentType::create([
+            'tenant_id' => $ctx['practice']->id,
+            'name' => 'Office Visit', 'duration_minutes' => 30,
+            'is_active' => true,
+        ]);
+
+        $appointment = \App\Models\Appointment::create([
+            'tenant_id' => $ctx['practice']->id,
+            'patient_id' => $ctx['patient']->id,
+            'provider_id' => $provider->id,
+            'appointment_type_id' => $apptType->id,
+            'scheduled_at' => now(),
+            'duration_minutes' => 30,
+            'status' => 'scheduled',
+            'is_telehealth' => false,
+        ]);
+
+        $appointment->update(['status' => 'checked_in']);
+        $appointment->update(['status' => 'completed']);
+
+        $this->assertEquals(1, EntitlementUsage::where('source_type', 'appointment')
+            ->where('source_id', $appointment->id)->count(),
+            'checked_in → completed is one visit, not two — observer must not record twice');
+    }
+
+    // ─── Concurrent decrements ──────────────────────────────────────────────
+
+    /**
+     * Two appointments completing back-to-back must each subtract from
+     * the bucket — the SUM(quantity)-based read model is safe here as
+     * long as each row is its own INSERT (no read-modify-write race
+     * on a shared counter column).
+     *
+     * This is a simulated-concurrency test: we don't fork PHP processes,
+     * we just create two source rows and flip both to completed without
+     * an intervening read. Validates that the design relies on row
+     * inserts + sum (correct) rather than a "decrement counter" UPDATE
+     * (would race).
+     */
+    public function test_two_appointments_completing_both_decrement_bucket(): void
+    {
+        $ctx = $this->setupBaseline();
+
+        $officeVisit = EntitlementType::create([
+            'tenant_id' => $ctx['practice']->id,
+            'code' => 'office_visit',
+            'name' => 'Office Visit', 'category' => 'visit',
+            'unit_of_measure' => 'visit', 'is_active' => true,
+        ]);
+        PlanEntitlement::create([
+            'plan_id' => $ctx['plan']->id,
+            'entitlement_type_id' => $officeVisit->id,
+            'quantity_limit' => 4, 'is_unlimited' => false,
+            'period_type' => 'per_month', 'overage_policy' => 'notify',
+            'is_active' => true,
+        ]);
+
+        $providerUser = User::create([
+            'name' => 'Dr', 'email' => 'dr-' . uniqid() . '@ent.com',
+            'password' => bcrypt('p'), 'tenant_id' => $ctx['practice']->id,
+            'role' => 'provider', 'first_name' => 'D', 'last_name' => 'X',
+            'status' => 'active',
+        ]);
+        $provider = \App\Models\Provider::create([
+            'tenant_id' => $ctx['practice']->id,
+            'user_id' => $providerUser->id,
+            'first_name' => 'D', 'last_name' => 'X',
+        ]);
+        $apptType = \App\Models\AppointmentType::create([
+            'tenant_id' => $ctx['practice']->id,
+            'name' => 'Office Visit', 'duration_minutes' => 30,
+            'is_active' => true,
+        ]);
+
+        $appt1 = \App\Models\Appointment::create([
+            'tenant_id' => $ctx['practice']->id,
+            'patient_id' => $ctx['patient']->id,
+            'provider_id' => $provider->id,
+            'appointment_type_id' => $apptType->id,
+            'scheduled_at' => now(),
+            'duration_minutes' => 30,
+            'status' => 'scheduled',
+            'is_telehealth' => false,
+        ]);
+        $appt2 = \App\Models\Appointment::create([
+            'tenant_id' => $ctx['practice']->id,
+            'patient_id' => $ctx['patient']->id,
+            'provider_id' => $provider->id,
+            'appointment_type_id' => $apptType->id,
+            'scheduled_at' => now()->addMinutes(45),
+            'duration_minutes' => 30,
+            'status' => 'scheduled',
+            'is_telehealth' => false,
+        ]);
+
+        // Flip both. Observer fires twice; each call inserts its own row.
+        $appt1->update(['status' => 'completed']);
+        $appt2->update(['status' => 'completed']);
+
+        $check = $this->service()->checkEntitlement($ctx['patient']->id, 'office_visit');
+        $this->assertEquals(2, $check['used'],
+            'Both completions must subtract — used should be 2 of 4');
+        $this->assertEquals(2, $check['remaining'],
+            'Bucket should reflect both subtractions');
+    }
 }
