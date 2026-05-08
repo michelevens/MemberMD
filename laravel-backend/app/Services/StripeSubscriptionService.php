@@ -682,22 +682,30 @@ class StripeSubscriptionService
         // Only billed when the plan has an enrollment_fee > 0 AND this
         // particular enrollment isn't being waived. Lives on the SAME
         // checkout so the patient pays subscription + fee in one flow,
-        // not two separate transactions. add_invoice_items attaches a
-        // one-time line item to the first invoice that the subscription
-        // generates — which Stripe charges immediately along with the
-        // first month's fee.
+        // not two separate transactions.
+        //
+        // Stripe deprecated subscription_data[add_invoice_items] in 2025
+        // (caught 2026-05-08 prod blocker: "Received unknown parameter:
+        // subscription_data[add_invoice_items]"). The replacement: append
+        // the one-time fee as a second top-level line_items entry with
+        // a one-time price_data. In mode=subscription Checkout, Stripe
+        // accepts one-time prices alongside the recurring one and bills
+        // both together on the subscription's first invoice.
         $enrollmentFee = (float) ($plan->enrollment_fee ?? 0);
         if ($enrollmentFee > 0 && !$waiveEnrollmentFee) {
-            $params['subscription_data']['add_invoice_items'] = [[
+            $params['line_items'][] = [
                 'price_data' => [
                     'currency' => 'usd',
+                    // Recurring is omitted → Stripe treats this as a
+                    // one-time price. The subscription Checkout mode
+                    // attaches it to the first invoice.
                     'unit_amount' => (int) round($enrollmentFee * 100),
                     'product_data' => [
                         'name' => 'Initial enrollment fee — ' . $plan->name,
                     ],
                 ],
                 'quantity' => 1,
-            ]];
+            ];
         }
 
         if ($applicationFeePercent > 0) {
