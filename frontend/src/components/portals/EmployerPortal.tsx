@@ -369,11 +369,19 @@ function ROISection() {
     );
   }
 
-  if (!data || (data.savings_this_month === 0 && data.savings_trailing_year === 0)) {
+  // apiFetch auto-camelCases responses; treat anything missing as
+  // zero / empty so a sparse or malformed response doesn't crash the
+  // whole portal.
+  const savingsMonth = Number(data?.savingsThisMonth ?? 0);
+  const savingsYear = Number(data?.savingsTrailingYear ?? 0);
+  const usageEvents = Number(data?.usageEventsThisMonth ?? 0);
+  const invoiceSpend = Number(data?.invoiceSpendTrailingYear ?? 0);
+  const ratio = data?.roiRatioTrailingYear ?? null;
+  const topCategories = Array.isArray(data?.topCategoriesThisMonth) ? data!.topCategoriesThisMonth : [];
+
+  if (!data || (savingsMonth === 0 && savingsYear === 0)) {
     return null;
   }
-
-  const ratio = data.roi_ratio_trailing_year;
 
   return (
     <div className="rounded-xl border p-5 space-y-4" style={{ borderColor: C.slate200, backgroundColor: C.white }}>
@@ -387,7 +395,8 @@ function ROISection() {
         <button
           type="button"
           onClick={async () => {
-            const res = await utilizationService.employerPdf(data.employer_id);
+            if (!data.employerId) return;
+            const res = await utilizationService.employerPdf(data.employerId);
             if (res.error || !res.url) return;
             const a = document.createElement("a");
             a.href = res.url;
@@ -411,10 +420,10 @@ function ROISection() {
             This month
           </div>
           <div className="text-2xl font-bold mt-1" style={{ color: C.teal600 }}>
-            {fmtMoney(data.savings_this_month)}
+            {fmtMoney(savingsMonth)}
           </div>
           <div className="text-[11px] mt-1" style={{ color: C.slate500 }}>
-            {data.usage_events_this_month} usage event{data.usage_events_this_month === 1 ? "" : "s"}
+            {usageEvents} usage event{usageEvents === 1 ? "" : "s"}
           </div>
         </div>
         <div className="rounded-lg p-3 border" style={{ borderColor: C.slate200 }}>
@@ -422,7 +431,7 @@ function ROISection() {
             Trailing 12 mo · delivered
           </div>
           <div className="text-2xl font-bold mt-1" style={{ color: C.navy900 }}>
-            {fmtMoney(data.savings_trailing_year)}
+            {fmtMoney(savingsYear)}
           </div>
           <div className="text-[11px] mt-1" style={{ color: C.slate500 }}>
             in cash-equivalent care
@@ -433,7 +442,7 @@ function ROISection() {
             Trailing 12 mo · spent
           </div>
           <div className="text-2xl font-bold mt-1" style={{ color: C.navy900 }}>
-            {fmtMoney(data.invoice_spend_trailing_year)}
+            {fmtMoney(invoiceSpend)}
           </div>
           <div className="text-[11px] mt-1 font-semibold" style={{ color: ratio !== null && ratio >= 1 ? C.teal600 : C.slate500 }}>
             {ratio !== null
@@ -443,18 +452,18 @@ function ROISection() {
         </div>
       </div>
 
-      {data.top_categories_this_month.length > 0 && (
+      {topCategories.length > 0 && (
         <div>
           <div className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: C.slate500 }}>
             Top categories this month
           </div>
           <ul className="divide-y" style={{ borderColor: C.slate100 }}>
-            {data.top_categories_this_month.map((c) => (
+            {topCategories.map((c) => (
               <li key={c.category} className="flex items-center justify-between py-2 text-sm">
                 <span style={{ color: C.navy800 }}>{c.category}</span>
                 <span style={{ color: C.slate600 }}>
-                  {c.total_used} use{c.total_used === 1 ? "" : "s"} ·{" "}
-                  <strong style={{ color: C.teal600 }}>{fmtMoney(Number(c.total_savings))}</strong>
+                  {c.totalUsed} use{Number(c.totalUsed) === 1 ? "" : "s"} ·{" "}
+                  <strong style={{ color: C.teal600 }}>{fmtMoney(Number(c.totalSavings))}</strong>
                 </span>
               </li>
             ))}

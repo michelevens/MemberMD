@@ -12,28 +12,30 @@ import { useEffect, useState } from "react";
 import { Loader2, TrendingUp } from "lucide-react";
 import { apiFetch } from "../../lib/api";
 
+// apiFetch auto-camelCases the wire response, so all keys here are
+// camelCase even though the Laravel controller writes snake_case.
 interface CategoryRow {
   category: string;
-  total_used: number;
-  total_savings: number;
-  members_using: number;
+  totalUsed: number;
+  totalSavings: number;
+  membersUsing: number;
 }
 
 interface TopEntitlement {
   id: string;
   name: string;
   category: string;
-  total_used: number;
-  total_savings: number;
+  totalUsed: number;
+  totalSavings: number;
 }
 
 interface PracticeUtilization {
-  period_start: string;
-  total_active_members: number;
-  total_usage_events: number;
-  total_savings: number;
-  usage_by_category: CategoryRow[];
-  top_entitlements: TopEntitlement[];
+  periodStart: string;
+  totalActiveMembers: number;
+  totalUsageEvents: number;
+  totalSavings: number;
+  usageByCategory: CategoryRow[];
+  topEntitlements: TopEntitlement[];
 }
 
 const C = {
@@ -86,7 +88,16 @@ export function PracticeROISection() {
     );
   }
 
-  if (!data || data.total_savings === 0) {
+  // Defensive coercion — even with the camelCased shape, an unexpected
+  // response (truncated body, transient 5xx) could leave fields
+  // undefined. We treat anything missing as zero / empty so the
+  // dashboard never crashes the whole portal again.
+  const totalSavings = Number(data?.totalSavings ?? 0);
+  const totalUsageEvents = Number(data?.totalUsageEvents ?? 0);
+  const totalActiveMembers = Number(data?.totalActiveMembers ?? 0);
+  const topEntitlements = Array.isArray(data?.topEntitlements) ? data!.topEntitlements : [];
+
+  if (!data || totalSavings === 0) {
     return null;
   }
 
@@ -105,7 +116,7 @@ export function PracticeROISection() {
             This month · cash value
           </div>
           <div className="text-2xl font-bold mt-1" style={{ color: C.green700 }}>
-            {fmtMoney(data.total_savings)}
+            {fmtMoney(totalSavings)}
           </div>
           <div className="text-[11px] mt-1" style={{ color: C.slate500 }}>
             in cash-equivalent care
@@ -116,7 +127,7 @@ export function PracticeROISection() {
             Usage events
           </div>
           <div className="text-2xl font-bold mt-1" style={{ color: C.navy900 }}>
-            {data.total_usage_events}
+            {totalUsageEvents}
           </div>
           <div className="text-[11px] mt-1" style={{ color: C.slate500 }}>
             visits + services + activities
@@ -127,7 +138,7 @@ export function PracticeROISection() {
             Active members
           </div>
           <div className="text-2xl font-bold mt-1" style={{ color: C.navy900 }}>
-            {data.total_active_members}
+            {totalActiveMembers}
           </div>
           <div className="text-[11px] mt-1" style={{ color: C.slate500 }}>
             across all plans
@@ -135,18 +146,18 @@ export function PracticeROISection() {
         </div>
       </div>
 
-      {data.top_entitlements.length > 0 && (
+      {topEntitlements.length > 0 && (
         <div>
           <div className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: C.slate500 }}>
             Top services this month
           </div>
           <ul className="divide-y" style={{ borderColor: C.slate100 }}>
-            {data.top_entitlements.slice(0, 5).map((t) => (
+            {topEntitlements.slice(0, 5).map((t) => (
               <li key={t.id} className="flex items-center justify-between py-2 text-sm">
                 <span className="truncate" style={{ color: C.navy800 }}>{t.name}</span>
                 <span style={{ color: C.slate600 }}>
-                  {t.total_used} use{Number(t.total_used) === 1 ? "" : "s"} ·{" "}
-                  <strong style={{ color: C.teal600 }}>{fmtMoney(Number(t.total_savings))}</strong>
+                  {t.totalUsed} use{Number(t.totalUsed) === 1 ? "" : "s"} ·{" "}
+                  <strong style={{ color: C.teal600 }}>{fmtMoney(Number(t.totalSavings))}</strong>
                 </span>
               </li>
             ))}

@@ -887,9 +887,19 @@ function NetworkROISection() {
     );
   }
 
+  // apiFetch auto-camelCases the response. Defensive coercion below
+  // so a partial / sparse response never crashes the network dashboard
+  // (which the Practice portal also indirectly mounts via shared chunks).
+  const tenantCount = Number(data?.tenantCount ?? 0);
+  const savingsMonth = Number(data?.savingsThisMonth ?? 0);
+  const savingsYear = Number(data?.savingsTrailingYear ?? 0);
+  const usageEvents = Number(data?.usageEventsThisMonth ?? 0);
+  const activeMembers = data?.totalActiveMembers ?? null;
+  const topTenants = Array.isArray(data?.topTenantsThisMonth) ? data!.topTenantsThisMonth : [];
+
   // Hide when there's no usage history yet — a brand-new operator
   // shouldn't see a "$0 delivered" tile that looks broken.
-  if (!data || (data.savings_this_month === 0 && data.savings_trailing_year === 0)) {
+  if (!data || (savingsMonth === 0 && savingsYear === 0)) {
     return null;
   }
 
@@ -901,7 +911,7 @@ function NetworkROISection() {
       <div className="flex items-center gap-2">
         <TrendingUp className="w-4 h-4" style={{ color: C.teal600 }} />
         <h3 className="text-sm font-semibold" style={{ color: C.navy900 }}>
-          Cash value delivered across {data.tenant_count} clinic{data.tenant_count === 1 ? "" : "s"}
+          Cash value delivered across {tenantCount} clinic{tenantCount === 1 ? "" : "s"}
         </h3>
       </div>
 
@@ -911,10 +921,10 @@ function NetworkROISection() {
             This month
           </p>
           <p className="text-2xl font-bold mt-1" style={{ color: C.green700 }}>
-            {fmtMoney(data.savings_this_month)}
+            {fmtMoney(savingsMonth)}
           </p>
           <p className="text-[11px] mt-1" style={{ color: C.slate500 }}>
-            {data.usage_events_this_month} usage event{data.usage_events_this_month === 1 ? "" : "s"}
+            {usageEvents} usage event{usageEvents === 1 ? "" : "s"}
           </p>
         </div>
         <div className="rounded-lg border p-3" style={{ borderColor: C.slate200 }}>
@@ -922,7 +932,7 @@ function NetworkROISection() {
             Trailing 12 mo
           </p>
           <p className="text-2xl font-bold mt-1" style={{ color: C.navy900 }}>
-            {fmtMoney(data.savings_trailing_year)}
+            {fmtMoney(savingsYear)}
           </p>
           <p className="text-[11px] mt-1" style={{ color: C.slate500 }}>
             in cash-equivalent care
@@ -933,7 +943,7 @@ function NetworkROISection() {
             Active members
           </p>
           <p className="text-2xl font-bold mt-1" style={{ color: C.navy900 }}>
-            {data.total_active_members ?? "—"}
+            {activeMembers ?? "—"}
           </p>
           <p className="text-[11px] mt-1" style={{ color: C.slate500 }}>
             across portfolio
@@ -941,18 +951,18 @@ function NetworkROISection() {
         </div>
       </div>
 
-      {data.top_tenants_this_month.length > 0 && (
+      {topTenants.length > 0 && (
         <div>
           <p className="text-[11px] font-semibold uppercase tracking-wide mb-2" style={{ color: C.slate500 }}>
             Top clinics by value delivered this month
           </p>
           <ul className="divide-y" style={{ borderColor: C.slate100 }}>
-            {data.top_tenants_this_month.slice(0, 5).map((t) => (
+            {topTenants.slice(0, 5).map((t) => (
               <li key={t.id} className="flex items-center justify-between py-2 text-sm">
                 <span className="truncate" style={{ color: C.navy800 }}>{t.name}</span>
                 <span style={{ color: C.slate600 }}>
-                  {t.total_used} use{t.total_used === 1 ? "" : "s"} ·{" "}
-                  <strong style={{ color: C.teal600 }}>{fmtMoney(Number(t.total_savings))}</strong>
+                  {t.totalUsed} use{Number(t.totalUsed) === 1 ? "" : "s"} ·{" "}
+                  <strong style={{ color: C.teal600 }}>{fmtMoney(Number(t.totalSavings))}</strong>
                 </span>
               </li>
             ))}

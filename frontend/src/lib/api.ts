@@ -2293,43 +2293,48 @@ export const employerEligibleEmailService = {
 // operator-scoped (multi-clinic operator view). Practice-scoped already
 // existed at /entitlement-usage/practice (EntitlementUsageController).
 
+// All keys camelCase: apiFetch runs snakeToCamel on every response
+// before returning it to consumers, so snake_case types here would
+// describe a wire shape that no caller actually receives. Production
+// crash 2026-05-08 traced to this exact mismatch on the Practice
+// dashboard ROI section.
 export interface CategoryUsageRow {
   category: string;
-  total_used: number;
-  total_savings: number;
+  totalUsed: number;
+  totalSavings: number;
 }
 
 export interface EmployerUtilization {
-  employer_id: string;
-  employer_name: string;
-  enrolled_count: number;
-  month_start: string;
-  year_start: string;
-  savings_this_month: number;
-  savings_trailing_year: number;
-  usage_events_this_month: number;
-  top_categories_this_month: CategoryUsageRow[];
-  invoice_spend_trailing_year: number;
-  roi_ratio_trailing_year: number | null;
+  employerId: string;
+  employerName: string;
+  enrolledCount: number;
+  monthStart: string;
+  yearStart: string;
+  savingsThisMonth: number;
+  savingsTrailingYear: number;
+  usageEventsThisMonth: number;
+  topCategoriesThisMonth: CategoryUsageRow[];
+  invoiceSpendTrailingYear: number;
+  roiRatioTrailingYear: number | null;
 }
 
 export interface OperatorTenantUsage {
   id: string;
   name: string;
-  total_used: number;
-  total_savings: number;
+  totalUsed: number;
+  totalSavings: number;
 }
 
 export interface OperatorUtilization {
-  tenant_count: number;
-  total_active_members?: number;
-  month_start: string;
-  year_start: string;
-  savings_this_month: number;
-  savings_trailing_year: number;
-  usage_events_this_month: number;
-  top_tenants_this_month: OperatorTenantUsage[];
-  top_categories_this_month: CategoryUsageRow[];
+  tenantCount: number;
+  totalActiveMembers?: number;
+  monthStart: string;
+  yearStart: string;
+  savingsThisMonth: number;
+  savingsTrailingYear: number;
+  usageEventsThisMonth: number;
+  topTenantsThisMonth: OperatorTenantUsage[];
+  topCategoriesThisMonth: CategoryUsageRow[];
 }
 
 export const utilizationService = {
