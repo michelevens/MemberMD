@@ -37,10 +37,30 @@ class SeedWidgetTestPractices extends Command
     // Slugs match the three GH Pages demo repos under michelevens/*.
     // The seed JSON output is keyed by slug so you know which
     // tenant_code goes into which repo's index.html.
+    //
+    // Admin email uses plus-addressing on contact@ennhealth.com so
+    // welcome / billing / notification emails actually deliver to a
+    // monitored inbox — the user can see what platform email each
+    // demo practice would have received.
     private const DEMO_VARIANTS = [
-        ['name' => 'Aurora Psychiatry', 'slug' => 'widget-demo-aurora-psychiatry', 'color' => '#635bff'],
-        ['name' => 'Cedar Mind Wellness', 'slug' => 'widget-demo-cedar-mind-wellness', 'color' => '#27ab83'],
-        ['name' => 'Lumen Psychiatry Group', 'slug' => 'widget-demo-lumen-psychiatry-group', 'color' => '#d97706'],
+        [
+            'name' => 'Aurora Psychiatry',
+            'slug' => 'widget-demo-aurora-psychiatry',
+            'color' => '#5B4CB8',
+            'admin_email' => 'contact+aurora.admin@ennhealth.com',
+        ],
+        [
+            'name' => 'Cedar Mind Wellness',
+            'slug' => 'widget-demo-cedar-mind-wellness',
+            'color' => '#1F7A6F',
+            'admin_email' => 'contact+cedar.admin@ennhealth.com',
+        ],
+        [
+            'name' => 'Lumen Psychiatry Group',
+            'slug' => 'widget-demo-lumen-psychiatry-group',
+            'color' => '#C2410C',
+            'admin_email' => 'contact+lumen.admin@ennhealth.com',
+        ],
     ];
 
     public function handle(): int
@@ -82,7 +102,8 @@ class SeedWidgetTestPractices extends Command
                 'selected_programs' => $source->selected_programs,
                 'practice_model' => $source->practice_model,
                 'phone' => $source->phone,
-                'email' => 'demo+' . Str::random(6) . '@membermd.io',
+                'email' => $variant['admin_email'],
+                'owner_email' => $variant['admin_email'],
                 'website' => $source->website,
                 'address' => $source->address,
                 'city' => $source->city,
@@ -157,6 +178,25 @@ class SeedWidgetTestPractices extends Command
                 }
             }
 
+            // Practice admin user — uses the practice's admin_email so
+            // welcome / billing / notification emails route to a
+            // monitored inbox (contact@ennhealth.com via plus-addressing).
+            // Password is set to a known temporary value so the user
+            // can log in and verify the demo end-to-end. Print it in
+            // the result block; the user can rotate via "forgot password"
+            // immediately after first login.
+            $tempAdminPassword = 'WidgetDemo!' . Str::random(8);
+            User::create([
+                'tenant_id' => $demo->id,
+                'name' => $variant['name'] . ' Admin',
+                'first_name' => 'Demo',
+                'last_name' => 'Admin',
+                'email' => $variant['admin_email'],
+                'password' => bcrypt($tempAdminPassword),
+                'role' => 'practice_admin',
+                'status' => 'active',
+            ]);
+
             // A throwaway patient + ConsentTemplate + SignatureRequest so
             // the signature widget on the demo site has a real token to
             // mount against. Tokens never expire (set far-future) so the
@@ -207,14 +247,18 @@ class SeedWidgetTestPractices extends Command
                 'tenant_code' => $demo->tenant_code,
                 'primary_color' => $variant['color'],
                 'signature_token' => $sigRequest->public_token,
+                'admin_email' => $variant['admin_email'],
+                'admin_temp_password' => $tempAdminPassword,
             ];
 
             $this->info("✓ {$demo->name} — tenant_code={$demo->tenant_code}");
         }
 
         $this->newLine();
-        $this->info('Done. Paste this into widget-test-sites/config.json:');
+        $this->info('Done. Use this output to wire up the demo widget sites:');
         $this->line(json_encode($results, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+        $this->newLine();
+        $this->warn('Admin temp passwords are sensitive — rotate via "forgot password" on first login.');
 
         return self::SUCCESS;
     }
