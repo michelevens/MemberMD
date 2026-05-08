@@ -64,6 +64,33 @@ Your {{ $plan?->name ?? 'membership' }} is ready to use.
 </table>
 @endif
 
+@if(!empty($entitlements))
+<p style="margin: 0 0 12px; font-size: 14px; font-weight: 700; color: #102a43; text-transform: uppercase; letter-spacing: 0.5px;">
+    What's included
+</p>
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin-bottom: 24px; border: 1px solid #e5e7eb; border-radius: 8px;">
+    @foreach($entitlements as $idx => $ent)
+    <tr>
+        <td style="padding: 12px 16px; {{ $idx < count($entitlements) - 1 ? 'border-bottom: 1px solid #f3f4f6;' : '' }} font-size: 14px; vertical-align: top;">
+            <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+                <tr>
+                    <td style="font-size: 14px; color: #111827; font-weight: 600;">
+                        {{ $ent['label'] }}
+                        @if(!empty($ent['notes']))
+                            <div style="font-size: 12px; color: #6b7280; font-weight: 400; margin-top: 2px;">{{ $ent['notes'] }}</div>
+                        @endif
+                    </td>
+                    <td align="right" style="font-size: 13px; color: #047857; font-weight: 600; white-space: nowrap; padding-left: 12px;">
+                        {{ $ent['allowance'] }}
+                    </td>
+                </tr>
+            </table>
+        </td>
+    </tr>
+    @endforeach
+</table>
+@endif
+
 <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
     <tr>
         <td align="center">

@@ -134,6 +134,12 @@ class EmailPreviewController extends Controller
                     'membership' => $stubMembership,
                     'plan' => $stubPlan,
                     'patientName' => 'Jamie Doe',
+                    'entitlements' => [
+                        ['label' => 'Office visits', 'allowance' => '4 visits per month', 'notes' => null],
+                        ['label' => 'Telehealth visits', 'allowance' => 'Unlimited', 'notes' => null],
+                        ['label' => 'Lab discount', 'allowance' => 'Included', 'notes' => '25% off list price at partner labs'],
+                        ['label' => 'Annual physical', 'allowance' => '1 visit per year', 'notes' => null],
+                    ],
                 ],
             ],
             'membership-cancelled' => [
