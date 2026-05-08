@@ -5,7 +5,7 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, CheckCircle2, Loader2, Eye, EyeOff } from "lucide-react";
+import { ArrowLeft, CheckCircle2, Loader2, Eye, EyeOff, Sparkles, Copy, Check } from "lucide-react";
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || "/api";
 
@@ -16,6 +16,46 @@ function getPasswordIssue(pw: string): string | null {
   if (!/[0-9]/.test(pw)) return "Password needs a number";
   if (!/[^A-Za-z0-9]/.test(pw)) return "Password needs a symbol";
   return null;
+}
+
+// Generate a 16-char password that always passes the validator above.
+//
+// crypto.getRandomValues over Math.random because the latter is biased
+// and predictable — fine for shuffling cards, not for a credential.
+//
+// We exclude visually ambiguous characters (0/O, 1/l/I) so a patient
+// reading the password off the screen to type into their password
+// manager doesn't fat-finger it. Symbol set excludes quotes/backslash
+// to avoid copy-paste escaping issues.
+const ALPHA_UPPER = "ABCDEFGHJKLMNPQRSTUVWXYZ";
+const ALPHA_LOWER = "abcdefghijkmnpqrstuvwxyz";
+const DIGITS = "23456789";
+const SYMBOLS = "!@#$%^&*-_=+?";
+const ALL_CHARS = ALPHA_UPPER + ALPHA_LOWER + DIGITS + SYMBOLS;
+
+function pick(set: string): string {
+  const buf = new Uint32Array(1);
+  crypto.getRandomValues(buf);
+  return set[buf[0] % set.length];
+}
+
+function generateStrongPassword(): string {
+  const chars: string[] = [
+    pick(ALPHA_UPPER),
+    pick(ALPHA_LOWER),
+    pick(DIGITS),
+    pick(SYMBOLS),
+  ];
+  while (chars.length < 16) chars.push(pick(ALL_CHARS));
+  // Fisher-Yates shuffle so the guaranteed-class chars aren't always
+  // at positions 0-3 (which would leak structure to anyone watching).
+  for (let i = chars.length - 1; i > 0; i--) {
+    const buf = new Uint32Array(1);
+    crypto.getRandomValues(buf);
+    const j = buf[0] % (i + 1);
+    [chars[i], chars[j]] = [chars[j], chars[i]];
+  }
+  return chars.join("");
 }
 
 export function ResetPasswordScreen() {
@@ -31,6 +71,24 @@ export function ResetPasswordScreen() {
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState(false);
   const [error, setError] = useState("");
+  const [justGenerated, setJustGenerated] = useState(false);
+
+  const handleGenerate = async () => {
+    const pw = generateStrongPassword();
+    setPassword(pw);
+    setConfirm(pw);
+    setShowPassword(true);
+    setError("");
+    try {
+      await navigator.clipboard?.writeText(pw);
+    } catch {
+      // Clipboard write can fail in non-secure contexts or when the user
+      // denies permission — the password is still visible on screen, so
+      // that's a soft failure, not worth surfacing.
+    }
+    setJustGenerated(true);
+    setTimeout(() => setJustGenerated(false), 3000);
+  };
 
   useEffect(() => {
     if (!token) {
@@ -128,7 +186,26 @@ export function ResetPasswordScreen() {
                 </div>
 
                 <div>
-                  <label className="block text-[13px] font-medium text-slate-700 mb-1">New password</label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-[13px] font-medium text-slate-700">New password</label>
+                    <button
+                      type="button"
+                      onClick={handleGenerate}
+                      className="inline-flex items-center gap-1.5 text-[12px] font-medium text-[#635bff] hover:text-[#544ee0]"
+                    >
+                      {justGenerated ? (
+                        <>
+                          <Check className="w-3.5 h-3.5" />
+                          Generated &amp; copied
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles className="w-3.5 h-3.5" />
+                          Generate strong password
+                        </>
+                      )}
+                    </button>
+                  </div>
                   <div className="relative">
                     <input
                       type={showPassword ? "text" : "password"}
@@ -148,6 +225,12 @@ export function ResetPasswordScreen() {
                       {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                     </button>
                   </div>
+                  {justGenerated && (
+                    <p className="mt-1.5 text-[11px] text-slate-500 flex items-center gap-1">
+                      <Copy className="w-3 h-3" />
+                      Saved to your clipboard — paste it into your password manager before submitting.
+                    </p>
+                  )}
                 </div>
 
                 <div>
