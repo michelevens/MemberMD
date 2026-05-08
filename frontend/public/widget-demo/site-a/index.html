@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title data-bind="title">Demo site · MemberMD widget tests</title>
+  <style>
+    :root {
+      --brand: #635bff;
+      --brand-soft: #eef0ff;
+      --bg: #ffffff;
+      --ink: #0f172a;
+      --muted: #475569;
+      --line: #e2e8f0;
+      --soft: #f8fafc;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+      color: var(--ink);
+      background: var(--bg);
+      -webkit-font-smoothing: antialiased;
+      line-height: 1.5;
+    }
+    a { color: var(--brand); text-decoration: none; }
+    /* — Top bar — */
+    header.top {
+      border-bottom: 1px solid var(--line);
+      background: #fff;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+    header.top .row {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 16px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    header.top .brand {
+      display: flex; align-items: center; gap: 10px;
+      font-weight: 700; font-size: 17px; letter-spacing: -0.01em;
+    }
+    header.top .logo {
+      width: 30px; height: 30px; border-radius: 7px; background: var(--brand);
+      display: flex; align-items: center; justify-content: center;
+      color: #fff; font-weight: 700; font-size: 14px;
+    }
+    header.top nav { display: flex; gap: 22px; font-size: 14px; color: var(--muted); }
+    header.top nav a { color: var(--muted); }
+    header.top nav a:hover { color: var(--ink); }
+    header.top .cta {
+      padding: 8px 14px; border-radius: 8px; background: var(--brand); color: #fff;
+      font-size: 13px; font-weight: 600;
+    }
+
+    /* — Hero — */
+    section.hero { padding: 80px 24px 56px; text-align: center; background: var(--soft); }
+    section.hero .inner { max-width: 720px; margin: 0 auto; }
+    section.hero h1 { margin: 0 0 14px; font-size: 38px; line-height: 1.15; letter-spacing: -0.02em; }
+    section.hero p { margin: 0 0 24px; font-size: 17px; color: var(--muted); }
+    section.hero .pill {
+      display: inline-block; padding: 4px 12px; border-radius: 999px;
+      background: var(--brand-soft); color: var(--brand); font-size: 12px; font-weight: 600;
+      margin-bottom: 18px;
+    }
+
+    /* — Section frames — */
+    section.block { padding: 64px 24px; border-top: 1px solid var(--line); }
+    section.block .inner { max-width: 1100px; margin: 0 auto; }
+    section.block h2 { margin: 0 0 8px; font-size: 26px; letter-spacing: -0.01em; }
+    section.block .sub { margin: 0 0 28px; color: var(--muted); font-size: 15px; }
+    .frame {
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      overflow: hidden;
+      background: #fff;
+    }
+    iframe { display: block; width: 100%; border: 0; }
+
+    /* — Tab nav for the four widgets — */
+    .tabs {
+      display: flex; gap: 4px;
+      border-bottom: 1px solid var(--line);
+      margin-bottom: 24px;
+      flex-wrap: wrap;
+    }
+    .tab {
+      padding: 10px 16px; font-size: 14px; font-weight: 500;
+      color: var(--muted); cursor: pointer;
+      border: 0; background: none;
+      border-bottom: 2px solid transparent;
+    }
+    .tab.active { color: var(--brand); border-bottom-color: var(--brand); }
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+
+    /* — Footer — */
+    footer.bottom {
+      padding: 32px 24px;
+      text-align: center;
+      color: var(--muted);
+      font-size: 12px;
+      border-top: 1px solid var(--line);
+    }
+    footer.bottom code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      background: var(--soft); padding: 2px 6px; border-radius: 4px;
+    }
+
+    /* — Status banner when unseeded — */
+    .alert {
+      max-width: 1100px;
+      margin: 16px auto 0;
+      padding: 12px 16px;
+      border-radius: 8px;
+      background: #fef3c7;
+      color: #78350f;
+      font-size: 13px;
+      border: 1px solid #fde68a;
+    }
+  </style>
+  <script>window.WIDGET_DEMO_SITE_INDEX = 0;</script>
+</head>
+<body>
+  <header class="top">
+    <div class="row">
+      <div class="brand">
+        <span class="logo" data-bind="logoChar">A</span>
+        <span data-bind="brandName">Demo Practice</span>
+      </div>
+      <nav>
+        <a href="#enroll">Plans</a>
+        <a href="#book">Book</a>
+        <a href="#sign">Patient Forms</a>
+      </nav>
+      <a href="#enroll" class="cta">Get started</a>
+    </div>
+  </header>
+
+  <div id="seedAlert" class="alert" style="display:none;">
+    This site's <code>tenant_code</code> hasn't been filled in yet. Run
+    <code>php artisan widgets:seed-test-practices --source="EnnHealth Psychiatry"</code>
+    against production, then paste the result into <code>config.json</code>.
+  </div>
+
+  <section class="hero">
+    <div class="inner">
+      <span class="pill" data-bind="heroPill">Modern psychiatric care</span>
+      <h1 data-bind="heroHeadline">Care that fits your life.</h1>
+      <p data-bind="heroSub">Membership-based psychiatry with same-week visits, secure messaging, and your full care team in one place.</p>
+    </div>
+  </section>
+
+  <section class="block">
+    <div class="inner">
+      <h2>Try our membership flow</h2>
+      <p class="sub">All four widgets below are live iframes from MemberMD, branded with this practice's tenant.</p>
+
+      <div class="tabs" role="tablist">
+        <button class="tab active" data-tab="enroll" id="tab-enroll" type="button">Enrollment</button>
+        <button class="tab" data-tab="plans" id="tab-plans" type="button">Plan comparison</button>
+        <button class="tab" data-tab="book" id="tab-book" type="button">Booking</button>
+        <button class="tab" data-tab="sign" id="tab-sign" type="button">Signature</button>
+      </div>
+
+      <div class="tab-panel active" id="panel-enroll">
+        <div class="frame"><iframe id="iframe-enroll" height="780" loading="lazy" title="Enrollment widget"></iframe></div>
+      </div>
+      <div class="tab-panel" id="panel-plans">
+        <div class="frame"><iframe id="iframe-plans" height="640" loading="lazy" title="Plan comparison widget"></iframe></div>
+      </div>
+      <div class="tab-panel" id="panel-book">
+        <div class="frame"><iframe id="iframe-book" height="780" loading="lazy" title="Booking widget"></iframe></div>
+      </div>
+      <div class="tab-panel" id="panel-sign">
+        <div class="frame"><iframe id="iframe-sign" height="780" loading="lazy" title="Signature widget"></iframe></div>
+      </div>
+    </div>
+  </section>
+
+  <footer class="bottom">
+    Demo site for widget integration testing · <a href="../">Back to all sites</a>
+    · tenant_code: <code data-bind="tenantCode">—</code>
+  </footer>
+
+  <script>
+    // The site index is set by each site folder's index.html before
+    // this script runs (via window.WIDGET_DEMO_SITE_INDEX). The
+    // template itself is identical across sites — only the index
+    // changes which slice of config.json drives the page.
+    (async () => {
+      const idx = window.WIDGET_DEMO_SITE_INDEX ?? 0;
+      try {
+        const r = await fetch('../config.json', { cache: 'no-store' });
+        const cfg = await r.json();
+        const site = cfg.sites[idx];
+        if (!site) throw new Error('No site at index ' + idx);
+
+        const isUnseeded = site.tenant_code === 'PASTE_FROM_SEED_RUN';
+        if (isUnseeded) document.getElementById('seedAlert').style.display = 'block';
+
+        // Brand
+        document.documentElement.style.setProperty('--brand', site.primary_color);
+        document.documentElement.style.setProperty('--brand-soft', site.primary_color + '14');
+        document.title = site.name + ' · MemberMD widget demo';
+        document.querySelector('[data-bind="title"]').textContent = document.title;
+        document.querySelector('[data-bind="brandName"]').textContent = site.name;
+        document.querySelector('[data-bind="logoChar"]').textContent = site.name[0] || 'D';
+        document.querySelector('[data-bind="heroPill"]').textContent = site.tagline;
+        document.querySelector('[data-bind="heroHeadline"]').textContent = site.name + '.';
+        document.querySelector('[data-bind="tenantCode"]').textContent = site.tenant_code;
+
+        // Widget URLs
+        const base = cfg.platform_base.replace(/\/$/, '');
+        const tc = encodeURIComponent(site.tenant_code);
+        const sigToken = encodeURIComponent(site.signature_token);
+
+        // When unseeded we still set the URLs to placeholders so the
+        // user gets a clear "404 / not found" instead of a confusing
+        // about:blank — the alert at the top tells them why.
+        document.getElementById('iframe-enroll').src = base + '/#/enroll/' + tc;
+        document.getElementById('iframe-plans').src = base + '/#/plans/' + tc;
+        document.getElementById('iframe-book').src = base + '/#/book/' + tc;
+        document.getElementById('iframe-sign').src = base + '/#/sign/' + sigToken;
+      } catch (e) {
+        console.error('widget-demo bootstrap failed', e);
+        document.body.insertAdjacentHTML('afterbegin',
+          '<div class="alert" style="display:block;background:#fee2e2;color:#991b1b;border-color:#fecaca;">' +
+          'Failed to load config.json: ' + (e.message || e) + '</div>');
+      }
+
+      // Tab wiring
+      document.querySelectorAll('.tab').forEach(btn => {
+        btn.addEventListener('click', () => {
+          document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+          document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+          btn.classList.add('active');
+          document.getElementById('panel-' + btn.dataset.tab).classList.add('active');
+        });
+      });
+    })();
+  </script>
+</body>
+</html>

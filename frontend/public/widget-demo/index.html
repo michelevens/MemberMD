@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>MemberMD widget integration tests</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; margin: 0; padding: 0; background: #f8fafc; color: #0f172a; -webkit-font-smoothing: antialiased; }
+    main { max-width: 920px; margin: 0 auto; padding: 64px 24px; }
+    h1 { margin: 0 0 8px; font-size: 28px; font-weight: 700; letter-spacing: -0.01em; }
+    p.lede { margin: 0 0 36px; color: #475569; font-size: 15px; line-height: 1.55; }
+    .grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+    a.card { display: block; padding: 22px; border-radius: 14px; background: #fff; border: 1px solid #e2e8f0; text-decoration: none; color: inherit; transition: transform .12s ease, box-shadow .12s ease, border-color .12s ease; }
+    a.card:hover { transform: translateY(-2px); box-shadow: 0 12px 28px rgba(15, 23, 42, .08); border-color: #cbd5e1; }
+    .swatch { width: 32px; height: 32px; border-radius: 8px; margin-bottom: 14px; }
+    .name { font-size: 17px; font-weight: 600; margin: 0 0 4px; }
+    .tagline { font-size: 13px; color: #64748b; margin: 0 0 12px; line-height: 1.45; }
+    .meta { font-size: 11px; color: #94a3b8; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .badge { display: inline-block; padding: 3px 8px; border-radius: 999px; background: #f1f5f9; color: #475569; font-size: 11px; font-weight: 500; margin-bottom: 24px; }
+    code { background: #f1f5f9; padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <main>
+    <span class="badge">Internal · Widget integration tests</span>
+    <h1>Three demo marketing sites</h1>
+    <p class="lede">
+      Each site embeds the four MemberMD public widgets — enrollment, plan comparison, booking, and signature — for a different tenant. Use these to verify white-label theming, plan list rendering, Stripe wiring, and cross-origin iframe behavior end to end.
+    </p>
+    <div class="grid" id="sites">
+      <p style="color:#94a3b8;font-size:13px;">Loading sites…</p>
+    </div>
+  </main>
+  <script>
+    (async () => {
+      try {
+        const r = await fetch('config.json', { cache: 'no-store' });
+        const cfg = await r.json();
+        const grid = document.getElementById('sites');
+        grid.innerHTML = '';
+        for (const site of cfg.sites) {
+          const a = document.createElement('a');
+          a.href = site.id + '/';
+          a.className = 'card';
+          a.innerHTML =
+            '<div class="swatch" style="background:' + site.primary_color + '"></div>' +
+            '<p class="name">' + site.name + '</p>' +
+            '<p class="tagline">' + site.tagline + '</p>' +
+            '<p class="meta">tenant_code: ' + (site.tenant_code === 'PASTE_FROM_SEED_RUN' ? '<span style="color:#dc2626">unseeded</span>' : '<code>' + site.tenant_code + '</code>') + '</p>';
+          grid.appendChild(a);
+        }
+      } catch (e) {
+        document.getElementById('sites').innerHTML = '<p style="color:#dc2626;font-size:13px;">Failed to load config.json: ' + e.message + '</p>';
+      }
+    })();
+  </script>
+</body>
+</html>
