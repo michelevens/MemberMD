@@ -247,17 +247,96 @@ class MembershipController extends Controller
             ->first();
 
         if ($existing) {
-            if ($sendEmail) {
-                $this->dispatchPaymentLinkEmail($patient, $practice, $plan, $existing);
+            // Defensive-check: a session minted before fab97ae (Stripe
+            // 2025 deprecation fix) quietly succeeded at Stripe minus
+            // the enrollment fee line item — patient paid sub but not
+            // fee. If the existing session is missing the expected fee,
+            // void it and fall through to mint fresh.
+            $expectedFee = (bool) $existing->waive_enrollment_fee
+                ? 0.0
+                : (float) ($plan->enrollment_fee ?? 0);
+            $sessionOk = empty($existing->stripe_checkout_session_id)
+                ? true
+                : $this->subscriptions->sessionHasEnrollmentFee(
+                    $practice,
+                    $existing->stripe_checkout_session_id,
+                    $expectedFee,
+                );
+            if ($sessionOk) {
+                if ($sendEmail) {
+                    $this->dispatchPaymentLinkEmail($patient, $practice, $plan, $existing);
+                }
+                return response()->json([
+                    'data' => [
+                        'pending_enrollment_id' => $existing->id,
+                        'checkout_url' => $existing->checkout_url,
+                        'expires_at' => $existing->expires_at,
+                        'reused' => true,
+                    ],
+                    'message' => $sendEmail ? 'Resent existing payment link.' : 'Existing checkout session.',
+                ]);
             }
+            // Stale session — re-mint on the SAME PendingEnrollment row
+            // so the pending_enrollment_id already in customer-facing
+            // emails / success URLs still resolves. Just refresh its
+            // Stripe session id and checkout_url with a fresh mint that
+            // includes the fee line item.
+            Log::info('Re-minting checkout: existing session missing enrollment fee', [
+                'pending_id' => $existing->id,
+                'old_session_id' => $existing->stripe_checkout_session_id,
+                'expected_fee' => $expectedFee,
+            ]);
+
+            $appUrl = (string) config('app.frontend_url', config('app.url'));
+            $successUrl = rtrim($appUrl, '/') . '/#/enrollment/success?pe=' . $existing->id;
+            $cancelUrl = rtrim($appUrl, '/') . '/#/enrollment/cancelled?pe=' . $existing->id;
+
+            try {
+                $session = $this->subscriptions->createPaymentLinkSession(
+                    practice: $practice,
+                    patient: $patient,
+                    plan: $plan,
+                    billingFrequency: $existing->billing_frequency,
+                    pendingEnrollmentId: $existing->id,
+                    successUrl: $successUrl,
+                    cancelUrl: $cancelUrl,
+                    waiveEnrollmentFee: (bool) $existing->waive_enrollment_fee,
+                );
+            } catch (\Throwable $e) {
+                Log::warning('Re-mint failed; serving stale URL as fallback', [
+                    'pending_id' => $existing->id,
+                    'error' => $e->getMessage(),
+                ]);
+                return response()->json([
+                    'data' => [
+                        'pending_enrollment_id' => $existing->id,
+                        'checkout_url' => $existing->checkout_url,
+                        'expires_at' => $existing->expires_at,
+                        'reused' => true,
+                    ],
+                    'message' => 'Existing checkout session.',
+                ]);
+            }
+
+            $existing->update([
+                'stripe_checkout_session_id' => $session['session_id'] ?? null,
+                'checkout_url' => $session['url'] ?? null,
+                'expires_at' => now()->addHours(24),
+            ]);
+
+            if ($sendEmail) {
+                $this->dispatchPaymentLinkEmail($patient, $practice, $plan, $existing->fresh());
+            }
+
             return response()->json([
                 'data' => [
                     'pending_enrollment_id' => $existing->id,
-                    'checkout_url' => $existing->checkout_url,
-                    'expires_at' => $existing->expires_at,
-                    'reused' => true,
+                    'checkout_url' => $existing->fresh()->checkout_url,
+                    'expires_at' => $existing->fresh()->expires_at,
+                    'reused' => false,
+                    'remint_reason' => 'enrollment_fee_missing',
                 ],
-                'message' => $sendEmail ? 'Resent existing payment link.' : 'Existing checkout session.',
+                'message' => 'Re-minted checkout (existing session was missing the enrollment fee).',
             ]);
         }
 

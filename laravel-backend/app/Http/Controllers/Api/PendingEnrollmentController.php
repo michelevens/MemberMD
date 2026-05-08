@@ -225,12 +225,30 @@ class PendingEnrollmentController extends Controller
             // server-side even though our local clock says it's alive.
             // Try to fetch the URL — if Stripe rejects, fall through to
             // mint a new one.
+            //
+            // Also defensive-check that the session carries the one-time
+            // enrollment fee line item when it should — sessions minted
+            // before commit fab97ae (2026-05-08 Stripe deprecation fix)
+            // quietly succeeded at Stripe but lost the fee. If the fee
+            // is missing, mint fresh instead of serving a fee-less URL.
             try {
                 $url = $this->subscriptions->getCheckoutSessionUrl(
                     $practice,
                     $pending->stripe_checkout_session_id,
                 );
-                return $url;
+                $expectedFee = (bool) $pending->waive_enrollment_fee
+                    ? 0.0
+                    : (float) ($plan->enrollment_fee ?? 0);
+                $hasFee = $this->subscriptions->sessionHasEnrollmentFee(
+                    $practice,
+                    $pending->stripe_checkout_session_id,
+                    $expectedFee,
+                );
+                if ($hasFee) {
+                    return $url;
+                }
+                // Fall through — stale session minted before the fix,
+                // mint a fresh one below.
             } catch (Throwable) {
                 // Stripe-side gone; mint a fresh one below.
             }

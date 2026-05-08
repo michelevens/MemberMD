@@ -904,6 +904,64 @@ class StripeSubscriptionService
     }
 
     /**
+     * Defensive check: does a stored Checkout Session actually carry the
+     * one-time enrollment fee line item?
+     *
+     * Why this exists: when Stripe deprecated `subscription_data
+     * [add_invoice_items]` in 2025 we patched mint to use a top-level
+     * line_items entry instead, but pending_enrollments rows minted
+     * BEFORE that patch hold session URLs that quietly succeeded at
+     * Stripe — minus the fee. Patient pays subscription, fee is lost.
+     *
+     * This helper retrieves the session with line_items expanded and
+     * verifies the fee line is present. Reuse-existing-session call
+     * sites (MembershipController::createPaymentLink and
+     * PendingEnrollmentController::resolveCheckoutUrl) call this
+     * before serving a stored URL — if it fails the check, they
+     * mint a fresh session that DOES include the fee.
+     *
+     * Returns true when the session is fine to reuse, false when the
+     * caller should mint fresh. Returns true on Stripe errors (fail-open
+     * — better to serve a maybe-stale URL than to break enrollment when
+     * Stripe is having a moment).
+     */
+    public function sessionHasEnrollmentFee(
+        Practice $practice,
+        string $sessionId,
+        float $expectedFeeDollars,
+    ): bool {
+        if ($expectedFeeDollars <= 0) {
+            return true;
+        }
+        try {
+            $session = $this->stripe()->checkout->sessions->retrieve(
+                $sessionId,
+                ['expand' => ['line_items']],
+                ['stripe_account' => $practice->stripe_account_id],
+            );
+        } catch (ApiErrorException $e) {
+            Log::warning('sessionHasEnrollmentFee fail-open', [
+                'session_id' => $sessionId,
+                'error' => $e->getMessage(),
+            ]);
+            return true;
+        }
+
+        $items = $session->line_items?->data ?? [];
+        $expectedCents = (int) round($expectedFeeDollars * 100);
+        foreach ($items as $li) {
+            // The fee line is a one-time price — recurring=null. The
+            // subscription line has recurring set. Match on amount AND
+            // shape so we don't false-match a $349 monthly plan.
+            $isOneTime = ($li->price?->recurring ?? null) === null;
+            if ($isOneTime && (int) ($li->amount_total ?? 0) === $expectedCents) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
      * Backfill local Invoice + Payment rows for a membership by listing
      * the Stripe subscription's invoices live and mirroring each one.
      *

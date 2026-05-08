@@ -87,11 +87,22 @@ function SuccessCard({ pendingId }: { pendingId: string | null }) {
     return (
       <ResultShell accentBg="#e6f7f2" icon={<Check className="w-8 h-8" style={{ color: "#27ab83" }} strokeWidth={2.5} />}>
         <h1 className="text-xl font-semibold text-slate-900 mb-2">You're enrolled.</h1>
-        <p className="text-sm text-slate-500 leading-relaxed">
-          Your payment went through and your membership is active. Your practice has been
-          notified and will reach out with next steps. You can close this window.
+        <p className="text-sm text-slate-500 leading-relaxed mb-5">
+          Your payment went through and your membership is active. We just sent
+          you an email with a link to set up your portal password — once you've
+          set it, you can sign in below.
         </p>
-        <Footnote text="A receipt was emailed to you by Stripe. If you don't see it, check your spam folder." pendingId={pendingId} />
+        <a
+          href="#/login"
+          className="inline-flex items-center justify-center gap-2 w-full px-4 py-2.5 rounded-md text-sm font-semibold text-white shadow-sm transition-colors"
+          style={{ backgroundColor: "#27ab83" }}
+        >
+          Go to your portal
+        </a>
+        <Footnote
+          text="A receipt was emailed to you by Stripe. If you don't see the welcome email or receipt, check your spam folder."
+          pendingId={pendingId}
+        />
       </ResultShell>
     );
   }
