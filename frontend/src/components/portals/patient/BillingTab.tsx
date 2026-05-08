@@ -26,6 +26,7 @@ import {
 } from "../../../lib/api";
 import type { PatientCreditSummary } from "../../../lib/api";
 import { formatDate, formatCurrency } from "../../../lib/format";
+import { enrollmentFeeExplanation } from "../../../lib/enrollmentFeeCopy";
 import { MyAgreementsSection } from "./MyAgreementsSection";
 import { FamilyMembersSection } from "./FamilyMembersSection";
 import type { PatientMembership, Invoice, PatientEntitlement } from "../../../types";
@@ -436,6 +437,33 @@ export function BillingTab() {
           Same component as the standalone Family Members tab — drops
           its own card chrome to nest inside this section.  */}
       <FamilyMembersSection variant="card" />
+
+      {/* ── About your enrollment fee ────────────────────────────────────
+          Shown only for newly enrolled patients (≤60 days) on a plan
+          that actually charges one. After two months they've absorbed
+          the charge and it's just visual clutter — at that point the
+          invoice list below tells the story. */}
+      {membership && (membership.plan?.enrollmentFee ?? 0) > 0 && (() => {
+        const enrolledAt = membership.createdAt ? new Date(membership.createdAt).getTime() : 0;
+        const ageDays = enrolledAt > 0 ? (Date.now() - enrolledAt) / 86400000 : Infinity;
+        if (ageDays > 60) return null;
+        return (
+          <div
+            className="rounded-2xl p-5 border"
+            style={{ backgroundColor: "#f0fdf4", borderColor: "#bbf7d0" }}
+          >
+            <div className="flex items-center gap-2 mb-1">
+              <Receipt className="w-4 h-4" style={{ color: C.teal600 }} />
+              <h3 className="text-sm font-semibold" style={{ color: C.teal600 }}>
+                About your enrollment fee
+              </h3>
+            </div>
+            <p className="text-sm leading-relaxed" style={{ color: C.navy900 }}>
+              {enrollmentFeeExplanation(membership.plan?.enrollmentFeeExplanation)}
+            </p>
+          </div>
+        );
+      })()}
 
       {/* ── Value delivered this period ───────────────────────────────────
           Cash-equivalent savings from membership-included services this

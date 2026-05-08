@@ -74,6 +74,13 @@ class MembershipPlanController extends Controller
             // initial evaluation specifically. Both nullable — most plans
             // have neither.
             'enrollment_fee' => 'nullable|numeric|min:0|max:10000',
+            // Practice-editable explanation of what the enrollment fee
+            // covers (typically the initial intake / assessment visit).
+            // Surfaces inline on the enrollment widget Review step, the
+            // plan comparison widget, and the patient billing receipt.
+            // 2000-char cap because patients read this mid-checkout —
+            // anything longer should link to a separate page instead.
+            'enrollment_fee_explanation' => 'nullable|string|max:2000',
             'intake_fee' => 'nullable|numeric|min:0|max:10000',
             // visits_per_month: positive int = limit, 0 = no visits (rare),
             // -1 = unlimited (concierge). Optional because the minimal
@@ -132,6 +139,13 @@ class MembershipPlanController extends Controller
             'monthly_price' => 'sometimes|numeric|min:0',
             'annual_price' => 'nullable|numeric|min:0',
             'enrollment_fee' => 'nullable|numeric|min:0|max:10000',
+            // Practice-editable explanation of what the enrollment fee
+            // covers (typically the initial intake / assessment visit).
+            // Surfaces inline on the enrollment widget Review step, the
+            // plan comparison widget, and the patient billing receipt.
+            // 2000-char cap because patients read this mid-checkout —
+            // anything longer should link to a separate page instead.
+            'enrollment_fee_explanation' => 'nullable|string|max:2000',
             'intake_fee' => 'nullable|numeric|min:0|max:10000',
             'visits_per_month' => 'sometimes|integer|min:0',
             'telehealth_included' => 'sometimes|boolean',

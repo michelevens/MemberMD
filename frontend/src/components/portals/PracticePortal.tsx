@@ -1457,7 +1457,7 @@ export function PracticePortal() {
   // Starter plans dialog — preview specialty-curated plan templates
   // and fork them into real MembershipPlan rows with one click.
   const [showStarterPlans, setShowStarterPlans] = useState(false);
-  const [createPlanForm, setCreatePlanForm] = useState({ name: "", monthlyPrice: "", annualPrice: "", enrollmentFee: "", description: "" });
+  const [createPlanForm, setCreatePlanForm] = useState({ name: "", monthlyPrice: "", annualPrice: "", enrollmentFee: "", enrollmentFeeExplanation: "", description: "" });
   const [createPlanLoading, setCreatePlanLoading] = useState(false);
 
   // ─── Plan Stripe price sync ───────────────────────────────────────
@@ -1479,7 +1479,7 @@ export function PracticePortal() {
 
   // ─── Edit Plan Modal ──────────────────────────────────────────────
   const [showEditPlan, setShowEditPlan] = useState(false);
-  const [editPlanForm, setEditPlanForm] = useState({ id: "", name: "", monthlyPrice: "", annualPrice: "", enrollmentFee: "", description: "" });
+  const [editPlanForm, setEditPlanForm] = useState({ id: "", name: "", monthlyPrice: "", annualPrice: "", enrollmentFee: "", enrollmentFeeExplanation: "", description: "" });
   const [editPlanLoading, setEditPlanLoading] = useState(false);
 
   // ─── Plan Entitlements Builder ───────────────────────────────────────
@@ -2606,6 +2606,7 @@ export function PracticePortal() {
         // 0 also means "don't charge" — both treated equivalently by
         // the Stripe checkout (only > 0 adds the line item).
         enrollmentFee: createPlanForm.enrollmentFee.trim() === "" ? null : parseFloat(createPlanForm.enrollmentFee) || 0,
+        enrollmentFeeExplanation: createPlanForm.enrollmentFeeExplanation.trim() === "" ? null : createPlanForm.enrollmentFeeExplanation.trim(),
         description: createPlanForm.description || undefined,
       });
       if (res.data || !res.error) {
@@ -2617,7 +2618,7 @@ export function PracticePortal() {
         }
         setToast({ message: "Plan created successfully.", type: "success" });
         setShowCreatePlan(false);
-        setCreatePlanForm({ name: "", monthlyPrice: "", annualPrice: "", enrollmentFee: "", description: "" });
+        setCreatePlanForm({ name: "", monthlyPrice: "", annualPrice: "", enrollmentFee: "", enrollmentFeeExplanation: "", description: "" });
         setCreatePlanEntitlements([]);
         setShowCreatePlanEntPicker(false);
         loadPracticeData();
@@ -2643,6 +2644,7 @@ export function PracticePortal() {
         monthlyPrice: parseFloat(editPlanForm.monthlyPrice) || 0,
         annualPrice: parseFloat(editPlanForm.annualPrice) || 0,
         enrollmentFee: editPlanForm.enrollmentFee.trim() === "" ? null : parseFloat(editPlanForm.enrollmentFee) || 0,
+        enrollmentFeeExplanation: editPlanForm.enrollmentFeeExplanation.trim() === "" ? null : editPlanForm.enrollmentFeeExplanation.trim(),
         description: editPlanForm.description || undefined,
       });
       if (res.data || !res.error) {
@@ -6008,6 +6010,7 @@ export function PracticePortal() {
                       monthlyPrice: String(monthlyPrice),
                       annualPrice: String(annualPrice),
                       enrollmentFee: plan.enrollmentFee != null ? String(plan.enrollmentFee) : "",
+                      enrollmentFeeExplanation: plan.enrollmentFeeExplanation ?? "",
                       description: plan.description ?? "",
                     });
                     fetchEntitlementTypes();
@@ -6908,6 +6911,7 @@ export function PracticePortal() {
                           monthlyPrice: String(monthlyPrice),
                           annualPrice: String(plan.annualPrice ?? plan.annual_price ?? 0),
                           enrollmentFee: (plan.enrollmentFee ?? plan.enrollment_fee) != null ? String(plan.enrollmentFee ?? plan.enrollment_fee) : "",
+                          enrollmentFeeExplanation: (plan.enrollmentFeeExplanation ?? plan.enrollment_fee_explanation) ?? "",
                           description: plan.description ?? "",
                         });
                         fetchEntitlementTypes();
@@ -7028,6 +7032,24 @@ export function PracticePortal() {
                     Charged once at sign-up (e.g., comprehensive intake / new-patient evaluation).
                   </p>
                 </div>
+                {createPlanForm.enrollmentFee.trim() !== "" && parseFloat(createPlanForm.enrollmentFee) > 0 && (
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">
+                      What does this fee cover? <span className="text-xs font-normal text-slate-400">(shown to patients at checkout)</span>
+                    </label>
+                    <textarea
+                      value={createPlanForm.enrollmentFeeExplanation}
+                      onChange={(e) => setCreatePlanForm({ ...createPlanForm, enrollmentFeeExplanation: e.target.value })}
+                      placeholder="Leave blank to use the default explanation"
+                      rows={3}
+                      maxLength={2000}
+                      className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 resize-none"
+                    />
+                    <p className="text-xs text-slate-400 mt-1">
+                      Optional — if blank, patients see: <em>"Covers your initial assessment — the intake visit where your provider reviews your history, sets up your chart, and tailors your care plan."</em>
+                    </p>
+                  </div>
+                )}
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Description</label>
                   <textarea value={createPlanForm.description} onChange={(e) => setCreatePlanForm({ ...createPlanForm, description: e.target.value })} placeholder="Plan description..." rows={3} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 resize-none" />
@@ -7240,6 +7262,24 @@ export function PracticePortal() {
                     Charged once at sign-up (e.g., comprehensive intake / new-patient evaluation). Existing members are not re-billed when this changes.
                   </p>
                 </div>
+                {editPlanForm.enrollmentFee.trim() !== "" && parseFloat(editPlanForm.enrollmentFee) > 0 && (
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">
+                      What does this fee cover? <span className="text-xs font-normal text-slate-400">(shown to patients at checkout)</span>
+                    </label>
+                    <textarea
+                      value={editPlanForm.enrollmentFeeExplanation}
+                      onChange={(e) => setEditPlanForm({ ...editPlanForm, enrollmentFeeExplanation: e.target.value })}
+                      placeholder="Leave blank to use the default explanation"
+                      rows={3}
+                      maxLength={2000}
+                      className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 resize-none"
+                    />
+                    <p className="text-xs text-slate-400 mt-1">
+                      Optional — if blank, patients see: <em>"Covers your initial assessment — the intake visit where your provider reviews your history, sets up your chart, and tailors your care plan."</em>
+                    </p>
+                  </div>
+                )}
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Description</label>
                   <textarea value={editPlanForm.description} onChange={(e) => setEditPlanForm({ ...editPlanForm, description: e.target.value })} rows={3} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 resize-none" />

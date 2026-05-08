@@ -6,6 +6,7 @@ import { useState, useEffect, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { Check, X } from "lucide-react";
 import { useWidgetTheme } from "../../hooks/useWidgetTheme";
+import { enrollmentFeeExplanation } from "../../lib/enrollmentFeeCopy";
 
 // ─── Config ─────────────────────────────────────────────────────────────────
 
@@ -43,6 +44,10 @@ interface Plan {
   badgeText?: string;
   monthlyPrice: number;
   annualPrice: number;
+  // One-time fee charged on first invoice + practice-editable
+  // explanation. When fee is null/0 the explanation is hidden.
+  enrollmentFee?: number | null;
+  enrollmentFeeExplanation?: string | null;
   visitsPerMonth: number | null;
   telehealthIncluded: boolean;
   messagingIncluded: boolean;
@@ -239,6 +244,8 @@ function transformApiPlan(raw: Record<string, unknown>): Plan {
     badgeText: raw.badge_text ? String(raw.badge_text) : undefined,
     monthlyPrice: Number(raw.monthly_price ?? 0),
     annualPrice: Number(raw.annual_price ?? 0),
+    enrollmentFee: raw.enrollment_fee != null ? Number(raw.enrollment_fee) : null,
+    enrollmentFeeExplanation: raw.enrollment_fee_explanation ? String(raw.enrollment_fee_explanation) : null,
     visitsPerMonth: raw.visits_per_month != null ? Number(raw.visits_per_month) : null,
     telehealthIncluded: Boolean(raw.telehealth_included),
     messagingIncluded: Boolean(raw.messaging_included),
@@ -263,6 +270,9 @@ export function PlanWidget() {
   const [loading, setLoading] = useState(true);
   const [error] = useState<string | null>(null);
   const [billingCycle, setBillingCycle] = useState<"monthly" | "annual">("monthly");
+  // Per-plan expand state for the enrollment-fee "What's this?"
+  // disclosure. Set of plan IDs currently showing the explanation.
+  const [feeExplanationOpen, setFeeExplanationOpen] = useState<Set<string>>(new Set());
 
   const isEmbedded = useMemo(() => {
     try {
@@ -456,6 +466,33 @@ export function PlanWidget() {
                     <p className="text-xs mt-1" style={{ color: C.slate400 }}>
                       or ${plan.annualPrice}/yr billed annually
                     </p>
+                  )}
+                  {(plan.enrollmentFee ?? 0) > 0 && (
+                    <div className="mt-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setFeeExplanationOpen((prev) => {
+                            const next = new Set(prev);
+                            if (next.has(plan.id)) next.delete(plan.id); else next.add(plan.id);
+                            return next;
+                          });
+                        }}
+                        className="text-xs underline"
+                        style={{ color: C.teal500 }}
+                        aria-expanded={feeExplanationOpen.has(plan.id)}
+                      >
+                        + ${plan.enrollmentFee} one-time enrollment fee — what's this?
+                      </button>
+                      {feeExplanationOpen.has(plan.id) && (
+                        <p
+                          className="mt-1.5 p-2 rounded text-[11px] leading-relaxed"
+                          style={{ backgroundColor: "#f0fdf4", color: C.navy900, border: "1px solid #bbf7d0" }}
+                        >
+                          {enrollmentFeeExplanation(plan.enrollmentFeeExplanation)}
+                        </p>
+                      )}
+                    </div>
                   )}
                 </div>
 

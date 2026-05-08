@@ -18,7 +18,7 @@ class MembershipPlan extends Model
         'tenant_id', 'program_id', 'name', 'description', 'badge_text',
         'agreement_template_id',
         'monthly_price', 'annual_price',
-        'enrollment_fee', 'intake_fee',
+        'enrollment_fee', 'enrollment_fee_explanation', 'intake_fee',
         'trial_days', 'trial_requires_payment_method', 'refund_window_days',
         'stripe_monthly_price_id', 'stripe_annual_price_id',
         'visits_per_month', 'telehealth_included', 'messaging_included',

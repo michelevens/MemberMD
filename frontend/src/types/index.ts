@@ -239,6 +239,11 @@ export interface MembershipPlan {
   // billed alongside the first month (intake / registration / setup
   // fee, depending on practice convention). Null or 0 → no fee.
   enrollmentFee: number | null;
+  // Practice-editable explanation of what the enrollment fee covers.
+  // Surfaces on the enrollment widget Review step, plan comparison
+  // widget, and patient billing tab. Null/empty → frontend uses a
+  // generic-but-specific default ("covers your initial assessment...").
+  enrollmentFeeExplanation: string | null;
   // Maps to backend membership_plans.intake_fee — separate concept
   // some practices use for the initial evaluation specifically.
   // Practices that bundle intake into enrollment_fee can leave this null.

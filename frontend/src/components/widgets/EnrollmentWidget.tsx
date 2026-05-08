@@ -7,6 +7,7 @@ import { useParams, useSearchParams } from "react-router-dom";
 import { Check, ChevronLeft, ChevronRight, ArrowRight, FileText, X } from "lucide-react";
 import { useWidgetTheme } from "../../hooks/useWidgetTheme";
 import { widgetAnalyticsService, consentService, type PublicConsentTemplate } from "../../lib/api";
+import { enrollmentFeeExplanation } from "../../lib/enrollmentFeeCopy";
 import { AgreementBody } from "../shared/AgreementBody";
 import { AddressAutocomplete } from "../shared/AddressAutocomplete";
 import { MedicationAutocomplete, type RxNormConcept } from "../shared/MedicationAutocomplete";
@@ -65,6 +66,10 @@ interface Plan {
   // One-time charge billed alongside the first month (intake / registration
   // / setup fee). Null or 0 → no fee. Read from plan.enrollment_fee.
   enrollmentFee?: number | null;
+  // Practice-editable copy explaining what the enrollment fee covers.
+  // Surfaces inline on the Review step. Falls back to a generic
+  // "covers your initial assessment" default when null/empty.
+  enrollmentFeeExplanation?: string | null;
   visitsPerMonth: number | null;
   telehealthIncluded: boolean;
   messagingIncluded: boolean;
@@ -210,6 +215,10 @@ export function EnrollmentWidget() {
 
   const [step, setStep] = useState(0);
   const [form, setForm] = useState<FormData>(INITIAL_FORM);
+  // Inline "What's this?" toggle for the enrollment-fee line on
+  // Review step. Starts collapsed because the answer is short and
+  // most patients don't ask.
+  const [showFeeExplanation, setShowFeeExplanation] = useState(false);
 
   // Save & resume — keep an unsigned draft in localStorage for 24h.
   // Without this, a patient who walks away mid-form (kid wakes up,
@@ -298,6 +307,7 @@ export function EnrollmentWidget() {
             monthlyPrice: Number(raw.monthly_price ?? 0),
             annualPrice: Number(raw.annual_price ?? 0),
             enrollmentFee: raw.enrollment_fee != null ? Number(raw.enrollment_fee) : null,
+            enrollmentFeeExplanation: raw.enrollment_fee_explanation ? String(raw.enrollment_fee_explanation) : null,
             visitsPerMonth: raw.visits_per_month != null ? Number(raw.visits_per_month) : null,
             telehealthIncluded: Boolean(raw.telehealth_included),
             messagingIncluded: Boolean(raw.messaging_included),
@@ -1102,7 +1112,30 @@ export function EnrollmentWidget() {
             {enrollmentFee > 0 && (
               <div className="mt-2 pt-2 border-t border-slate-100 text-xs" style={{ color: C.slate500 }}>
                 <div className="flex justify-between"><span>Subscription</span><span>${price}</span></div>
-                <div className="flex justify-between"><span>One-time enrollment fee</span><span>${enrollmentFee}</span></div>
+                <div className="flex justify-between items-baseline gap-2">
+                  <span>
+                    One-time enrollment fee
+                    {" "}
+                    <button
+                      type="button"
+                      onClick={() => setShowFeeExplanation((s) => !s)}
+                      className="underline"
+                      style={{ color: C.teal600 }}
+                      aria-expanded={showFeeExplanation}
+                    >
+                      {showFeeExplanation ? "Hide" : "What's this?"}
+                    </button>
+                  </span>
+                  <span>${enrollmentFee}</span>
+                </div>
+                {showFeeExplanation && (
+                  <div
+                    className="mt-1.5 mb-1 p-2 rounded text-[11px] leading-relaxed"
+                    style={{ backgroundColor: "#f0fdf4", color: C.navy800, border: "1px solid #bbf7d0" }}
+                  >
+                    {enrollmentFeeExplanation(selectedPlan?.enrollmentFeeExplanation)}
+                  </div>
+                )}
                 <div className="flex justify-between font-semibold mt-1 pt-1 border-t border-slate-100" style={{ color: C.navy900 }}>
                   <span>Today's charge</span><span>${firstChargeTotal}</span>
                 </div>

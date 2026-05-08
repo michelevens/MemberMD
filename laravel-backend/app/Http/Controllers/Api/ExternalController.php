@@ -64,7 +64,7 @@ class ExternalController extends Controller
             ->get([
                 'id', 'name', 'description', 'badge_text',
                 'monthly_price', 'annual_price',
-                'enrollment_fee', 'intake_fee',
+                'enrollment_fee', 'enrollment_fee_explanation', 'intake_fee',
                 'visits_per_month', 'telehealth_included', 'messaging_included',
                 'messaging_response_sla_hours', 'crisis_support', 'lab_discount_pct',
                 'prescription_management', 'features_list',
@@ -937,7 +937,7 @@ class ExternalController extends Controller
                 ->where('is_active', true)
                 ->whereNotNull('monthly_price')
                 ->orderBy('monthly_price')
-                ->first(['id', 'name', 'monthly_price', 'annual_price', 'visits_per_month', 'enrollment_fee']);
+                ->first(['id', 'name', 'monthly_price', 'annual_price', 'visits_per_month', 'enrollment_fee', 'enrollment_fee_explanation']);
         }
 
         return response()->json([
