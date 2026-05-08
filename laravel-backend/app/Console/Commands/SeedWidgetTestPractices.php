@@ -226,6 +226,7 @@ class SeedWidgetTestPractices extends Command
             $template = ConsentTemplate::create([
                 'practice_id' => $demo->id,
                 'name' => 'Membership agreement (demo)',
+                'type' => 'membership_agreement',
                 'content' => "<h2>Membership Agreement</h2><p>This is a demo consent for the widget integration test site. By signing below you acknowledge that this is a non-production environment used solely for embed testing.</p>",
                 'version' => '1.0',
                 'is_active' => true,
