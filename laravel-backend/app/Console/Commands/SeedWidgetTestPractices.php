@@ -34,10 +34,13 @@ class SeedWidgetTestPractices extends Command
 
     private const DEMO_SLUG_PREFIX = 'widget-demo-';
 
+    // Slugs match the three GH Pages demo repos under michelevens/*.
+    // The seed JSON output is keyed by slug so you know which
+    // tenant_code goes into which repo's index.html.
     private const DEMO_VARIANTS = [
-        ['name' => 'Site A — Demo Psychiatry', 'slug' => 'widget-demo-site-a', 'color' => '#635bff'],
-        ['name' => 'Site B — Demo Psychiatry', 'slug' => 'widget-demo-site-b', 'color' => '#27ab83'],
-        ['name' => 'Site C — Demo Psychiatry', 'slug' => 'widget-demo-site-c', 'color' => '#d97706'],
+        ['name' => 'Aurora Psychiatry', 'slug' => 'widget-demo-aurora-psychiatry', 'color' => '#635bff'],
+        ['name' => 'Cedar Mind Wellness', 'slug' => 'widget-demo-cedar-mind-wellness', 'color' => '#27ab83'],
+        ['name' => 'Lumen Psychiatry Group', 'slug' => 'widget-demo-lumen-psychiatry-group', 'color' => '#d97706'],
     ];
 
     public function handle(): int
