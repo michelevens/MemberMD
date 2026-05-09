@@ -163,7 +163,7 @@ pricing_replacement = '''  <section class="payment" id="pricing">
       </div>
       <div style="border:1px solid #e2e8f0;border-radius:14px;background:#fff;margin-top:32px;box-shadow:0 4px 16px rgba(15,23,42,.04);padding:64px 32px;text-align:center;">
         <p style="margin:0 auto 32px;color:#475569;font-size:17px;line-height:1.6;max-width:560px;">Compare every plan side by side — pricing, visit limits, and what's included. Pick the membership that fits your care.</p>
-        <a href="${PLATFORM}/#/plans/${TENANT_CODE}" target="_blank" rel="noopener" class="btn-primary" style="display:inline-block;text-decoration:none;font-size:16px;">View membership plans →</a>
+        <a href="${PLATFORM}/#/plans/${TENANT_CODE}" target="_blank" rel="noopener" onclick="return openMD(this.href)" class="btn-primary" style="display:inline-block;text-decoration:none;font-size:16px;">View membership plans →</a>
       </div>
     </div>
   </section>
@@ -187,7 +187,7 @@ booking_replacement = '''  <section class="booking-section" id="book" aria-label
       </div>
       <div style="border:1px solid #e2e8f0;border-radius:14px;background:#fff;margin-top:32px;box-shadow:0 4px 16px rgba(15,23,42,.04);padding:64px 32px;text-align:center;">
         <p style="margin:0 auto 32px;color:#475569;font-size:17px;line-height:1.6;max-width:560px;">Pick a time that works for you — real-time availability, HIPAA-compliant booking, no phone tag.</p>
-        <a href="${PLATFORM}/#/book/${TENANT_CODE}" target="_blank" rel="noopener" class="btn-primary" style="display:inline-block;text-decoration:none;font-size:16px;">Book an appointment →</a>
+        <a href="${PLATFORM}/#/book/${TENANT_CODE}" target="_blank" rel="noopener" onclick="return openMD(this.href)" class="btn-primary" style="display:inline-block;text-decoration:none;font-size:16px;">Book an appointment →</a>
       </div>
     </div>
   </section>
@@ -202,7 +202,7 @@ booking_replacement = '''  <section class="booking-section" id="book" aria-label
       </div>
       <div style="border:1px solid #e2e8f0;border-radius:14px;background:#fff;margin-top:32px;box-shadow:0 4px 16px rgba(15,23,42,.04);padding:64px 32px;text-align:center;">
         <p style="margin:0 auto 32px;color:#475569;font-size:17px;line-height:1.6;max-width:560px;">Join in under 5 minutes — choose a plan, set up payment, and start booking. All in one secure flow.</p>
-        <a href="${PLATFORM}/#/enroll/${TENANT_CODE}" target="_blank" rel="noopener" class="btn-primary" style="display:inline-block;text-decoration:none;font-size:16px;">Become a member →</a>
+        <a href="${PLATFORM}/#/enroll/${TENANT_CODE}" target="_blank" rel="noopener" onclick="return openMD(this.href)" class="btn-primary" style="display:inline-block;text-decoration:none;font-size:16px;">Become a member →</a>
       </div>
     </div>
   </section>
@@ -217,7 +217,7 @@ booking_replacement = '''  <section class="booking-section" id="book" aria-label
       </div>
       <div style="border:1px solid #e2e8f0;border-radius:14px;background:#fff;margin-top:32px;box-shadow:0 4px 16px rgba(15,23,42,.04);padding:64px 32px;text-align:center;">
         <p style="margin:0 auto 32px;color:#475569;font-size:17px;line-height:1.6;max-width:560px;">Consent, intake, and agreement signing handled online — before your visit, on your schedule.</p>
-        <a href="${PLATFORM}/#/sign/${SIGNATURE_TOKEN}" target="_blank" rel="noopener" class="btn-primary" style="display:inline-block;text-decoration:none;font-size:16px;">Sign your forms →</a>
+        <a href="${PLATFORM}/#/sign/${SIGNATURE_TOKEN}" target="_blank" rel="noopener" onclick="return openMD(this.href)" class="btn-primary" style="display:inline-block;text-decoration:none;font-size:16px;">Sign your forms →</a>
       </div>
     </div>
   </section>
@@ -235,7 +235,36 @@ html = re.sub(
 # (Both already point at #book and #pricing — no change needed,
 # they continue to work after replacement.)
 
-# Update CNAME so each repo doesn't try to claim ennhealth.com.
+# Inject the popup-launcher script before </body>. Each CTA's onclick
+# calls window.openMD(url) which opens the MemberMD widget in a
+# centered popup window so the visitor stays on the practice site
+# in the background. target="_blank" remains as the popup-blocked
+# fallback.
+popup_script = '''
+  <!-- MemberMD widget popup launcher -->
+  <script>
+    (function () {
+      window.openMD = function (url) {
+        var w = 920, h = 900;
+        var left = (screen.width - w) / 2;
+        var top = (screen.height - h) / 2;
+        var features = [
+          'width=' + w, 'height=' + h, 'left=' + left, 'top=' + top,
+          'resizable=yes', 'scrollbars=yes', 'status=no', 'toolbar=no',
+          'menubar=no', 'location=no',
+        ].join(',');
+        var win = window.open(url, 'membermd_widget', features);
+        if (!win || win.closed || typeof win.closed === 'undefined') {
+          return true; // popup blocked → target="_blank" fallback fires
+        }
+        win.focus();
+        return false;
+      };
+    })();
+  </script>
+</body>'''
+html = html.replace('</body>', popup_script, 1)
+
 with open('index.html', 'w', encoding='utf-8') as fh:
     fh.write(html)
 PYEOF
