@@ -92,7 +92,7 @@ class SeedWidgetTestPractices extends Command
         foreach ($existingDemos as $old) {
             $this->warn("Removing existing demo practice: {$old->slug}");
             SignatureRequest::where('tenant_id', $old->id)->delete();
-            ConsentTemplate::where('practice_id', $old->id)->delete();
+            ConsentTemplate::where('tenant_id', $old->id)->delete();
             Patient::where('tenant_id', $old->id)->delete();
             User::where('tenant_id', $old->id)->delete();
             PlanEntitlement::whereIn(
@@ -238,14 +238,17 @@ class SeedWidgetTestPractices extends Command
                 'is_active' => true,
             ]);
 
+            // tenant_id is set by BelongsToTenant; practice_id was a
+            // miswritten field that Eloquent silently dropped. is_required
+            // is the actual column name (not requires_signature).
             $template = ConsentTemplate::create([
-                'practice_id' => $demo->id,
+                'tenant_id' => $demo->id,
                 'name' => 'Membership agreement (demo)',
                 'type' => 'membership_agreement',
                 'content' => "<h2>Membership Agreement</h2><p>This is a demo consent for the widget integration test site. By signing below you acknowledge that this is a non-production environment used solely for embed testing.</p>",
                 'version' => '1.0',
                 'is_active' => true,
-                'requires_signature' => true,
+                'is_required' => true,
             ]);
 
             $sigRequest = SignatureRequest::create([
