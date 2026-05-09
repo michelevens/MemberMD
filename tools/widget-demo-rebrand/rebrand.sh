@@ -138,8 +138,15 @@ with open(p, 'w', encoding='utf-8', newline='') as fh:
 "
 
 # 3) Surgical section replacements for widget integration.
-# Replace booking-section (line range marked) with MemberMD booking widget.
-# Replace payment#pricing section with plan-comparison + enrollment widgets.
+# Original design used iframes embedding app.membermd.io directly. In the
+# field, browsers blocked the iframe with an X-Frame-Options error in
+# console even though the server sends no such header — we couldn't
+# reproduce server-side and incognito reproduced too, ruling out
+# extensions/cache. Switched to new-tab CTA buttons: more realistic
+# embed pattern (most marketing sites link out to enrollment portals
+# anyway), and sidesteps whatever iframe block the browser is enforcing.
+# Replace booking-section (line range marked) with MemberMD booking CTA.
+# Replace payment#pricing section with plans + enrollment CTAs.
 python3 - <<PYEOF
 import re
 
@@ -154,11 +161,9 @@ pricing_replacement = '''  <section class="payment" id="pricing">
         <h2>Pick the plan that fits your care</h2>
         <p>Direct Psychiatry Care memberships — flat monthly pricing, no surprise bills, secure messaging with your provider.</p>
       </div>
-      <div style="border:1px solid #e2e8f0;border-radius:14px;overflow:hidden;background:#fff;margin-top:32px;box-shadow:0 4px 16px rgba(15,23,42,.04);">
-        <iframe src="${PLATFORM}/#/plans/${TENANT_CODE}" style="display:block;width:100%;border:0;" height="640" loading="lazy" title="Membership plan comparison"></iframe>
-      </div>
-      <div style="max-width:1200px;margin:36px auto 0;text-align:center;">
-        <a href="#enroll" class="btn-primary" style="display:inline-block;text-decoration:none;">Become a member</a>
+      <div style="border:1px solid #e2e8f0;border-radius:14px;background:#fff;margin-top:32px;box-shadow:0 4px 16px rgba(15,23,42,.04);padding:64px 32px;text-align:center;">
+        <p style="margin:0 auto 32px;color:#475569;font-size:17px;line-height:1.6;max-width:560px;">Compare every plan side by side — pricing, visit limits, and what's included. Pick the membership that fits your care.</p>
+        <a href="${PLATFORM}/#/plans/${TENANT_CODE}" target="_blank" rel="noopener" class="btn-primary" style="display:inline-block;text-decoration:none;font-size:16px;">View membership plans →</a>
       </div>
     </div>
   </section>
@@ -180,8 +185,9 @@ booking_replacement = '''  <section class="booking-section" id="book" aria-label
         <h2>Schedule your appointment</h2>
         <p>Pick a time that works for you — real-time calendar, HIPAA-compliant booking.</p>
       </div>
-      <div style="border:1px solid #e2e8f0;border-radius:14px;overflow:hidden;background:#fff;margin-top:32px;box-shadow:0 4px 16px rgba(15,23,42,.04);">
-        <iframe src="${PLATFORM}/#/book/${TENANT_CODE}" style="display:block;width:100%;border:0;" height="820" loading="lazy" title="Booking widget"></iframe>
+      <div style="border:1px solid #e2e8f0;border-radius:14px;background:#fff;margin-top:32px;box-shadow:0 4px 16px rgba(15,23,42,.04);padding:64px 32px;text-align:center;">
+        <p style="margin:0 auto 32px;color:#475569;font-size:17px;line-height:1.6;max-width:560px;">Pick a time that works for you — real-time availability, HIPAA-compliant booking, no phone tag.</p>
+        <a href="${PLATFORM}/#/book/${TENANT_CODE}" target="_blank" rel="noopener" class="btn-primary" style="display:inline-block;text-decoration:none;font-size:16px;">Book an appointment →</a>
       </div>
     </div>
   </section>
@@ -194,8 +200,9 @@ booking_replacement = '''  <section class="booking-section" id="book" aria-label
         <h2>Become a member</h2>
         <p>Join the practice in under 5 minutes. Choose a plan, set up payment, and start booking — all in one secure flow.</p>
       </div>
-      <div style="border:1px solid #e2e8f0;border-radius:14px;overflow:hidden;background:#fff;margin-top:32px;box-shadow:0 4px 16px rgba(15,23,42,.04);">
-        <iframe src="${PLATFORM}/#/enroll/${TENANT_CODE}" style="display:block;width:100%;border:0;" height="800" loading="lazy" title="Enrollment widget"></iframe>
+      <div style="border:1px solid #e2e8f0;border-radius:14px;background:#fff;margin-top:32px;box-shadow:0 4px 16px rgba(15,23,42,.04);padding:64px 32px;text-align:center;">
+        <p style="margin:0 auto 32px;color:#475569;font-size:17px;line-height:1.6;max-width:560px;">Join in under 5 minutes — choose a plan, set up payment, and start booking. All in one secure flow.</p>
+        <a href="${PLATFORM}/#/enroll/${TENANT_CODE}" target="_blank" rel="noopener" class="btn-primary" style="display:inline-block;text-decoration:none;font-size:16px;">Become a member →</a>
       </div>
     </div>
   </section>
@@ -208,8 +215,9 @@ booking_replacement = '''  <section class="booking-section" id="book" aria-label
         <h2>Sign your forms online</h2>
         <p>Consent, intake, and agreement signing handled before your visit. No paper, no waiting room clipboard.</p>
       </div>
-      <div style="border:1px solid #e2e8f0;border-radius:14px;overflow:hidden;background:#fff;margin-top:32px;box-shadow:0 4px 16px rgba(15,23,42,.04);">
-        <iframe src="${PLATFORM}/#/sign/${SIGNATURE_TOKEN}" style="display:block;width:100%;border:0;" height="780" loading="lazy" title="Signature widget"></iframe>
+      <div style="border:1px solid #e2e8f0;border-radius:14px;background:#fff;margin-top:32px;box-shadow:0 4px 16px rgba(15,23,42,.04);padding:64px 32px;text-align:center;">
+        <p style="margin:0 auto 32px;color:#475569;font-size:17px;line-height:1.6;max-width:560px;">Consent, intake, and agreement signing handled online — before your visit, on your schedule.</p>
+        <a href="${PLATFORM}/#/sign/${SIGNATURE_TOKEN}" target="_blank" rel="noopener" class="btn-primary" style="display:inline-block;text-decoration:none;font-size:16px;">Sign your forms →</a>
       </div>
     </div>
   </section>
