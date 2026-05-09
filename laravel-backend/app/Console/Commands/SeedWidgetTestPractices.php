@@ -85,9 +85,21 @@ class SeedWidgetTestPractices extends Command
         $this->info("Cloning {$sourcePlans->count()} plans from '{$source->name}' into 3 demo practices.");
 
         // Clean up any prior demo practices first so re-runs don't pile up.
+        // Practice delete doesn't cascade to Users / Patient / ConsentTemplate /
+        // SignatureRequest, so wipe those by tenant_id first to avoid the
+        // users_email_unique violation on re-create.
         $existingDemos = Practice::where('slug', 'like', self::DEMO_SLUG_PREFIX . '%')->get();
         foreach ($existingDemos as $old) {
             $this->warn("Removing existing demo practice: {$old->slug}");
+            SignatureRequest::where('tenant_id', $old->id)->delete();
+            ConsentTemplate::where('practice_id', $old->id)->delete();
+            Patient::where('tenant_id', $old->id)->delete();
+            User::where('tenant_id', $old->id)->delete();
+            PlanEntitlement::whereIn(
+                'plan_id',
+                MembershipPlan::where('tenant_id', $old->id)->pluck('id')
+            )->delete();
+            MembershipPlan::where('tenant_id', $old->id)->delete();
             $old->delete();
         }
 
@@ -201,7 +213,10 @@ class SeedWidgetTestPractices extends Command
             // the signature widget on the demo site has a real token to
             // mount against. Tokens never expire (set far-future) so the
             // demo doesn't go stale on us.
-            $demoUserEmail = 'demo-patient+' . substr($demo->id, 0, 8) . '@membermd.io';
+            // Use Str::random rather than substr($demo->id, 0, 8) — UUIDv7
+            // IDs created in the same second share the time prefix and
+            // collide on users.email_unique.
+            $demoUserEmail = 'demo-patient+' . Str::lower(Str::random(12)) . '@membermd.io';
             $demoUser = User::create([
                 'tenant_id' => $demo->id,
                 'name' => 'Demo Patient',
