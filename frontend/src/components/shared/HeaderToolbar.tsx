@@ -3,7 +3,8 @@
 // Messages, Notifications, Settings, Dark Mode, UserSettingsDropdown
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import { MessageSquare, Bell, Settings, Moon, Sun, X, Building2, ChevronDown, ArrowLeftRight, HelpCircle } from "lucide-react";
+import { MessageSquare, Bell, Settings, Moon, Sun, X, Building2, ChevronDown, ArrowLeftRight, HelpCircle, BookOpen, LifeBuoy } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import { UserSettingsDropdown } from "./UserSettingsDropdown";
 import { useTheme } from "../../contexts/ThemeContext";
 import { useAuth } from "../../contexts/AuthContext";
@@ -165,8 +166,12 @@ function MiniPanel({
 export function HeaderToolbar({ variant, onNavigate }: HeaderToolbarProps) {
   const [showMessages, setShowMessages] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
   const [notifications, setNotifications] = useState(MOCK_NOTIFICATIONS);
   const { isDark, toggleTheme } = useTheme();
+  const { user } = useAuth();
+  const navigate = useNavigate();
+  const handbookLabel = user?.role === "patient" ? "User Guide" : "Staff Handbook";
 
   const unreadMessages = MOCK_MESSAGES.filter((m) => m.unread).length;
   const unreadNotifications = notifications.filter((n) => !n.read).length;
@@ -390,14 +395,56 @@ export function HeaderToolbar({ variant, onNavigate }: HeaderToolbarProps) {
         )}
       </div>
 
-      {/* Help — opens shared HelpCenterModal via the help:open event. */}
-      <button
-        className={iconBtnClass}
-        onClick={() => window.dispatchEvent(new Event("help:open"))}
-        title="Help"
-      >
-        <HelpCircle className="w-5 h-5" style={{ color: COLORS.slate500 }} />
-      </button>
+      {/* Help — small dropdown: Help Center (modal) + Staff Handbook (page). */}
+      <div className="relative">
+        <button
+          className={iconBtnClass}
+          onClick={() => setShowHelp((v) => !v)}
+          title="Help"
+        >
+          <HelpCircle className="w-5 h-5" style={{ color: COLORS.slate500 }} />
+        </button>
+        {showHelp && (
+          <MiniPanel onClose={() => setShowHelp(false)}>
+            <div className="py-1">
+              <button
+                className="w-full text-left px-4 py-2.5 hover:bg-slate-50 flex items-center gap-3"
+                onClick={() => {
+                  setShowHelp(false);
+                  window.dispatchEvent(new Event("help:open"));
+                }}
+              >
+                <LifeBuoy className="w-4 h-4" style={{ color: COLORS.slate500 }} />
+                <div>
+                  <div className="text-sm font-medium" style={{ color: COLORS.navy900 }}>
+                    Help Center
+                  </div>
+                  <div className="text-xs" style={{ color: COLORS.slate500 }}>
+                    Search articles & FAQs
+                  </div>
+                </div>
+              </button>
+              <button
+                className="w-full text-left px-4 py-2.5 hover:bg-slate-50 flex items-center gap-3"
+                onClick={() => {
+                  setShowHelp(false);
+                  navigate("/help/guides");
+                }}
+              >
+                <BookOpen className="w-4 h-4" style={{ color: COLORS.teal600 }} />
+                <div>
+                  <div className="text-sm font-medium" style={{ color: COLORS.navy900 }}>
+                    {handbookLabel}
+                  </div>
+                  <div className="text-xs" style={{ color: COLORS.slate500 }}>
+                    Step-by-step playbooks for your role
+                  </div>
+                </div>
+              </button>
+            </div>
+          </MiniPanel>
+        )}
+      </div>
 
       {/* Settings */}
       <button

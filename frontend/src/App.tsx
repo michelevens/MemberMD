@@ -186,6 +186,11 @@ const LandingPage = namedLazy(
   "LandingPage"
 );
 
+const HelpGuidesPage = namedLazy(
+  () => import("./components/shared/HelpGuidesPage"),
+  "HelpGuidesPage"
+);
+
 
 // ─── Loading Fallback ─────────────────────────────────────────────────────────
 
@@ -256,6 +261,7 @@ function AuthGate() {
         <Route path="/practice/*" element={<PracticePortal />} />
         <Route path="/patient/*" element={<PatientPortal />} />
         <Route path="/employer/*" element={<EmployerPortal />} />
+        <Route path="/help/guides" element={<HelpGuidesPage />} />
         <Route path="/telehealth/:sessionId" element={<TelehealthRoom />} />
         <Route path="/enrollment/success" element={<EnrollmentSuccessWidget />} />
         <Route path="/enrollment/cancelled" element={<EnrollmentCancelledWidget />} />

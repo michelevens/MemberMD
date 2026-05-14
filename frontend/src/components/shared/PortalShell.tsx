@@ -26,8 +26,12 @@ import {
   Search,
   MessageSquare,
   ShieldCheck,
+  BookOpen,
+  LifeBuoy,
 } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import { NotificationBell } from "./NotificationBell";
+import { useAuth } from "../../contexts/AuthContext";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -215,7 +219,12 @@ export function PortalShell({
 }: PortalShellProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [helpMenuOpen, setHelpMenuOpen] = useState(false);
   const userMenuRef = useRef<HTMLDivElement>(null);
+  const helpMenuRef = useRef<HTMLDivElement>(null);
+  const navigate = useNavigate();
+  const { user } = useAuth();
+  const handbookLabel = user?.role === "patient" ? "User Guide" : "Staff Handbook";
   const baseColors = colorMap[portalColor];
   // Per-tenant accent overrides the colorMap so a patient on
   // BellaCare sees BellaCare colors instead of the platform default.
@@ -241,6 +250,18 @@ export function PortalShell({
     document.addEventListener("mousedown", onClick);
     return () => document.removeEventListener("mousedown", onClick);
   }, [userMenuOpen]);
+
+  // Close the help menu when clicking outside.
+  useEffect(() => {
+    if (!helpMenuOpen) return;
+    const onClick = (e: MouseEvent) => {
+      if (helpMenuRef.current && !helpMenuRef.current.contains(e.target as Node)) {
+        setHelpMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, [helpMenuOpen]);
 
   const sections: NavSection[] = isSectioned(nav)
     ? nav
@@ -523,16 +544,50 @@ export function PortalShell({
               </button>
             )}
 
-            {/* Help — opens the Help Center modal (port from InsureFlow).
-                Desktop-only; on mobile help lives in the user menu. */}
-            <button
-              type="button"
-              onClick={() => window.dispatchEvent(new Event("help:open"))}
-              aria-label="Help"
-              className="hidden sm:inline-flex p-2 rounded-xl hover:bg-gray-100 transition-colors"
-            >
-              <HelpCircle className="w-5 h-5 text-gray-600" />
-            </button>
+            {/* Help — dropdown with Help Center (modal) + Handbook (page).
+                Desktop-only; on mobile both options live in the user menu. */}
+            <div className="relative hidden sm:inline-flex" ref={helpMenuRef}>
+              <button
+                type="button"
+                onClick={() => setHelpMenuOpen((v) => !v)}
+                aria-label="Help"
+                className="p-2 rounded-xl hover:bg-gray-100 transition-colors"
+              >
+                <HelpCircle className="w-5 h-5 text-gray-600" />
+              </button>
+              {helpMenuOpen && (
+                <div className="absolute right-0 top-12 w-72 bg-white rounded-xl shadow-2xl border border-gray-200 overflow-hidden z-50">
+                  <button
+                    type="button"
+                    className="w-full text-left px-4 py-2.5 hover:bg-gray-50 flex items-center gap-3"
+                    onClick={() => {
+                      setHelpMenuOpen(false);
+                      window.dispatchEvent(new Event("help:open"));
+                    }}
+                  >
+                    <LifeBuoy className="w-4 h-4 text-gray-500" />
+                    <div>
+                      <div className="text-sm font-medium text-gray-900">Help Center</div>
+                      <div className="text-xs text-gray-500">Search articles & FAQs</div>
+                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    className="w-full text-left px-4 py-2.5 hover:bg-gray-50 flex items-center gap-3 border-t border-gray-100"
+                    onClick={() => {
+                      setHelpMenuOpen(false);
+                      navigate("/help/guides");
+                    }}
+                  >
+                    <BookOpen className="w-4 h-4 text-teal-600" />
+                    <div>
+                      <div className="text-sm font-medium text-gray-900">{handbookLabel}</div>
+                      <div className="text-xs text-gray-500">Step-by-step playbooks for your role</div>
+                    </div>
+                  </button>
+                </div>
+              )}
+            </div>
 
             {/* Settings — desktop-only, sidebar entry remains the canonical path. */}
             {onOpenSettings && (
@@ -625,8 +680,23 @@ export function PortalShell({
                           <ShieldCheck className="w-4 h-4" /> My Consents
                         </button>
                       )}
-                      <button className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50">
-                        <HelpCircle className="w-4 h-4" /> Help Center
+                      <button
+                        onClick={() => {
+                          setUserMenuOpen(false);
+                          window.dispatchEvent(new Event("help:open"));
+                        }}
+                        className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                      >
+                        <LifeBuoy className="w-4 h-4" /> Help Center
+                      </button>
+                      <button
+                        onClick={() => {
+                          setUserMenuOpen(false);
+                          navigate("/help/guides");
+                        }}
+                        className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                      >
+                        <BookOpen className="w-4 h-4" /> {handbookLabel}
                       </button>
                     </div>
                     <div className="border-t border-gray-100 py-1">

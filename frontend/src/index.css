@@ -427,3 +427,105 @@ body {
   }
 }
 
+/* ─── Markdown body (Staff Handbook) ───────────────────────────────────────── */
+/* Minimal typography for react-markdown output. Scoped to .markdown-body so
+   it doesn't leak into the rest of the app. We don't load
+   @tailwindcss/typography to keep the bundle small for one page. */
+
+.markdown-body {
+  color: var(--color-slate-700, #334155);
+  font-size: 0.9375rem;
+  line-height: 1.65;
+}
+.markdown-body h1 {
+  font-size: 1.625rem;
+  font-weight: 700;
+  color: var(--color-slate-900, #0f172a);
+  margin-bottom: 0.5rem;
+  letter-spacing: -0.01em;
+}
+.markdown-body h2 {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--color-slate-900, #0f172a);
+  margin-top: 2rem;
+  margin-bottom: 0.75rem;
+  padding-bottom: 0.375rem;
+  border-bottom: 1px solid var(--color-slate-200, #e2e8f0);
+}
+.markdown-body h3 {
+  font-size: 1.0625rem;
+  font-weight: 600;
+  color: var(--color-slate-900, #0f172a);
+  margin-top: 1.5rem;
+  margin-bottom: 0.5rem;
+}
+.markdown-body p { margin: 0.75rem 0; }
+.markdown-body ul, .markdown-body ol {
+  margin: 0.75rem 0 0.75rem 1.5rem;
+  padding-left: 0.5rem;
+}
+.markdown-body ul { list-style: disc; }
+.markdown-body ol { list-style: decimal; }
+.markdown-body li { margin: 0.25rem 0; }
+.markdown-body li > ul, .markdown-body li > ol { margin: 0.25rem 0 0.25rem 1rem; }
+.markdown-body blockquote {
+  border-left: 3px solid var(--color-teal-500, #199473);
+  background: var(--color-teal-50, #e6f7f2);
+  padding: 0.625rem 1rem;
+  margin: 1rem 0;
+  border-radius: 0 0.5rem 0.5rem 0;
+  color: var(--color-slate-700, #334155);
+}
+.markdown-body blockquote p { margin: 0.25rem 0; }
+.markdown-body code {
+  background: var(--color-slate-100, #f1f5f9);
+  padding: 0.125rem 0.375rem;
+  border-radius: 0.25rem;
+  font-size: 0.875em;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  color: var(--color-slate-800, #1e293b);
+}
+.markdown-body pre {
+  background: var(--color-slate-900, #0f172a);
+  color: var(--color-slate-100, #f1f5f9);
+  padding: 1rem;
+  border-radius: 0.5rem;
+  overflow-x: auto;
+  margin: 1rem 0;
+  font-size: 0.8125rem;
+}
+.markdown-body pre code {
+  background: transparent;
+  color: inherit;
+  padding: 0;
+}
+.markdown-body a {
+  color: var(--color-teal-600, #147d64);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.markdown-body a:hover { color: var(--color-teal-700, #0f6654); }
+.markdown-body table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1rem 0;
+  font-size: 0.875rem;
+}
+.markdown-body th, .markdown-body td {
+  border: 1px solid var(--color-slate-200, #e2e8f0);
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+}
+.markdown-body th {
+  background: var(--color-slate-50, #f8fafc);
+  font-weight: 600;
+  color: var(--color-slate-900, #0f172a);
+}
+.markdown-body hr {
+  border: 0;
+  border-top: 1px solid var(--color-slate-200, #e2e8f0);
+  margin: 1.5rem 0;
+}
+.markdown-body strong { color: var(--color-slate-900, #0f172a); font-weight: 600; }
+
