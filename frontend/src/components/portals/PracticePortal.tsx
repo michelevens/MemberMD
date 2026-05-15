@@ -1546,6 +1546,15 @@ export function PracticePortal() {
   const [ptApiAppointments, setPtApiAppointments] = useState<any[]>([]);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [ptApiPrescriptions, setPtApiPrescriptions] = useState<any[]>([]);
+  // Selected entity rows for in-patient-detail slide-over drawers. The
+  // patient detail view embeds tables for meds + past/upcoming
+  // appointments; clicking a row opens a DetailDrawer with full fields.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [selectedMedication, setSelectedMedication] = useState<any | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [selectedPastAppointment, setSelectedPastAppointment] = useState<any | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [selectedUpcomingAppointment, setSelectedUpcomingAppointment] = useState<any | null>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [_ptApiEncounters, setPtApiEncounters] = useState<any[]>([]);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -5282,7 +5291,11 @@ export function PracticePortal() {
                         ? new Date(startDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
                         : startDate;
                       return (
-                        <tr key={med.id || i} className="border-t border-slate-100 hover:bg-slate-50 transition-colors">
+                        <tr
+                          key={med.id || i}
+                          className="border-t border-slate-100 hover:bg-slate-50 transition-colors cursor-pointer"
+                          onClick={() => setSelectedMedication(med)}
+                        >
                           <td className="px-4 py-3 font-medium text-slate-700">{name}</td>
                           <td className="px-4 py-3 text-slate-600">{dosage}</td>
                           <td className="px-4 py-3 text-slate-500">{frequency}</td>
@@ -5296,7 +5309,7 @@ export function PracticePortal() {
                             </span>
                           </td>
                           <td className="px-4 py-3 text-slate-500 hidden lg:table-cell">{startDateStr}</td>
-                          <td className="px-4 py-3">
+                          <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                             <div className="flex items-center gap-1">
                               {status === "active" && (
                                 <>
@@ -5327,7 +5340,11 @@ export function PracticePortal() {
               <h3 className="font-semibold text-slate-800 mb-3">Upcoming Appointments</h3>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                 {mockPtAppointments.upcoming.map((apt) => (
-                  <div key={apt.id} className="glass rounded-xl p-4">
+                  <div
+                    key={apt.id}
+                    className="glass rounded-xl p-4 cursor-pointer hover:shadow-md transition-shadow"
+                    onClick={() => setSelectedUpcomingAppointment(apt)}
+                  >
                     <div className="flex items-start justify-between mb-2">
                       <div>
                         <p className="font-medium text-slate-800">{apt.date}</p>
@@ -5343,7 +5360,7 @@ export function PracticePortal() {
                     <p className="text-xs text-slate-400">{apt.provider}</p>
                     <button
                       className="mt-3 px-3 py-1 rounded text-xs font-medium" style={{ color: "#dc2626" }}
-                      onClick={() => setConfirmDialog({ title: "Cancel Appointment", message: `Cancel this ${apt.type} appointment on ${apt.date}?`, confirmLabel: "Cancel Appointment", danger: true, onConfirm: () => { handleCancelAppointment(apt.id); setConfirmDialog(null); } })}
+                      onClick={(e) => { e.stopPropagation(); setConfirmDialog({ title: "Cancel Appointment", message: `Cancel this ${apt.type} appointment on ${apt.date}?`, confirmLabel: "Cancel Appointment", danger: true, onConfirm: () => { handleCancelAppointment(apt.id); setConfirmDialog(null); } }); }}
                     >Cancel</button>
                   </div>
                 ))}
@@ -5368,15 +5385,25 @@ export function PracticePortal() {
                     </thead>
                     <tbody>
                       {mockPtAppointments.past.map((apt) => (
-                        <tr key={apt.id} className="border-t border-slate-100 hover:bg-slate-50 transition-colors">
+                        <tr
+                          key={apt.id}
+                          className="border-t border-slate-100 hover:bg-slate-50 transition-colors cursor-pointer"
+                          onClick={() => setSelectedPastAppointment(apt)}
+                        >
                           <td className="px-4 py-3 font-medium text-slate-700">{apt.date}</td>
                           <td className="px-4 py-3 text-slate-600">{apt.type}</td>
                           <td className="px-4 py-3 text-slate-500 hidden md:table-cell">{apt.provider}</td>
                           <td className="px-4 py-3 text-slate-500 hidden md:table-cell">{apt.duration}</td>
                           <td className="px-4 py-3"><StatusBadge status={apt.status} /></td>
-                          <td className="px-4 py-3">
+                          <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                             {apt.notes ? (
-                              <button className="text-xs font-medium" style={{ color: "#27ab83" }}>View Notes</button>
+                              <button
+                                className="text-xs font-medium"
+                                style={{ color: "#27ab83" }}
+                                onClick={() => setSelectedPastAppointment(apt)}
+                              >
+                                View Notes
+                              </button>
                             ) : (
                               <span className="text-xs text-slate-300">—</span>
                             )}
@@ -12615,6 +12642,255 @@ export function PracticePortal() {
           }}
         />
       )}
+
+      {/* Slide-over: medication detail — row click on the patient detail
+          Medications table. Read-only view; actual refill/discontinue
+          actions live in the Prescriptions tab where the full prescription
+          object + provider context is loaded. */}
+      <DetailDrawer
+        open={!!selectedMedication}
+        onClose={() => setSelectedMedication(null)}
+        eyebrow="Medication"
+        title={
+          selectedMedication
+            ? (selectedMedication.name || selectedMedication.medicationName || selectedMedication.medication_name || "Medication")
+            : ""
+        }
+        width="md"
+        footer={
+          selectedMedication ? (
+            <button
+              onClick={() => setSelectedMedication(null)}
+              className="px-3 py-1.5 rounded-md text-sm font-medium border border-slate-200 text-slate-600 hover:bg-slate-50"
+            >
+              Close
+            </button>
+          ) : null
+        }
+      >
+        {selectedMedication && (
+          <div className="space-y-5">
+            <div className="space-y-3">
+              {selectedMedication.id && (
+                <Field label="Prescription ID">
+                  <EntityId prefix="rx" id={selectedMedication.id} full />
+                </Field>
+              )}
+              <Field label="Dosage">
+                <span className="text-sm text-slate-800">{selectedMedication.dosage || "—"}</span>
+              </Field>
+              <Field label="Frequency">
+                <span className="text-sm text-slate-800">{selectedMedication.frequency || "—"}</span>
+              </Field>
+              <Field label="Route">
+                <span className="text-sm text-slate-800">{selectedMedication.route || "—"}</span>
+              </Field>
+              <Field label="Status">
+                <span
+                  className="px-2 py-0.5 rounded-full text-xs font-medium capitalize"
+                  style={(selectedMedication.status || "active") === "active"
+                    ? { backgroundColor: "#ecf9ec", color: "#2f8132" }
+                    : { backgroundColor: "#f1f5f9", color: "#64748b" }}
+                >
+                  {selectedMedication.status || "active"}
+                </span>
+              </Field>
+              <Field label="Prescriber">
+                <span className="text-sm text-slate-800">
+                  {selectedMedication.prescriber || selectedMedication.providerName || selectedMedication.provider?.user?.firstName || "—"}
+                </span>
+              </Field>
+              <Field label="Started">
+                <span className="text-sm text-slate-700">
+                  {selectedMedication.startDate || selectedMedication.prescribedAt || selectedMedication.prescribed_at || "—"}
+                </span>
+              </Field>
+              {(selectedMedication.refills_remaining !== undefined || selectedMedication.refillsRemaining !== undefined) && (
+                <Field label="Refills remaining">
+                  <span className="text-sm text-slate-800">
+                    {selectedMedication.refills_remaining ?? selectedMedication.refillsRemaining}
+                  </span>
+                </Field>
+              )}
+              {selectedMedication.notes && (
+                <Field label="Notes">
+                  <span className="text-sm text-slate-700 whitespace-pre-wrap">{selectedMedication.notes}</span>
+                </Field>
+              )}
+            </div>
+
+            <div className="border-t border-slate-100 pt-4">
+              <p className="text-[11px] uppercase tracking-wider font-semibold text-slate-400 mb-3">
+                Manage this prescription
+              </p>
+              <p className="text-sm text-slate-500 mb-3">
+                Refill, modify, or discontinue from the Prescriptions tab to keep the full audit trail.
+              </p>
+              <button
+                onClick={() => { setSelectedMedication(null); setActiveTab("prescriptions"); }}
+                className="px-3 py-1.5 rounded-md text-sm font-medium text-white shadow-sm"
+                style={{ backgroundColor: "#635bff" }}
+              >
+                Open in Prescriptions tab
+              </button>
+            </div>
+          </div>
+        )}
+      </DetailDrawer>
+
+      {/* Slide-over: past appointment detail — row click on the patient
+          Appointments tab. Shows visit notes when present, and a link
+          into the full Encounters tab for the encounter record. */}
+      <DetailDrawer
+        open={!!selectedPastAppointment}
+        onClose={() => setSelectedPastAppointment(null)}
+        eyebrow="Past appointment"
+        title={
+          selectedPastAppointment
+            ? `${selectedPastAppointment.type || "Visit"} — ${selectedPastAppointment.date || ""}`
+            : ""
+        }
+        width="md"
+        footer={
+          selectedPastAppointment ? (
+            <button
+              onClick={() => setSelectedPastAppointment(null)}
+              className="px-3 py-1.5 rounded-md text-sm font-medium border border-slate-200 text-slate-600 hover:bg-slate-50"
+            >
+              Close
+            </button>
+          ) : null
+        }
+      >
+        {selectedPastAppointment && (
+          <div className="space-y-5">
+            <div className="space-y-3">
+              {selectedPastAppointment.id && (
+                <Field label="Appointment ID">
+                  <EntityId prefix="apt" id={selectedPastAppointment.id} full />
+                </Field>
+              )}
+              <Field label="Date">
+                <span className="text-sm text-slate-800">{selectedPastAppointment.date || "—"}</span>
+              </Field>
+              <Field label="Type">
+                <span className="text-sm text-slate-800">{selectedPastAppointment.type || "—"}</span>
+              </Field>
+              <Field label="Provider">
+                <span className="text-sm text-slate-800">{selectedPastAppointment.provider || "—"}</span>
+              </Field>
+              <Field label="Duration">
+                <span className="text-sm text-slate-800">{selectedPastAppointment.duration || "—"}</span>
+              </Field>
+              <Field label="Status">
+                <StatusBadge status={selectedPastAppointment.status} />
+              </Field>
+            </div>
+
+            {selectedPastAppointment.notes ? (
+              <div className="border-t border-slate-100 pt-4">
+                <p className="text-[11px] uppercase tracking-wider font-semibold text-slate-400 mb-3">
+                  Visit notes
+                </p>
+                <div className="rounded-lg border border-slate-200 bg-slate-50/60 p-4 text-sm text-slate-700 whitespace-pre-wrap">
+                  {selectedPastAppointment.notes}
+                </div>
+              </div>
+            ) : (
+              <div className="border-t border-slate-100 pt-4">
+                <p className="text-sm text-slate-400 italic">No notes recorded for this visit.</p>
+              </div>
+            )}
+
+            <div className="border-t border-slate-100 pt-4">
+              <button
+                onClick={() => { setSelectedPastAppointment(null); setActiveTab("encounters"); }}
+                className="px-3 py-1.5 rounded-md text-sm font-medium border border-slate-200 text-slate-700 hover:bg-slate-50"
+              >
+                Open full encounter
+              </button>
+            </div>
+          </div>
+        )}
+      </DetailDrawer>
+
+      {/* Slide-over: upcoming appointment detail — card click on the
+          patient Appointments tab. Quick view + cancel/reschedule entry. */}
+      <DetailDrawer
+        open={!!selectedUpcomingAppointment}
+        onClose={() => setSelectedUpcomingAppointment(null)}
+        eyebrow="Upcoming appointment"
+        title={
+          selectedUpcomingAppointment
+            ? `${selectedUpcomingAppointment.type || "Visit"} — ${selectedUpcomingAppointment.date || ""}`
+            : ""
+        }
+        width="md"
+        footer={
+          selectedUpcomingAppointment ? (
+            <>
+              <button
+                onClick={() => setSelectedUpcomingAppointment(null)}
+                className="px-3 py-1.5 rounded-md text-sm font-medium border border-slate-200 text-slate-600 hover:bg-slate-50"
+              >
+                Close
+              </button>
+              <button
+                onClick={() => {
+                  const apt = selectedUpcomingAppointment;
+                  setConfirmDialog({
+                    title: "Cancel Appointment",
+                    message: `Cancel this ${apt.type} appointment on ${apt.date}?`,
+                    confirmLabel: "Cancel Appointment",
+                    danger: true,
+                    onConfirm: () => {
+                      handleCancelAppointment(apt.id);
+                      setSelectedUpcomingAppointment(null);
+                      setConfirmDialog(null);
+                    },
+                  });
+                }}
+                className="px-3 py-1.5 rounded-md text-sm font-medium border border-red-200 text-red-700 hover:bg-red-50"
+              >
+                Cancel appointment
+              </button>
+            </>
+          ) : null
+        }
+      >
+        {selectedUpcomingAppointment && (
+          <div className="space-y-5">
+            <div className="space-y-3">
+              {selectedUpcomingAppointment.id && (
+                <Field label="Appointment ID">
+                  <EntityId prefix="apt" id={selectedUpcomingAppointment.id} full />
+                </Field>
+              )}
+              <Field label="Date">
+                <span className="text-sm text-slate-800">{selectedUpcomingAppointment.date || "—"}</span>
+              </Field>
+              <Field label="Time">
+                <span className="text-sm text-slate-800">{selectedUpcomingAppointment.time || "—"}</span>
+              </Field>
+              <Field label="Type">
+                <span className="text-sm text-slate-800">{selectedUpcomingAppointment.type || "—"}</span>
+              </Field>
+              <Field label="Provider">
+                <span className="text-sm text-slate-800">{selectedUpcomingAppointment.provider || "—"}</span>
+              </Field>
+              <Field label="Modality">
+                {selectedUpcomingAppointment.telehealth ? (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium" style={{ backgroundColor: "#e6f7f2", color: "#147d64" }}>
+                    <Video className="w-3 h-3" /> Telehealth
+                  </span>
+                ) : (
+                  <span className="text-sm text-slate-800">In-person</span>
+                )}
+              </Field>
+            </div>
+          </div>
+        )}
+      </DetailDrawer>
 
     </>
   );

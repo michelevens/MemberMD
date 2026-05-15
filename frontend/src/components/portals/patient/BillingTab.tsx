@@ -29,6 +29,7 @@ import { formatDate, formatCurrency } from "../../../lib/format";
 import { enrollmentFeeExplanation } from "../../../lib/enrollmentFeeCopy";
 import { MyAgreementsSection } from "./MyAgreementsSection";
 import { FamilyMembersSection } from "./FamilyMembersSection";
+import { DetailDrawer } from "../../shared/stripe-ui";
 import type { PatientMembership, Invoice, PatientEntitlement } from "../../../types";
 
 // ─── Colors ─────────────────────────────────────────────────────────────────
@@ -103,6 +104,9 @@ export function BillingTab() {
   const [cardsOpen, setCardsOpen] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
   const [syncingFromStripe, setSyncingFromStripe] = useState(false);
+  // Click on an invoice row opens a slide-over with full details.
+  // Patients can still hit the PDF link in the row OR from the drawer.
+  const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
 
   useEffect(() => {
     if (!toast) return;
@@ -655,7 +659,12 @@ export function BillingTab() {
                 || (inv as unknown as Record<string, string | null>).pdf_url;
 
               return (
-                <div key={inv.id} className="flex items-center justify-between py-3">
+                <button
+                  key={inv.id}
+                  type="button"
+                  onClick={() => setSelectedInvoice(inv)}
+                  className="w-full flex items-center justify-between py-3 text-left hover:bg-slate-50 -mx-2 px-2 rounded transition-colors"
+                >
                   <div className="flex items-center gap-3">
                     <div
                       className="w-9 h-9 rounded-lg flex items-center justify-center"
@@ -682,6 +691,7 @@ export function BillingTab() {
                         href={pdfUrl}
                         target="_blank"
                         rel="noopener noreferrer"
+                        onClick={(e) => e.stopPropagation()}
                         className="p-1.5 rounded-lg hover:bg-slate-100"
                         title="View invoice"
                       >
@@ -689,7 +699,7 @@ export function BillingTab() {
                       </a>
                     )}
                   </div>
-                </div>
+                </button>
               );
             })}
           </div>
@@ -733,6 +743,129 @@ export function BillingTab() {
           {toast.message}
         </div>
       )}
+
+      {/* ── Invoice detail slide-over ─────────────────────────────────────── */}
+      <DetailDrawer
+        open={!!selectedInvoice}
+        onClose={() => setSelectedInvoice(null)}
+        eyebrow="Invoice"
+        title={
+          selectedInvoice
+            ? formatCurrency(
+                (selectedInvoice as unknown as Record<string, number | null>).total
+                ?? (selectedInvoice as unknown as Record<string, number | null>).amount
+                ?? 0
+              )
+            : ""
+        }
+        width="md"
+        footer={
+          selectedInvoice ? (
+            <>
+              <button
+                onClick={() => setSelectedInvoice(null)}
+                className="px-3 py-1.5 rounded-md text-sm font-medium border border-slate-200 text-slate-600 hover:bg-slate-50"
+              >
+                Close
+              </button>
+              {(() => {
+                const pdfUrl = (selectedInvoice as unknown as Record<string, string | null>).pdfUrl
+                  || (selectedInvoice as unknown as Record<string, string | null>).pdf_url;
+                return pdfUrl ? (
+                  <a
+                    href={pdfUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-3 py-1.5 rounded-md text-sm font-medium text-white shadow-sm"
+                    style={{ backgroundColor: C.teal500 }}
+                  >
+                    Download PDF
+                  </a>
+                ) : null;
+              })()}
+            </>
+          ) : null
+        }
+      >
+        {selectedInvoice && (() => {
+          const inv = selectedInvoice as unknown as Record<string, string | number | null>;
+          const total = (inv.total ?? inv.amount ?? 0) as number;
+          const subtotal = (inv.subtotal ?? total) as number;
+          const tax = (inv.tax ?? 0) as number;
+          const status = (inv.status ?? "draft") as string;
+          const number = (inv.number ?? inv.invoice_number ?? null) as string | null;
+          const issued = (inv.createdAt ?? inv.created_at ?? null) as string | null;
+          const paidAt = (inv.paidAt ?? inv.paid_at ?? null) as string | null;
+          const dueDate = (inv.dueDate ?? inv.due_date ?? null) as string | null;
+          const description = (inv.description ?? null) as string | null;
+          return (
+            <div className="space-y-5">
+              <div className="space-y-3">
+                {number && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">Invoice number</span>
+                    <span className="text-sm font-mono text-slate-700">{number}</span>
+                  </div>
+                )}
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">Status</span>
+                  <span className="px-2 py-0.5 rounded text-xs font-semibold capitalize"
+                    style={{
+                      backgroundColor: status === "paid" ? C.green50 : status === "open" || status === "pending" ? C.amber50 : C.slate100,
+                      color: status === "paid" ? "#15803d" : status === "open" || status === "pending" ? "#92400e" : C.slate600,
+                    }}
+                  >{status}</span>
+                </div>
+                {issued && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">Issued</span>
+                    <span className="text-sm text-slate-700">{formatDate(issued)}</span>
+                  </div>
+                )}
+                {dueDate && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">Due</span>
+                    <span className="text-sm text-slate-700">{formatDate(dueDate)}</span>
+                  </div>
+                )}
+                {paidAt && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">Paid</span>
+                    <span className="text-sm text-slate-700">{formatDate(paidAt)}</span>
+                  </div>
+                )}
+              </div>
+
+              <div className="border-t border-slate-100 pt-4">
+                <p className="text-[11px] uppercase tracking-wider font-semibold text-slate-400 mb-3">
+                  Amount
+                </p>
+                <div className="rounded-lg border border-slate-200 bg-slate-50/60 p-4 space-y-2">
+                  {description && (
+                    <div className="text-sm text-slate-600 pb-2 border-b border-slate-200">
+                      {description}
+                    </div>
+                  )}
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-slate-600">Subtotal</span>
+                    <span className="text-slate-700 tabular-nums">{formatCurrency(subtotal)}</span>
+                  </div>
+                  {tax > 0 && (
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-slate-600">Tax</span>
+                      <span className="text-slate-700 tabular-nums">{formatCurrency(tax)}</span>
+                    </div>
+                  )}
+                  <div className="flex items-center justify-between pt-2 border-t border-slate-200 text-sm">
+                    <span className="font-semibold text-slate-900">Total</span>
+                    <span className="font-semibold text-base text-slate-900 tabular-nums">{formatCurrency(total)}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+      </DetailDrawer>
     </div>
   );
 }
