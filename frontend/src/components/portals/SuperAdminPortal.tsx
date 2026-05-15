@@ -15,6 +15,7 @@ import { CommandPalette, useCommandPaletteShortcut } from "../shared/CommandPale
 import { formatCurrencyWhole as formatCurrency, formatNumber } from "../../lib/format";
 import {
   DataTable,
+  DetailDrawer,
   EntityId,
   FilterChips,
   MoneyAmount,
@@ -986,6 +987,10 @@ export function SuperAdminPortal() {
   const [apiPractices, setApiPractices] = useState<MockPractice[] | null>(null);
   const [apiStats, setApiStats] = useState<Record<string, number> | null>(null);
   const [selectedPractice, setSelectedPractice] = useState<MockPractice | null>(null);
+  // Row clicks on the SuperAdmin audit log + screening-instruments grid
+  // open slide-overs with the full record.
+  const [selectedAuditLog, setSelectedAuditLog] = useState<MockAuditLog | null>(null);
+  const [selectedScreeningInstrument, setSelectedScreeningInstrument] = useState<MockScreeningInstrument | null>(null);
   // Detail payload fetched when a practice row is opened. Shape:
   //   { plans, members, providers, activity }
   // Each is null until loaded; the detail renderer falls back to
@@ -3655,7 +3660,11 @@ export function SuperAdminPortal() {
                       const r = inferRiskRow(log);
                       const c = riskColors[r];
                       return (
-                        <tr key={log.id} className="border-b border-slate-100 last:border-b-0 hover:bg-slate-50/60">
+                        <tr
+                          key={log.id}
+                          className="border-b border-slate-100 last:border-b-0 hover:bg-slate-50/60 cursor-pointer"
+                          onClick={() => setSelectedAuditLog(log)}
+                        >
                           <td className="px-4 py-2 text-xs text-slate-500 font-mono tabular-nums whitespace-nowrap">
                             {log.timestamp ? new Date(log.timestamp).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "—"}
                           </td>
@@ -3774,8 +3783,11 @@ export function SuperAdminPortal() {
             const isExpanded = expandedScreening === instrument.id;
             return (
               <div key={instrument.id} className="glass rounded-xl overflow-hidden transition-all">
-                {/* Card Header */}
-                <div className="p-5">
+                {/* Card Header — click anywhere here opens the detail drawer */}
+                <div
+                  className="p-5 cursor-pointer"
+                  onClick={() => setSelectedScreeningInstrument(instrument)}
+                >
                   <div className="flex items-start justify-between mb-3">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
@@ -3790,7 +3802,7 @@ export function SuperAdminPortal() {
                       <p className="text-sm text-slate-500 mt-0.5">{instrument.fullName}</p>
                     </div>
                     <button
-                      onClick={() => {/* toggle active - placeholder */}}
+                      onClick={(e) => { e.stopPropagation(); /* toggle active - placeholder */ }}
                       className="px-2.5 py-1 rounded-full text-xs font-semibold shrink-0 ml-2"
                       style={
                         instrument.active
@@ -3840,7 +3852,7 @@ export function SuperAdminPortal() {
 
                   {/* Expand toggle */}
                   <button
-                    onClick={() => setExpandedScreening(isExpanded ? null : instrument.id)}
+                    onClick={(e) => { e.stopPropagation(); setExpandedScreening(isExpanded ? null : instrument.id); }}
                     className="flex items-center gap-1.5 text-xs font-semibold transition-colors"
                     style={{ color: "#147d64" }}
                   >
@@ -5316,6 +5328,193 @@ export function SuperAdminPortal() {
           </div>
         </footer>
       </div>
+
+      {/* Slide-over: audit-log detail. Surfaces fields cut from the row
+          (full timestamp, IP, resource) so SuperAdmin can see the whole
+          event without dropping into the database. */}
+      <DetailDrawer
+        open={!!selectedAuditLog}
+        onClose={() => setSelectedAuditLog(null)}
+        eyebrow="Audit event"
+        title={selectedAuditLog ? selectedAuditLog.action : ""}
+        width="md"
+        footer={
+          selectedAuditLog ? (
+            <button
+              onClick={() => setSelectedAuditLog(null)}
+              className="px-3 py-1.5 rounded-md text-sm font-medium border border-slate-200 text-slate-600 hover:bg-slate-50"
+            >
+              Close
+            </button>
+          ) : null
+        }
+      >
+        {selectedAuditLog && (
+          <div className="space-y-5">
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">When</span>
+                <span className="text-sm font-mono text-slate-700">
+                  {selectedAuditLog.timestamp
+                    ? new Date(selectedAuditLog.timestamp).toLocaleString()
+                    : "—"}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">Actor</span>
+                <span className="text-sm text-slate-800">{selectedAuditLog.user}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">Action</span>
+                <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium font-mono bg-slate-100 text-slate-700">
+                  {selectedAuditLog.action}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">Resource</span>
+                <span className="text-sm text-slate-700">{selectedAuditLog.resource || "—"}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">IP address</span>
+                <span className="text-sm font-mono text-slate-700">{selectedAuditLog.ipAddress || "—"}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">Audit ID</span>
+                <EntityId prefix="evt" id={selectedAuditLog.id} full />
+              </div>
+            </div>
+          </div>
+        )}
+      </DetailDrawer>
+
+      {/* Slide-over: screening-instrument detail. The card grid only
+          surfaces a summary; this drawer puts the full instrument
+          metadata, severity bands, questions, and answer options in one
+          place — useful when a SuperAdmin is reviewing whether to
+          enable an instrument for a tenant. */}
+      <DetailDrawer
+        open={!!selectedScreeningInstrument}
+        onClose={() => setSelectedScreeningInstrument(null)}
+        eyebrow="Screening instrument"
+        title={
+          selectedScreeningInstrument ? (
+            <div className="flex items-center gap-2 min-w-0">
+              <span>{selectedScreeningInstrument.name}</span>
+              <span
+                className="text-xs font-mono font-medium px-2 py-0.5 rounded"
+                style={{ backgroundColor: "#e0f2fe", color: "#0369a1" }}
+              >
+                {selectedScreeningInstrument.code}
+              </span>
+            </div>
+          ) : ""
+        }
+        width="lg"
+        footer={
+          selectedScreeningInstrument ? (
+            <button
+              onClick={() => setSelectedScreeningInstrument(null)}
+              className="px-3 py-1.5 rounded-md text-sm font-medium border border-slate-200 text-slate-600 hover:bg-slate-50"
+            >
+              Close
+            </button>
+          ) : null
+        }
+      >
+        {selectedScreeningInstrument && (
+          <div className="space-y-5">
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">Full name</span>
+                <span className="text-sm text-slate-800">{selectedScreeningInstrument.fullName}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">Category</span>
+                <span className="text-sm text-slate-700">{selectedScreeningInstrument.category}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">Status</span>
+                <span
+                  className="px-2 py-0.5 rounded-full text-xs font-semibold"
+                  style={selectedScreeningInstrument.active
+                    ? { backgroundColor: "#ecf9ec", color: "#2f8132" }
+                    : { backgroundColor: "#f1f5f9", color: "#94a3b8" }}
+                >
+                  {selectedScreeningInstrument.active ? "Active" : "Inactive"}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">Question count</span>
+                <span className="text-sm text-slate-700">{selectedScreeningInstrument.questionCount}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">Score range</span>
+                <span className="text-sm font-mono text-slate-700">
+                  {selectedScreeningInstrument.scoreMin} – {selectedScreeningInstrument.scoreMax}
+                </span>
+              </div>
+            </div>
+
+            <div className="border-t border-slate-100 pt-4">
+              <p className="text-[11px] uppercase tracking-wider font-semibold text-slate-400 mb-3">Severity bands</p>
+              <div className="flex flex-wrap gap-1.5">
+                {selectedScreeningInstrument.severities.map((sev) => (
+                  <span
+                    key={sev.label}
+                    className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium"
+                    style={{ backgroundColor: sev.bg, color: sev.color }}
+                  >
+                    {sev.label} ({sev.min}-{sev.max})
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            <div className="border-t border-slate-100 pt-4">
+              <p className="text-[11px] uppercase tracking-wider font-semibold text-slate-400 mb-3">Specialties</p>
+              <div className="flex flex-wrap gap-1.5">
+                {selectedScreeningInstrument.specialties.map((spec) => (
+                  <span
+                    key={spec}
+                    className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium"
+                    style={{ backgroundColor: "#f1f5f9", color: "#334e68" }}
+                  >
+                    {spec}
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            <div className="border-t border-slate-100 pt-4">
+              <p className="text-[11px] uppercase tracking-wider font-semibold text-slate-400 mb-3">
+                Questions
+              </p>
+              <ol className="space-y-2 rounded-lg border border-slate-200 bg-slate-50/60 p-4">
+                {selectedScreeningInstrument.questions.map((q, idx) => (
+                  <li key={idx} className="flex gap-3 text-sm">
+                    <span className="font-mono font-bold shrink-0 text-slate-600" style={{ minWidth: "1.5rem" }}>{idx + 1}.</span>
+                    <span className="text-slate-800">{q}</span>
+                  </li>
+                ))}
+              </ol>
+            </div>
+
+            <div className="border-t border-slate-100 pt-4">
+              <p className="text-[11px] uppercase tracking-wider font-semibold text-slate-400 mb-3">
+                Answer options
+              </p>
+              <ul className="space-y-1">
+                {selectedScreeningInstrument.answerOptions.map((opt, idx) => (
+                  <li key={idx} className="text-sm text-slate-700">
+                    <span className="font-mono text-slate-500 mr-2">{idx}</span>
+                    {opt}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        )}
+      </DetailDrawer>
 
       {/* Command Palette — Cmd+K / Ctrl+K to jump to any section. */}
       <CommandPalette

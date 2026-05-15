@@ -8,6 +8,7 @@ import { formatUSPhone, normalizeUSPhone } from "../../lib/phone";
 import { AddressAutocomplete } from "../shared/AddressAutocomplete";
 import { EmployerEligibilityPanel } from "../practice/EmployerEligibilityPanel";
 import { employerInviteService, employerBillingService, utilizationService } from "../../lib/api";
+import { DetailDrawer } from "../shared/stripe-ui";
 import {
   Search,
   Plus,
@@ -139,6 +140,10 @@ export function EmployerManagementTab() {
   const [expandedEmployer, setExpandedEmployer] = useState<string | null>(null);
   const [expandedDetail, setExpandedDetail] = useState<{ employer: Employer; contracts: EmployerContract[]; invoices: EmployerInvoice[] } | null>(null);
   const [showAddEmployer, setShowAddEmployer] = useState(false);
+  // Click on a contract or invoice row inside an expanded employer opens
+  // a slide-over with the full record.
+  const [selectedContract, setSelectedContract] = useState<EmployerContract | null>(null);
+  const [selectedEmpInvoice, setSelectedEmpInvoice] = useState<EmployerInvoice | null>(null);
 
   // Plans for contract dropdown
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -555,7 +560,12 @@ export function EmployerManagementTab() {
                               ) : (
                                 <div className="space-y-2">
                                   {expandedDetail.contracts.map((c) => (
-                                    <div key={c.id} className="flex items-center justify-between bg-white rounded-lg px-3 py-2 border border-slate-100">
+                                    <button
+                                      key={c.id}
+                                      type="button"
+                                      onClick={() => setSelectedContract(c)}
+                                      className="w-full flex items-center justify-between bg-white rounded-lg px-3 py-2 border border-slate-100 hover:border-slate-300 hover:bg-slate-50 transition-colors text-left"
+                                    >
                                       <div>
                                         <span className="font-medium text-slate-800">{c.planName}</span>
                                         <span className="ml-2 text-slate-500">${c.pepmRate}/PEPM</span>
@@ -564,7 +574,7 @@ export function EmployerManagementTab() {
                                         <span className="text-xs text-slate-500">{c.effectiveDate}</span>
                                         <StatusBadge status={c.status} />
                                       </div>
-                                    </div>
+                                    </button>
                                   ))}
                                 </div>
                               )}
@@ -578,7 +588,12 @@ export function EmployerManagementTab() {
                               ) : (
                                 <div className="space-y-2">
                                   {expandedDetail.invoices.slice(0, 5).map((inv) => (
-                                    <div key={inv.id} className="flex items-center justify-between bg-white rounded-lg px-3 py-2 border border-slate-100">
+                                    <button
+                                      key={inv.id}
+                                      type="button"
+                                      onClick={() => setSelectedEmpInvoice(inv)}
+                                      className="w-full flex items-center justify-between bg-white rounded-lg px-3 py-2 border border-slate-100 hover:border-slate-300 hover:bg-slate-50 transition-colors text-left"
+                                    >
                                       <div>
                                         <span className="font-medium text-slate-800">{inv.invoiceNumber}</span>
                                         <span className="ml-2 text-slate-500">{inv.period}</span>
@@ -587,7 +602,7 @@ export function EmployerManagementTab() {
                                         <span className="font-medium text-slate-800">${inv.total.toLocaleString()}</span>
                                         <StatusBadge status={inv.status} />
                                       </div>
-                                    </div>
+                                    </button>
                                   ))}
                                 </div>
                               )}
@@ -1064,6 +1079,124 @@ export function EmployerManagementTab() {
           </div>
         </div>
       </DialogOverlay>
+
+      {/* Slide-over: contract detail (employer-tab sub-list) */}
+      <DetailDrawer
+        open={!!selectedContract}
+        onClose={() => setSelectedContract(null)}
+        eyebrow="Contract"
+        title={selectedContract ? selectedContract.planName : ""}
+        width="md"
+        footer={
+          selectedContract ? (
+            <button
+              onClick={() => setSelectedContract(null)}
+              className="px-3 py-1.5 rounded-md text-sm font-medium border border-slate-200 text-slate-600 hover:bg-slate-50"
+            >
+              Close
+            </button>
+          ) : null
+        }
+      >
+        {selectedContract && (
+          <div className="space-y-5">
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">Employer</span>
+                <span className="text-sm text-slate-800">{selectedContract.employerName}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">Status</span>
+                <StatusBadge status={selectedContract.status} />
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">PEPM rate</span>
+                <span className="text-sm font-mono text-slate-800">${Number(selectedContract.pepmRate).toFixed(2)}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">Enrolled count</span>
+                <span className="text-sm text-slate-700">{selectedContract.enrolledCount}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">Effective</span>
+                <span className="text-sm text-slate-700">{selectedContract.effectiveDate}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">Ends</span>
+                <span className="text-sm text-slate-700">{selectedContract.endDate || "—"}</span>
+              </div>
+            </div>
+
+            <div className="border-t border-slate-100 pt-4">
+              <p className="text-[11px] uppercase tracking-wider font-semibold text-slate-400 mb-2">Monthly</p>
+              <p className="text-sm text-slate-600">
+                Projected monthly billing at current enrollment:&nbsp;
+                <span className="font-medium text-slate-800">
+                  ${(Number(selectedContract.pepmRate) * selectedContract.enrolledCount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </span>
+              </p>
+            </div>
+          </div>
+        )}
+      </DetailDrawer>
+
+      {/* Slide-over: employer-invoice detail (employer-tab sub-list) */}
+      <DetailDrawer
+        open={!!selectedEmpInvoice}
+        onClose={() => setSelectedEmpInvoice(null)}
+        eyebrow="Invoice"
+        title={selectedEmpInvoice ? selectedEmpInvoice.invoiceNumber : ""}
+        width="md"
+        footer={
+          selectedEmpInvoice ? (
+            <button
+              onClick={() => setSelectedEmpInvoice(null)}
+              className="px-3 py-1.5 rounded-md text-sm font-medium border border-slate-200 text-slate-600 hover:bg-slate-50"
+            >
+              Close
+            </button>
+          ) : null
+        }
+      >
+        {selectedEmpInvoice && (
+          <div className="space-y-5">
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">Employer</span>
+                <span className="text-sm text-slate-800">{selectedEmpInvoice.employerName}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">Status</span>
+                <StatusBadge status={selectedEmpInvoice.status} />
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">Period</span>
+                <span className="text-sm text-slate-700">{selectedEmpInvoice.period}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">Enrolled count</span>
+                <span className="text-sm text-slate-700">{selectedEmpInvoice.enrolledCount}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">Due</span>
+                <span className="text-sm text-slate-700">{selectedEmpInvoice.dueDate}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">Issued</span>
+                <span className="text-sm text-slate-700">{selectedEmpInvoice.createdAt}</span>
+              </div>
+            </div>
+
+            <div className="border-t border-slate-100 pt-4">
+              <p className="text-[11px] uppercase tracking-wider font-semibold text-slate-400 mb-2">Total</p>
+              <div className="rounded-lg border border-slate-200 bg-slate-50/60 p-4 flex items-center justify-between">
+                <span className="text-sm text-slate-600">{selectedEmpInvoice.period}</span>
+                <span className="text-lg font-semibold text-slate-900 tabular-nums">${selectedEmpInvoice.total.toLocaleString()}</span>
+              </div>
+            </div>
+          </div>
+        )}
+      </DetailDrawer>
     </div>
   );
 }

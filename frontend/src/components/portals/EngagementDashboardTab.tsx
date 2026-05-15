@@ -3,6 +3,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { apiFetch } from "../../lib/api";
+import { DetailDrawer } from "../shared/stripe-ui";
 import {
   Activity,
   AlertTriangle,
@@ -80,6 +81,9 @@ export function EngagementDashboardTab() {
   const [rulesLoading, setRulesLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showAddRule, setShowAddRule] = useState(false);
+  // Click on an at-risk patient row opens a slide-over with the score
+  // breakdown + recommended outreach.
+  const [selectedAtRisk, setSelectedAtRisk] = useState<AtRiskPatient | null>(null);
   const [ruleForm, setRuleForm] = useState<NewRuleForm>({
     triggerCondition: "",
     actionType: "",
@@ -289,7 +293,11 @@ export function EngagementDashboardTab() {
                 </tr>
               ) : (
                 dashboard.atRiskPatients.map((patient) => (
-                  <tr key={patient.id} className="border-b border-gray-50 hover:bg-gray-50">
+                  <tr
+                    key={patient.id}
+                    className="border-b border-gray-50 hover:bg-gray-50 cursor-pointer"
+                    onClick={() => setSelectedAtRisk(patient)}
+                  >
                     <td className="px-6 py-3 font-medium text-gray-900">{patient.name}</td>
                     <td className="px-6 py-3">
                       <span
@@ -493,6 +501,76 @@ export function EngagementDashboardTab() {
           </div>
         </div>
       )}
+
+      {/* Slide-over: at-risk patient detail. Surfaces the recommended
+          outreach based on risk level — the cron-computed score plus
+          days-since-last-visit drives most of the practical "what to do
+          next" guidance. */}
+      <DetailDrawer
+        open={!!selectedAtRisk}
+        onClose={() => setSelectedAtRisk(null)}
+        eyebrow="At-risk patient"
+        title={selectedAtRisk ? selectedAtRisk.name : ""}
+        width="md"
+        footer={
+          selectedAtRisk ? (
+            <button
+              onClick={() => setSelectedAtRisk(null)}
+              className="px-3 py-1.5 rounded-md text-sm font-medium border border-slate-200 text-slate-600 hover:bg-slate-50"
+            >
+              Close
+            </button>
+          ) : null
+        }
+      >
+        {selectedAtRisk && (
+          <div className="space-y-5">
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">Engagement score</span>
+                <span
+                  className="inline-flex items-center px-2.5 py-0.5 rounded-full text-sm font-semibold"
+                  style={{ color: "#fff", backgroundColor: getScoreColor(selectedAtRisk.score) }}
+                >
+                  {selectedAtRisk.score}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">Risk level</span>
+                <span
+                  className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium capitalize"
+                  style={getRiskBadgeStyle(selectedAtRisk.riskLevel)}
+                >
+                  {selectedAtRisk.riskLevel}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">Days since last visit</span>
+                <span className="text-sm font-medium text-slate-900">{selectedAtRisk.daysSinceLastVisit}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">Last visit</span>
+                <span className="text-sm text-slate-700">
+                  {selectedAtRisk.lastVisitDate
+                    ? new Date(selectedAtRisk.lastVisitDate).toLocaleDateString()
+                    : "Never"}
+                </span>
+              </div>
+            </div>
+
+            <div className="border-t border-slate-100 pt-4">
+              <p className="text-[11px] uppercase tracking-wider font-semibold text-slate-400 mb-2">Recommended outreach</p>
+              <p className="text-sm text-slate-600">
+                {selectedAtRisk.riskLevel === "high"
+                  ? "High risk of churn. Schedule a personal phone call this week and offer to book the patient's next visit while on the line."
+                  : selectedAtRisk.riskLevel === "medium"
+                    ? "Medium risk. Send a personalized check-in message or e-mail with a booking link. Follow up by phone if no reply in 5 days."
+                    : "Low risk. Include in the next general engagement campaign — automated reminder is enough."}
+              </p>
+            </div>
+          </div>
+        )}
+      </DetailDrawer>
     </div>
   );
 }

@@ -16,6 +16,7 @@ import {
   Copy,
   Check,
 } from "lucide-react";
+import { DetailDrawer } from "../shared/stripe-ui";
 
 // ─── Colors ──────────────────────────────────────────────────────────────────
 
@@ -570,6 +571,10 @@ export function PlatformSettings() {
   const [emailFromName, setEmailFromName] = useState("MemberMD");
   const [emailReplyTo, setEmailReplyTo] = useState("support@membermd.io");
   const [emailTemplates, setEmailTemplates] = useState(INITIAL_EMAIL_TEMPLATES);
+  // Click on an email-template row opens a slide-over preview with the
+  // trigger + variable hints.
+  const [selectedTemplateIdx, setSelectedTemplateIdx] = useState<number | null>(null);
+  const selectedTemplate = selectedTemplateIdx !== null ? emailTemplates[selectedTemplateIdx] : null;
 
   // ─── Billing State ──────────────────────────────────────────────────────
   const [stripeTestMode, setStripeTestMode] = useState(true);
@@ -856,8 +861,9 @@ export function PlatformSettings() {
               {emailTemplates.map((t, i) => (
                 <tr
                   key={t.name}
-                  className="border-b transition-colors hover:bg-slate-50"
+                  className="border-b transition-colors hover:bg-slate-50 cursor-pointer"
                   style={{ borderColor: COLORS.slate100 }}
+                  onClick={() => setSelectedTemplateIdx(i)}
                 >
                   <td
                     className="py-3 px-4 font-medium"
@@ -868,7 +874,7 @@ export function PlatformSettings() {
                   <td className="py-3 px-4" style={{ color: COLORS.slate500 }}>
                     {t.trigger}
                   </td>
-                  <td className="py-3 px-4 text-center">
+                  <td className="py-3 px-4 text-center" onClick={(e) => e.stopPropagation()}>
                     <button
                       onClick={() => {
                         const copy = [...emailTemplates];
@@ -893,8 +899,9 @@ export function PlatformSettings() {
                       />
                     </button>
                   </td>
-                  <td className="py-3 px-4 text-right">
+                  <td className="py-3 px-4 text-right" onClick={(e) => e.stopPropagation()}>
                     <button
+                      onClick={() => setSelectedTemplateIdx(i)}
                       className="text-xs font-medium px-3 py-1 rounded-lg transition-colors hover:bg-slate-100"
                       style={{ color: COLORS.teal600 }}
                     >
@@ -1350,6 +1357,91 @@ export function PlatformSettings() {
           Save Changes
         </button>
       </div>
+
+      {/* Slide-over: email-template detail. The table only surfaces
+          name + trigger + toggle; the drawer shows what variables the
+          template accepts and a placeholder body block (the actual
+          server-rendered body lives in the backend mailable). */}
+      <DetailDrawer
+        open={selectedTemplate !== null}
+        onClose={() => setSelectedTemplateIdx(null)}
+        eyebrow="Email template"
+        title={selectedTemplate ? selectedTemplate.name : ""}
+        width="md"
+        footer={
+          selectedTemplate ? (
+            <>
+              <button
+                onClick={() => setSelectedTemplateIdx(null)}
+                className="px-3 py-1.5 rounded-md text-sm font-medium border border-slate-200 text-slate-600 hover:bg-slate-50"
+              >
+                Close
+              </button>
+              <button
+                onClick={() => {
+                  if (selectedTemplateIdx === null) return;
+                  const copy = [...emailTemplates];
+                  copy[selectedTemplateIdx] = {
+                    ...copy[selectedTemplateIdx],
+                    active: !copy[selectedTemplateIdx].active,
+                  };
+                  setEmailTemplates(copy);
+                  markDirty();
+                }}
+                className="px-3 py-1.5 rounded-md text-sm font-medium text-white"
+                style={{
+                  backgroundColor: selectedTemplate.active ? COLORS.slate300 : COLORS.teal500,
+                }}
+              >
+                {selectedTemplate.active ? "Disable" : "Enable"}
+              </button>
+            </>
+          ) : null
+        }
+      >
+        {selectedTemplate && (
+          <div className="space-y-5">
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">Trigger</span>
+                <span className="text-sm text-slate-800">{selectedTemplate.trigger}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">Status</span>
+                <span
+                  className="px-2 py-0.5 rounded-full text-xs font-semibold"
+                  style={selectedTemplate.active
+                    ? { backgroundColor: "#ecf9ec", color: "#2f8132" }
+                    : { backgroundColor: "#f1f5f9", color: "#94a3b8" }}
+                >
+                  {selectedTemplate.active ? "Active" : "Inactive"}
+                </span>
+              </div>
+            </div>
+
+            <div className="border-t border-slate-100 pt-4">
+              <p className="text-[11px] uppercase tracking-wider font-semibold text-slate-400 mb-2">
+                What this email does
+              </p>
+              <p className="text-sm text-slate-600">
+                Fires when <span className="font-medium text-slate-800">{selectedTemplate.trigger}</span> happens. Body is server-rendered from the Mailable class — edit the body in the Laravel codebase, not here. This toggle controls whether the system attempts to send the email at all.
+              </p>
+            </div>
+
+            <div className="border-t border-slate-100 pt-4">
+              <p className="text-[11px] uppercase tracking-wider font-semibold text-slate-400 mb-2">
+                Source
+              </p>
+              <p className="text-sm text-slate-600 font-mono">
+                laravel-backend/app/Mail/*Mail.php
+              </p>
+              <p className="text-xs text-slate-400 mt-1">
+                Resolved by NotificationRegistry. Tenant overrides apply on top of this default.
+              </p>
+            </div>
+          </div>
+        )}
+      </DetailDrawer>
     </div>
   );
 }
