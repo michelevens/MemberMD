@@ -32,6 +32,7 @@ import {
   UserCog,
 } from "lucide-react";
 import { programService, patientService, providerService, apiFetch, membershipPlanService } from "../../lib/api";
+import { DetailDrawer } from "../shared/stripe-ui";
 
 const isDemoMode = import.meta.env.VITE_DEMO_MODE !== "false";
 
@@ -498,6 +499,8 @@ export function ProgramsSection() {
   const [availablePlans, setAvailablePlans] = useState<any[]>([]);
   const [availablePlansLoading, setAvailablePlansLoading] = useState(false);
   const [enrollmentActionLoading, setEnrollmentActionLoading] = useState<string | null>(null);
+  // Click on an enrollment row opens a slide-over with full details.
+  const [selectedEnrollment, setSelectedEnrollment] = useState<MockEnrollment | null>(null);
   // Re-assign provider modal — patches enrollment.assigned_provider_id
   // on the backend. Source list comes from selectedProgram.providers
   // (the program's attached providers, not the practice-wide list).
@@ -1721,7 +1724,11 @@ export function ProgramsSection() {
                   </thead>
                   <tbody>
                     {selectedProgram.enrollments.map((e) => (
-                      <tr key={e.id} className="border-t border-slate-100 hover:bg-slate-50/50">
+                      <tr
+                        key={e.id}
+                        className="border-t border-slate-100 hover:bg-slate-50/50 cursor-pointer"
+                        onClick={() => setSelectedEnrollment(e)}
+                      >
                         <td className="py-3 px-4">
                           <div className="flex items-center gap-2">
                             <div
@@ -1752,7 +1759,7 @@ export function ProgramsSection() {
                         </td>
                         <td className="py-3 px-4 text-slate-500 text-xs">{e.enrolledAt}</td>
                         <td className="py-3 px-4 text-slate-500 text-xs">{e.expiresAt || "—"}</td>
-                        <td className="py-3 px-4 text-right">
+                        <td className="py-3 px-4 text-right" onClick={(ev) => ev.stopPropagation()}>
                           <div className="flex items-center justify-end gap-1">
                             {/* Pause / Resume */}
                             {e.status === "active" && (
@@ -2148,6 +2155,152 @@ export function ProgramsSection() {
             visible (whichever paint won), and the inner copy had a
             text-white heading on a white modal that made the title
             invisible. Single source of truth now. */}
+
+        {/* Slide-over: enrollment detail. Lives inside the if(selectedProgram)
+            branch so TypeScript keeps `selectedProgram` narrowed to non-null
+            in the Reassign-provider action's closure. */}
+        <DetailDrawer
+          open={!!selectedEnrollment}
+          onClose={() => setSelectedEnrollment(null)}
+          eyebrow="Enrollment"
+          title={selectedEnrollment ? selectedEnrollment.patientName : ""}
+          width="md"
+          footer={
+            selectedEnrollment ? (
+              <button
+                onClick={() => setSelectedEnrollment(null)}
+                className="px-3 py-1.5 rounded-md text-sm font-medium border border-slate-200 text-slate-600 hover:bg-slate-50"
+              >
+                Close
+              </button>
+            ) : null
+          }
+        >
+          {selectedEnrollment && (
+            <div className="space-y-5">
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">Plan</span>
+                  <span className="text-sm text-slate-800">{selectedEnrollment.planName}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">Status</span>
+                  <EnrollmentStatusBadge status={selectedEnrollment.status} />
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">Provider</span>
+                  <span className="text-sm text-slate-800">
+                    {selectedEnrollment.assignedProviderName || <em className="text-slate-400">Not assigned</em>}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">Funding</span>
+                  <div className="text-right">
+                    <div className="text-sm text-slate-800">{selectedEnrollment.fundingSource}</div>
+                    {selectedEnrollment.sponsorName && (
+                      <div className="text-xs text-slate-500">{selectedEnrollment.sponsorName}</div>
+                    )}
+                  </div>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">Enrolled</span>
+                  <span className="text-sm text-slate-700">{selectedEnrollment.enrolledAt}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">Expires</span>
+                  <span className="text-sm text-slate-700">{selectedEnrollment.expiresAt || "—"}</span>
+                </div>
+              </div>
+
+              <div className="border-t border-slate-100 pt-4">
+                <p className="text-[11px] uppercase tracking-wider font-semibold text-slate-400 mb-3">
+                  Actions
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {selectedEnrollment.status === "active" && (
+                    <button
+                      onClick={() => {
+                        const enr = selectedEnrollment;
+                        setSelectedEnrollment(null);
+                        setConfirmDialog({
+                          title: "Pause Enrollment",
+                          message: `Pause ${enr.patientName}'s enrollment? They will retain their membership but benefits will be suspended.`,
+                          confirmLabel: "Pause",
+                          danger: false,
+                          onConfirm: async () => {
+                            setConfirmDialog(null);
+                            await handlePauseEnrollment(enr.id);
+                          },
+                        });
+                      }}
+                      className="px-3 py-1.5 rounded-md text-sm font-medium border border-amber-200 text-amber-700 bg-amber-50 hover:bg-amber-100"
+                    >
+                      Pause
+                    </button>
+                  )}
+                  {selectedEnrollment.status === "paused" && (
+                    <button
+                      onClick={() => {
+                        const enr = selectedEnrollment;
+                        setSelectedEnrollment(null);
+                        handleResumeEnrollment(enr.id);
+                      }}
+                      className="px-3 py-1.5 rounded-md text-sm font-medium border border-emerald-200 text-emerald-700 bg-emerald-50 hover:bg-emerald-100"
+                    >
+                      Resume
+                    </button>
+                  )}
+                  {(selectedEnrollment.status === "active" || selectedEnrollment.status === "paused") && (
+                    <>
+                      <button
+                        onClick={() => {
+                          const enr = selectedEnrollment;
+                          setSelectedEnrollment(null);
+                          setChangePlanModal({ enrollmentId: enr.id, patientName: enr.patientName });
+                          setChangePlanSelectedId(null);
+                          fetchAvailablePlans();
+                        }}
+                        className="px-3 py-1.5 rounded-md text-sm font-medium border border-slate-200 text-slate-700 hover:bg-slate-50"
+                      >
+                        Change plan
+                      </button>
+                      <button
+                        onClick={() => {
+                          const enr = selectedEnrollment;
+                          setSelectedEnrollment(null);
+                          setReassignProviderModal({
+                            enrollmentId: enr.id,
+                            patientName: enr.patientName,
+                            currentProviderId: enr.assignedProviderId ?? null,
+                            programId: selectedProgram.id,
+                            programProviders: selectedProgram.providers,
+                          });
+                          setReassignSelectedProviderId(enr.assignedProviderId ?? null);
+                        }}
+                        className="px-3 py-1.5 rounded-md text-sm font-medium border border-slate-200 text-slate-700 hover:bg-slate-50"
+                      >
+                        Reassign provider
+                      </button>
+                    </>
+                  )}
+                  {selectedEnrollment.status !== "cancelled" && selectedEnrollment.status !== "completed" && (
+                    <button
+                      onClick={() => {
+                        const enr = selectedEnrollment;
+                        setSelectedEnrollment(null);
+                        setCancelReasonModal({ enrollmentId: enr.id, patientName: enr.patientName });
+                        setCancelReason("");
+                      }}
+                      className="px-3 py-1.5 rounded-md text-sm font-medium border border-red-200 text-red-700 hover:bg-red-50"
+                    >
+                      Cancel enrollment
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+        </DetailDrawer>
       </div>
     );
   }

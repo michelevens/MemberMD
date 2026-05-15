@@ -46,6 +46,7 @@ import { FacilitiesPanel } from "./FacilitiesPanel";
 import { NotificationRegistryPanel } from "./NotificationRegistryPanel";
 import { PhiWaiversPanel } from "./PhiWaiversPanel";
 import { PhoneField, EmailField, NPIField, ZipField, AddressField } from "../shared/fields";
+import { DetailDrawer } from "../shared/stripe-ui";
 
 // ─── Colors ──────────────────────────────────────────────────────────────────
 
@@ -747,6 +748,9 @@ export function PracticeSettings({ initialTab }: { initialTab?: string }) {
 
   // ─── Team State ──────────────────────────────────────────────────────────
   const [teamMembers] = useState<TeamMember[]>(INITIAL_TEAM);
+  // Click on a team row opens a slide-over with role + status detail
+  // and Edit Role / Deactivate / Resend invite actions in the footer.
+  const [selectedTeamMember, setSelectedTeamMember] = useState<TeamMember | null>(null);
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState("staff");
 
@@ -1439,7 +1443,12 @@ export function PracticeSettings({ initialTab }: { initialTab?: string }) {
               </thead>
               <tbody>
                 {teamMembers.map((m) => (
-                  <tr key={m.email} className="border-b" style={{ borderColor: C.slate100 }}>
+                  <tr
+                    key={m.email}
+                    className="border-b cursor-pointer hover:bg-slate-50/50 transition-colors"
+                    style={{ borderColor: C.slate100 }}
+                    onClick={() => setSelectedTeamMember(m)}
+                  >
                     <td className="py-3 px-3 font-medium" style={{ color: C.navy900 }}>{m.name}</td>
                     <td className="py-3 px-3" style={{ color: C.slate500 }}>{m.email}</td>
                     <td className="py-3 px-3">{roleBadge(m.role)}</td>
@@ -1447,9 +1456,13 @@ export function PracticeSettings({ initialTab }: { initialTab?: string }) {
                       <Badge text={m.status} color={C.green600} bg="#dcfce7" />
                     </td>
                     <td className="py-3 px-3" style={{ color: C.slate500 }}>{m.lastLogin}</td>
-                    <td className="py-3 px-3">
+                    <td className="py-3 px-3" onClick={(e) => e.stopPropagation()}>
                       <div className="flex items-center gap-1">
-                        <button className="p-1.5 rounded-lg hover:bg-slate-100" title="Edit Role">
+                        <button
+                          className="p-1.5 rounded-lg hover:bg-slate-100"
+                          title="Edit Role"
+                          onClick={() => setSelectedTeamMember(m)}
+                        >
                           <Pencil className="w-4 h-4" style={{ color: C.slate400 }} />
                         </button>
                         <button className="p-1.5 rounded-lg hover:bg-slate-100" title="Deactivate">
@@ -2267,6 +2280,88 @@ export function PracticeSettings({ initialTab }: { initialTab?: string }) {
           Save Changes
         </button>
       </div>
+
+      {/* Slide-over: team-member detail. Edit / deactivate / resend
+          invite actions live here; the table is too dense to keep them
+          discoverable inline. */}
+      <DetailDrawer
+        open={!!selectedTeamMember}
+        onClose={() => setSelectedTeamMember(null)}
+        eyebrow="Team member"
+        title={selectedTeamMember ? selectedTeamMember.name : ""}
+        width="md"
+        footer={
+          selectedTeamMember ? (
+            <>
+              <button
+                onClick={() => setSelectedTeamMember(null)}
+                className="px-3 py-1.5 rounded-md text-sm font-medium border border-slate-200 text-slate-600 hover:bg-slate-50"
+              >
+                Close
+              </button>
+              <button
+                onClick={() => { showToast("Invitation resent"); }}
+                className="px-3 py-1.5 rounded-md text-sm font-medium border border-slate-200 text-slate-700 hover:bg-slate-50"
+              >
+                Resend invite
+              </button>
+              <button
+                onClick={() => { showToast("Member deactivated"); setSelectedTeamMember(null); }}
+                className="px-3 py-1.5 rounded-md text-sm font-medium border border-red-200 text-red-700 hover:bg-red-50"
+              >
+                Deactivate
+              </button>
+            </>
+          ) : null
+        }
+      >
+        {selectedTeamMember && (
+          <div className="space-y-5">
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">Email</span>
+                <a
+                  href={`mailto:${selectedTeamMember.email}`}
+                  className="text-sm text-slate-800 hover:underline"
+                >
+                  {selectedTeamMember.email}
+                </a>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">Role</span>
+                {selectedTeamMember.role === "Practice Admin" ? (
+                  <Badge text={selectedTeamMember.role} color="#7c3aed" bg="#ede9fe" />
+                ) : selectedTeamMember.role === "Provider" ? (
+                  <Badge text={selectedTeamMember.role} color={C.teal600} bg="#e6f7f1" />
+                ) : (
+                  <Badge text={selectedTeamMember.role} color={C.navy700} bg={C.slate100} />
+                )}
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">Status</span>
+                <Badge text={selectedTeamMember.status} color={C.green600} bg="#dcfce7" />
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">Last login</span>
+                <span className="text-sm text-slate-700">{selectedTeamMember.lastLogin}</span>
+              </div>
+            </div>
+
+            <div className="border-t border-slate-100 pt-4">
+              <p className="text-[11px] uppercase tracking-wider font-semibold text-slate-400 mb-2">
+                Permissions
+              </p>
+              <p className="text-sm text-slate-600">
+                {selectedTeamMember.role === "Practice Admin"
+                  ? "Full access: patients, billing, providers, plans, settings."
+                  : selectedTeamMember.role === "Provider"
+                    ? "Clinical access: patients, encounters, prescriptions, screenings, telehealth."
+                    : "Staff access: patient roster, appointments, messages — no billing or settings."}
+              </p>
+            </div>
+          </div>
+        )}
+      </DetailDrawer>
     </div>
   );
 }

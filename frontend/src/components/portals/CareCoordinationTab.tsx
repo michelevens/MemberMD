@@ -16,6 +16,21 @@ import {
   Activity,
   Clock,
 } from "lucide-react";
+import { DetailDrawer } from "../shared/stripe-ui";
+
+// Selected patient from either the registry tables or the overdue tables.
+// Tagged so the drawer can render the right body.
+type SelectedCareRow =
+  | { kind: "registry"; registryName: string; patient: RegistryPatient }
+  | { kind: "overdue"; bucketLabel: string; patient: OverduePatient };
+
+// Hoisted from inside RegistrySection so the drawer in CareCoordinationTab
+// can render it too. Module-level for shared access.
+function TrendIcon({ trend }: { trend: string }) {
+  if (trend === "up") return <ArrowUp className="w-4 h-4" style={{ color: "#ef4444" }} />;
+  if (trend === "down") return <ArrowDown className="w-4 h-4" style={{ color: "#22c55e" }} />;
+  return <Minus className="w-4 h-4 text-gray-400" />;
+}
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -110,6 +125,9 @@ export function CareCoordinationTab() {
   const [error, setError] = useState<string | null>(null);
   const [subTab, setSubTab] = useState<SubTab>("gaps");
   const [popLoading, setPopLoading] = useState(false);
+  // Row click on any registry or overdue table opens a slide-over with
+  // the patient context + outreach actions.
+  const [selectedRow, setSelectedRow] = useState<SelectedCareRow | null>(null);
   const [overdueLoading, setOverdueLoading] = useState(false);
 
   const fetchDashboard = useCallback(async () => {
@@ -346,6 +364,7 @@ export function CareCoordinationTab() {
                 iconColor="#ef4444"
                 iconBg="#fef2f2"
                 patients={populationHealth.diabetesRegistry}
+                onSelect={(p) => setSelectedRow({ kind: "registry", registryName: "Diabetes", patient: p })}
               />
 
               {/* Hypertension Registry */}
@@ -356,6 +375,7 @@ export function CareCoordinationTab() {
                 iconColor="#f97316"
                 iconBg="#fff7ed"
                 patients={populationHealth.hypertensionRegistry}
+                onSelect={(p) => setSelectedRow({ kind: "registry", registryName: "Hypertension", patient: p })}
               />
 
               {/* Depression Registry */}
@@ -366,6 +386,7 @@ export function CareCoordinationTab() {
                 iconColor="#8b5cf6"
                 iconBg="#f5f3ff"
                 patients={populationHealth.depressionRegistry}
+                onSelect={(p) => setSelectedRow({ kind: "registry", registryName: "Depression", patient: p })}
               />
             </>
           ) : (
@@ -389,18 +410,21 @@ export function CareCoordinationTab() {
                 patients={overdueData.over90Days}
                 badgeColor="#eab308"
                 badgeBg="#fefce8"
+                onSelect={(p) => setSelectedRow({ kind: "overdue", bucketLabel: "90+ days", patient: p })}
               />
               <OverdueSection
                 title="180+ Days Without Visit"
                 patients={overdueData.over180Days}
                 badgeColor="#ea580c"
                 badgeBg="#fff7ed"
+                onSelect={(p) => setSelectedRow({ kind: "overdue", bucketLabel: "180+ days", patient: p })}
               />
               <OverdueSection
                 title="365+ Days Without Visit"
                 patients={overdueData.over365Days}
                 badgeColor="#dc2626"
                 badgeBg="#fef2f2"
+                onSelect={(p) => setSelectedRow({ kind: "overdue", bucketLabel: "365+ days", patient: p })}
               />
             </>
           ) : (
@@ -408,6 +432,116 @@ export function CareCoordinationTab() {
           )}
         </>
       )}
+
+      {/* Slide-over: care-coordination row detail. Single drawer handles
+          both registry hits and overdue-visit hits — branches on the
+          tagged union the row click set. Outreach actions in the footer
+          surface the practice's phone + send-message workflows. */}
+      <DetailDrawer
+        open={!!selectedRow}
+        onClose={() => setSelectedRow(null)}
+        eyebrow={
+          selectedRow?.kind === "registry"
+            ? `${selectedRow.registryName} registry`
+            : selectedRow?.kind === "overdue"
+              ? `Overdue ${selectedRow.bucketLabel}`
+              : ""
+        }
+        title={selectedRow ? selectedRow.patient.patientName : ""}
+        width="md"
+        footer={
+          selectedRow ? (
+            <button
+              onClick={() => setSelectedRow(null)}
+              className="px-3 py-1.5 rounded-md text-sm font-medium border border-slate-200 text-slate-600 hover:bg-slate-50"
+            >
+              Close
+            </button>
+          ) : null
+        }
+      >
+        {selectedRow?.kind === "registry" && (
+          <div className="space-y-5">
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">Registry</span>
+                <span className="text-sm text-slate-800">{selectedRow.registryName}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">Latest value</span>
+                <span className="text-sm font-mono text-slate-800">
+                  {selectedRow.patient.latestValue} {selectedRow.patient.unit}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">Recorded</span>
+                <span className="text-sm text-slate-700">
+                  {new Date(selectedRow.patient.latestDate).toLocaleDateString()}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">Trend</span>
+                <TrendIcon trend={selectedRow.patient.trend} />
+              </div>
+            </div>
+
+            <div className="border-t border-slate-100 pt-4">
+              <p className="text-[11px] uppercase tracking-wider font-semibold text-slate-400 mb-2">Suggested action</p>
+              <p className="text-sm text-slate-600">
+                {selectedRow.patient.trend === "up" && selectedRow.registryName === "Diabetes"
+                  ? "A1C trending up — schedule a follow-up or order labs to confirm."
+                  : selectedRow.patient.trend === "up" && selectedRow.registryName === "Hypertension"
+                    ? "Blood pressure trending up — review medications or order home-monitoring."
+                    : selectedRow.patient.trend === "up" && selectedRow.registryName === "Depression"
+                      ? "PHQ-9 trending up — schedule a check-in and consider screening for risk."
+                      : "Continue current care plan. Re-check at the next scheduled visit."}
+              </p>
+            </div>
+          </div>
+        )}
+        {selectedRow?.kind === "overdue" && (
+          <div className="space-y-5">
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">Bucket</span>
+                <span className="text-sm text-slate-800">{selectedRow.bucketLabel}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">Days since visit</span>
+                <span className="text-sm font-medium text-slate-900">{selectedRow.patient.daysSinceVisit}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">Last visit</span>
+                <span className="text-sm text-slate-700">
+                  {selectedRow.patient.lastVisitDate
+                    ? new Date(selectedRow.patient.lastVisitDate).toLocaleDateString()
+                    : "Never"}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">Phone</span>
+                {selectedRow.patient.phone ? (
+                  <a
+                    href={`tel:${selectedRow.patient.phone}`}
+                    className="text-sm text-slate-800 hover:underline"
+                  >
+                    {selectedRow.patient.phone}
+                  </a>
+                ) : (
+                  <span className="text-sm text-slate-400">—</span>
+                )}
+              </div>
+            </div>
+
+            <div className="border-t border-slate-100 pt-4">
+              <p className="text-[11px] uppercase tracking-wider font-semibold text-slate-400 mb-2">Outreach</p>
+              <p className="text-sm text-slate-600">
+                Reach out via phone or messaging to schedule the patient back in. Successful contact will move them out of this bucket on the next nightly refresh.
+              </p>
+            </div>
+          </div>
+        )}
+      </DetailDrawer>
     </div>
   );
 }
@@ -421,20 +555,16 @@ function RegistrySection({
   iconColor,
   iconBg,
   patients,
+  onSelect,
 }: {
   title: string;
   subtitle: string;
   Icon: React.ElementType;
   iconColor: string;
   iconBg: string;
+  onSelect: (patient: RegistryPatient) => void;
   patients: RegistryPatient[];
 }) {
-  const TrendIcon = ({ trend }: { trend: string }) => {
-    if (trend === "up") return <ArrowUp className="w-4 h-4" style={{ color: "#ef4444" }} />;
-    if (trend === "down") return <ArrowDown className="w-4 h-4" style={{ color: "#22c55e" }} />;
-    return <Minus className="w-4 h-4 text-gray-400" />;
-  };
-
   return (
     <div className="bg-white rounded-xl border border-gray-200">
       <div className="px-6 py-4 border-b border-gray-200 flex items-center gap-3">
@@ -465,7 +595,11 @@ function RegistrySection({
               </tr>
             ) : (
               patients.map((p) => (
-                <tr key={p.id} className="border-b border-gray-50 hover:bg-gray-50">
+                <tr
+                  key={p.id}
+                  className="border-b border-gray-50 hover:bg-gray-50 cursor-pointer"
+                  onClick={() => onSelect(p)}
+                >
                   <td className="px-6 py-3 font-medium text-gray-900">{p.patientName}</td>
                   <td className="px-6 py-3 text-gray-700 font-mono">
                     {p.latestValue} {p.unit}
@@ -491,11 +625,13 @@ function OverdueSection({
   patients,
   badgeColor,
   badgeBg,
+  onSelect,
 }: {
   title: string;
   patients: OverduePatient[];
   badgeColor: string;
   badgeBg: string;
+  onSelect: (patient: OverduePatient) => void;
 }) {
   return (
     <div className="bg-white rounded-xl border border-gray-200">
@@ -530,7 +666,11 @@ function OverdueSection({
               </tr>
             ) : (
               patients.map((p) => (
-                <tr key={p.id} className="border-b border-gray-50 hover:bg-gray-50">
+                <tr
+                  key={p.id}
+                  className="border-b border-gray-50 hover:bg-gray-50 cursor-pointer"
+                  onClick={() => onSelect(p)}
+                >
                   <td className="px-6 py-3 font-medium text-gray-900">{p.patientName}</td>
                   <td className="px-6 py-3">
                     <span

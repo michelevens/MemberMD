@@ -3,6 +3,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { apiFetch } from "../../lib/api";
+import { DetailDrawer } from "../shared/stripe-ui";
 import {
   AlertTriangle,
   RefreshCw,
@@ -355,6 +356,9 @@ export function DunningDashboardTab() {
   const [editingPolicy, setEditingPolicy] = useState(false);
   const [retrying, setRetrying] = useState<string | null>(null);
   const [showPolicy, setShowPolicy] = useState(true);
+  // Click on a dunning row opens a slide-over with full step history,
+  // patient context, and the Retry Payment CTA in the footer.
+  const [selectedDunning, setSelectedDunning] = useState<DunningPatient | null>(null);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -594,7 +598,8 @@ export function DunningDashboardTab() {
                 {activePatients.map((patient) => (
                   <tr
                     key={patient.id}
-                    className="border-b border-slate-50 hover:bg-slate-50/50 transition-colors"
+                    className="border-b border-slate-50 hover:bg-slate-50/50 transition-colors cursor-pointer"
+                    onClick={() => setSelectedDunning(patient)}
                   >
                     <td className="px-6 py-3">
                       <span className="text-sm font-medium text-slate-800">{patient.patientName}</span>
@@ -630,7 +635,7 @@ export function DunningDashboardTab() {
                         {patient.lastAttempt || "—"}
                       </span>
                     </td>
-                    <td className="px-6 py-3 text-right">
+                    <td className="px-6 py-3 text-right" onClick={(e) => e.stopPropagation()}>
                       <button
                         onClick={() => handleRetryPayment(patient.membershipId)}
                         disabled={retrying === patient.membershipId}
@@ -652,6 +657,95 @@ export function DunningDashboardTab() {
           </div>
         )}
       </div>
+
+      {/* Slide-over: dunning entry detail. Action footer mirrors the
+          per-row Retry Payment button so it stays one click away. */}
+      <DetailDrawer
+        open={!!selectedDunning}
+        onClose={() => setSelectedDunning(null)}
+        eyebrow="Failed payment"
+        title={selectedDunning ? selectedDunning.patientName : ""}
+        width="md"
+        footer={
+          selectedDunning ? (
+            <>
+              <button
+                onClick={() => setSelectedDunning(null)}
+                className="px-3 py-1.5 rounded-md text-sm font-medium border border-slate-200 text-slate-600 hover:bg-slate-50"
+              >
+                Close
+              </button>
+              <button
+                onClick={() => {
+                  const id = selectedDunning.membershipId;
+                  handleRetryPayment(id);
+                }}
+                disabled={retrying === selectedDunning.membershipId}
+                className="px-3 py-1.5 rounded-md text-sm font-medium text-white shadow-sm disabled:opacity-50 inline-flex items-center gap-1.5"
+                style={{ backgroundColor: "#635bff" }}
+              >
+                {retrying === selectedDunning.membershipId ? (
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <CreditCard className="w-3.5 h-3.5" />
+                )}
+                Retry payment
+              </button>
+            </>
+          ) : null
+        }
+      >
+        {selectedDunning && (
+          <div className="space-y-5">
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">Plan</span>
+                <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium" style={getPlanBadgeStyle(selectedDunning.plan)}>
+                  {selectedDunning.plan}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">Amount overdue</span>
+                <span className="text-sm font-semibold" style={{ color: "#dc2626" }}>
+                  {formatCurrency(selectedDunning.amountOverdue)}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">Days in dunning</span>
+                <span className="text-sm font-medium" style={getDaysStyle(selectedDunning.daysInDunning)}>
+                  {selectedDunning.daysInDunning}d
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">Dunning step</span>
+                <span className="text-sm text-slate-700 inline-flex items-center gap-1.5">
+                  <Clock className="w-3.5 h-3.5 text-slate-400" />
+                  Step {selectedDunning.currentStep} of {selectedDunning.totalSteps}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">Last attempt</span>
+                <span className="text-sm text-slate-700">{selectedDunning.lastAttempt || "—"}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">Membership ID</span>
+                <span className="text-xs font-mono text-slate-600">{selectedDunning.membershipId}</span>
+              </div>
+            </div>
+
+            <div className="border-t border-slate-100 pt-4">
+              <p className="text-[11px] uppercase tracking-wider font-semibold text-slate-400 mb-2">
+                What happens next
+              </p>
+              <p className="text-sm text-slate-600">
+                {selectedDunning.currentStep < selectedDunning.totalSteps
+                  ? `The next automated step will fire on the dunning policy schedule. You can short-circuit by retrying the payment now.`
+                  : `This patient is at the final step. Manual review recommended — retry once more or move to suspend/cancel per your policy.`}
+              </p>
+            </div>
+          </div>
+        )}
+      </DetailDrawer>
     </div>
   );
 }
