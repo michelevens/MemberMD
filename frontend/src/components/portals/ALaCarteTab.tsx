@@ -4,6 +4,8 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { apiFetch } from "../../lib/api";
+import { EmptyState } from "../shared/EmptyState";
+import { LoadingState } from "../shared/LoadingState";
 import {
   DollarSign,
   Package,
@@ -404,15 +406,13 @@ export function ALaCarteTab() {
       </div>
 
       {loading ? (
-        <div className="text-center py-12 text-slate-400">Loading prices...</div>
+        <LoadingState label="Loading prices…" />
       ) : prices.length === 0 ? (
-        <div className="text-center py-12">
-          <Tag className="w-8 h-8 mx-auto mb-2 text-slate-300" />
-          <p className="text-sm text-slate-500">No pricing configured yet.</p>
-          <p className="text-xs text-slate-400 mt-1">
-            Click "Add price" to set self-pay rates from your entitlement catalog.
-          </p>
-        </div>
+        <EmptyState
+          icon={<Tag className="w-5 h-5" />}
+          title="No pricing configured yet"
+          description='Click "Add price" to set self-pay rates from your entitlement catalog.'
+        />
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -625,11 +625,13 @@ export function ALaCarteTab() {
       </div>
 
       {loading ? (
-        <div className="text-center py-12 text-slate-400">Loading visit packs...</div>
+        <LoadingState label="Loading visit packs…" />
       ) : packs.length === 0 ? (
-        <div className="glass rounded-xl p-12 text-center text-slate-400">
-          No visit packs created yet. Click "Create Pack" to add one.
-        </div>
+        <EmptyState
+          icon={<Package className="w-5 h-5" />}
+          title="No visit packs created yet"
+          description='Click "Create Pack" to add a bundle patients can buy outside of a subscription.'
+        />
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {packs.map((pack) => {

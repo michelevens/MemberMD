@@ -4,6 +4,8 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { apiFetch } from "../../lib/api";
+import { EmptyState } from "../shared/EmptyState";
+import { LoadingState } from "../shared/LoadingState";
 import {
   Search,
   Play,
@@ -734,9 +736,13 @@ export function ActivityLoggerTab() {
         )}
 
         {activitiesLoading ? (
-          <div className="text-center py-12 text-slate-400">Loading activities...</div>
+          <LoadingState label="Loading activities…" />
         ) : activities.length === 0 ? (
-          <div className="text-center py-12 text-slate-400">No activities found.</div>
+          <EmptyState
+            icon={<ClipboardList className="w-5 h-5" />}
+            title="No activities logged yet"
+            description="Start the timer or log a quick activity above. Phone calls, texts, home visits, and CCM/RPM time all count."
+          />
         ) : (
           <>
             <div className="overflow-x-auto">

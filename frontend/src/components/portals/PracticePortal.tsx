@@ -107,6 +107,8 @@ import {
 import { RefreshButton } from "../shared/RefreshButton";
 import { OnboardingChecklist, ConnectSetupBanner } from "../shared/OnboardingChecklist";
 import { ComplianceWidget } from "../shared/ComplianceWidget";
+import { EmptyState } from "../shared/EmptyState";
+import { LoadingState } from "../shared/LoadingState";
 import {
   DataTable,
   DetailDrawer,
@@ -4745,13 +4747,14 @@ export function PracticePortal() {
                 Benefits & Utilization
               </h3>
               {utilizationLoading && (
-                <div className="flex items-center justify-center py-6">
-                  <div className="w-5 h-5 border-2 rounded-full animate-spin" style={{ borderColor: "#e2e8f0", borderTopColor: "#27ab83" }} />
-                  <span className="ml-2 text-sm text-slate-400">Loading utilization...</span>
-                </div>
+                <LoadingState compact label="Loading utilization…" />
               )}
               {!utilizationLoading && usageItems.length === 0 && (
-                <p className="text-sm text-slate-400 text-center py-4">No entitlement usage data available.</p>
+                <EmptyState
+                  icon={<Activity className="w-5 h-5" />}
+                  title="No entitlement usage yet"
+                  description="Usage shows up here once benefits start getting consumed."
+                />
               )}
               {!utilizationLoading && usageItems.length > 0 && (
                 <div className="space-y-3">
@@ -6237,7 +6240,7 @@ export function PracticePortal() {
                   </button>
                 </div>
                 {entitlementTypesLoading && (
-                  <span className="text-sm text-slate-400">Loading entitlement types…</span>
+                  <LoadingState compact label="Loading entitlement types…" />
                 )}
                 {!entitlementTypesLoading && entitlementTypes.length === 0 && (
                   <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">

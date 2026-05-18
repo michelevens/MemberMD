@@ -16,7 +16,10 @@
 //   - `actions(row)` returns KebabAction[] rendered in a final cell
 
 import type { ReactNode } from "react";
+import { Inbox } from "lucide-react";
 import { KebabMenu, type KebabAction } from "./KebabMenu";
+import { EmptyState } from "../EmptyState";
+import { LoadingState } from "../LoadingState";
 
 export interface DataTableColumn<T> {
   /** Stable key for React + future column toggling. */
@@ -106,8 +109,8 @@ export function DataTable<T>({
           <tbody>
             {loading && (
               <tr>
-                <td colSpan={colCount} className="px-4 py-12 text-center text-slate-400 text-sm">
-                  Loading…
+                <td colSpan={colCount} className="px-4">
+                  <LoadingState compact />
                 </td>
               </tr>
             )}
@@ -120,11 +123,13 @@ export function DataTable<T>({
             )}
             {!loading && !error && rows.length === 0 && (
               <tr>
-                <td colSpan={colCount} className="px-4 py-16">
+                <td colSpan={colCount} className="px-4">
                   {empty ?? (
-                    <div className="text-center text-slate-400 text-sm">
-                      No results
-                    </div>
+                    <EmptyState
+                      icon={<Inbox className="w-5 h-5" />}
+                      title="No results"
+                      description="Try adjusting filters or check back later."
+                    />
                   )}
                 </td>
               </tr>

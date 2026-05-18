@@ -17,6 +17,7 @@ import {
   Clock,
 } from "lucide-react";
 import { DetailDrawer } from "../shared/stripe-ui";
+import { EmptyState } from "../shared/EmptyState";
 
 // Selected patient from either the registry tables or the overdue tables.
 // Tagged so the drawer can render the right body.
@@ -311,8 +312,12 @@ export function CareCoordinationTab() {
                 <tbody>
                   {dashboard.topPatients.length === 0 ? (
                     <tr>
-                      <td colSpan={4} className="px-6 py-10 text-center text-gray-400">
-                        No patient gaps found.
+                      <td colSpan={4}>
+                        <EmptyState
+                          icon={<ShieldAlert className="w-5 h-5" />}
+                          title="No open care gaps"
+                          description="Every patient is up to date on their care plan."
+                        />
                       </td>
                     </tr>
                   ) : (
@@ -589,8 +594,12 @@ function RegistrySection({
           <tbody>
             {patients.length === 0 ? (
               <tr>
-                <td colSpan={4} className="px-6 py-8 text-center text-gray-400">
-                  No patients in this registry.
+                <td colSpan={4}>
+                  <EmptyState
+                    icon={<Icon className="w-5 h-5" />}
+                    title="No patients in this registry"
+                    description="Patients matching this registry's criteria will appear here automatically."
+                  />
                 </td>
               </tr>
             ) : (
@@ -660,8 +669,12 @@ function OverdueSection({
           <tbody>
             {patients.length === 0 ? (
               <tr>
-                <td colSpan={4} className="px-6 py-8 text-center text-gray-400">
-                  No overdue patients in this category.
+                <td colSpan={4}>
+                  <EmptyState
+                    icon={<Clock className="w-5 h-5" />}
+                    title="No overdue patients"
+                    description="Patients in this bucket have all been seen within the window."
+                  />
                 </td>
               </tr>
             ) : (

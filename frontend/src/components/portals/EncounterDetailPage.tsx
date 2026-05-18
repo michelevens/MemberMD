@@ -13,6 +13,7 @@ import {
   prescriptionService,
 } from "../../lib/api";
 import type { ChartTemplate, ChartTemplateField } from "../../lib/api";
+import { LoadingState } from "../shared/LoadingState";
 
 interface EncounterDetailPageProps {
   encounterId: string;
@@ -298,7 +299,9 @@ export function EncounterDetailPage({ encounterId, onBack, onSaved }: EncounterD
         <button onClick={onBack} className="inline-flex items-center gap-1.5 text-sm text-slate-600 hover:text-slate-900">
           <ArrowLeft className="w-4 h-4" /> Back to encounters
         </button>
-        <div className="glass rounded-xl p-8 text-center text-slate-400 text-sm">Loading encounter…</div>
+        <div className="glass rounded-xl">
+          <LoadingState label="Loading encounter…" />
+        </div>
       </div>
     );
   }

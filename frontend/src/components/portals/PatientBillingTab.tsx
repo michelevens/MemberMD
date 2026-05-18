@@ -20,6 +20,7 @@ import {
 import { membershipService, patientBillingService, apiFetch, adHocChargeService } from "../../lib/api";
 import type { AdHocChargeRow } from "../../lib/api";
 import { PatientCreditsPanel } from "../practice/PatientCreditsPanel";
+import { EmptyState } from "../shared/EmptyState";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Toast = (msg: { message: string; type: "success" | "error" }) => void;
@@ -334,7 +335,11 @@ export function PatientBillingTab({
           </div>
         </div>
         {invoices.length === 0 ? (
-          <div className="px-5 py-8 text-center text-sm text-slate-400">No payments yet.</div>
+          <EmptyState
+            icon={<Receipt className="w-5 h-5" />}
+            title="No payments yet"
+            description="Charges and refunds will appear here once the patient pays an invoice."
+          />
         ) : (
           <div className="divide-y divide-slate-100">
             {invoices.map((inv) => {
